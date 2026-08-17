@@ -29,6 +29,10 @@
  */
 
 import { CHARACTER_IDS, CHARACTERS, type CharacterId, type Rarity } from '../rules.ts';
+// §76: the payout scalars below are read through the override layer so the admin panel's
+// Economy tab has something real in it. Same rule as `rules.ts` — the literal stays on its
+// line and the registry LEARNS the default; there is no table of economy numbers anywhere.
+import { tune } from '../tuningRegistry.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Currencies
@@ -113,22 +117,43 @@ export const STARTER_CHARACTER: CharacterId = CHARACTER_IDS[0]; // hamburger
  */
 export const MATCH_PAYOUT = {
   /** (prototype: 1st place) */
-  trophiesWin: 15,
+  trophiesWin: tune('MATCH_PAYOUT.trophiesWin', 15, {
+    group: 'economy', unit: 'trophies', min: 0, max: 200, int: true,
+    doc: 'Trophies for first place. The whole placement curve is stated relative to this — see the placement block below.',
+  }),
 
   /** (prototype) Loss = min(cap, base + floor(trophies / per)). */
-  trophyLossBase: 2,
-  trophyLossPer: 150,
-  trophyLossCap: 10,
+  trophyLossBase: tune('MATCH_PAYOUT.trophyLossBase', 2, {
+    group: 'economy', unit: 'trophies', min: 0, max: 100, int: true,
+    doc: 'Flat part of a loss. Loss = min(cap, base + floor(trophies / per)).',
+  }),
+  trophyLossPer: tune('MATCH_PAYOUT.trophyLossPer', 150, {
+    group: 'economy', unit: 'trophies', min: 1, max: 10_000, int: true,
+    doc: 'Trophies per extra point of loss — the escalation rate. A DIVISOR: smaller is harsher.',
+  }),
+  trophyLossCap: tune('MATCH_PAYOUT.trophyLossCap', 10, {
+    group: 'economy', unit: 'trophies', min: 0, max: 200, int: true,
+    doc: 'Ceiling on a single loss, however many trophies are held.',
+  }),
   /** MINE. No trophy loss at all below this. See above. */
-  trophyLossGraceBelow: 100,
+  trophyLossGraceBelow: tune('MATCH_PAYOUT.trophyLossGraceBelow', 100, {
+    group: 'economy', unit: 'trophies', min: 0, max: 10_000, int: true,
+    doc: 'Below this standing a loss costs nothing — the first hour must not read as standing still.',
+  }),
 
   /**
    * MINE. Coins are the participation reward: you always get some, and winning is
    * worth 3x losing. A 3:1 ratio is enough for winning to feel better without making
    * a losing streak feel like a waste of ten minutes.
    */
-  coinsWin: 60,
-  coinsLoss: 20,
+  coinsWin: tune('MATCH_PAYOUT.coinsWin', 60, {
+    group: 'economy', unit: 'coins', min: 0, max: 10_000, int: true,
+    doc: 'Coins for a win. The 3:1 ratio against coinsLoss is the design statement, not either number alone.',
+  }),
+  coinsLoss: tune('MATCH_PAYOUT.coinsLoss', 20, {
+    group: 'economy', unit: 'coins', min: 0, max: 10_000, int: true,
+    doc: 'Coins for a loss. Always non-zero: a losing streak must not feel like a waste of ten minutes.',
+  }),
 
   /**
    * MINE. Wins per free chest. The prototype's shop says outright: "Chests aren't

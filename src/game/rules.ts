@@ -20,7 +20,39 @@
  *
  * The other sanctioned exception is arena geometry (see `arena.ts`), which the brief
  * explicitly opened up for redesign.
+ *
+ * ── 🚨 2026-08-17: SOME LITERALS BELOW ARE NOW READ THROUGH `tune()` ────────
+ *
+ * `DECISIONS-FOR-URI.md` §76 — Uri: *"All game and character constants should be manageable
+ * through admin. Nothing lives in code."* **That sentence collides head-on with the heading
+ * of this file**, and §76 constraint 1 resolves the collision in this file's favour:
+ *
+ *   > *"The panel must not become the second place. `rules.ts` stays authoritative; the panel
+ *   > edits an OVERRIDE LAYER that `rules.ts` itself reads, so there is still exactly one
+ *   > read path."*
+ *
+ * So nothing moved. `export const PLAYER_SPEED = 0.12` became
+ * `export const PLAYER_SPEED = tune('PLAYER_SPEED', 0.12, {…})` — **the literal is still on
+ * its own line, under its own block comment, and it is still the only statement of the
+ * default anywhere in the repo.** `src/game/tuning/registry.ts` LEARNS the default by being
+ * handed it; there is no table of constants in that directory and there must never be one.
+ * A registry that repeated `PLAYER_SPEED: 0.12` would be the second place, with the added
+ * cruelty that it would agree on the day it was written.
+ *
+ * ⚠️ **WITH NO OVERRIDE SET INSTALLED, `tune()` RETURNS ITS SECOND ARGUMENT AND NOTHING
+ * ELSE HAPPENS.** That is not a claim, it is measured: `tools/tmp/tun_bitid.mjs` runs the
+ * whole 110-matchup corpus in lockstep against a detached worktree of the pre-change commit
+ * and requires every match to be bit-identical — **with a positive-control arm under a real
+ * override that must DIVERGE**, because a null result on its own is exactly what a layer
+ * that silently did nothing would produce.
+ *
+ * ⚠️ **AND THE COST TO THE TYPE SYSTEM IS REAL AND IS DECLARED**: an `export const` that was
+ * a literal type (`150000`) is now `number`. Nothing in the tree narrowed on those literal
+ * types — `tsc --noEmit` is the check and it is clean — but a future `as const`-style
+ * dependency on one of them will not compile, and that is the trade §76 constraint 1 buys.
  */
+
+import { deriveFns, deriveds, registerCharacterFields, tune } from './tuningRegistry.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // World & match structure
@@ -142,7 +174,10 @@ export const PROTOTYPE_VIEWPORT = { w: 360, h: 240 } as const;
  * watch: `REGEN_AMOUNT / REGEN_TICK_MS` is 10 HP/s, so 150 s of disengagement is 1,500 HP
  * against a 100 HP pool where 45 s was 410. Re-measure, do not reason.
  */
-export const MATCH_DURATION_MS = 150_000; // 2:30 — Uri's ceiling, DECISIONS §58(c)
+export const MATCH_DURATION_MS = tune('MATCH_DURATION_MS', 150_000, { // 2:30 — Uri's ceiling, DECISIONS §58(c)
+  group: 'arena', unit: 'ms', min: 30_000, max: 600_000, int: true,
+  doc: 'Match clock. Uri moved this 45 s → 150 s by playing (§72), and every balance number in the repo predates it.',
+});
 
 /**
  * ── THE RING SCHEDULE, DECOUPLED FROM THE CLOCK (Uri, 2026-08-12) ──────────
@@ -180,8 +215,14 @@ export const MATCH_DURATION_MS = 150_000; // 2:30 — Uri's ceiling, DECISIONS �
  * `sim.test.mjs` §29 and §11 assert the arrival on the live sim; `tools/tmp/fs_sched_ring.mjs`
  * asserts it on real matches at N=2..6 and carries the OLD constants as its known-bad.
  */
-export const FOG_HOLD_MS = 25_000;
-export const FOG_CLOSE_MS = 120_000;
+export const FOG_HOLD_MS = tune('FOG_HOLD_MS', 25_000, {
+  group: 'arena', unit: 'ms', min: 0, max: 120_000, int: true,
+  doc: 'The ring does not move at all before this. Uri: "a grace period to find a weapon and an opponent".',
+});
+export const FOG_CLOSE_MS = tune('FOG_CLOSE_MS', 120_000, {
+  group: 'arena', unit: 'ms', min: 5_000, max: 600_000, int: true,
+  doc: 'When the ring ARRIVES at minSafeRadiusFor(N). SUDDEN_DEATH_MS is derived from this, so they cannot drift apart again.',
+});
 
 /**
  * ── AUTHORISED DEVIATION #8 (2026-08-05): COUNTDOWN_FROM 5 -> 3 ─────────────
@@ -280,8 +321,14 @@ export const MAX_SAFE_RADIUS = 545;
  * symmetric — 100 HP survives 2.0 s in the fog and 150 HP survives 3.0 s — which is
  * exactly the unfairness `MIN_SAFE_RADIUS` below exists to keep out of the endgame.
  */
-export const FOG_TICK_MS = 300;
-export const FOG_DAMAGE = 15;
+export const FOG_TICK_MS = tune('FOG_TICK_MS', 300, {
+  group: 'arena', unit: 'ms', min: 50, max: 5_000, int: true,
+  doc: 'How often a fighter outside the ring is burned. With FOG_DAMAGE this is a RATE, and a rate against a pool is scale-invariant — the clock change could not mistune it.',
+});
+export const FOG_DAMAGE = tune('FOG_DAMAGE', 15, {
+  group: 'arena', unit: 'hp', min: 0, max: 200,
+  doc: 'HP per fog tick. Tune the PAIR, not this alone — FOG_DPS below is the quantity that matters and it is derived from both.',
+});
 
 /**
  * The fog's damage RATE, in HP per second — the same 15/300 the two constants above
@@ -295,9 +342,21 @@ export const FOG_DAMAGE = 15;
  * so the rate is stated HERE, beside the two numbers it is derived from.
  *
  * ⚠️ It is DERIVED, not authored. Moving `FOG_DAMAGE` or `FOG_TICK_MS` moves this, which
- * is the point; do not replace it with a literal.
+ * is the point; do not replace it with a literal — and since 2026-08-17 the registry
+ * ENFORCES that: `deriveds()` puts it in the `DerivedKey` union, so an override naming it
+ * is a compile error as well as a runtime refusal. §76 constraint 2.
  */
-export const FOG_DPS = (FOG_DAMAGE / FOG_TICK_MS) * 1000;
+const FOG_DERIVED = deriveds({
+  FOG_DPS: {
+    group: 'arena', unit: 'hp/s', inputs: { FOG_DAMAGE, FOG_TICK_MS },
+    formula: '(FOG_DAMAGE / FOG_TICK_MS) * 1000',
+    doc: 'Fog burn rate. 50 HP/s today: a 100 HP pool survives 2.0 s outside the ring, a 150 HP pool 3.0 s.',
+    f: (i) => (i.FOG_DAMAGE / i.FOG_TICK_MS) * 1000,
+  },
+});
+/** See `DerivedScheduleKey`. Same rule, second block. */
+export type DerivedFogKey = keyof typeof FOG_DERIVED;
+export const FOG_DPS = FOG_DERIVED.FOG_DPS;
 
 /**
  * FLOOR on the closing ring: `safeRadius` never shrinks below this.
@@ -340,7 +399,11 @@ export const FOG_DPS = (FOG_DAMAGE / FOG_TICK_MS) * 1000;
  * it is the POT term of that maximum, the radius below which "safe ground" does not exist
  * at any fighter count. Nothing here is reversed; a second term was added beside it.
  */
-export const MIN_SAFE_RADIUS = 140;
+export const MIN_SAFE_RADIUS = tune('MIN_SAFE_RADIUS', 140, {
+  group: 'arena', unit: 'wu', min: 0, max: 1_000,
+  doc: 'The POT term of the ring floor — the radius below which safe ground does not exist at any fighter count. Binds at N ≤ 4, where the SPACING term binds at N ≥ 5.',
+  simClamp: { lo: 0, where: 'rules.ts:minSafeRadiusFor' },
+});
 
 /**
  * Central hazard (the boiling pot in the prototype). 8 HP per 250 ms = 32 HP/s.
@@ -387,7 +450,10 @@ export const PUDDLE_SLOW_FACTOR = 0.45;
 // Entities
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const PLAYER_MAX_HP = 100;
+export const PLAYER_MAX_HP = tune('PLAYER_MAX_HP', 100, {
+  group: 'combat', unit: 'hp', min: 10, max: 1000, int: true,
+  doc: 'The player pool every fighter above two seats is built from. Character cards scale it by healthMultiplier.',
+});
 
 /**
  * ── AUTHORISED DEVIATION #9 (2026-08-05): ENEMY_MAX_HP 150 -> 90 ────────────
@@ -510,7 +576,10 @@ export const PLAYER_MAX_HP = 100;
  * a bot**, which is now the only configuration this constant describes. It is not a
  * free-for-all balance figure and there is no instrument in this repo that produces one.
  */
-export const ENEMY_MAX_HP = 90;
+export const ENEMY_MAX_HP = tune('ENEMY_MAX_HP', 90, {
+  group: 'combat', unit: 'hp', min: 10, max: 1000, int: true,
+  doc: 'The BOT-opponent pool in a 1v1 only (§49c flattened it above two seats). The difficulty dial: 140 → 56.3%, 130 → 62.3% player win under smart2.',
+});
 export const PLAYER_SIZE = 42;
 export const ENEMY_SIZE = 42;
 
@@ -551,11 +620,29 @@ export const ENEMY_SIZE = 42;
  * the 150 s clock; on the 45 s clock it would have been **69%**, and `DECISIONS §1` already
  * recorded that **13.0 s of a 19.6 s match was spent walking to contact**. The two changes
  * are one decision made twice — do not move this constant without re-reading the clock.
+ *
+ * ── 🔴 THIS IS THE FIELD THE ADMIN PANEL EXISTS FOR (§76 / §75(b)) ─────────
+ *
+ * The answer above (0.09) is parked because **nobody knows whether `AI_CHASE_SPEED` should
+ * move with it**, and that is a question only Uri can answer and only by FEEL. The panel is
+ * how he answers it: both constants are registered, side by side, in the same group, so the
+ * **ratio** is the thing being tuned rather than either number. Dropping only the player
+ * takes the gap 1.71x → 1.29x; dropping both together holds it at 1.71x. **Do not land
+ * either one from a brief. Let him move the sliders.**
  */
-export const PLAYER_SPEED = 0.12;
+export const PLAYER_SPEED = tune('PLAYER_SPEED', 0.12, {
+  group: 'combat', unit: 'wu/ms', min: 0.01, max: 0.5,
+  doc: 'Player base movement. §75(b) is answered (0.09) and UNLANDED — see AI_CHASE_SPEED, because the PAIR is the decision and not this field alone.',
+});
 /** AI chase / flee speeds. Prototype: `0.07 * dt` and `0.085 * dt`. */
-export const AI_CHASE_SPEED = 0.07;
-export const AI_FLEE_SPEED = 0.085;
+export const AI_CHASE_SPEED = tune('AI_CHASE_SPEED', 0.07, {
+  group: 'combat', unit: 'wu/ms', min: 0.01, max: 0.5,
+  doc: 'Bot chase speed. PLAYER_SPEED / this is 1.71x today. Move only this and the game gets harder, move only the player and it gets harder too.',
+});
+export const AI_FLEE_SPEED = tune('AI_FLEE_SPEED', 0.085, {
+  group: 'combat', unit: 'wu/ms', min: 0.01, max: 0.5,
+  doc: 'Bot flee speed — deliberately ABOVE the chase speed, so disengaging is faster than closing.',
+});
 /** AI retreats below this fraction of max HP. */
 export const AI_FLEE_HP_FRACTION = 0.28;
 /** Movement multiplier applied to a slowed AI. */
@@ -720,9 +807,18 @@ export const AI_SELF_HEAL_HP_FRACTION = 0.5;
  * recorded because they are the numbers a duration-based fix would have had to reach, and
  * both are far below what the sweep above shows the player can afford.
  */
-export const SLOW_DURATION_MS = 2500;
-export const SLOW_MOVE_MULTIPLIER = 0.45;
-export const STUN_DURATION_MS = 2000; // stunned = movement locked to 0
+export const SLOW_DURATION_MS = tune('SLOW_DURATION_MS', 2500, {
+  group: 'combat', unit: 'ms', min: 0, max: 20_000, int: true,
+  doc: 'How long a slow lasts before diminishing returns scale it. Cutting it is CHEAP (−0.9 pp at 900 ms) and barely helps — the binding constraint is the application rate.',
+});
+export const SLOW_MOVE_MULTIPLIER = tune('SLOW_MOVE_MULTIPLIER', 0.45, {
+  group: 'combat', unit: 'x', min: 0, max: 1,
+  doc: 'Movement multiplier while slowed. 0 would make a slow into a stun, and 1 would delete the effect.',
+});
+export const STUN_DURATION_MS = tune('STUN_DURATION_MS', 2000, { // stunned = movement locked to 0
+  group: 'combat', unit: 'ms', min: 0, max: 20_000, int: true,
+  doc: 'Movement locked to zero for this long. EXPENSIVE to cut: −10.6 pp of player win rate at 1000 ms. The re-application rule below is the cheaper lever.',
+});
 
 /**
  * ── AUTHORISED DEVIATION #5 (2026-08-05): STATUS RE-APPLICATION IS NOW BOUNDED ──
@@ -818,8 +914,14 @@ export const STUN_DURATION_MS = 2000; // stunned = movement locked to 0
  * weapons that could break it. That ratchet is kept and TIGHTENED from `<=` to `==`,
  * because it no longer needs headroom.
  */
-export const STUN_GRACE_MS = 500;
-export const SLOW_GRACE_MS = 500;
+export const STUN_GRACE_MS = tune('STUN_GRACE_MS', 500, {
+  group: 'combat', unit: 'ms', min: 0, max: 10_000, int: true,
+  doc: 'Immunity window after a stun expires. ANY positive value buys the bound, and the size only sets how big the usable gap is. 500 ms = 2.38 evade windows.',
+});
+export const SLOW_GRACE_MS = tune('SLOW_GRACE_MS', 500, {
+  group: 'combat', unit: 'ms', min: 0, max: 10_000, int: true,
+  doc: 'Immunity window after a slow expires. Flat rather than a ratio of the duration — 500/625 measured indistinguishable, and one number is one sentence.',
+});
 
 /**
  * DIMINISHING RETURNS — `DECISIONS §75(a)`, and the grace above was NOT enough.
@@ -853,8 +955,20 @@ export const SLOW_GRACE_MS = 500;
  * refused application must not extend the punishment, or immunity becomes self-sustaining
  * and the fighter is permanently immune (which is the same defect wearing the other sign).
  */
+/**
+ * ⚠️ **NOT REGISTERED AS A TUNABLE, AND THE REASON IS A TYPE.** `combat.ts:drNextStacks`
+ * clamps to `STATUS_DR_SCALES.length - 1` and `state.ts`'s `*Stacks` fields INDEX this array,
+ * so its LENGTH is a schema, not a number: a panel that let Uri add or drop a rung would move
+ * a bound that four files read and two of them store. The individual scales could be
+ * registered without that risk — the length is what is load-bearing — but a half-tunable
+ * array whose length is frozen and whose contents are not is exactly the surface §76
+ * constraint 4 is about, so it is left whole and named here rather than left silent.
+ */
 export const STATUS_DR_SCALES = [1, 0.5, 0.25, 0] as const;
-export const STATUS_DR_WINDOW_MS = 8_000;
+export const STATUS_DR_WINDOW_MS = tune('STATUS_DR_WINDOW_MS', 8_000, {
+  group: 'combat', unit: 'ms', min: 0, max: 60_000, int: true,
+  doc: 'Applications within this of the last APPLIED status are scaled down by STATUS_DR_SCALES. Measured from the last applied, never the last hit — the other way round makes immunity self-sustaining.',
+});
 
 /**
  * Out-of-combat regeneration.
@@ -1530,7 +1644,10 @@ export function fogReachesRadiusAt(radius: number, openingRadius: number, floorR
  * the rule is *"the players get 15 s on the final circle"*, and a rule stated as a
  * subtraction between two absolute times is a rule nobody can move safely.
  */
-export const SUDDEN_DEATH_GRACE_MS = 15_000;
+export const SUDDEN_DEATH_GRACE_MS = tune('SUDDEN_DEATH_GRACE_MS', 15_000, {
+  group: 'arena', unit: 'ms', min: 0, max: 120_000, int: true,
+  doc: 'How long the players get to stand on the final circle before the collapse. Uri\'s number, verbatim: "sudden death starts 15 s after that".',
+});
 
 /**
  * How far into a match sudden death begins. **135 s = `FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS`.**
@@ -1554,8 +1671,26 @@ export const SUDDEN_DEATH_GRACE_MS = 15_000;
  * that starts at a known value and is unaffected by `COUNTDOWN_FROM`, which is exactly
  * the property `driver_guard.mjs` exists to protect: a sudden death keyed off `elapsed`
  * would move with the countdown and re-seed every balance number in the project.
+ *
+ * ── 🚨 REGISTERED WITH `deriveds()`, WHICH IS WHAT MAKES IT UNTYPEABLE ─────
+ *
+ * §76 constraint 2, verbatim: *"a panel that let you type `SUDDEN_DEATH_MS` would un-fix the
+ * exact bug he found by playing."* So this is not a text box that the panel merely renders
+ * read-only — `keys.ts` intersects `OverrideSet` with `{ [K in DerivedKey]?: never }`, so
+ * `{ SUDDEN_DEATH_MS: 5 }` is a **COMPILE ERROR**, and `validate.ts` refuses it again at run
+ * time because JSON arriving from localStorage has no types. The recompute below is the
+ * formula's only copy: the panel previews it by calling it, and knows no arithmetic of its own.
  */
-export const SUDDEN_DEATH_MS = FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS;
+const SCHEDULE_DERIVED = deriveds({
+  SUDDEN_DEATH_MS: {
+    group: 'arena', unit: 'ms', inputs: { FOG_CLOSE_MS, SUDDEN_DEATH_GRACE_MS },
+    formula: 'FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS',
+    doc: 'When the ring is abolished. Derived BECAUSE a literal 30_000 let the collapse overtake the ring by 9.6–11.8 s — the bug Uri found by playing.',
+    f: (i) => i.FOG_CLOSE_MS + i.SUDDEN_DEATH_GRACE_MS,
+  },
+});
+
+export const SUDDEN_DEATH_MS = SCHEDULE_DERIVED.SUDDEN_DEATH_MS;
 
 /**
  * The clock reading at which sudden death starts — **15 000 ms**, derived, never typed.
@@ -1566,8 +1701,40 @@ export const SUDDEN_DEATH_MS = FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS;
  * 15 000 ms), so `suddenDeathActive`'s FORM did not have to change. That invariance is a
  * convenience and not a law — see `SUDDEN_DEATH_MS` for why the two 15 s figures are
  * different quantities that happen to agree.
+ *
+ * ⚠️ **WAS `MATCH_DURATION_MS - SUDDEN_DEATH_MS` WRITTEN HERE**; it is the same expression,
+ * registered rather than merely evaluated. Kept identical to the token.
+ *
+ * ⚠️ **THE TWO-DEEP LINK, AND IT IS LOAD-BEARING FOR AN INSTRUMENT.** This reads
+ * `SUDDEN_DEATH_MS`, which reads `FOG_CLOSE_MS` — so a candidate on `FOG_CLOSE_MS` reaches
+ * this value only through a WALK. `tuningRegistry.ts:previewDerived` used to substitute DIRECT
+ * inputs only and returned a silently stale number here; it now recurses, and
+ * `tools/tmp/tun_gate.mjs` uses **this exact chain** as its fixture with the old direct-only
+ * body kept as the known-bad mutant.
+ *
+ * ⚠️ It is a SECOND `deriveds()` call rather than a second key in the block above, and that is
+ * forced: the declaration passes each input as the IDENTIFIER holding it, so `SUDDEN_DEATH_MS`
+ * has to be a `const` before it can be named — which it is, one statement up. Two calls, one
+ * union, no value stated twice.
  */
-export const SUDDEN_DEATH_REMAINING_MS = MATCH_DURATION_MS - SUDDEN_DEATH_MS;
+const SCHEDULE_DERIVED_2 = deriveds({
+  SUDDEN_DEATH_REMAINING_MS: {
+    group: 'arena', unit: 'ms', inputs: { MATCH_DURATION_MS, SUDDEN_DEATH_MS },
+    formula: 'MATCH_DURATION_MS - SUDDEN_DEATH_MS',
+    doc: 'The clock reading at which sudden death starts. Derived, never typed — see above for why the coincidence with the grace is a coincidence.',
+    f: (i) => i.MATCH_DURATION_MS - i.SUDDEN_DEATH_MS,
+  },
+});
+
+/**
+ * The derived-key union for the schedule — **`keyof typeof`, never a hand-written list.**
+ * `tuning/keys.ts` folds it into `DerivedKey`, which `OverrideSet` refuses. Adding a key to
+ * either block extends the refusal automatically; that is the entire reason the block form
+ * exists rather than bare `derive()` calls.
+ */
+export type DerivedScheduleKey = keyof typeof SCHEDULE_DERIVED | keyof typeof SCHEDULE_DERIVED_2;
+
+export const SUDDEN_DEATH_REMAINING_MS = SCHEDULE_DERIVED_2.SUDDEN_DEATH_REMAINING_MS;
 
 /**
  * The safe radius during sudden death: **zero. There is no safe ground.**
@@ -3662,6 +3829,77 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     ],
   }),
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE ROSTER JOINS THE REGISTRY — §76, and the placement is load-bearing
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 🚨 **THIS CALL MUST SIT HERE, IMMEDIATELY AFTER THE OBJECT LITERAL ABOVE, AND THE REASON
+// IS `ai.ts:PRESS_VALUE`.** That map is `ReadonlyMap<Weapon, PressProfile>` keyed on weapon
+// **OBJECT IDENTITY**, and it is built in a module-level IIFE that reads `w.damage`,
+// `w.pellets`, `w.spreadDeg` and `w.comboParts[i].angle` at `ai.ts` evaluation time. Two
+// distinct ways to break it, and only one of them is obvious:
+//
+//   1. REPLACING a weapon object would make every `PRESS_VALUE.get(w)` miss and every ranked
+//      press silently fall back to `w.damage` (`pressValue`'s "unreachable" branch). So
+//      `registerCharacterFields` **mutates in place** — `owner[field] = value`, never a new
+//      object, never a new array — and mutates ONLY when the value actually changed.
+//   2. Registering LATER than `ai.ts`'s IIFE would leave the profiles computed from the
+//      AUTHORED numbers while the sim ran the OVERRIDDEN ones — a driver ranking weapons by
+//      a table that no longer describes them, which is this repo's five-times-recorded
+//      "one rule stated in two places" with a tuning panel attached.
+//
+// Ordering is guaranteed, not hoped for: `ai.ts` imports `rules.ts` and `rules.ts` imports
+// nothing from `src/game/` except `tuning/registry.ts`, so there is no cycle and ESM fully
+// evaluates this module — including this line — before `ai.ts`'s body runs. **`rules.ts` has
+// no other module-scope reader of `CHARACTERS`**: `healthMultiplier`, `speedMultiplier`,
+// `kitDps` and `kitSignature` are all functions, evaluated on call.
+// `tools/tmp/tun_gate.mjs` asserts the identity property directly (every weapon object in
+// `ai.ts`'s map is `===` the one in `CHARACTERS`) rather than trusting this comment.
+registerCharacterFields(
+  CHARACTERS as unknown as Readonly<Record<string, { stats: Record<string, number>; weapons: Array<Record<string, unknown>> }>>,
+  // The ladder rungs, flattened, so the panel can WARN that overriding a weapon's `range`
+  // pins it off `REACH` / `SPEED`. Passed rather than imported by the registry, because the
+  // registry must not know what a ladder is.
+  {
+    ...Object.fromEntries(Object.entries(REACH).map(([k, v]) => [`REACH.${k}`, v])),
+    ...Object.fromEntries(Object.entries(SPEED).map(([k, v]) => [`SPEED.${k}`, v])),
+    ...Object.fromEntries(Object.entries(FLIGHT_MS).map(([k, v]) => [`FLIGHT_MS.${k}`, v])),
+  },
+);
+
+/**
+ * The three schedule FUNCTIONS, registered read-only.
+ *
+ * §76 constraint 2 names them: they are values of run-time arguments, not of constants
+ * alone, so there is no scalar for a text box to hold. The registry "records nothing
+ * executable" for these — the panel renders the signature and calls the real export — and
+ * `registry.ts:valuesOf` refuses to use one as a derived input from the other side.
+ *
+ * Their `inputs` are what makes them useful rather than decorative: `model.ts:buildGraph`
+ * walks them, so moving `FOG_HOLD_MS` in the panel lists `fogRadiusAt` as a consequence
+ * without the panel knowing the fog exists.
+ */
+const SCHEDULE_FNS = {
+  minSafeRadiusFor: {
+    group: 'arena', unit: 'wu', inputs: ['MIN_SAFE_RADIUS'],
+    where: 'rules.ts:minSafeRadiusFor', args: ['fighterCount'],
+    doc: 'The ring floor at N fighters. MIN_SAFE_RADIUS binds at N ≤ 4, and the evenly-spaced-chord term binds at N ≥ 5 (237.00 at N=6).',
+  },
+  fogRadiusAt: {
+    group: 'arena', unit: 'wu', inputs: ['FOG_HOLD_MS', 'FOG_CLOSE_MS'],
+    where: 'rules.ts:fogRadiusAt', args: ['playMs', 'openingRadius', 'floorRadius'],
+    doc: 'Where the ring is at a given moment of PLAY. Holds, then interpolates to the floor, then stays — the only reader of the two schedule constants.',
+  },
+  fogReachesRadiusAt: {
+    group: 'arena', unit: 'ms', inputs: ['FOG_HOLD_MS', 'FOG_CLOSE_MS'],
+    where: 'rules.ts:fogReachesRadiusAt', args: ['radius', 'openingRadius', 'floorRadius'],
+    doc: 'The inverse of fogRadiusAt — when the ring arrives at a radius. Exists so nothing solves the schedule by hand.',
+  },
+} as const;
+/** See `DerivedScheduleKey`. Same rule, third block — a FUNCTION is no more overridable. */
+export type DerivedFnKey = keyof typeof SCHEDULE_FNS;
+deriveFns(SCHEDULE_FNS);
 
 /** Rarity display order, lowest → highest. */
 export const RARITY_ORDER: Rarity[] = ['Normal', 'Rare', 'Epic', 'Legendary', 'Neon', 'Cyber'];
