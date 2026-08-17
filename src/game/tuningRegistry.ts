@@ -628,7 +628,7 @@ export function assertRegistryPopulated(): void {
  * Every installed override key that matched NO registry key.
  *
  * ⚠️ **THIS CANNOT BE CHECKED AT BOOT, AND THAT IS WHY IT IS A SEPARATE FUNCTION.** Overrides
- * are installed *before* `rules.ts` evaluates — that is the whole design (`store.ts`: an ESM
+ * are installed *before* `rules.ts` evaluates — that is the whole design (`tuningStore.ts`: an ESM
  * `const` cannot be reassigned) — so at install time the registry is empty and EVERY key looks
  * unknown. The earliest moment the question is answerable is the seal.
  */
@@ -639,7 +639,7 @@ export function unknownOverrideKeys(): string[] {
 /**
  * Called by `index.ts` once every registering module has evaluated. Unlocks the set hash.
  *
- * 🚨 **AND IT THROWS ON AN OVERRIDE KEY NOTHING CLAIMED.** `store.ts` states the principle
+ * 🚨 **AND IT THROWS ON AN OVERRIDE KEY NOTHING CLAIMED.** `tuningStore.ts` states the principle
  * two screens up and this is where it is enforced: *"a silently-dropped override produces a
  * measurement whose stamp says 'tuned' and whose numbers are stock — unreproducible in the
  * most confusing possible way."* A typo in a hand-written set is exactly that. It hashes to a

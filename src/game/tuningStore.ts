@@ -7,7 +7,7 @@
  * impossible to quote without saying which set produced it.
  *
  * ⚠️ **THIS FILE IMPORTS NOTHING.** It is evaluated before `rules.ts` (which imports
- * `registry.ts`, which imports this) and an import of `rules.ts` from here would be a cycle
+ * `tuningRegistry.ts`, which imports this) and an import of `rules.ts` from here would be a cycle
  * whose failure mode is a half-initialised constant table — i.e. the one defect that is
  * worse than having no override layer at all.
  *
@@ -20,7 +20,7 @@
  * so it *"AGREED BY CONSTRUCTION"*.
  *
  * So the panel does **not** get a second table of numbers. `rules.ts` keeps its literals and
- * reads each one through `registry.ts:tunables()`, which consults this store. The authored
+ * reads each one through `tuningRegistry.ts:tunables()`, which consults this store. The authored
  * default is stated exactly once — as the literal in `rules.ts` — and the registry LEARNS it
  * from there. There is no list of defaults anywhere in `src/game/tuning/`; a file that held
  * one would be the second place.
@@ -77,7 +77,7 @@ let overrides = new Map<string, number>();
 let defaults = new Map<string, number>();
 let source: TuningSource = 'none';
 let sealed = false;
-/** Set by `registry.ts` once `assertRegistryPopulated()` has run. Hash validity depends on it. */
+/** Set by `tuningRegistry.ts` once `assertRegistryPopulated()` has run. Hash validity depends on it. */
 let defaultsComplete = false;
 
 /**
@@ -150,7 +150,7 @@ export function tuningSource(): TuningSource {
   return source;
 }
 
-/** Marks the defaults table complete. `registry.ts` calls this; the hash is unsafe before it. */
+/** Marks the defaults table complete. `tuningRegistry.ts` calls this; the hash is unsafe before it. */
 export function markDefaultsComplete(): void {
   defaultsComplete = true;
 }
@@ -165,7 +165,7 @@ export function areDefaultsComplete(): boolean {
  * `range`-means-two-things defect with a clock on it.
  *
  * ⚠️ Values are NOT validated here: this file cannot see the registry (it would be a cycle).
- * `registry.ts:tunables()` validates each key against its spec as it registers it, and
+ * `tuningRegistry.ts:tunables()` validates each key against its spec as it registers it, and
  * `validate.ts:parseSet()` validates a whole set against the populated registry before it is
  * ever persisted. The only way to reach an invalid value at boot is to hand-edit storage, and
  * that path throws with the key named.

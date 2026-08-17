@@ -1,7 +1,7 @@
 /**
  * THE ONE IMPORT — evaluate every registering module, seal, and re-export.
  *
- * `DECISIONS-FOR-URI.md` §76. `registry.ts` has told readers to import this file since the day
+ * `DECISIONS-FOR-URI.md` §76. `tuningRegistry.ts` has told readers to import this file since the day
  * it was written (*"import `src/game/tuning/index.ts`, which imports it for you"*) and **it did
  * not exist**; `src/admin/model.ts` carries a comment saying so and does the two side-effect
  * imports by hand. It exists now, and `model.ts` can collapse to one line whenever that file
@@ -11,7 +11,7 @@
  *
  * The registry is **populated by evaluation, not by a list**: `rules.ts` registers each of its
  * literals as that literal initialises. So the registry is exactly as complete as the set of
- * modules that have been evaluated, and a consumer that imports `registry.ts` alone gets an
+ * modules that have been evaluated, and a consumer that imports `tuningRegistry.ts` alone gets an
  * EMPTY one — which is not an error state that announces itself, it is a panel with no rows
  * and a hash of `'stock'`. `CLAUDE.md` #6 calls that the vacuity class and it is why
  * `assertRegistryPopulated()` throws rather than returning an empty array.
@@ -25,14 +25,14 @@
  * ── ⚠️ IMPORTING THIS FILE SEALS THE STORE ────────────────────────────────
  *
  * Evaluating `rules.ts` reads a constant, and the first read seals the override store for the
- * lifetime of the process (`store.ts` explains why at length). So **anything that wants to
+ * lifetime of the process (`tuningStore.ts` explains why at length). So **anything that wants to
  * install a set must do so before this module is imported** — in Node that means `FA_TUNING`,
- * which is read at `store.ts` evaluation and is therefore always early enough. There is no
+ * which is read at `tuningStore.ts` evaluation and is therefore always early enough. There is no
  * post-hoc install path; `validate.ts` documents why one cannot exist.
  */
 
 // The side effects. Ordering between the two does not matter — they register disjoint keys and
-// `registry.ts:claim()` throws on a collision, so an overlap could never pass silently.
+// `tuningRegistry.ts:claim()` throws on a collision, so an overlap could never pass silently.
 import '../rules.ts';
 import '../economy/tuning.ts';
 

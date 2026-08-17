@@ -65,7 +65,7 @@ export type OverrideSet =
   & { readonly [K in DerivedKey]?: never };
 
 /**
- * The envelope `validate.ts:exportSet` writes and `store.ts:parseBootstrapPayload` accepts.
+ * The envelope `validate.ts:exportSet` writes and `tuningStore.ts:parseBootstrapPayload` accepts.
  *
  * `tuningHash` is a **STAMP, not an input**: nothing re-derives the set from it and nothing
  * trusts it. It exists so a set sitting in a file can be matched against the
