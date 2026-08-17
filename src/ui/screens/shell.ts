@@ -90,6 +90,8 @@ import { createTrophyRoadScreen } from './trophyRoad';
 import { createShopScreen } from './shop';
 import { createLobbyScreen } from './lobby';
 import { createMatchScreen } from './matchScreen';
+import { ADMIN_ENABLED, ADMIN_OFF_REASON } from '../../admin/gate';
+import { createAdminScreen } from '../../admin/adminScreen';
 
 declare global {
   interface Window {
@@ -115,9 +117,22 @@ declare global {
   }
 }
 
-/** Every route name, as data, so a value off `history.state` can be validated. */
+/**
+ * Every route name, as data, so a value off `history.state` can be validated.
+ *
+ * ⚠️ `main.ts`'s header documents this same ladder in prose and says the two have to be
+ * added to together — it went stale once already. `admin` is in both.
+ *
+ * 🚨 **`admin` IS CONDITIONAL, AND THIS IS THE WEAKEST OF THE THREE GATES ON IT.**
+ * It only decides what `parseRoute`/`routeFromSearch` will accept off `history.state` or
+ * the address bar. It does NOT cover `window.__shell.navigate({ name: 'admin' })`, which
+ * this file publishes in production for QA and which a player with devtools open has the
+ * same access to. `build()` is what covers that, and it is the gate `adm_unreachable.mjs`
+ * actually points its known-bad at.
+ */
 const ROUTE_NAMES: readonly string[] = [
   'opening', 'home', 'characters', 'trophies', 'shop', 'settings', 'lobby', 'match',
+  ...(ADMIN_ENABLED ? ['admin'] : []),
 ];
 
 function isCharacterId(v: unknown): v is CharacterId {
@@ -369,6 +384,18 @@ export function createShell(opts: ShellOptions): Shell {
       // not a live stage, which is also why navigating here does not touch the shared
       // WebGL context the way `match` does.
       case 'lobby': return createLobbyScreen(ctx);
+      // 🚨 §76 CONSTRAINT 5, AND THIS IS THE GATE THAT COUNTS. Pure DOM like the shop, so
+      // it defines no `update()` and mounting it stops the rAF loop entirely.
+      //
+      // The throw is the point. Every other path to this screen — `?screen=admin`,
+      // `history.state`, a hand-edited address bar — is already filtered by ROUTE_NAMES;
+      // this one also covers `window.__shell.navigate({ name: 'admin' })`, which is a
+      // production global and therefore the path an actual cheat would take. Throwing
+      // rather than returning a stub means `mountFailed` runs, and `mountFailed` puts the
+      // player on HOME with the URL rewritten — a working game, not a black rectangle.
+      case 'admin':
+        if (!ADMIN_ENABLED) throw new Error(ADMIN_OFF_REASON);
+        return createAdminScreen(ctx);
       case 'match': return createMatchScreen(ctx, route);
     }
     // Unreachable by the type system and NOT unreachable in fact. A `Route` can arrive

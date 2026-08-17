@@ -64,6 +64,32 @@ export type Route =
    */
   | { name: 'lobby' }
   /**
+   * THE TUNING PANEL — `DECISIONS-FOR-URI.md` §76, and the one route in this union that
+   * is **not part of the game**.
+   *
+   * Uri: *"All game and character constants should be manageable through admin… Admin
+   * should not look like the game."* It lives behind the same router as everything else
+   * because that is where `?screen=` decoding, history, the curtain and `__screen` already
+   * live, and duplicating any of that for one screen would be the second-place defect in
+   * router form.
+   *
+   * 🚨 **IT IS NOT REACHABLE IN A DEFAULT BUILD, AND THE ROUTE EXISTING IS NOT A HOLE.**
+   * §76 constraint 5: a live tuning panel is a cheat surface. `src/admin/gate.ts` holds the
+   * condition; `shell.ts` refuses it in THREE places, and the one that matters is
+   * `build()`, because `window.__shell.navigate` ships in production and a URL-only gate
+   * would be one console line wide. `tools/tmp/adm_unreachable.mjs` proves all of it
+   * against a real production build, with the `VITE_FA_ADMIN=1` build as the known-good
+   * arm that shows the test can see a reachable panel at all.
+   *
+   * ⚠️ **NO ARGUMENTS, for the same reason `lobby` has none** — a route field duplicating
+   * persisted state goes stale the moment it is written from anywhere else. Which tab is
+   * open is screen state and stays in the screen; the override set lives in
+   * `localStorage` under `store.ts:STORAGE_KEY`, which is where the SIM reads it at boot,
+   * so a panel that put it on the route would be a second copy of the one thing in this
+   * whole feature that must have exactly one home.
+   */
+  | { name: 'admin' }
+  /**
    * A live match.
    *
    * `seats` is the `DECISIONS §66` flag and it is **default-off by being OPTIONAL**: every

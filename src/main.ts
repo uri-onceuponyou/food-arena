@@ -15,6 +15,10 @@
  *     over everything. ⚠️ This IS a doc copy of the ladder below and it went stale once
  *     already; `shell.ts:ROUTE_NAMES` is the set a `popstate` validates against and the two
  *     have to be added to together.
+ *     ⚠️ **And `?screen=admin` is deliberately NOT in that list** — `DECISIONS-FOR-URI.md`
+ *     §76's tuning panel is not part of the game and is unreachable unless
+ *     `src/admin/gate.ts` says this build carries it. It is handled below, gated, beside
+ *     the others.
  *   * otherwise, if ANY match-only QA parameter is present boot straight into the match,
  *     exactly as before. Those parameters have no meaning anywhere else, so their presence
  *     is an unambiguous statement of intent.
@@ -37,6 +41,7 @@ import { audio } from './audio';
 import { PlayerProfile } from './ui/screens/profile';
 import { CHARACTER_IDS, type CharacterId } from './game/rules';
 import { seatsFromParams } from './ui/screens/brawl';
+import { ADMIN_ENABLED } from './admin/gate';
 import type { Route } from './ui/screens/types';
 
 const params = new URLSearchParams(location.search);
@@ -79,6 +84,12 @@ function bootRoute(profile: PlayerProfile): Route {
   // `?screen=lobby` is a complete description of it and a reload lands on a working screen
   // rather than re-deriving the boot route and showing the title card — which is the trap
   // that once made a capture labelled `home` photograph a different screen entirely.
+  // `DECISIONS-FOR-URI.md` §76's tuning panel. Gated at the boot route as well as in
+  // `shell.ts`, so that in a default build `?screen=admin` falls straight through to the
+  // ladder below and lands on the title card — the same answer an unknown `?screen=` value
+  // has always produced. **This branch alone is not the guarantee**: `shell.ts:build()` is,
+  // because `window.__shell.navigate` bypasses every URL.
+  if (ADMIN_ENABLED && params.get('screen') === 'admin') return { name: 'admin' };
   if (params.get('screen') === 'lobby') return { name: 'lobby' };
   if (params.get('screen') === 'characters') return { name: 'characters' };
   if (params.get('screen') === 'trophies') return { name: 'trophies' };
