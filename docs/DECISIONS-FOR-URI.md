@@ -5307,3 +5307,73 @@ toward it"* is **forced movement**; burrito's *"the flying toppings can be destr
 **projectile destructibility**; *"the seaweed scatters across the map"* is a **map-wide effect**.
 **"Build the mechanics" is three or four projects, not one**, and this entry authorises all of
 them — but they should be sequenced, not attempted together.
+
+---
+
+## 78. ✅ ANSWERED — a wind-up costs POSITION, not SILENCE. And the shipped wind-up is 1.83× its own rule.
+
+**Uri, 2026-08-18**, choosing *"keep the root, drop the lockout"*.
+
+### The measurement that reframed the whole programme
+
+Three conversion passes converted **1 of 6** ultimates. Every refusal blamed a different thing —
+balance, then `ai.ts`, then the derivation — and `12bd5fa` finally measured the real term by running
+three single-variable ablations, `Mega` held at 1100 throughout:
+
+| term removed | site | waterbottle (smart2) | |
+|---|---|---|---|
+| — (shipped) | — | **9.8%** | |
+| **ATTACK LOCKOUT** | `combat.ts:attemptAttack` | **29.5%** | **+19.7** |
+| FROZEN AIM | `sim.ts:applyAim` + `ai.ts` facing | 10.5% | +0.6 (1/110 moved) |
+| **MOVEMENT ROOT** | `state.ts:movementLocked` | **3.3%** | **−6.6** |
+
+🚨 **THE OBVIOUS STORY — "the cost is the ROOT" — IS FALSE, AND IT WAS REFUTED BY THE ARM RUN TO
+CONFIRM IT.** Removing the root makes it **worse**: an unrooted caster walks off its own frozen
+bearing and misses. **The telegraph was never the expensive part. Being unable to act during it is.**
+
+**So: the root STAYS** (it is what makes the telegraph tell the truth about where the effect lands,
+and removing it is measurably negative), **and the attack lockout GOES.** A super becomes a
+commitment of *position*, not a period of *silence*.
+
+### And the shipped conversion is wrong — the rule reads a CONE as a DISC
+
+`Weapon.castMs` derives from *"the target must leave a disc of `range`"*. `combat.ts:deliverWeapon`
+does not implement a disc: it tests `angleTo > cone / 2` against `attacker.facing`, and **both**
+`sim.ts:applyAim` and `ai.ts`'s facing block refuse to update facing while `isCasting`. A melee cast
+with `cone < 360` therefore threatens a **FROZEN WEDGE**, and the cheapest exit from a wedge is
+**angular**. Swept over 36 run bearings × 7 separations through the real `stepMatch`:
+
+```
+waterbottle.Mega   radial escape, bearing 0     601 ms   <- the shipped 1100's input
+                   CHEAPEST escape              134 ms   @ sep 20, bearing 130 deg
+                   escape WINDOW                284 ms slowest human / 251 fastest
+                   -> roundUp50(284 + 300)    = 600, NOT 1100
+```
+
+**1.83× its own rule**, and `Mega 1100 → 600` measures **9.8% → 25.9% (+16.1 pp)**, 16/110 paired.
+⚠️ **The closed form is wrong for every weapon carrying a `cone` — five of the six candidates.**
+A `cone: 360` melee *is* the disc the old paragraph describes, and the sweep reproduces the old
+answer for `lollipop.Giant` exactly, which is what proves the diagnosis rather than asserting it.
+
+### Two records that were wrong and are corrected here
+
+* **`castMs: 300` was NOT "below the dodge floor".** That arm was used to isolate root+interrupt at
+  13.8 pp, but both speed extremes escape a 100° cone in **251–284 ms**, so **the dodge was ON in
+  the arm built to switch it OFF.** The arm that genuinely switches it off is **150 ms**.
+* **`165.20 / 105.60 = 1564.39, not 1523.39.** A MEASURED number was equated with the arithmetic of
+  the PREDICTED one printed beside it in the same table — and the sentence was quoted into `ai.ts`.
+
+### The ablation the record said was never run, and it inverts the question
+
+**Soup without Dump at all: 13.1%. Soup with a telegraphed Dump: 7.0% (600 ms), 0.2% (1100 ms).**
+**A wind-up on that weapon is worse than not having the weapon.** That refutes the standing
+`pressValue` hypothesis exactly as it was refuted for Mega: if the AI were merely mis-choosing,
+*removing the choice* would help — and it helps by **6.1 pp**.
+⚠️ Re-measure Soup after the lockout goes. It may need no redesign at all.
+
+### ⚠️ Standing caveat on every cast number above
+
+**`tools/tmp/scripted_player.mjs` contains the string `cast` ZERO times.** The driver on the other
+side of every balance corpus here has no notion of a wind-up — it neither dodges one nor refuses to
+open one it cannot land. **Every cast win-rate in this file is therefore role-dependent**, and the
+asymmetry widens with each conversion. Fixing that is its own pass.
