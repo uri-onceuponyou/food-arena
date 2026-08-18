@@ -43,6 +43,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { resolve, join } from 'node:path';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
@@ -93,9 +94,16 @@ function stripComments(text) {
     .join('\n');
 }
 
-/** Scrapes found in one tool: key -> [line numbers]. */
-function scrapesIn(rel) {
-  const text = stripComments(readFileSync(join(ROOT, rel), 'utf8'));
+/**
+ * Scrapes found in a blob of tool SOURCE: key -> [line numbers].
+ *
+ * Split out from `scrapesIn` so the selftest can hand it bytes that are NOT on disk —
+ * see the pinned-blob note there. Deliberately NOT exported: this file runs its whole
+ * report at module scope, and `docs/AGENT-BRIEF.md` §3 records three tools that turned
+ * `import` into a full CLI run by exporting one helper.
+ */
+function scrapesInText(source) {
+  const text = stripComments(source);
   const found = new Map();
   const lines = text.split('\n');
   lines.forEach((line, i) => {
@@ -110,6 +118,11 @@ function scrapesIn(rel) {
   return found;
 }
 
+/** Scrapes found in one tool ON DISK. */
+function scrapesIn(rel) {
+  return scrapesInText(readFileSync(join(ROOT, rel), 'utf8'));
+}
+
 // ═════════════════════════════════════════════════════════════════════════════
 // --selftest — a locator that cannot find a known scrape is worthless
 // ═════════════════════════════════════════════════════════════════════════════
@@ -121,17 +134,66 @@ if (args.has('--selftest')) {
   };
   console.log('\n══ tun_scrapes SELFTEST ══\n');
 
-  // 🚨 THE POSITIVE CONTROL IS A REAL FILE IN THE TREE, NOT A FIXTURE. A locator validated
-  // only against a string it was handed proves it can read that string.
-  const known = 'tools/tmp/sp_place.mjs';
-  const hits = existsSync(join(ROOT, known)) ? scrapesIn(known) : new Map();
-  ok('KNOWN SCRAPE: sp_place.mjs is caught reading MIN_SAFE_RADIUS out of rules.ts',
-    hits.has('MIN_SAFE_RADIUS'), `line ${(hits.get('MIN_SAFE_RADIUS') ?? []).join(',')}`);
-  ok('…and PLAYER_SPEED in the same file, so it finds MORE THAN ONE per tool',
-    hits.has('PLAYER_SPEED'), `line ${(hits.get('PLAYER_SPEED') ?? []).join(',')}`);
+  // ════════════════════════════════════════════════════════════════════════════
+  // THE POSITIVE CONTROL IS A **PINNED GIT BLOB**, AND HERE IS WHY IT HAD TO BECOME ONE.
+  //
+  // 🚨 **A KNOWN-BAD CONTROL POINTED AT LIVE SOURCE EXPIRES THE MOMENT THE BUG DOES.**
+  //
+  // This row used to read `scrapesIn('tools/tmp/sp_place.mjs')`, with the note *"a real
+  // file in the tree, NOT a fixture — a locator validated only against a string it was
+  // handed proves it can read that string."* That instinct was **right** and the target was
+  // **wrong**, because `sp_place.mjs` was a live file whose whole purpose in this test was
+  // to be broken — and `fcf6da7` then did exactly what this tool exists to ask for and
+  // replaced its four regexes with an import. **The defect went away, so the control went
+  // away: 4/4 → 2/4 with the detector still perfectly correct.** A red row meaning
+  // "someone fixed the bug" is indistinguishable from one meaning "the detector broke",
+  // which destroys the entire value of having a control.
+  //
+  // **A control must be immune to the fix it is measuring.** Three targets are, in
+  // descending order of evidential weight:
+  //   1. a **pinned git blob** — `git show <sha>:<path>`. Best when the defect actually
+  //      shipped: these are the real bytes, not a fixture written to pass. Immutable.
+  //   2. a **mutation of today's real file** — proves the detector is not keyed to the old
+  //      formatting. Complements (1); does not replace it.
+  //   3. a **synthetic string** built in the test — cheapest, and only ever proves the
+  //      detector can read a string its own author already knew how to write.
+  // `tools/tmp/tf1_noscrape.mjs` runs all three and is the model this row was rebuilt on.
+  //
+  // ⚠️ A pin has its OWN vacuity mode (`CLAUDE.md` #6): if `git show` fails, `hits` is an
+  // empty Map and the rows below fail for a reason that has nothing to do with the
+  // detector — or, in the mirror-image test, pass by absence. **So the FIRST row asserts
+  // the bytes arrived**, before anything is asserted over them.
+  // ════════════════════════════════════════════════════════════════════════════
+  //
+  // `eb3e44d` is the last commit BEFORE `fcf6da7`'s de-scrape pass — the same pin
+  // `tf1_noscrape.mjs` uses, deliberately: one pin, one documented reason, two tools.
+  const KNOWN_BAD_SHA = 'eb3e44d';
+  const KNOWN_BAD_PATH = 'tools/tmp/sp_place.mjs';
+  let badSrc = null;
+  try {
+    badSrc = execFileSync('git', ['show', `${KNOWN_BAD_SHA}:${KNOWN_BAD_PATH}`],
+      { cwd: ROOT, encoding: 'utf8' });
+  } catch { badSrc = null; }
+  ok(`the known-bad bytes are readable (${KNOWN_BAD_SHA}:${KNOWN_BAD_PATH})`,
+    typeof badSrc === 'string' && badSrc.length > 0,
+    badSrc ? `${badSrc.split('\n').length} lines` : 'git show FAILED — every arm below would be VACUOUS');
 
-  // The negative control. Without it, a matcher that returned every key on every line would
-  // pass the row above and be useless.
+  const hits = badSrc ? scrapesInText(badSrc) : new Map();
+  ok(`KNOWN-BAD: the shipped pre-fix ${KNOWN_BAD_PATH} is caught reading MIN_SAFE_RADIUS out of rules.ts`,
+    hits.has('MIN_SAFE_RADIUS'), `line ${(hits.get('MIN_SAFE_RADIUS') ?? []).join(',') || '— DETECTOR MISSES ITS OWN DEFECT'}`);
+  ok('…and PLAYER_SPEED in the same file, so it finds MORE THAN ONE per tool',
+    hits.has('PLAYER_SPEED'), `line ${(hits.get('PLAYER_SPEED') ?? []).join(',') || '— none'}`);
+
+  // MOVES / HOLDS on ONE file. The pin proves the detector sees the bug; this proves it
+  // sees the FIX. Without it, a detector that flagged every line would pass all three rows
+  // above. This arm is pointed at live source ON PURPOSE and that is safe in this
+  // direction: re-introducing a scrape here SHOULD go red.
+  const fixed = existsSync(join(ROOT, KNOWN_BAD_PATH)) ? scrapesIn(KNOWN_BAD_PATH) : new Map();
+  ok(`NEGATIVE CONTROL: today's ${KNOWN_BAD_PATH} — same file, scrapes replaced by an import — is NOT flagged`,
+    fixed.size === 0, `${fixed.size} scrape(s) found`);
+
+  // A second negative control, on a DIFFERENT file. Without it the row above could be
+  // passing because that one file is unusual rather than because the detector discriminates.
   const clean = scrapesIn('tools/tmp/tun_gate.mjs');
   ok('NEGATIVE CONTROL: a tool that IMPORTS rather than scrapes is not flagged',
     clean.size === 0, `${clean.size} scrape(s) found`);
