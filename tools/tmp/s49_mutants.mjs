@@ -57,11 +57,21 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { simModulesFromTree } from './tf2_simstage.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
-/** The same six modules `conceal_lab`, `match-sim` and `roster_lab` each hardcode. */
-const SIM_MODULES = ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts'];
+/**
+ * WAS: `const SIM_MODULES = ['sim.ts','ai.ts','movement.ts','combat.ts','state.ts','rules.ts'];`
+ * under the comment *"The same six modules `conceal_lab`, `match-sim` and `roster_lab` each
+ * hardcode."* — a comment that named the defect and left it there. There were ELEVEN copies,
+ * not four, and §76 (`c5b9754`) broke all of them at once by adding `tuningRegistry.ts` and
+ * `tuningStore.ts` to `sim.ts`'s closure.
+ *
+ * This file DID have a `gatecount` row, so it went red rather than silent — the lucky half.
+ * DERIVED now, from the working tree, which is what this file stages.
+ */
+const SIM_MODULES = simModulesFromTree(ROOT);
 
 let pass = 0;
 let fail = 0;

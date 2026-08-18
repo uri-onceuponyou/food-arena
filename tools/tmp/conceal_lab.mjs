@@ -74,6 +74,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createScriptedPlayer, rng, parseDriverFlags, DRIVER_REV } from './scripted_player.mjs';
+import { simModulesFromTree, simModulesAtRef } from './tf2_simstage.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -100,14 +101,35 @@ const args = (() => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * The six modules a standalone copy of the sim needs, in ONE place in this file.
+ * The modules a standalone copy of the sim needs, DERIVED from `sim.ts`'s import graph.
  *
- * ⚠️ There are FOUR hardcoded copies of this list in the repo — `match-sim.mjs:76`,
- * `roster_lab.mjs:307`, and (until 2026-08-10) two in this file. A seventh module under
- * `src/game/` therefore means finding all of them, which is why the N-fighter refactor
- * deliberately added none. Two of the four are now one; the other two are not this file's.
+ * 🚨 **WAS a hardcoded six, under a comment that had already diagnosed the bug and only
+ * got the COUNT wrong:** *"There are FOUR hardcoded copies of this list in the repo —
+ * `match-sim.mjs:76`, `roster_lab.mjs:307`, and (until 2026-08-10) two in this file. A
+ * seventh module under `src/game/` therefore means finding all of them, which is why the
+ * N-fighter refactor deliberately added none."*
+ *
+ * There were **ELEVEN**, not four. §76 (`c5b9754`) added a seventh AND an eighth
+ * (`tuningRegistry.ts`, `tuningStore.ts`) and nobody found all of them, because nothing
+ * could: the coupling was written down in a comment, in one of the eleven files, as a
+ * count that was already stale.
+ *
+ * Measured, because the obvious summary ("four red, seven silent") is wrong twice:
+ *   4 went RED in `gatecount` — this file, `as_cost`, `s49_mutants`, `sd_lab`.
+ *   2 were REGISTERED AND GREEN while broken — `match-sim --selftest` 15/15 (its selftest
+ *     never passes `--sim-ref`) and `nc_measure --selftest` 18/18 (it stages a directory
+ *     and never imports it). **That is the dangerous class**, not absence from the battery.
+ *   4 had no row at all — `rg2_mutants`, `e2e_statuslock`, `e2e_timeout_finder`, and
+ *     `nav_baseline_setup`, which is the worst of the eleven: it printed
+ *     `baseline (HEAD) -> …` and **exited 0** while writing a tree that cannot be imported.
+ *   1 was never broken — `roster_lab`, whose only copy stages a ref that predates §76.
+ *
+ * Deriving it is the fix the old comment was reaching for. See `tf2_simstage.mjs`, and note
+ * why it is a FUNCTION and not a longer constant: `extractSimAt` takes a REF, and no commit
+ * below `c5b9754` has a `tuningRegistry.ts` to extract. `--bitid` defaults to `HEAD~1` and
+ * a bisect walks it straight past that line.
  */
-const SIM_MODULES = ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts'];
+const SIM_MODULES = simModulesFromTree(ROOT);
 
 function extractSimAt(ref) {
   const sha = execFileSync('git', ['rev-parse', '--short', ref], { cwd: ROOT, encoding: 'utf8' }).trim();
@@ -115,7 +137,7 @@ function extractSimAt(ref) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, 'game'), { recursive: true });
   mkdirSync(join(dir, 'arena'), { recursive: true });
-  for (const f of SIM_MODULES) {
+  for (const f of simModulesAtRef(ref, ROOT)) {
     writeFileSync(join(dir, 'game', f), execFileSync('git', ['show', `${ref}:src/game/${f}`], { cwd: ROOT, encoding: 'utf8' }));
   }
   writeFileSync(join(dir, 'arena', 'types.ts'), execFileSync('git', ['show', `${ref}:src/arena/types.ts`], { cwd: ROOT, encoding: 'utf8' }));
@@ -1013,8 +1035,24 @@ if (args.selftest) {
     // One character's speed stat, moved by the smallest step that can matter. Chosen over
     // a damage change because it perturbs POSITION, which is the quantity a "the AI walks
     // to the wrong place" bug would move — i.e. exactly what this harness must catch.
+    // WAS: ['rules.ts', 'export const AI_CHASE_SPEED = 0.07;', 'export const AI_CHASE_SPEED = 0.0700001;']
+    //
+    // ⚠️ §76 (`c5b9754`) rewrote the declaration as
+    //     export const AI_CHASE_SPEED = tune('AI_CHASE_SPEED', 0.07, { … });
+    // so the literal anchor matched nothing. `docs/LESSONS.md` files that under FAMILY 1 —
+    // a tool reading `rules.ts` as TEXT — and it landed inside a FAMILY 2 tool as well.
+    //
+    // ✅ THE CONTROL DID ITS JOB. `applied[0]` went false and the row FAILED loudly rather
+    // than lockstepping two identical sims and reporting a triumphant 0 divergences — which
+    // is exactly the "a no-op patch would fake this control" failure it was written for, and
+    // the reason the next line exists at all. A known-bad that cannot fail is not a known-bad.
+    //
+    // The anchor is now a regex that matches BOTH forms, so it also patches a `--sim-ref`
+    // below `c5b9754`. It is still text and it can still go stale — but staleness costs a
+    // red row, never a green one.
     const { dir, applied } = patchedSimDir('selftest-bad', [
-      ['rules.ts', 'export const AI_CHASE_SPEED = 0.07;', 'export const AI_CHASE_SPEED = 0.0700001;'],
+      ['rules.ts', /export const AI_CHASE_SPEED = (tune\('AI_CHASE_SPEED', )?0\.07\b/,
+        'export const AI_CHASE_SPEED = $10.0700001'],
     ]);
     ok('the known-bad sim was actually patched (a no-op patch would fake this control)', applied[0]);
     const BAD = await loadSim(dir);

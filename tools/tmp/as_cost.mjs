@@ -110,6 +110,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createScriptedPlayer, rng, parseDriverFlags } from './scripted_player.mjs';
+import { simModulesFromTree, simModulesAtRef } from './tf2_simstage.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -143,10 +144,18 @@ async function importShielded(spec) {
 /**
  * `src/game/` is shared between owners, so a hash over the directory moves when a peer
  * commits something unrelated and says nothing about the files these numbers came from
- * (`1b506d6` discarded two whole batteries to learn that). Hash the seven, before and
+ * (`1b506d6` discarded two whole batteries to learn that). Hash the closure, before and
  * after, and refuse to publish a number measured across a moving tree.
+ *
+ * ⚠️ **WAS a hardcoded six-module list — one of ELEVEN copies — and the control inherited
+ * its blind spot.** §76 (`c5b9754`) added `tuningRegistry.ts` and `tuningStore.ts` to
+ * `sim.ts`'s closure, so on top of the staging break this "refuse to publish across a
+ * moving tree" control was **not hashing two of the files the numbers depend on**: a peer
+ * could have retuned `PLAYER_SPEED` mid-run and the control would have reported a still
+ * tree. That is the quieter half of the same bug and it would not have shown up as an
+ * error at all. DERIVED now, so the control covers whatever the sim actually imports.
  */
-const SIM_MODULES = ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts'];
+const SIM_MODULES = simModulesFromTree(ROOT);
 const CONTROL_FILES = [...SIM_MODULES.map((f) => `src/game/${f}`), 'src/arena/types.ts'];
 const controlHashes = () => Object.fromEntries(CONTROL_FILES.map((f) =>
   [f, createHash('sha256').update(readFileSync(`${ROOT}/${f}`)).digest('hex').slice(0, 8)]));
@@ -368,7 +377,13 @@ function stageArm(arm) {
   rmSync(root, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   mkdirSync(join(root, 'arena'), { recursive: true });
-  for (const f of SIM_MODULES) writeFileSync(join(dir, f), readSim(`src/game/${f}`));
+  // ⚠️ The closure is derived from THE SOURCE BEING STAGED. Under `--head` the files come
+  // out of `git show HEAD:`, so the list must be HEAD's closure, not the working tree's —
+  // a tree with a module HEAD does not have (or vice versa) would stage a hole. Same
+  // reason `match-sim --sim-ref` derives at its ref: see `tf2_simstage.mjs`.
+  for (const f of (HEAD_SIM ? simModulesAtRef('HEAD', ROOT) : SIM_MODULES)) {
+    writeFileSync(join(dir, f), readSim(`src/game/${f}`));
+  }
   writeFileSync(join(root, 'arena', 'types.ts'), readSim('src/arena/types.ts'));
   const applied = [];
   for (const [file, from, to] of edits) {

@@ -8,10 +8,16 @@
  * This is the cheap search — pure `sim.ts` in Node, ~4 ms a match — so the expensive
  * SwiftShader run only ever plays the matchup that is already known to time out.
  *
- * Sim extraction is `tools/match-sim.mjs:extractSimAt` verbatim: the six sim modules
- * are copied out of `git archive HEAD` into the OS temp dir and imported from there,
+ * Sim extraction is `tools/match-sim.mjs:extractSimAt` verbatim: the sim modules
+ * are copied out of `git show <ref>:` into the OS temp dir and imported from there,
  * because five peers are mid-edit in the working tree and a scratch `.ts` under
  * `tools/` would turn `npx tsc --noEmit` red for all of them.
+ *
+ * ⚠️ **"Verbatim" is how it broke.** It was a hardcoded six-module list, one of ELEVEN
+ * copies, and §76 (`c5b9754`) added `tuningRegistry.ts` and `tuningStore.ts` to the closure.
+ * This tool has no `gatecount` row, so it was one of the seven that broke in silence. The
+ * list is DERIVED at the ref now (`tf2_simstage.mjs`) — and derived rather than hardcoded
+ * because `--ref` is the point of this tool and no ref below `c5b9754` has those two files.
  *
  *   node tools/tmp/e2e_timeout_finder.mjs [--ref HEAD] [--top 12]
  */
@@ -19,6 +25,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { simModulesAtRef } from './tf2_simstage.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const argv = process.argv.slice(2);
@@ -32,7 +39,7 @@ function extractSimAt(ref) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, 'game'), { recursive: true });
   mkdirSync(join(dir, 'arena'), { recursive: true });
-  for (const f of ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts']) {
+  for (const f of simModulesAtRef(ref, ROOT)) {
     writeFileSync(join(dir, 'game', f), execFileSync('git', ['show', `${ref}:src/game/${f}`], { cwd: ROOT, encoding: 'utf8' }));
   }
   writeFileSync(join(dir, 'arena', 'types.ts'), execFileSync('git', ['show', `${ref}:src/arena/types.ts`], { cwd: ROOT, encoding: 'utf8' }));

@@ -33,11 +33,22 @@
 import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { simModulesFromTree } from './tf2_simstage.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
-/** The same six modules `conceal_lab`, `match-sim`, `roster_lab` and `s49_mutants` use. */
-const SIM_MODULES = ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts'];
+/**
+ * WAS: `const SIM_MODULES = ['sim.ts','ai.ts','movement.ts','combat.ts','state.ts','rules.ts'];`
+ * under the comment *"The same six modules `conceal_lab`, `match-sim`, `roster_lab` and
+ * `s49_mutants` use."* — which was true, was the whole problem, and was one of ELEVEN copies
+ * rather than four. §76 (`c5b9754`) added `tuningRegistry.ts` and `tuningStore.ts` to
+ * `sim.ts`'s closure and every copy staged a `rules.ts` that could not resolve its own
+ * import. This file has no `gatecount` row (`docs/TOOLS.md` says so explicitly), so the §53b
+ * known-bad battery — a guard — stopped running with nothing to say about it.
+ *
+ * DERIVED now, from the working tree, which is what this file stages.
+ */
+const SIM_MODULES = simModulesFromTree(ROOT);
 
 let pass = 0;
 let fail = 0;

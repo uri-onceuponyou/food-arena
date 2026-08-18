@@ -20,19 +20,34 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { simModulesAtRef } from './tf2_simstage.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const argv = process.argv.slice(2);
 const REF = argv.includes('--ref') ? argv[argv.indexOf('--ref') + 1] : 'HEAD';
 
+/**
+ * ⚠️ **WAS: a hardcoded six-module list, one of ELEVEN copies.** §76 (`c5b9754`) added
+ * `tuningRegistry.ts` and `tuningStore.ts` to `sim.ts`'s closure and this tool was one of
+ * the seven with no `gatecount` row, so it broke in silence. The list is DERIVED at the ref
+ * now — `tf2_simstage.mjs` explains why derived-at-the-ref rather than eight strings: this
+ * tool takes `--ref`, and any ref below `c5b9754` has no `tuningRegistry.ts` to extract.
+ *
+ * 🚨 **AND THE CACHE PREDICATE WAS PART OF THE BUG.** It asked only whether `sim.ts`
+ * existed, so a directory left behind by the broken six-file extraction is a CACHE HIT: the
+ * fix above would have been skipped entirely and the tool would keep failing on a stale
+ * `$TMPDIR` for as long as the machine kept it. It now requires every module in the closure.
+ */
 function extractSimAt(ref) {
   const sha = execFileSync('git', ['rev-parse', '--short', ref], { cwd: ROOT, encoding: 'utf8' }).trim();
   const dir = join(tmpdir(), `fa-e2e-simref-${sha}`);
-  if (!existsSync(join(dir, 'game', 'sim.ts'))) {
+  const modules = simModulesAtRef(ref, ROOT);
+  const complete = modules.every((f) => existsSync(join(dir, 'game', f)));
+  if (!complete) {
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(join(dir, 'game'), { recursive: true });
     mkdirSync(join(dir, 'arena'), { recursive: true });
-    for (const f of ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts']) {
+    for (const f of modules) {
       writeFileSync(join(dir, 'game', f), execFileSync('git', ['show', `${ref}:src/game/${f}`], { cwd: ROOT, encoding: 'utf8' }));
     }
     writeFileSync(join(dir, 'arena', 'types.ts'), execFileSync('git', ['show', `${ref}:src/arena/types.ts`], { cwd: ROOT, encoding: 'utf8' }));

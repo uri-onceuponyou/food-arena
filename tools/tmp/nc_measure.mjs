@@ -60,6 +60,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createScriptedPlayer, rng, DRIVER_REV } from './scripted_player.mjs';
+import { simModulesFromTree } from './tf2_simstage.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const args = Object.fromEntries(
@@ -79,9 +80,27 @@ const HZ = 1000 / DT;
  * ⚠️ THE CONTROL IS PER FILE, NOT PER DIRECTORY. `1b506d6` discarded two whole batteries to
  * learn that: `src/game/` is a directory this project SHARES between owners, so a hash over
  * the directory moves when a peer commits something unrelated and says nothing about the
- * seven files the numbers actually came from.
+ * files the numbers actually came from.
+ *
+ * 🚨 **WAS a hardcoded six-module list — one of ELEVEN copies — and §76 (`c5b9754`) broke
+ * this tool in THREE places at once, only one of which was an error.**
+ *
+ *   1. `patchedSimDir` staged a `rules.ts` importing a `tuningRegistry.ts` that was not
+ *      there. `ERR_MODULE_NOT_FOUND`, §5, every run — the tool's headline result, gone.
+ *   2. 🚨 **AND `--selftest` STAYED GREEN AT 18/18 THROUGH ALL OF IT, IN `gatecount`.** This
+ *      tool DOES have a gate row (`docs/TOOLS.md`, expect 18) and it was ✓ OK on the run
+ *      that reported twelve faults. §F stages the same broken directory and asserts only
+ *      that the text edit LANDED; it never imports what it staged. **A registered, green
+ *      gate covering the wrong thing is worse than no gate**, because the battery reads as
+ *      evidence. `CLAUDE.md` #6: *"`--selftest` validates a tool's LOGIC. It never validates
+ *      where the tool is POINTED."*
+ *   3. The tree control silently stopped covering `tuningRegistry.ts`/`tuningStore.ts` —
+ *      i.e. a peer retuning `PLAYER_SPEED` mid-run would have been reported as a still tree.
+ *      No error, no red, just a control with two holes in it.
+ *
+ * DERIVED now (`tf2_simstage.mjs`), which fixes all three and the next one.
  */
-const SIM_MODULES = ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts'];
+const SIM_MODULES = simModulesFromTree(ROOT);
 const CONTROL_FILES = [...SIM_MODULES.map((f) => `src/game/${f}`), 'src/arena/types.ts'];
 
 function controlHashes() {
@@ -467,10 +486,26 @@ if (args.selftest) {
       `${aliasFaults(jsonRT).length} broken invariants`);
   } else ok('E  skipped — no arena cache', false, ARENA_PATH);
 
-  // ── F. the stepAI probe actually patches ──────────────────────────────────
+  // ── F. the stepAI probe actually patches, AND WHAT IT STAGED CAN BE LOADED ─
+  //
+  // 🚨 **F1 USED TO ASSERT ONLY `applied[0]`, AND THAT IS HOW §76 GOT PAST IT.** From
+  // `c5b9754` until this line was written, `patchedSimDir` staged a `rules.ts` importing a
+  // `tuningRegistry.ts` it had not copied — §5 of the real run died on `ERR_MODULE_NOT_FOUND`
+  // every time — and `--selftest` reported **18/18** throughout, because it checked that the
+  // text edit LANDED and never imported the directory it had just written. `CLAUDE.md` #6:
+  // *"`--selftest` validates a tool's LOGIC. It never validates where the tool is POINTED."*
+  //
+  // The load is folded INTO F1 rather than added as F3 on purpose: `docs/TOOLS.md`'s gate
+  // table pins this selftest at a count, that table is executable and is not this pass's
+  // file, so the hole is closed by making an existing row stronger instead of by adding one.
+  // The known-bad is not hypothetical — it is the state this file was in when F1 last passed.
   const P = patchedSimDir('selftest-probe', [['sim.ts', AI_ANCHOR, AI_PATCH]]);
-  ok('F1 the stepAI timing probe patches sim.ts (the anchor still exists)', P.applied[0],
-    'the anchor is a line of CODE, never a comment — a comment is rewritten exactly when the rule under it moves');
+  let stagedLoads = false; let stageErr = '';
+  try { await loadSim(P.dir); stagedLoads = true; } catch (e) { stageErr = String(e.message).split('\n')[0]; }
+  ok('F1 the stepAI timing probe patches sim.ts AND the staged sim actually IMPORTS', P.applied[0] && stagedLoads,
+    stagedLoads
+      ? 'the anchor is a line of CODE, never a comment — a comment is rewritten exactly when the rule under it moves'
+      : `staged an INCOMPLETE closure: ${stageErr}`);
   const NEG = patchedSimDir('selftest-neg', [['sim.ts', 'THIS_ANCHOR_DOES_NOT_EXIST_ANYWHERE', 'x']]);
   ok('F2 and it reports a MISS when the anchor is absent (the known-bad)', NEG.applied[0] === false);
 
@@ -802,7 +837,27 @@ const codeOnly = (s) => s
 const census = (re) => SIM_MODULES.map((f) => [f, (codeOnly(SRC[f]).match(re) ?? []).length]);
 const total = (re) => census(re).reduce((a, [, c]) => a + c, 0);
 
-console.log('\n  STATIC CENSUS of the six sim modules, comments stripped');
+/**
+ * 🚨 **THIS CENSUS MOVED, AND THE MOVE IS A MEASUREMENT, NOT A REFACTOR.** It used to read
+ * *"STATIC CENSUS of the six sim modules"* over a hardcoded six-file list. §76 put two more
+ * modules inside `sim.ts`'s closure and the census could not see them, so the numbers
+ * `docs/NETCODE.md` §3 reasons about were counting part of the program:
+ *
+ *     row                          before (6 modules)   after (8, derived)
+ *     new Map / new Set                     0                 2
+ *     Object.keys/entries/values            4                17
+ *     .sort(                                3                 7
+ *
+ * Everything else is unchanged (`Math.hypot` 26, trig 4, `atan2/asin/acos` 2, `Math.random`
+ * 0, `Date.now` 0). Those three rows are precisely the ITERATION-ORDER hazards a lockstep
+ * design has to pin — the reason the row exists — and they more than quadrupled. Whether it
+ * MATTERS is a separate question this tool does not answer (the registry is built at module
+ * load, not per tick) and `docs/NETCODE.md` is not this pass's file: the delta is reported,
+ * not edited in.
+ * ⚠️ `docs/NETCODE.md:233` is ALSO stale against the six-module numbers it quotes (it says
+ * `Object.keys` 1 and `.sort(` 2 against this tool's 4 and 3), which predates §76 entirely.
+ */
+console.log(`\n  STATIC CENSUS of the ${SIM_MODULES.length} sim modules (derived closure), comments stripped`);
 const censusRows = [
   ['Math.random', /Math\.random/g],
   ['Date.now / performance.now', /Date\.now|performance\.now|new Date\(/g],

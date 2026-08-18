@@ -43,6 +43,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createScriptedPlayer, rng, parseDriverFlags } from './scripted_player.mjs';
+import { simModulesAtRef } from './tf2_simstage.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -304,7 +305,18 @@ if (args.selftest) {
       rmSync(dir, { recursive: true, force: true });
       mkdirSync(join(dir, 'game'), { recursive: true });
       mkdirSync(join(dir, 'arena'), { recursive: true });
-      for (const f of ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts']) {
+      // ⚠️ **WAS a hardcoded six-module list — one of ELEVEN copies of it — and this is the
+      // ONE COPY §76 DID NOT BREAK.** `c5b9754` added `tuningRegistry.ts`/`tuningStore.ts` to
+      // `sim.ts`'s closure and every other stager went down; this one kept working because it
+      // extracts `099119a`, which predates §76, so its six-module list was still the whole
+      // closure AT THAT REF. Measured: `--selftest` was 9/9 through the outage.
+      //
+      // 🚨 **WHICH IS EXACTLY WHY THE FIX IS A DERIVATION AND NOT A LONGER LIST.** Adding the
+      // two strings here — the "safe minimum" — would make this ask git for
+      // `099119a:src/game/tuningRegistry.ts`, which **exits 128**, and would take a green
+      // tool red to fix a bug it did not have. The closure is derived AT THE REF instead:
+      // six here, eight at HEAD, both correct, and a future re-pin cannot get it wrong.
+      for (const f of simModulesAtRef(REF, ROOT)) {
         writeFileSync(join(dir, 'game', f), execFileSync('git', ['show', `${REF}:src/game/${f}`], { cwd: ROOT, encoding: 'utf8' }));
       }
       writeFileSync(join(dir, 'arena', 'types.ts'), execFileSync('git', ['show', `${REF}:src/arena/types.ts`], { cwd: ROOT, encoding: 'utf8' }));

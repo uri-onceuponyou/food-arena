@@ -53,6 +53,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createScriptedPlayer, rng, parseDriverFlags, DRIVER_REV } from './scripted_player.mjs';
+import { simModulesFromTree, simModulesAtRef } from './tf2_simstage.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -82,7 +83,16 @@ const args = (() => {
 // `git status --porcelain` for exactly them so the run says so rather than assuming it.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SIM_MODULES = ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts'];
+/**
+ * ⚠️ **WAS a hardcoded `['sim.ts','ai.ts','movement.ts','combat.ts','state.ts','rules.ts']`,
+ * one of ELEVEN copies of the same list.** §76 (`c5b9754`) added `tuningRegistry.ts` and
+ * `tuningStore.ts` to `sim.ts`'s closure and every copy staged a `rules.ts` that could not
+ * resolve its own import. DERIVED now (`tf2_simstage.mjs`).
+ *
+ * The `--bitid` side is the reason it must be a function and not a longer constant: it
+ * extracts a REF, and no commit below `c5b9754` has those two files for `git show` to find.
+ */
+const SIM_MODULES = simModulesFromTree(ROOT);
 
 function extractSimAt(ref) {
   const sha = execFileSync('git', ['rev-parse', '--short', ref], { cwd: ROOT, encoding: 'utf8' }).trim();
@@ -90,7 +100,7 @@ function extractSimAt(ref) {
   rmSync(root, { recursive: true, force: true });
   mkdirSync(join(root, 'game'), { recursive: true });
   mkdirSync(join(root, 'arena'), { recursive: true });
-  for (const f of SIM_MODULES) {
+  for (const f of simModulesAtRef(ref, ROOT)) {
     writeFileSync(join(root, 'game', f), execFileSync('git', ['show', `${ref}:src/game/${f}`], { cwd: ROOT, encoding: 'utf8' }));
   }
   writeFileSync(join(root, 'arena', 'types.ts'), execFileSync('git', ['show', `${ref}:src/arena/types.ts`], { cwd: ROOT, encoding: 'utf8' }));
@@ -519,9 +529,32 @@ async function selftest() {
       //    `suddenDeathActive(timeRemaining)` can then never be true, so the collapse never
       //    arms and the frozen fixture — standing inside the ring's floor — takes no fog at
       //    all and runs to `resolveTimeout`.
-      edits: [['rules.ts',
-        'export const SUDDEN_DEATH_MS = FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS;',
-        'export const SUDDEN_DEATH_MS = MATCH_DURATION_MS + SUDDEN_DEATH_GRACE_MS;']],
+      //    ⚠️ **ANCHOR RE-CUT A SECOND TIME, AND FOR THE SAME REASON ONE LEVEL OUT.** Old
+      //    wording, kept with the reason:
+      //      > ['rules.ts', 'export const SUDDEN_DEATH_MS = FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS;',
+      //      >              'export const SUDDEN_DEATH_MS = MATCH_DURATION_MS + SUDDEN_DEATH_GRACE_MS;']
+      //    §76 (`c5b9754`) registered the constant with `deriveds()` and the export became
+      //    `= SCHEDULE_DERIVED.SUDDEN_DEATH_MS;`, so the literal matched nothing — the FAMILY 1
+      //    defect (a tool reading `rules.ts` as TEXT) landing inside a FAMILY 2 tool.
+      //    ✅ `[latetrigger] the patch APPLIED` went RED rather than silently lockstepping an
+      //    unpatched sim against itself and declaring the known-bad caught. That row is why
+      //    this was a short fix and not a wrong number in `DECISIONS §2`.
+      //
+      //    🚨 **AND PATCHING THE EXPORT — the obvious re-cut — IS REFUSED BY §76 ITSELF:**
+      //      > tuning: derived "SUDDEN_DEATH_REMAINING_MS" names input "SUDDEN_DEATH_MS" but
+      //      > was passed 165000 while the registry holds 135000.
+      //    `deriveds()` checks every named input against the registry, so an export rewritten
+      //    under the registry's back throws at load. That is the layer working: the patch has
+      //    to move the FORMULA, which is the thing that is actually true of the sim. Three
+      //    edits, all covered by `applied.every(Boolean)` — a stale one costs a red row.
+      edits: [
+        ['rules.ts', 'inputs: { FOG_CLOSE_MS, SUDDEN_DEATH_GRACE_MS },',
+          'inputs: { MATCH_DURATION_MS, SUDDEN_DEATH_GRACE_MS },'],
+        ['rules.ts', "formula: 'FOG_CLOSE_MS + SUDDEN_DEATH_GRACE_MS',",
+          "formula: 'MATCH_DURATION_MS + SUDDEN_DEATH_GRACE_MS',"],
+        ['rules.ts', 'f: (i) => i.FOG_CLOSE_MS + i.SUDDEN_DEATH_GRACE_MS,',
+          'f: (i) => i.MATCH_DURATION_MS + i.SUDDEN_DEATH_GRACE_MS,'],
+      ],
       // The constant, not the code: a schedule change alone must be able to put the timeout
       // back in reach, which is why §30 asserts the window against the burn-down rather than
       // asserting "no timeout" on its own.

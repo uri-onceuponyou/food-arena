@@ -45,6 +45,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { simModulesAtRef } from './tmp/tf2_simstage.mjs';
 
 const ROOT = resolve(new URL('..', import.meta.url).pathname);
 const ARENA_CACHE = `${ROOT}/tools/arena.gameplay.json`;
@@ -66,6 +67,24 @@ const ARENA_CACHE = `${ROOT}/tools/arena.gameplay.json`;
  * turns `npx tsc --noEmit` red for everyone at once (see `nav_baseline_setup.mjs`).
  *
  * Default (no flag) is the working tree, i.e. the historical behaviour.
+ *
+ * ⚠️ **WAS: a hardcoded `['sim.ts','ai.ts','movement.ts','combat.ts','state.ts','rules.ts']`
+ * — the ORIGINAL of eleven copies; three other tools cite this function by line number and
+ * two say they lifted it "verbatim".** §76 (`c5b9754`) added `tuningRegistry.ts` and
+ * `tuningStore.ts` to `sim.ts`'s closure, and every copy staged a `rules.ts` whose own
+ * import could not resolve.
+ *
+ * 🚨 **AND `--selftest` NEVER TAKES `--sim-ref`, SO `gatecount` READ 15/15 THE WHOLE TIME.**
+ * The gate row for this file exists and was ✓ OK on the same run that reported twelve
+ * faults; the flag whose entire purpose is *"verify the COMMITTED tree, not your working
+ * tree"* (`CLAUDE.md` #1) died with `ERR_MODULE_NOT_FOUND` on every invocation underneath
+ * it. A green gate that does not exercise the broken path is the quiet failure mode; the
+ * four tools that went RED were the lucky ones.
+ *
+ * The list is DERIVED at the ref now (`tools/tmp/tf2_simstage.mjs`). Derived rather than
+ * eight hardcoded strings because this function takes a REF: no commit below `c5b9754` has
+ * a `tuningRegistry.ts` for `git show` to find, so an eight-string list would break exactly
+ * the historical comparison `--sim-ref` exists to make.
  */
 function extractSimAt(ref) {
   const sha = execFileSync('git', ['rev-parse', '--short', ref], { cwd: ROOT, encoding: 'utf8' }).trim();
@@ -73,7 +92,7 @@ function extractSimAt(ref) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, 'game'), { recursive: true });
   mkdirSync(join(dir, 'arena'), { recursive: true });
-  for (const f of ['sim.ts', 'ai.ts', 'movement.ts', 'combat.ts', 'state.ts', 'rules.ts']) {
+  for (const f of simModulesAtRef(ref, ROOT)) {
     writeFileSync(join(dir, 'game', f), execFileSync('git', ['show', `${ref}:src/game/${f}`], { cwd: ROOT, encoding: 'utf8' }));
   }
   writeFileSync(join(dir, 'arena', 'types.ts'), execFileSync('git', ['show', `${ref}:src/arena/types.ts`], { cwd: ROOT, encoding: 'utf8' }));
