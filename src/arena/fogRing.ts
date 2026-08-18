@@ -113,10 +113,23 @@ const GROUND_Y = 0.34;
  * the floor, the props and any fighter out there are all seen THROUGH one convergent
  * tint. 3.2 m clears every cover prop in the arena and every character (2.1 m).
  *
- * The catch a horizontal plane brings is parallax: at height h it projects h/tan(pitch)
- * off the ground point beneath it. That is corrected exactly, per frame, from the
- * rig's own pitch and yaw — see the offset in `update()`. It is the reason `update()`
- * takes the camera angles rather than assuming 58 degrees.
+ * The catch a horizontal plane brings is parallax: at height h it projects off the
+ * ground point beneath it, and correcting that is what makes the tint line up with the
+ * boundary the sim actually judges. See `update()` for the correction and for the two
+ * years of wrong ones above it.
+ *
+ * ⚠️ **THE SENTENCE THAT STOOD HERE WAS FALSE AND IS KEPT, BECAUSE IT IS HALF THE BUG:**
+ *
+ *   > *"at height h it projects h/tan(pitch) off the ground point beneath it. That is
+ *   > corrected exactly, per frame, from the rig's own pitch and yaw — see the offset in
+ *   > `update()`. It is the reason `update()` takes the camera angles rather than
+ *   > assuming 58 degrees."*
+ *
+ * It was NOT corrected exactly and it could not be, from pitch and yaw alone. Measured
+ * on the shipped render (`tools/tmp/fc_pix.mjs`, ablation against a canopy-hidden arm,
+ * damage line marked in the frame): the canopy's alpha-visible edge landed **−48 wu
+ * INSIDE** the damage line on the near arc and **+106 wu OUTSIDE** it on the far arc, a
+ * **154 wu** spread on one circle. See `update()`.
  */
 const CANOPY_Y = 3.2;
 
@@ -249,6 +262,15 @@ const SEG = 128;
  * bounds clamp is half a body), and the camera reaches at most 470 wu past them, so no
  * ground pixel outside **2161.2 wu** can ever be on screen — 319 wu of margin.
  *
+ * ⚠️ **AND THE CANOPY'S COPY OF THIS RADIUS IS NOW SCALED BY `k` IN `update()`, WHICH
+ * DOES NOT SHRINK ITS COVERAGE.** `k = (Cy − CANOPY_Y) / Cy` ≈ 0.858 at the shipped
+ * rig, so the canopy's outer rim sits at ~2128 wu in world space instead of 2480.47 —
+ * and lands back on **exactly 2480.47** once projected, because scaling by `k` about the
+ * camera's ground position is the inverse of the projection that scales by `1/k`. The
+ * requirement this constant encodes is "reach past everything the camera can show",
+ * which is a statement about the PROJECTION, and the projection is unchanged. The ground
+ * band (`GROUND_RINGS`) is drawn at y = 0.34 and is not scaled at all.
+ *
  * ⚠️ **Widening the annulus costs no vertices and no draw calls.** `SEG × rings` is
  * unchanged, the outer band is a single flat-alpha ring, and fragments outside the viewport
  * are clipped by the rasteriser — so this is the same mesh reaching further, not more mesh.
@@ -295,12 +317,24 @@ const GROUND_RINGS: RingSpec[] = [
  * DANGER CANOPY, at `CANOPY_Y`. One convergent tint over everything outside the
  * boundary — floor, cover props, fighters.
  *
- * The alpha ramp starts 12 wu OUTSIDE the boundary and needs ~30 wu to reach full,
- * on purpose: the parallax correction is exact only for a camera at infinity, so a
- * few world units of residual misregistration exist near the bottom of the frame.
- * A soft ramp puts that error inside a gradient instead of on a hard edge, and
- * starting outside the line guarantees the error can only ever under-tint lethal
- * ground, never tint SAFE ground.
+ * The alpha ramp starts 12 wu OUTSIDE the boundary and needs ~32 wu to reach 0.6, on
+ * purpose: a soft ramp puts any residual registration error inside a gradient instead
+ * of on a hard edge, and starting outside the line means the error can only ever
+ * under-tint lethal ground, never tint SAFE ground.
+ *
+ * ⚠️ **THE SECOND HALF OF THAT SENTENCE WAS A GUARANTEE THIS FILE COULD NOT KEEP, AND
+ * THE OLD WORDING IS KEPT BECAUSE IT IS WHY NOBODY LOOKED:**
+ *
+ *   > *"the parallax correction is exact only for a camera at infinity, so a few world
+ *   > units of residual misregistration exist near the bottom of the frame … starting
+ *   > outside the line guarantees the error can only ever under-tint lethal ground,
+ *   > never tint SAFE ground."*
+ *
+ * The residual near the bottom of the frame was **77 wu, not "a few"**, and it had the
+ * sign the sentence promised was impossible: on the NEAR arc the canopy's alpha-visible
+ * edge sat 48 wu INSIDE the damage line. At the §72 final ring (140 wu) that painted
+ * **62% of the safe disc's AREA** as lethal ground. It is true now — measured, not
+ * argued — because `update()` places the canopy by the closed-form inverse.
  */
 const CANOPY_RINGS: RingSpec[] = [
   { offset: 12, color: FIELD_COLOR, alpha: 0.0 },
@@ -497,16 +531,24 @@ export interface FogRing {
    * @param active          false during countdown / after the match ends, which hides
    *                        the whole thing rather than showing a boundary that is not
    *                        yet dealing damage.
-   * @param camera          the rig's current pitch/yaw in DEGREES. Required, not
-   *                        optional: the canopy's alignment is a function of them
-   *                        (see `CANOPY_Y`), so a stale angle silently mis-registers
-   *                        the whole danger field against its own boundary line.
+   * @param rig             the LIVE camera rig. Required, not optional: the canopy's
+   *                        alignment is a function of where the camera actually is, so
+   *                        a stale one silently mis-registers the whole danger field
+   *                        against its own boundary line.
+   *
+   * ⚠️ **THIS PARAMETER WAS `camera: { pitchDeg: number; yawDeg: number }` AND THE
+   * ANGLES WERE NOT ENOUGH INFORMATION TO DO THE JOB.** The correction is a homothety
+   * about the camera's ground position (see `update()`), and neither the centre of that
+   * homothety nor its ratio is recoverable from two angles — both need the camera's
+   * POSITION. Every caller already had it (`CameraRig.camera.position`); the narrow type
+   * was the reason nobody could see that the correction underneath it was impossible.
+   * The angles are no longer read at all.
    */
   update(
     safeRadiusUnits: number,
     elapsedSeconds: number,
     active: boolean,
-    camera: { pitchDeg: number; yawDeg: number },
+    rig: { camera: { position: { x: number; y: number; z: number } } },
   ): void;
   dispose(): void;
 }
@@ -556,7 +598,7 @@ export function createFogRing(centerUnits: { x: number; y: number }): FogRing {
   return {
     root,
 
-    update(safeRadiusUnits, elapsedSeconds, active, camera) {
+    update(safeRadiusUnits, elapsedSeconds, active, rig) {
       // Clamp the delta: the first call after a match starts, and any tab-visibility
       // stall, hands over a huge jump. (`docs/LESSONS.md` §12 records a negative first
       // rAF delta NaN-ing the portrait camera permanently — same class of trap.)
@@ -602,16 +644,80 @@ export function createFogRing(centerUnits: { x: number; y: number }): FogRing {
       ground.setOpacity(fade);
       canopy.setOpacity(fade);
 
-      // Slide the canopy directly AWAY from the camera by height / tan(pitch), which
-      // is exactly the amount that makes a point at `CANOPY_Y` project onto the same
-      // screen pixel as the ground point below it. Without this the danger field's
-      // inner edge lands metres away from the boundary line the player is actually
-      // judged against — on the near side it would darken SAFE ground, which is the
-      // one error a zone visual must never make.
-      const pitch = THREE.MathUtils.degToRad(camera.pitchDeg);
-      const yaw = THREE.MathUtils.degToRad(camera.yawDeg);
-      const back = CANOPY_Y / Math.max(0.2, Math.tan(pitch));
-      canopy.mesh.position.set(-Math.sin(yaw) * back, CANOPY_Y, -Math.cos(yaw) * back);
+      // ── REGISTERING THE CANOPY AGAINST THE LINE THAT BURNS YOU ────────────────
+      //
+      // 🚨 **WHAT STOOD HERE WAS WRONG IN DIRECTION, AND IT IS KEPT VERBATIM BECAUSE THE
+      // COMMENT NAMED THE EXACT FAILURE IT WAS CAUSING:**
+      //
+      //   > *"Slide the canopy directly AWAY from the camera by height / tan(pitch),
+      //   > which is exactly the amount that makes a point at `CANOPY_Y` project onto the
+      //   > same screen pixel as the ground point below it. Without this the danger
+      //   > field's inner edge lands metres away from the boundary line the player is
+      //   > actually judged against — on the near side it would darken SAFE ground, which
+      //   > is the one error a zone visual must never make."*
+      //   >
+      //   >     const pitch = THREE.MathUtils.degToRad(camera.pitchDeg);
+      //   >     const yaw = THREE.MathUtils.degToRad(camera.yawDeg);
+      //   >     const back = CANOPY_Y / Math.max(0.2, Math.tan(pitch));
+      //   >     canopy.mesh.position.set(-Math.sin(yaw) * back, CANOPY_Y, -Math.cos(yaw) * back);
+      //
+      // An elevated point appears displaced AWAY from the camera, so the compensating
+      // slide has to be TOWARD it. `camera.ts:apply` puts the camera at
+      // `target + (sin(yaw), ·, cos(yaw)) * horiz`, so `(-sin, -cos)` is the away
+      // direction — the shipped slide moved the canopy the way the parallax was already
+      // moving it and doubled the error instead of cancelling it.
+      //
+      // ── MEASURED, TWICE, BY INSTRUMENTS THAT SHARE NO CODE ────────────────────
+      //
+      // `tools/tmp/fg_reg.mjs` (offline; ray-casts every ring VERTEX onto the ground
+      // plane) and `tools/tmp/fc_pix.mjs` (in the browser; ablates the canopy and finds
+      // where its own luma contribution begins, on rays out of the fog's own centre).
+      // Apparent ground offset of the canopy's alpha-visible edge from the damage line,
+      // at pitch 58, on the shipped build — authored value is +28 wu on every arc:
+      //
+      //                  NEAR arc      SIDE arcs     FAR arc      spread
+      //     pixels        −48 wu        +26 wu       +106 wu      154 wu
+      //     offline       −54 wu        +31 wu       +120 wu      174 wu
+      //
+      // At the §72 final ring (140 wu) the near-arc figure paints **62% of the safe
+      // disc's area** with the lethal tint, and leaves an untinted lethal annulus out to
+      // +96 wu on the far arc — `f87d407`'s own defect signature, back by bearing.
+      //
+      // ── AND "JUST FLIP THE SIGN" IS NOT THE FIX. IT WAS MEASURED AND REJECTED ──
+      //
+      // Flipping it reads NEAR +32 / SIDE +26 / FAR +20 at pitch 58 — good — because at
+      // this rig the camera happens to sit `Cy / tan(pitch)` from the arc the player is
+      // standing on, which is the one configuration where a rigid slide linearises
+      // correctly. It is a coincidence of the fair-frame distance, not a correction.
+      // Offline, same tool, sweeping pitch (canopy alpha-0.30 edge, authored +28):
+      //
+      //     pitch    shipped NEAR/FAR      flipped NEAR/FAR      this code NEAR/FAR
+      //       20      +185 / −117           +608 / −541           +28.00 / +28.00
+      //       45      −103 / +170            +49 /  +18           +28.00 / +28.00
+      //       70       −18 /  +81            +34 /  +29           +28.00 / +28.00
+      //
+      // A translation cannot invert a perspective map. The inverse of "project an
+      // elevated point onto the ground" is a HOMOTHETY about the camera's ground
+      // position — a scale AND a centre shift, with ratio k = (Cy − h) / Cy:
+      //
+      //     canopy centre = fog centre + (1 − k) · (camera ground pos − fog centre)
+      //     canopy radii  = k × the radii `setRadius` just wrote
+      //
+      // which is exact for every bearing, every pitch, every yaw and every radius, and
+      // costs one clamp and two multiplies. `mesh.scale` carries the ratio so
+      // `setRadius` stays the single place that knows what the radii mean.
+      const camY = rig.camera.position.y;
+      // Guarded, not trusted: a camera at or below `CANOPY_Y` sends k to zero or
+      // negative, which would fold the canopy through its own centre. No shipped rig
+      // gets near it (pitch 58 puts the camera at 22.58 m against a 3.2 m canopy), and
+      // that is exactly the kind of margin that stops being true one camera change later.
+      const k = THREE.MathUtils.clamp(camY > CANOPY_Y ? (camY - CANOPY_Y) / camY : 0, 0.05, 1);
+      canopy.mesh.scale.set(k, 1, k);
+      canopy.mesh.position.set(
+        (1 - k) * (rig.camera.position.x - root.position.x),
+        CANOPY_Y,
+        (1 - k) * (rig.camera.position.z - root.position.z),
+      );
 
       const rm = wu(safeR);
       // Height is a function of the radius now — see `curtainHeight()` for the
