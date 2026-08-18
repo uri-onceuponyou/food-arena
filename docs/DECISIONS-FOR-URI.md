@@ -5150,6 +5150,8 @@ not before.**
 * **This is a nerf to every status weapon**, and the roster range is **9.8 pp**. Measure aggregate
   and paired **separately** (aggregate floor ~9 pp; a paired per-matchup delta on identical seeds
   is EXACT — once an aggregate moved 0.8 pp while **58 of 110 matchups moved, max 34.4 pp**).
+  ⚠️ **The 9.8 pp is STALE — measured 53.9 pp on `smart2` at `a06c0fd` (2026-08-18). See the
+  correction in §77.** The "measure both, separately" instruction is unaffected and still right.
 * ⚠️ **`AI_SLOW_MULTIPLIER` (0.35) is harsher than `SLOW_MOVE_MULTIPLIER` (0.45)** — a slowed bot
   is slowed *more* than a slowed player. Diminishing returns must apply to both or the asymmetry
   compounds.
@@ -5262,6 +5264,16 @@ measurement*).
   other characters until the aggregate looks calm. 🚨 **Remember what the Soup measurement proved:
   the aggregate moved −3.2 pp — INSIDE its own ~9 pp floor — while a character left the game.**
   An aggregate that looks fine is not evidence.
+
+  🚨 **CORRECTION, MEASURED 2026-08-18 — THE 9.8 pp IS STALE, AND THE COINCIDENCE IS WHY IT
+  SURVIVED.** `roster_lab --seeds 32` at `a06c0fd`: the roster range on `smart2` is **53.9 pp**
+  (9.8%–63.7%) and on `chase` **64.8 pp**. **9.8 is now WATER BOTTLE'S STRENGTH, not the range** —
+  the same two digits in a different column, which is exactly why nobody caught it. The 9.8 pp
+  range was measured at `33318a1`; `16b635d` then shipped `waterbottle.Mega`'s `castMs: 1100` for
+  a recorded −35.0 pp and took that character to 9.8%. **So the roster is ALREADY holding a
+  character 37 pp below its nearest neighbour**, and the band this paragraph protects does not
+  currently exist. It is quoted the same way in §75 above. Additive note only; nothing else on
+  this page is changed. Full measurement in `src/game/rules.ts:Weapon.castMs`.
 * **It is not permission to weaken a super until it is safe.** *"Retain sanity"* is Uri's phrase for
   *unbeatable*, not for *strong*. A super that is scary and dodgeable is the target; a super nobody
   presses is the same failure as one nobody survives, and it is quieter.

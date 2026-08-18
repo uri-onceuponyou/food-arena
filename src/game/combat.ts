@@ -556,6 +556,30 @@ export function attemptAttack(
   // The wind-up gate sits ABOVE the cooldown gate deliberately: a fighter mid-cast is not
   // "on cooldown for this slot", it is busy for every slot, and asking the narrower
   // question first would let a second weapon's ready cooldown answer the wider one.
+  //
+  // ── 🚨 THIS ONE LINE IS 19.7 pp OF WATER BOTTLE, AND IT IS BUYING THE DODGE ──
+  //
+  // Measured 2026-08-18 (`DECISIONS §77`, `roster_lab --seeds 32`, 3,520 paired matches,
+  // a detached worktree of `a06c0fd` with only this line relaxed to
+  // `attacker.cast !== null && (w.castMs ?? 0) > 0` — i.e. no SECOND cast, but the rest of
+  // the kit stays live through a wind-up):
+  //
+  //     waterbottle strength   9.8% -> 29.5%  (+19.7 smart2, +17.5 chase)
+  //     roster sd              13.6 -> 8.5 pp · range 53.9 -> 33.4 pp · settled 28 -> 22
+  //
+  // It is the single largest term in what a wind-up costs its owner — larger than the
+  // frozen aim (+8.8) and the movement root (-6.5, which HELPS when kept). **And it must
+  // not be relaxed**, because the same arm deletes the counterplay the feature exists for.
+  // Measured on the fixture, not argued: with the gate relaxed, Water Bottle fires
+  // `Spray, Glass, Cap, Spray, Cap` during its own 1100 ms Mega wind-up; Spray and Cap
+  // carry `slow` and Glass carries `stun`; a target that ran the entire window finishes
+  // **1.46 wu** from the caster against an 84 wu reach. `sim.test.mjs` §33(l)'s three dodge
+  // rows go red on that arm and they are correct to.
+  //
+  // So the gate is load-bearing in the design sense and not only the mechanical one: it is
+  // what keeps *"Spray -> Mega is a two-press combo on one character"*
+  // (`rules.ts:Weapon.castMs`) a DECISION rather than an automatic execute. Relaxing it is
+  // a nerf to the telegraph disguised as a buff to the caster.
   if (attacker.cast !== null) return false;
   if (now - attacker.lastUsed[weaponIndex] < w.cooldown) return false;
   attacker.lastUsed[weaponIndex] = now;

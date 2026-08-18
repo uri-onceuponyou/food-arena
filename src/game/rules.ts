@@ -2509,18 +2509,60 @@ export interface Weapon {
    *
    * Uri authorised the mechanic with a stated goal: *"a telegraph you can dodge"*. That
    * makes the duration a MEASURED quantity, not a taste one — the target must be able to
-   * leave the effect by moving during the window. For a melee weapon the effect is a
-   * disc of `range` around a caster who cannot move, so from separation 0 the escape
-   * costs `range / speedFor(character, PLAYER_SPEED)`:
+   * leave the effect by moving during the window.
    *
-   *     REACH.meleeHeavy 84 wu       fastest human 700.00 ms · slowest human 795.45 ms
+   * 🚨 **AND THE QUANTITY UNDERNEATH IT WAS MEASURED IN THE WRONG DIRECTION. THE OLD
+   * PARAGRAPH IS KEPT VERBATIM BELOW BECAUSE THE SHIPPED 1100 IS ITS OUTPUT.** It read:
    *
-   * Below 700 ms nobody escapes and it is a wind-up, not counterplay; above 795.45 ms
-   * everybody escapes on reflex and it is a dead button. Both ends are failures. Adding
-   * a human reaction to a sudden onset (~300 ms) puts the first duration that is a real
-   * decision for the WHOLE roster at ~1100 ms: a player who reacts inside 304.55 ms
-   * escapes, a player who does not is hit. That 304.55 ms is the counterplay window and
-   * it is the number this feature is judged on.
+   *   > *"For a melee weapon the effect is a disc of `range` around a caster who cannot
+   *   > move, so from separation 0 the escape costs `range / speedFor(character,
+   *   > PLAYER_SPEED)`:*
+   *   >
+   *   >     REACH.meleeHeavy 84 wu     fastest human 700.00 ms · slowest human 795.45 ms
+   *   >
+   *   > *Below 700 ms nobody escapes and it is a wind-up, not counterplay; above 795.45 ms
+   *   > everybody escapes on reflex and it is a dead button. Both ends are failures.
+   *   > Adding a human reaction to a sudden onset (~300 ms) puts the first duration that
+   *   > is a real decision for the WHOLE roster at ~1100 ms: a player who reacts inside
+   *   > 304.55 ms escapes, a player who does not is hit. That 304.55 ms is the counterplay
+   *   > window and it is the number this feature is judged on."*
+   *
+   * **`combat.ts:deliverWeapon` does not implement a disc.** Three lines below its range
+   * test it runs `angleTo > cone / 2 → "wrong direction"` against `attacker.facing` — and
+   * `sim.ts:applyAim` and `ai.ts`'s facing block BOTH refuse to update `facing` while
+   * `isCasting`. So the threatened set of a melee cast with `cone < 360` is a **frozen
+   * WEDGE**, and the cheapest way out of a wedge is to leave the ARC, not to outrun the
+   * RADIUS. `Mega` is a 100° cone; `Dump` is 90°. Neither is a disc.
+   *
+   * MEASURED — `tools/tmp/u6_escape.mjs`, which sweeps 36 RUN BEARINGS × 7 separations and
+   * bisects `castMs` through the real `stepMatch`, against `u5_derive.mjs`, which sweeps
+   * bearing 0 only (that is not a defect in `u5_derive`: bearing 0 is the whole answer for
+   * a 360° weapon, and it is the tool's published contract):
+   *
+   *     waterbottle.Mega    radial escape (bearing 0)   601 ms @ sep 20   ← the shipped 1100's input
+   *                         CHEAPEST escape             134 ms @ sep 20, bearing 130°
+   *                         escape WINDOW (max over separations of min over bearings)
+   *                                                     284 ms slowest human · 251 ms fastest
+   *                         → castMs = roundUp50(284 + 300) = **600**, not 1100
+   *
+   * The shipped 1100 is therefore **1.83× the duration its own rule returns**, and the
+   * excess is 500 ms of a mechanic whose price is measured in §(2)-(3) below: it is worth
+   * **+16.1 pp of Water Bottle** to give it back, on a character currently sitting 40 pp
+   * below the roster.
+   *
+   * ⚠️ **AND IT FALSIFIES THIS FILE'S OWN CONTROL ARM.** The decomposition below says
+   * *"300 ms costs 13.8 pp and NOBODY CAN DODGE IT — 300 is below the 700.00 ms floor at
+   * which the fastest human first escapes"*. The real escape from Mega's cone is **251 ms
+   * for the fastest human and 284 ms for the SLOWEST** — both under 300. So **the dodge was
+   * already ON in that arm, for every character in the roster**, and its 13.8 pp is not
+   * "the ROOT and the INTERRUPT alone": it is root + interrupt + a dodge with 16-49 ms of
+   * reaction. The arm that genuinely switches the dodge off by arithmetic is **150 ms**,
+   * and it is measured on `soup.Dump` at the weapon itself.
+   *
+   * ⚠️ A `cone: 360` melee (`lollipop.Giant`) IS the disc the old paragraph describes, and
+   * `u6_escape` reproduces bearing 0 as the cheapest bearing for it — 3584 ms, identical to
+   * `u5_derive`'s radial. The old form is not wrong everywhere; it is wrong for every
+   * weapon that carries a `cone`, which is five of the six candidates.
    *
    * ⚠️ **AND IT IS UNDODGEABLE AGAINST A SLOWED TARGET** — 1767.68 ms at
    * `SLOW_MOVE_MULTIPLIER` — which matters because Water Bottle's own Spray applies
@@ -2626,6 +2668,171 @@ export interface Weapon {
    *     the measured 1523.39 ms is 165.20/105.60 to three figures. For a NON-HOMING fan
    *     (`taco.Double`) it is not a disc — 823.39 ms is the ±10° fan walking off the target,
    *     not the 1450.76 ms the disc would predict. **Two answers, and the file needs both.**
+   *     ⚠️ **THAT LAST IDENTITY IS ARITHMETICALLY FALSE AND IS KEPT BECAUSE IT WAS QUOTED
+   *     INTO `ai.ts`.** `165.20 / 105.60 = 1564.39 ms`, not 1523.39 — and 1564.39 is printed
+   *     one column to the LEFT of 1523.39 in `u5_derive`'s own output, under `pred@0 slow`.
+   *     A MEASURED number was equated with the arithmetic of the PREDICTED one beside it.
+   *     The disc SHAPE is right (`ai.ts:castThreat`'s bearing sweep puts the real edge at
+   *     160 wu, bearing-independent); the identity is not. `a06c0fd` found it.
+   *
+   * ── 🚨 THE BLOCK ABOVE IS THE RECORD. THE RULE IT STATES IS FALSIFIED. ──────
+   *
+   * `DECISIONS §77` lifted the two refusals that were *"the number says no"* and `a06c0fd`
+   * lifted the `ai.ts` block, so all five were re-derived and all five were MEASURED on
+   * balance. **Both halves of the table above move, and one of them moves the shipped
+   * weapon.** Everything below is 3,520 paired matches per policy per arm,
+   * `roster_lab --seeds 32`, every arm a detached worktree of `a06c0fd` with one field
+   * changed by `tools/tmp/u6_arm.mjs` (which verifies the staging through the module loader
+   * and refuses an arm whose edit did not land — a textual patch that silently misses reads
+   * exactly like "the change did nothing").
+   *
+   * ── (1) THE ESCAPE WINDOWS, RE-MEASURED IN THE CHEAPEST DIRECTION ──────────
+   *
+   * `tools/tmp/u6_escape.mjs`, 36 run bearings × 7 separations, bisect to 1 ms:
+   *
+   *     weapon             shape                 radial@20   WINDOW slow (sep,bearing)  DERIVED
+   *     waterbottle.Mega   melee 100° cone, 84         601      284  ( 40, 130°)          600
+   *     soup.Dump          melee  90° cone, 84         601      267  ( 40, 120°)          600
+   *     taco.Double        ranged ±10° fan, 128        634      201  ( 20,  70°)          550
+   *     burrito.Swarm      ranged homing, 140         1334     1334  ( 20,   0°)         1650
+   *     sushi.Catch        ranged homing, 140         1351      784  ( 80,   0°)         1100
+   *     lollipop.Giant     melee 360°, 400            3584     3584  ( 20,   0°)         3900
+   *
+   * Only `burrito.Swarm` keeps its old number — a homing volley really is a bearing-free
+   * disc, so the two sweeps agree, which is the cross-check that the new sweep is not just
+   * returning something smaller. `sushi.Catch` is the one non-monotone row: its cheapest
+   * escape at 20 wu is to run THROUGH the caster (bearing 180°, 384 ms), because pellets
+   * that overshoot cannot turn back inside `HOMING_TURN_RATE` — so its worst separation is
+   * 80 wu, not 20, and a tool that sampled one separation would have priced it wrong in the
+   * other direction.
+   *
+   * Every derived value is confirmed against BOTH failure modes, not one: the escape window
+   * is the largest over separations (so the slowest human can always get out), and a
+   * STANDING target still takes the full press at that `castMs` at every separation the
+   * weapon reaches (so it is not a dead button). `u6_escape` prints the standing-target
+   * damage beside every row for exactly that reason.
+   *
+   * ── (2) 🚨 AND EVERY ONE OF THEM IS A LARGE NERF, INCLUDING THE CORRECTED ONES ──
+   *
+   * Character STRENGTH, `smart2`, against the `a06c0fd` baseline. ⚠️ The aggregate moved
+   * -0.8 to -2.7 pp in every arm — inside the ~9 pp floor, context and not a result. The
+   * PAIRED per-matchup count is EXACT and is quoted separately; the two are never added.
+   *
+   * ✅ **NULL ARM FIRST**, because a null result is the normal outcome here and it is the
+   * one nobody re-checks: the baseline tree re-staged through `u6_arm` and re-measured
+   * against its own JSON moves **0 of 110 matchups on both policies**, aggregate +0.0 pp,
+   * sd and settled identical. Whatever the rows below are, the rig did not manufacture
+   * them.
+   *
+   *     arm                                    the character   Δ strength   paired moved
+   *     waterbottle.Mega 1100 -> 600           9.8% -> 25.9%      +16.1      16/110  max 78.1
+   *     waterbottle.Mega 1100 -> 450           9.8% -> 31.1%      +21.2      18/110  max 81.3
+   *     soup.Dump        0 -> 150             47.2% -> 33.0%      -14.2      19/110  max 59.4
+   *     soup.Dump        0 -> 600             47.2% ->  7.0%      -40.2      19/110  max 87.5
+   *     soup.Dump        0 -> 1100            47.2% ->  0.2%      -47.0      19/110  max 100.0
+   *     soup.Dump        REMOVED FROM PLAY    47.2% -> 13.1%      -34.1      18/110  max 78.1
+   *     taco.Double      0 -> 300             51.9% -> 41.6%      -10.3   } one arm, three
+   *     burrito.Swarm    0 -> 850             55.2% -> 25.2%      -30.0   } weapons:
+   *     sushi.Catch      0 -> 550             54.1% -> 26.3%      -27.8   } 50/110 max 90.6
+   *     taco.Double      0 -> 550             51.9% -> 23.0%      -28.9   } one arm, three
+   *     burrito.Swarm    0 -> 1650            55.2% -> 12.7%      -42.5   } weapons:
+   *     sushi.Catch      0 -> 1100            54.1% -> 10.0%      -44.1   } 50/110 max 96.9
+   *     lollipop.Giant   range 400 -> 200     59.2% -> 32.8%      -26.4      20/110  max 62.5
+   *     lollipop.Giant   range 200 + cast 2050 59.2% ->  1.4%     -57.8      20/110  max 100.0
+   *
+   * 🚨 **THE ABLATION `soup.Dump` SAYS WAS NEVER RUN HAS NOW BEEN RUN, AND IT INVERTS THE
+   * QUESTION.** Removing Dump from play entirely (`cooldown` 999999, so it is pressed at
+   * most once a match) leaves Soup at **13.1%**. A wind-up leaves it at **7.0% (600 ms)**
+   * and **0.2% (1100 ms)**. **A telegraphed Dump is WORSE THAN NO DUMP AT ALL** — by 6.1 pp
+   * at the corrected duration and 12.9 pp at the reverted one. That is not a weapon that
+   * needs a shorter tell or more damage; a telegraphed press is a net LIABILITY to its
+   * owner.
+   *
+   * The standing hypothesis at the weapon — `ai.ts:pressValue` ranking a 16 above a 9 and
+   * spending the window on a whiff — is refuted by the same measurement, in the same way
+   * `3f28b39` refuted it for Mega: if the AI were merely mis-choosing, taking the choice
+   * away would HELP. It helps by 6.1 pp, which is the wrong sign for that story. What the
+   * right sign points AT is §(3), and it is not what I expected either.
+   *
+   * ── (3) WHY IT COSTS THAT MUCH — FOUR TERMS, MEASURED BY ABLATION, AND MY OWN
+   *        HYPOTHESIS WAS REFUTED BY THE ARM I RAN TO CONFIRM IT ─────────────
+   *
+   * ⚠️ **THIS SECTION FIRST READ "THE COST IS THE ROOT" AND THAT IS FALSE. THE WORDING IS
+   * KEPT BECAUSE IT IS THE OBVIOUS STORY AND THE NEXT READER WILL REACH FOR IT TOO:**
+   *
+   *   > *"Nothing in the six is priced by the dodge; everything is priced by the 0.15-2.05 s
+   *   > the caster spends unable to move. So the thing §77 authorises redesigning is not
+   *   > five abilities. It is the CAST — `state.ts:movementLocked`'s `|| f.cast !== null`
+   *   > is the entire cost."*
+   *
+   * A wind-up does four separable things to its caster. Each was removed ON ITS OWN in a
+   * detached worktree of `a06c0fd` and measured over the same 3,520 paired matches
+   * (`waterbottle.Mega` held at its shipped 1100 throughout, so the column below is the
+   * price of the MECHANIC, not of a duration):
+   *
+   *     term removed                          site                        waterbottle (smart2)
+   *     — (the shipped mechanic)              —                                   9.8%
+   *     the ATTACK LOCKOUT                    combat.ts:attemptAttack            29.5%  +19.7
+   *     the FROZEN AIM                        sim.ts:applyAim + ai.ts facing     10.5%   +0.6
+   *     the MOVEMENT ROOT                     state.ts:movementLocked             3.3%   -6.6
+   *
+   * ⚠️ **THE AIM ROW HAD TO BE RE-RUN, AND THE FIRST VERSION OF IT READ +8.8.** That arm
+   * carried `soup.Dump.castMs = 600` as well, and `strength` is normalised so the roster
+   * mean is exactly 50% — so Soup collapsing 40 pp lifts every other character by
+   * construction. The `soup.Dump 600` arm ALONE moves Water Bottle +7.2 pp for that reason
+   * and nothing else. **A single-variable arm is not optional in a normalised metric**, and
+   * the confound was in the direction that flattered the hypothesis.
+   *
+   * 🚨 **REMOVING THE ROOT MAKES IT WORSE.** An unrooted caster walks while its aim stays
+   * frozen, so it drifts off its own committed bearing and misses more. The root is not the
+   * cost; it is partly a *subsidy*, because standing still keeps the swing pointed where
+   * the telegraph said it would land. And the FROZEN AIM is very nearly free: **1 of 110
+   * matchups moved**, max 12.5 pp, and the character rate shifted +0.6 pp — so the one
+   * property that makes the telegraph honest costs almost nothing to keep. (At N=2 a caster
+   * is already facing its target when it presses, so there is little aim left to update.)
+   *
+   * 🚨 **AND THE +19.7 IS NOT FREE EITHER — IT IS THE COUNTERPLAY, SOLD.** With the lockout
+   * gone, Water Bottle fires **Spray, Glass, Cap, Spray, Cap** during its own 1100 ms
+   * wind-up (measured, not reasoned), and Spray/Cap carry `slow` while Glass carries
+   * `stun`. A target that ran the whole window ends **1.46 wu** from the caster against an
+   * 84 wu reach: it did not move. `sim.test.mjs` §33(l)'s three dodge rows go red on that
+   * arm and they are RIGHT to — the wind-up stops being dodgeable at all. The lockout is
+   * what makes "Spray -> Mega is a two-press combo" (see below) a decision instead of an
+   * automatic execute.
+   *
+   * **So three of the four terms are load-bearing and the fourth is a subsidy. There is no
+   * cheaper wind-up available; the only non-load-bearing lever is the DURATION** — and the
+   * shipped duration is 1.83x the value its own rule returns, because the rule reads a cone
+   * as a disc. That is the whole recommendation, and it is one field.
+   *
+   * The residual — delay per se — is what remains and it is the dominant term on Soup:
+   * removing any single side-effect there recovers only 1.0-3.6 pp of a 40.2 pp loss, and a
+   * `castMs` of **150 ms** (below BOTH of Dump's cone escape windows, 267 slowest / 234
+   * fastest, so no dodge exists at all) already costs **14.2 pp**. A press whose effect
+   * arrives 150 ms late lands on ground the target has left, and that is charged before any
+   * telegraph, root or lockout is involved.
+   *
+   * ── (4) WHAT IS BLOCKING THE CONVERSION, EXACTLY ───────────────────────────
+   *
+   * Not `ai.ts` any more, and not the numbers: **`sim.test.mjs`**. Measured with
+   * `tools/tmp/u6_gate.mjs`, which stages one edit into a worktree, runs the suite before
+   * and after, and reports only the rows the edit turns red (a raw failure list would
+   * attribute other passes' reds to the edit):
+   *
+   *     edit                            rows turned red   what they encode
+   *     waterbottle.Mega.castMs=600            5          §33(l)/(n)/(o): the melee DISC
+   *     soup.Dump.castMs=600                   2          §33(o) only
+   *     taco.Double.castMs=550                 9          §1 coincident fixtures + §33(o)
+   *     burrito.Swarm.castMs=1650              6          §20/§25 press-gate fixtures
+   *     sushi.Catch.castMs=1100                6          §20/§25 press-gate fixtures
+   *     lollipop.Giant.range=200               2          §19 reach + §33(o)'s Giant row
+   *
+   * §33(o) is the ratchet, and it asserts `castMs === roundUp50(range/slowestHuman + 300)` —
+   * the melee **disc** closed form, for every cast weapon in the roster. It is green today
+   * only because the roster's one cast weapon is priced by that same falsified form. The
+   * dozen fixture rows are a different class entirely: they press a special and read its
+   * projectiles on the SAME tick, which is what a wind-up moves. **Every conversion in the
+   * table above reddens rows in a file this pass does not own, so none of them ships here.**
    */
   castMs?: number;
 }
@@ -3476,6 +3683,24 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // Onion Bomb sits one rung below Filling/Double so Taco keeps two distinct
       // ranges, exactly as it did at 200 vs 220.
       { key: 'Onion', name: 'Onion Bomb', type: 'ranged', range: REACH.rangedMid, damage: 7, cooldown: 750, speed: SPEED.mid, color: '#B497D6', effect: null, emoji: '🧅' },
+      // ── THE WIND-UP: DERIVED 550 ms, MEASURED, NOT APPLIED (2026-08-18) ──────
+      //
+      // `a06c0fd` lifted the `ai.ts` block that refused ranged casts, so `DECISIONS §77`'s
+      // first blocker is gone. The value moves too: `u5_derive` sweeps RADIAL escape and
+      // returns 1150, but a ±10° fan is a WEDGE and the cheapest exit is sideways —
+      // `u6_escape` measures the window at **201 ms** (slowest human, bearing 70°, worst
+      // separation 20 wu) against the 823.39 ms of running straight away, so the rule
+      // returns **550**. `damage: 0` is not a problem for the cast path: `deliverWeapon`'s
+      // combo branch reads `part.damage` and never `w.damage`, and `resolveWeapon` calls
+      // the same function, so the wind-up delivers the full 23 (measured through
+      // `stepMatch`, not read off the source).
+      //
+      // ⚠️ **AND IT COSTS TACO 28.9 pp.** `roster_lab --seeds 32`, paired: 51.9% -> 23.0%
+      // at 550 and 51.9% -> 41.6% at 300 (aggregate -2.0 pp, inside the ~9 pp floor; PAIRED
+      // 50/110 moved in both arms, max 96.9 / 90.6 pp, EXACT). It is roughly linear in
+      // `castMs`, and it is NOT the root — see `Weapon.castMs` §(3), where removing the
+      // root measures WORSE. It also turns **9** rows red in `sim.test.mjs`, seven of them
+      // §1 fixtures that press this weapon and read its projectiles on the same tick.
       {
         key: 'Double', name: 'Double Toss', type: 'ranged', range: REACH.rangedLong, damage: 0, cooldown: 2500, speed: SPEED.long, color: '#6B3E26', effect: null, emoji: '💥',
         comboParts: [
@@ -3544,6 +3769,20 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       //   makes the character weaker. See `HOMING_TURN_RATE` and DECISIONS §50 — the only
       //   lever that helps this weapon without a close-range cost is the retirement rule,
       //   which lives in `sim.ts` and is priced there rather than guessed at here.
+      // ── THE WIND-UP: 1650 ms, AND IT IS THE ONE ROW BOTH SWEEPS AGREE ON ─────
+      //
+      // A homing volley really is a bearing-free disc of `range + hitRadius`, so
+      // `u6_escape`'s 36-bearing sweep returns the SAME 1334 ms as `u5_derive`'s radial one
+      // at every separation, and both give `roundUp50(1334 + 300)` = **1650**. That
+      // agreement is the cross-check that the new sweep is not simply returning something
+      // smaller. Per-press damage is `damage x pellets` = 4 x 4 = **16**, not 4.
+      //
+      // ⚠️ **AND IT COSTS BURRITO 42.5 pp — to 12.7%, with `asAI` at 0.0%.** At half the
+      // value (850 ms) it still costs 30.0. `roster_lab --seeds 32`, paired: aggregate
+      // -2.0 pp (inside the ~9 pp floor), PAIRED 50/110 moved in both arms, max 96.9 / 90.6
+      // pp, EXACT. 1650 is 46% of this weapon's own 3600 ms cooldown spent mid-cast,
+      // against 31% for the shipped Mega. Not applied; 6 rows red in `sim.test.mjs`. See
+      // `Weapon.castMs` §(2)-(4).
       {
         key: 'Swarm', name: 'Topping Swarm', type: 'ranged', range: REACH.rangedMax, damage: 4, cooldown: 3600, speed: SPEED.maxSlow, color: '#7CB518', effect: null,
         pellets: 4, spreadDeg: 55, homing: true,
@@ -3623,6 +3862,50 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       //   Measured (32 seeds x 110 matchups, paired): lollipop 40.3% -> 54.8% on `smart2`
       //   and 37.3% -> 45.8% on `chase`. It is the only change in DEVIATION #13 that moves
       //   the same character the same way on BOTH policies.
+      //
+      // ── 🚨 THE REDESIGN `DECISIONS §77` AUTHORISES WAS PRICED 2026-08-18 AND REFUSED
+      //    ON A NUMBER, AND THE SHAPE PROBLEM IS REAL AND STILL OPEN ────────────
+      //
+      // §77: *"the 400 wu disc is a choice, not a constraint"*. Three independent readings
+      // agree the choice is wrong, and the balance measurement says every fix is too big:
+      //
+      //   * **The hitbox is undrawable, MEASURED IN PIXELS.** `game/vfx.ts:spawnCastTelegraph`
+      //     REFUSES to draw the generic footprint for `giantSlam`: at 400 wu / 360° it is
+      //     **259,315 px, 64.0% of the frame, held for the whole wind-up** (`tg_tele.mjs`).
+      //     `REACH.ultimateSlam`'s own comment hands that problem to the VFX owner —
+      //     *"its warning has to be the screen-filling slam VISUAL"* — and the VFX owner
+      //     came back with a number: it *"has no edge on screen and no direction, so it
+      //     cannot tell anyone where to run; it just erases the arena."*
+      //   * **The art has been drawing a different weapon all along.** `spawnGiantLollipop`
+      //     drops a candy of `CHARACTER_HEIGHT * 0.85` (1.785 m = **35.7 wu** radius) offset
+      //     `+ CHARACTER_HEIGHT * 0.5` ahead of her (2.835 m = **56.7 wu**), so the prop
+      //     covers ground out to **92.4 wu** — one rung above `REACH.meleeHeavy` (84) and
+      //     **4.3x short of the 400 wu hitbox**. Hitbox and prop are one rule stated in two
+      //     places, and the shipped telegraph marks the SMALL one: its own comment says it
+      //     *"points at the object that is about to appear"* and *"UNDER-claims the danger"*.
+      //   * **`FAIR_PLAY.radiusUnits` is 199.2 wu** — the disc every supported aspect ratio
+      //     is guaranteed to show. 400 is 2.0x it, so half the threatened ground is off
+      //     camera BY CONSTRUCTION, which is what makes the tell impossible rather than
+      //     merely hard.
+      //
+      // Both repairs were staged and measured (`roster_lab --seeds 32`, paired, one field
+      // per arm, detached worktrees of `a06c0fd`) — lollipop's strength on `smart2`:
+      //
+      //     range 400 -> 200 (= FAIR_PLAY, no wind-up)     59.2% -> 32.8%   -26.4
+      //     range 200 + castMs 2050 (the derived tell)     59.2% ->  1.4%   -57.8
+      //
+      // ⚠️ Aggregate -1.2 / -1.3 pp, inside the ~9 pp floor. PAIRED 20/110 moved, max 62.5
+      // and 100.0 pp — EXACT. So the ability is worth ~26 pp of its owner in AREA alone,
+      // and a wind-up on top removes the character. **Shrinking the disc is a redesign the
+      // roster cannot absorb unhandled, and pairing it with a wind-up is not a redesign, it
+      // is a deletion.** §19(b)'s cap exists because this hit cannot be dodged; the way out
+      // is to make the AREA dodgeable and pay the 26 pp back somewhere Uri chooses, which is
+      // a roster decision and not this pass's (§77 explicitly withholds it).
+      //
+      // ⚠️ AND THE CARD IS STILL FALSE EITHER WAY. *"hits the whole map"* is 400 wu on a
+      // 2800x2000 arena — 14% of its width — and `ui/screens/characterSelect.ts:73` prints
+      // *"Whole map"* off `range >= REACH.ultimateSlam`. A genuinely map-wide effect is one
+      // of the three separate projects §77 names, not a constant.
       { key: 'Giant', name: 'Giant Lollipop', type: 'melee', range: REACH.ultimateSlam, damage: 18, cooldown: 7000, cone: 360, color: '#E63946', effect: 'stun', giantSlam: true, emoji: '🍭' },
     ],
     abilities: [
@@ -3687,6 +3970,20 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       //    1.71x AI_CHASE_SPEED (70). Both roles press it 2.02x/match from the same
       //    separation for the same authored 27; the player collected 26.48, the AI 12.65.
       //    Same rung, same reach, normal flight time instead of slow. See `SPEED.maxSlow`.
+      // ── THE WIND-UP: 1100 ms, AND ITS WORST SEPARATION IS NOT THE NEAREST ────
+      //
+      // The only non-monotone escape curve in the six. `u6_escape` (36 bearings x 7
+      // separations): the cheapest dodge at 20 wu is to run THROUGH the caster —
+      // bearing 180°, **384 ms** — because `SPEED.max` pellets that overshoot cannot turn
+      // back inside `HOMING_TURN_RATE`. The window therefore PEAKS at 80 wu (**784 ms**),
+      // not at contact, and the rule returns **1100** rather than `u5_derive`'s radial 1850.
+      // A tool that sampled one separation would have priced this weapon wrong in the
+      // opposite direction from `taco.Double`. Per-press damage is 9 x 3 pellets = **27**.
+      //
+      // ⚠️ **AND IT COSTS SUSHI 44.1 pp — to 10.0%.** At half (550 ms) it still costs 27.8.
+      // `roster_lab --seeds 32`, paired: aggregate -2.0 pp (inside the ~9 pp floor), PAIRED
+      // 50/110 moved in both arms, max 96.9 / 90.6 pp, EXACT. Not applied; 6 rows red in
+      // `sim.test.mjs`.
       { key: 'Catch', name: 'Big Catch', type: 'ranged', range: REACH.rangedMax, damage: 9, cooldown: 3200, speed: SPEED.max, color: '#FF8C42', effect: null, pellets: 3, spreadDeg: 40, homing: true, emoji: '🐡' },
     ],
     abilities: [
@@ -3754,6 +4051,57 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       //   authorised here. Shortening `castMs` to buy the win rate back spends the one
       //   property the feature exists for, and `cooldown` is barred outright (`lastUsed` is
       //   stamped at the PRESS, so throughput never moved).
+      //
+      // ── 🚨 2026-08-18, `DECISIONS §77`: THE ABLATION ABOVE HAS NOW BEEN RUN, AND IT
+      //    ANSWERS THE QUESTION IN THE DIRECTION NOBODY PROPOSED ────────────────
+      //
+      // Four arms, `roster_lab --seeds 32`, 3,520 paired matches each, every arm a detached
+      // worktree of `a06c0fd` differing by ONE field. Soup's strength:
+      //
+      //     arm                                              smart2            chase
+      //     baseline (no wind-up)                            47.2%             73.4%
+      //     castMs 150   — below BOTH cone escape windows    33.0%  -14.2      47.0%  -26.4
+      //     castMs 600   — the CORRECTED derivation           7.0%  -40.2      17.2%  -56.3
+      //     castMs 1100  — the value `edadf78` reverted       0.2%  -47.0       3.3%  -70.2
+      //     Dump REMOVED from play (`cooldown` 999999)       13.1%  -34.1      25.5%  -47.9
+      //
+      // ✅ **THE 1100 ROW REPRODUCES THE PUBLISHED REVERT**, which is what says this harness
+      // is measuring the same thing `edadf78` did: it recorded -49.7 / -71.1 pp to 0.6% /
+      // 2.8% against a worktree of `2d4840e`; this reads -47.0 / -70.2 to 0.2% / 3.3%
+      // against `a06c0fd`. Different baseline, same weapon, same answer.
+      //
+      // ⚠️ Aggregate moved -0.8 to -2.7 pp across those arms, INSIDE the ~9 pp floor, while
+      // a character left the game — the same trap this block already names. Read the paired
+      // column: 18-19 of 110 matchups moved, max 59.4-100.0 pp, EXACT on identical seeds.
+      // And containment is measured rather than assumed: in every single-weapon arm, **0 of
+      // the 90 matchups that do not involve the changed character moved on either policy**,
+      // which is `Weapon.castMs`'s "weapons with no `castMs` stay bit-identical" checked on
+      // `matchupRates` rather than argued.
+      //
+      // 🚨 **A TELEGRAPHED DUMP IS WORSE THAN NO DUMP AT ALL.** 7.0% with the corrected
+      // wind-up against 13.1% with the weapon deleted. So the standing hypothesis in the
+      // block above — `pressValue` spending the window on a whiff — is REFUTED by the same
+      // test that refuted it for Mega, and for the same reason: if the AI were merely
+      // mis-choosing, taking the choice away would help, and it helps by 6.1 pp. The cost
+      // is not the choice and it is not the dodge.
+      //
+      // ⚠️ **AND IT IS NOT ANY ONE SIDE-EFFECT OF THE CAST EITHER — THREE MORE ABLATIONS
+      // SAY SO.** Against the 7.0% this weapon reaches at `castMs 600`, removing the attack
+      // lockout gives 10.6%, removing the frozen aim 8.0%, removing the movement root
+      // 10.0%. **Every one is still below the 13.1% of not having the weapon**, so no
+      // single term explains Dump the way the lockout explains Mega (`Weapon.castMs` §(3)).
+      // What is left is the DELAY itself: `castMs 150` buys no dodge whatsoever — the cone
+      // escape is 267 ms slowest / 234 fastest, measured by `u6_escape` — and still costs
+      // **14.2 pp**, because a press whose effect arrives 150 ms late lands on ground a
+      // moving target has already left.
+      //
+      // Soup is a 9-health tank with `speed: 4`, the roster's slowest, and its kit is one
+      // melee dump plus two short pokes — Dump is 34.1 of its 47.2 pp, i.e. 72% of the
+      // character. The honest answer to *"can a telegraphed melee dump work on a slow
+      // character"* is **no, not on a kit this concentrated**: a delay costs a fraction of
+      // the press, and here the press is nearly the whole character. Nothing is changed:
+      // the corrected 600 is recorded so the next pass does not re-derive it, and it is not
+      // applied because it measures worse than deleting the weapon.
       { key: 'Dump', name: 'Soup Dump', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 3000, cone: 90, color: '#E8792A', effect: 'slow', emoji: '🌊' },
     ],
     abilities: [
@@ -3784,6 +4132,32 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // 1100 ms is derived in `Weapon.castMs` from `REACH.meleeHeavy` and the roster's
       // slowest human speed; it leaves a 304.55 ms reaction window against the slowest
       // character and 400.00 ms against the fastest. See `DECISIONS §74`.
+      //
+      // ── 🚨 THE 1100 IS 1.83x ITS OWN RULE, AND WATER BOTTLE IS THE ROSTER'S WORST
+      //    CHARACTER BY 37 pp BECAUSE OF IT. MEASURED 2026-08-18, NOT CHANGED HERE. ──
+      //
+      // `Weapon.castMs`'s derivation reads a melee cast as a DISC of `range`. `deliverWeapon`
+      // resolves this one against a FROZEN 100° cone, so the escape is angular, not radial:
+      // `u6_escape` measures the window at **284 ms** (slowest human) against the 795.45 ms
+      // the disc form predicts, and the rule therefore returns **600**, not 1100.
+      //
+      //     arm (roster_lab --seeds 32, paired on a06c0fd)   waterbottle strength   roster sd   range   settled
+      //     baseline, castMs 1100 (SHIPPED)                        9.8%              13.6 pp   53.9 pp   28/110
+      //     castMs 600  (the corrected derivation)                25.9%  +16.1         9.7 pp   36.1 pp   21/110
+      //     castMs 450  (the most the geometry allows)            31.1%  +21.2         8.5 pp   30.8 pp   20/110
+      //
+      // Every roster-health number improves together, which is what separates this from a
+      // tune: sd, range and settled all fall, and the 94 of 110 matchups that do not involve
+      // Water Bottle are BIT-IDENTICAL in both arms (0 moved — checked on `matchupRates`,
+      // not asserted). ⚠️ 450 measures better and is NOT the recommendation: it leaves only
+      // 166 ms of reaction over the 284 ms window, against the 300 ms the rule budgets. 600
+      // is the derived value; 450 is the sensitivity beside it.
+      //
+      // 🚨 **AND IT IS NOT APPLIED, BECAUSE THE 9.8% IS ALSO THE NUMBER `DECISIONS §77`
+      // QUOTES AS THE ROSTER RANGE.** The range at `a06c0fd` is **53.9 pp**; 9.8 pp was
+      // measured at `33318a1`, BEFORE `16b635d` shipped this field. Two live decisions rest
+      // on that stale figure. Changing `castMs` here turns 5 rows red in `sim.test.mjs`
+      // (§33(l)/(n)/(o), all of which encode the disc) and that file is not this pass's.
       { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', castMs: 1100, emoji: '🌊' },
     ],
     abilities: [
