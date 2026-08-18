@@ -4120,6 +4120,101 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     //   outside the shell" read as a second head). A spec that says FLOATING will get floating.
     //   Kept because the translucency clauses still govern the model.
     face: 'EYES ON THE BOTTLE, NEVER FLOATING ABOVE THE CAP. Detached features were the old spec and floating is a defect already rejected on taco — a face with nothing under it reads as a separate object. Set the eyes on the SHOULDER of the bottle where the shell curves, sharing one tangent frame, so they sit on a surface. Open eyes, three elements: a white sclera as the brightest value on the character, a dark pupil offset for gaze, an explicit catchlight. ⚠️ THE FACE MUST BE OPAQUE AND MOUNTED ON THE OUTER SURFACE. This is the one genuinely transmissive character in the cast; a feature placed inside or on the inner wall gets eaten by the transmission pass, and the sclera in particular will vanish into whatever is behind the bottle. MOUTH: keep the big smile — it is the most extrovert face in the cast and worth protecting — with a dark throat behind the lip. SILHOUETTE: translucent blue bottle, darker cap, water fill kept NON-transmissive (an opaque glossy liquid seen through a transmissive shell; nesting two transmissive materials makes the transmission snapshot incoherent and one of them flattens). PERSONALITY: cheerful, splashy, unbothered.',
+    // ── 🚨 §79's KIT TRIM WAS MEASURED AND IS **NOT APPLIED**. THE PRICE ENDS THE
+    //    CHARACTER, AND THE PREMISE UNDER IT IS FALSIFIED BY THE ROSTER. 2026-08-18. ──
+    //
+    // `DECISIONS §79` reasoned: Water Bottle carries slow on three of four weapons plus a
+    // stun, *"that composition is what turns a telegraph into theatre"*, so trim the kit
+    // until a 1100 ms wind-up is survivable. Acceptance test `tools/tmp/lk_dodge.mjs`: the
+    // `open` arm must ESCAPE. Every arm below is a detached worktree with the named fields
+    // changed and READ BACK THROUGH THE MODULE LOADER (`tools/tmp/kt_arm.mjs`) — `u6_arm`
+    // could not stage these, because its verification is `castMs`-only and an `effect` edit
+    // leaves that map bit-identical, so a patch that silently missed would certify green.
+    //
+    // ── (1) THE PREMISE IS WRONG: COMPOSITION IS NOT THE VARIABLE ──────────
+    //
+    // `tools/tmp/kt_census.mjs`, over the whole roster: **9 of 11 characters would lock a
+    // 1100 ms wind-up with their CASTLESS KIT ALONE**, and four of those nine (egg, sushi,
+    // soup, hotdog) hold exactly **ONE** slow weapon. Only donut and taco — the two with
+    // ZERO CC — would not. So the answer to §79's own question, *"how many CC weapons may
+    // one character hold?"*, is **zero**, and Water Bottle's three is not what makes it
+    // special. `SLOW_DURATION_MS` is 2500 against a 1100 ms cast, so the FIRST application
+    // covers the whole wind-up and the second adds nothing (`statusReadyAt` refuses it).
+    // Measured, not argued: dropping TWO of the three CC weapons moves the radial escape by
+    // **0.00 wu** and the bearing coverage by **0 of 36**.
+    //
+    // ── (2) THE STUN IS THE WHOLE MECHANISM, AND IT DEFEATS EVERY BEARING ──
+    //
+    // A stun is movement locked to zero, so no run direction helps. `kt_bearing.mjs` sweeps
+    // 36 bearings on the same fixture (`lk_dodge` drives only bearing 0, which §78 measured
+    // as the MOST expensive escape — 601 ms radial against 134 ms angular):
+    //
+    //     arm                          radial sep   radial    bearings escaping
+    //     baseline (shipped)                20.36      HIT      0 of 36   <- no bearing works
+    //     drop Spray(slow) only             21.33      HIT      0 of 36
+    //     drop Cap(slow) only               20.36      HIT      0 of 36
+    //     drop Glass(STUN) only             71.84      HIT     23 of 36   <- counterplay returns
+    //     Glass 'stun' -> 'slow'            71.84      HIT     23 of 36   <- IDENTICAL to removing it
+    //     drop all three                   135.73  ESCAPED     36 of 36
+    //
+    // Downgrading the stun to a slow measures **identically** to deleting it, because the
+    // surviving slows already cover the window — so "weaken rather than remove" is not a
+    // third option here, it is the same option.
+    //
+    // ── (3) THE PRICE. `roster_lab --seeds 32`, 3,520 paired matches per policy ──
+    //
+    //     arm                                        wb smart2    Δ      roster range
+    //     baseline 48c8166                              26.6%     —         37.0 pp
+    //     drop Glass(stun) only                         11.1%  -15.5        52.7 pp
+    //     Glass 'stun' -> 'slow'                        10.9%  -15.7        52.8 pp
+    //     drop Glass + Mega.castMs 1100 -> 1400         12.8%  -13.8        50.9 pp   ESCAPES
+    //     drop ALL THREE effects (§79 as written)        5.2%  -21.4        58.6 pp   ESCAPES
+    //     drop Glass + Mega.range 84 -> 70               3.8%  -22.8        59.5 pp   ESCAPES
+    //     drop Glass + Mega.range 84 -> 58               2.7%  -23.9        61.2 pp   ESCAPES
+    //
+    // ⚠️ The aggregate floor is ~9 pp, so every row above clears it; the 5.2 -> 12.8 gap
+    // between the two cheapest ESCAPING arms is 7.6 pp and does **NOT**. Separately, and
+    // EXACTLY: **0 of 90 matchups not involving Water Bottle moved in any arm** — the
+    // change is confined to one character, which is what `§77`'s "do not re-tune the roster"
+    // asks for. (`kt_paired.mjs`; and note `matchupRates` is keyed `PLAYER>ENEMY`, so
+    // averaging a character's 20 keys cancels the sign to ~0 and hides a 21 pp move.)
+    //
+    // ── (4) THE ONE CONSTRUCTIVE RESULT, AND IT REVERSES §78's DIRECTION ───
+    //
+    // A **LONGER** wind-up is more dodgeable, not less: the runner escapes iff it clears the
+    // reach BEFORE the cast resolves. Against a one-slow kit the radial clear time is
+    // `esc/mult` = **1347 ms**, and the sim crosses exactly there — `castMs` 1300 HIT,
+    // 1350 ESCAPED. So `drop Glass(stun)` + `castMs 1100 -> 1400` reaches §79's bar
+    // touching ONE weapon's effect, and the lengthening is **FREE in win rate** (11.1% ->
+    // 12.8%, inside the floor). The entire −15.5 pp is the stun; the wind-up buys the
+    // radial case for nothing. ⚠️ **`§78` wanted 1100 -> 600 for +16.1 pp — that was
+    // measured with the stun still live, where no cast length works at all** (controls at
+    // 1400 / 1800 / 2200 all HIT, 0 of 36 bearings, because the 2000 ms stun outlasts them).
+    //
+    // ── (5) WHY NOTHING IS APPLIED ────────────────────────────────────────
+    //
+    //   * Every arm above turns rows RED in `src/game/sim.test.mjs`, which is not this
+    //     pass's file: at minimum §17(d)'s hard-coded CC census at `sim.test.mjs:1699`
+    //     (*"the roster still has exactly the 4-of-5 stun and 8-of-10 slow cooldown
+    //     overlaps"*) — it counts `effect` across the whole roster, so **any** CC edit on
+    //     **any** character moves it, by design — and for any
+    //     escaping arm §33(p.3)'s **⚠️ THE PRICE** row, which asserts `open.dealt ===
+    //     MEGA.damage` — the exact logical NEGATION of §79's acceptance test. That row's own
+    //     comment anticipates this: *"a future change that made it get away again would be a
+    //     real change to this feature and must show up here."* It must be REVERSED, keeping
+    //     the old wording above it, by whoever owns that file.
+    //   * The reach-cut arms are also FRAGILE against a decision that is already answered:
+    //     at `§75(b)`'s `PLAYER_SPEED` 0.09 the runner is slower, and `Mega.range 70` flips
+    //     back to HIT while `range 58` survives by **0.33 wu**. `drop all three` survives at
+    //     both speeds (135.73 / 106.25 wu).
+    //   * Removing an `effect` makes this character's `abilities[]` blurbs FALSE — *"slows
+    //     enemies down a lot"*, *"freeze enemies"*, *"enemies slip when it hits"*. Any trim
+    //     must rewrite them in the same edit or it ships the §74 false-card defect.
+    //
+    // **§79 permits this outcome explicitly** — *"if Water Bottle ends up unplayable, that
+    // is a REPORT, and the honest answer may be that it needs a different super rather than
+    // a smaller kit."* At 26.6% it is already the roster's weakest; −15.5 pp is the cheapest
+    // counterplay this kit sells, and it is a redesign question, not a tuning one.
     weapons: [
       // Water Bottle is the only four-weapon fighter with three ranged slots, so
       // Spray and Glass each drop a rung to keep all four reaches distinct.
