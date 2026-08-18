@@ -16,8 +16,13 @@
  */
 
 import * as THREE from 'three';
-import { WORLD_SCALE, wu } from '../units';
-import { CHARACTERS, HIT_RADIUS_VS_PLAYER, PLAYER_SPEED, TRAIL } from '../game/rules';
+// ⚠️ THE `.ts` EXTENSIONS ARE LOAD-BEARING, not a style slip. Node's type-stripping
+// resolves no extensions (`src/game/state.ts`'s header says the same thing for the same
+// reason), so without them this module cannot be imported from a `.mjs` tool at all —
+// and `tools/tmp/sh_dist.mjs` scores the shipped `shakeProximityScale` on a real match
+// corpus rather than a transcription of it. A transcribed curve is a curve nothing gates.
+import { WORLD_SCALE, wu } from '../units.ts';
+import { CHARACTERS, HIT_RADIUS_VS_PLAYER, PLAYER_SPEED, TRAIL } from '../game/rules.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE FAIR-PLAY RECTANGLE
@@ -219,6 +224,169 @@ export const SUPPORTED_ASPECT = {
   max: 21 / 9,
 } as const;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GROUND REACH — the closed forms, lifted to module scope as PURE FUNCTIONS.
+//
+// `CameraRig` calls these for its OWN aspect. `shakeFadeRadiusUnits()` calls them for an
+// aspect the rig is NOT at — "what would the widest supported display see?" — which the
+// instance methods cannot answer without mutating the rig and putting it back. Lifting is
+// deliberate rather than copying the solve for the second caller: a second copy would be
+// exercised only by the new caller, and `tools/aspect.mjs` — the gate that would catch a
+// drift between them — walks the rig's path and only the rig's path.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How much ground the pitched frustum reaches per metre of camera distance, toward the
+ * bottom (`near`) and top (`far`) of the frame, measured from the camera's AIM point.
+ *
+ * Both are linear in distance, which is what makes the fair-rectangle fit a closed form
+ * rather than a search. Guarded at both ends: a shallow enough pitch puts the horizon in
+ * frame (far -> infinity) and a steep enough one would put the camera's own position
+ * inside the near edge.
+ */
+function groundReachPerMetreAt(pitchDeg: number, fovDeg: number): { near: number; far: number } {
+  const vFov = THREE.MathUtils.degToRad(fovDeg);
+  const pitch = THREE.MathUtils.degToRad(pitchDeg);
+  const cosP = Math.cos(pitch);
+  const sinP = Math.sin(pitch);
+  const nearAngle = pitch + vFov / 2;
+  const farAngle = pitch - vFov / 2;
+  const near = nearAngle >= Math.PI / 2 ? cosP : cosP - sinP / Math.tan(nearAngle);
+  const far = farAngle <= 0.02 ? 8 : Math.min(8, sinP / Math.tan(farAngle) - cosP);
+  return { near: Math.max(0.02, near), far: Math.max(0.02, far) };
+}
+
+/** The `frameMode: 'fair'` distance solve. `fairRadiusM` is in METRES; see
+ *  `CameraRig.computeFairDistance` for the derivation this implements. */
+function fairSolveAt(
+  aspect: number, pitchDeg: number, fovDeg: number, fairRadiusM: number,
+): { dist: number; lookAhead: number } {
+  const vFov = THREE.MathUtils.degToRad(fovDeg);
+  const cosP = Math.cos(THREE.MathUtils.degToRad(pitchDeg));
+  const { near: kNear, far: kFar } = groundReachPerMetreAt(pitchDeg, fovDeg);
+  const tanHalfH = Math.tan(vFov / 2) * aspect;
+
+  const distForDepth = (2 * fairRadiusM) / (kNear + kFar);
+
+  // lookAhead = lookAheadPerMetre * distance; folded into the width solve below.
+  const lookAheadPerMetre = (kFar - kNear) / 2;
+  const shrink = THREE.MathUtils.clamp(lookAheadPerMetre * cosP, 0, 0.5);
+  const distForWidth = (fairRadiusM * (1 / tanHalfH + cosP)) / (1 - shrink);
+
+  const dist = Math.max(distForDepth, distForWidth);
+  return { dist, lookAhead: lookAheadPerMetre * dist };
+}
+
+/**
+ * Radius of the smallest disc, centred on the FOLLOW TARGET, that contains every ground
+ * point a `frameMode: 'fair'` frame can show at `aspect`. World units.
+ *
+ * The visible ground is a trapezoid, not a disc, so this is its FAR CORNER — deliberately
+ * the conservative direction. A falloff built on it never silences anything the player can
+ * actually see; the price is that a few points which are off screen but nearer than the
+ * corner keep some shake. Radial symmetry is worth that: an anisotropic test would make
+ * the kick depend on the BEARING to the event, so a fighter circling you at constant range
+ * would pump the camera on and off, and it would make the feel depend on the display.
+ */
+export function visibleGroundRadiusUnits(
+  aspect: number, pitchDeg: number, fovDeg: number, fairRadiusUnits: number,
+): number {
+  const cosP = Math.cos(THREE.MathUtils.degToRad(pitchDeg));
+  const tanHalfH = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2) * aspect;
+  const { near: kNear, far: kFar } = groundReachPerMetreAt(pitchDeg, fovDeg);
+  const { dist, lookAhead } = fairSolveAt(aspect, pitchDeg, fovDeg, wu(fairRadiusUnits));
+  // `kNear`/`kFar` are measured from the AIM point; the corners wanted here are offsets
+  // from the TARGET, which sits `lookAhead` back down-screen from it.
+  const reachNear = dist * kNear;
+  const reachFar = dist * kFar;
+  const halfWidthFar = (dist + reachFar * cosP) * tanHalfH;
+  const halfWidthNear = Math.max(0, (dist - reachNear * cosP) * tanHalfH);
+  return Math.max(
+    Math.hypot(reachFar - lookAhead, halfWidthFar),
+    Math.hypot(reachNear + lookAhead, halfWidthNear),
+  ) / WORLD_SCALE;
+}
+
+/**
+ * SHAKE PROXIMITY — how much of a camera kick survives the distance from the local seat
+ * to whatever caused it.
+ *
+ * 🚨 REPORTED BY URI ON THE DEPLOYED SIX-FIGHTER BUILD: *"The VFX of screen shaking a bit
+ * due to explosions, while playing 6, causes the screen to shake a lot. We need to make
+ * sure that the shake only happens when the proximity is close."*
+ *
+ * `match.ts`'s three kick sites had **no distance term at all**: amplitude was a function
+ * of damage and one boolean (was the victim the local seat). At two seats every hit
+ * involves you, so "local" and "close" were the same predicate and the omission could not
+ * express itself. `tools/tmp/sh_dist.mjs`, 20 matches each through the real sim, is what
+ * it costs at six:
+ *
+ *                 kicks/match   shake asked for   median distance from slot 0
+ *      N = 2            25.4     5.278 m/match                  1 wu
+ *      N = 6           178.4    26.642 m/match              1 275 wu
+ *
+ * 7.0x the kick rate and 5.0x the amplitude, overwhelmingly from events a THOUSAND world
+ * units away. Same root cause `lu2_offscreen` found for the HUD (63.7-82.9% of opponent HP
+ * pills at six seats belonged to a fighter outside the frame, mean separation 1 534 wu) —
+ * different symptom.
+ *
+ * ── THE TWO RADII ARE DERIVED, NOT CHOSEN ────────────────────────────────────
+ *
+ *   FULL  `FAIR_PLAY.radiusUnits` — the disc EVERY supported display is guaranteed to
+ *         show. Inside it the event is on your screen whatever device you hold, so the
+ *         kick is delivered at exactly its old amplitude. The scale is **1.000 at and
+ *         below this radius**, which is why a hit on the local seat (distance 0) is
+ *         bit-identical to the pre-change build and the 1.25x local-seat bias is
+ *         untouched — proximity MULTIPLIES with that bias, it does not subsume it. The
+ *         two answer different questions: WHERE, and WHO.
+ *   FADE  `CameraRig.shakeFadeRadiusUnits()` — the farthest ground point ANY supported
+ *         aspect can show. Beyond it nothing on the ground is on screen on any device.
+ *
+ * Both come out of the per-aspect solve but the pair is aspect-INDEPENDENT on purpose: a
+ * kick is a translation of the whole camera and therefore momentarily costs fair-play
+ * radius (`match.ts:kick`), so letting its amplitude depend on the player's display would
+ * let the effective guarantee depend on the display. Taking the max over the supported
+ * band is the conservative direction — nobody's visible shake is cut.
+ *
+ * ── AND WHY THERE IS A FLOOR RATHER THAN SILENCE ─────────────────────────────
+ *
+ * Uri's sentence is about the LOUD case, not about silence at range, and a six-way brawl
+ * that goes dead still whenever the fight moves off screen reads as broken. So the floor
+ * is derived rather than tasted: `CameraRig.update` **zeroes** the shake below 0.002 m,
+ * and the smallest kick `match.ts` can ask for is **0.012 m** (`hit-landed`'s clamp
+ * minimum). At 0.15 that smallest kick arrives as 0.0018 m — under the rig's own cutoff,
+ * so chip damage from across the map is not merely quiet, it is **provably invisible** —
+ * while the loudest (a death or a slam, both clamped to `SHAKE_MAX_M` = 0.40 m) still
+ * arrives as 0.060 m, ~30x that cutoff. Loud things far away rumble; small things far
+ * away are gone. Any floor at or above 1/6 breaks that derivation.
+ */
+export const SHAKE_PROXIMITY = {
+  /** Full amplitude at and inside this radius, world units. */
+  fullRadiusUnits: FAIR_PLAY.radiusUnits,
+  /** Residual fraction at and beyond the fade radius. Derived above; not a taste dial. */
+  floor: 0.15,
+} as const;
+
+/**
+ * The multiplier a camera kick gets for happening `distanceUnits` from the local seat.
+ * 1.0 inside `SHAKE_PROXIMITY.fullRadiusUnits`, `floor` at and beyond `fadeRadiusUnits`,
+ * smoothstepped between — C1 at BOTH ends, so neither boundary pops as a fighter walks
+ * across it. (A hard cut at either radius pops; that is why this is a curve.)
+ *
+ * `floor` is a parameter ONLY so `tools/tmp/sh_dist.mjs --sweep` can score candidates on a
+ * real corpus without carrying a second copy of this curve. Every shipped caller takes the
+ * default, and a second copy is what the sweep exists to avoid.
+ */
+export function shakeProximityScale(
+  distanceUnits: number,
+  fadeRadiusUnits: number,
+  floor: number = SHAKE_PROXIMITY.floor,
+): number {
+  const full = SHAKE_PROXIMITY.fullRadiusUnits;
+  const t = THREE.MathUtils.smoothstep(distanceUnits, full, Math.max(fadeRadiusUnits, full + 1e-6));
+  return 1 - (1 - floor) * t;
+}
+
 export interface CameraRigOptions {
   /** Downward pitch in degrees. 90 = straight down. Brawl Stars sits around 55-62. */
   pitchDeg?: number;
@@ -345,15 +513,7 @@ export class CameraRig {
    * own position inside the near edge.
    */
   private groundReachPerMetre(): { near: number; far: number } {
-    const vFov = THREE.MathUtils.degToRad(this.camera.fov);
-    const pitch = THREE.MathUtils.degToRad(this.pitchDeg);
-    const cosP = Math.cos(pitch);
-    const sinP = Math.sin(pitch);
-    const nearAngle = pitch + vFov / 2;
-    const farAngle = pitch - vFov / 2;
-    const near = nearAngle >= Math.PI / 2 ? cosP : cosP - sinP / Math.tan(nearAngle);
-    const far = farAngle <= 0.02 ? 8 : Math.min(8, sinP / Math.tan(farAngle) - cosP);
-    return { near: Math.max(0.02, near), far: Math.max(0.02, far) };
+    return groundReachPerMetreAt(this.pitchDeg, this.camera.fov);
   }
 
   /** Distance needed to frame the ground patch, the standing subject, or the fair rect. */
@@ -401,23 +561,35 @@ export class CameraRig {
    * occur on real devices, which is precisely why fitting always by height was wrong.
    */
   private computeFairDistance(): number {
-    const vFov = THREE.MathUtils.degToRad(this.camera.fov);
-    const pitch = THREE.MathUtils.degToRad(this.pitchDeg);
-    const cosP = Math.cos(pitch);
-    const R = wu(this.fairRadiusUnits);
-    const { near: kNear, far: kFar } = this.groundReachPerMetre();
-    const tanHalfH = Math.tan(vFov / 2) * this.aspect;
-
-    const distForDepth = (2 * R) / (kNear + kFar);
-
-    // lookAhead = lookAheadPerMetre * distance; folded into the width solve below.
-    const lookAheadPerMetre = (kFar - kNear) / 2;
-    const shrink = THREE.MathUtils.clamp(lookAheadPerMetre * cosP, 0, 0.5);
-    const distForWidth = (R * (1 / tanHalfH + cosP)) / (1 - shrink);
-
-    const dist = Math.max(distForDepth, distForWidth);
-    this.lookAhead = lookAheadPerMetre * dist;
+    // The solve itself lives at module scope (`fairSolveAt`) so `shakeFadeRadiusUnits()`
+    // can evaluate it for an aspect this rig is not at. Same arithmetic, one copy.
+    const { dist, lookAhead } = fairSolveAt(
+      this.aspect, this.pitchDeg, this.camera.fov, wu(this.fairRadiusUnits),
+    );
+    this.lookAhead = lookAhead;
     return dist;
+  }
+
+  /**
+   * The distance at which a camera kick has decayed to `SHAKE_PROXIMITY.floor`, in world
+   * units: the farthest ground point any SUPPORTED aspect can show at this rig's pitch,
+   * fov and fair radius. See `SHAKE_PROXIMITY` for what it is for.
+   *
+   * ⚠️ SAMPLED ACROSS THE BAND rather than evaluated at its two ends, because the reach is
+   * **not monotone in aspect**: below the width/depth crossover (~1.6) the rig sits further
+   * back — 30.9 m at 4:3 against 26.6 m at 16:9 — so 4:3's corner beats 16:10's and the
+   * minimum is in the interior. Reading `SUPPORTED_ASPECT.max` alone is right today and
+   * silently wrong the day the crossover moves, which `fov` or `pitchDeg` can do.
+   */
+  shakeFadeRadiusUnits(): number {
+    const STEPS = 32;
+    let max = 0;
+    for (let i = 0; i <= STEPS; i++) {
+      const a = SUPPORTED_ASPECT.min + (SUPPORTED_ASPECT.max - SUPPORTED_ASPECT.min) * (i / STEPS);
+      const r = visibleGroundRadiusUnits(a, this.pitchDeg, this.camera.fov, this.fairRadiusUnits);
+      if (r > max) max = r;
+    }
+    return max;
   }
 
   /**

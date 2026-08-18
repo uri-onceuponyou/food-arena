@@ -41,6 +41,9 @@ import {
   SUDDEN_DEATH_MS, SUDDEN_DEATH_RADIUS, SUDDEN_DEATH_REMAINING_MS, clampLevel, type CharacterId, type Weapon,
 } from './rules';
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
+// The shake falloff lives in `render/camera.ts` because both radii it needs are the
+// camera's own: what every display is GUARANTEED to show, and what the widest one CAN.
+import { shakeProximityScale } from '../render/camera';
 import { InputController } from './input';
 import { createPointerLock, type PointerLockController } from './pointerLock';
 import { VfxLayer } from './vfx';
@@ -187,6 +190,30 @@ export interface FeelDebug {
    * the range is ever actually reached in play. */
   peakHitAmount: number;
   peakShakeM: number;
+  /**
+   * SHAKE ENERGY, DELIVERED vs REQUESTED — the pair that made Uri's six-player report
+   * measurable, and the reason `responses.shake` alone could not.
+   *
+   * `responses.shake` counts KICKS. The proximity falloff scales amplitudes and skips
+   * nothing, so that counter is unchanged by it BY DESIGN and a before/after on it reads
+   * as "the fix did nothing" — the `AGENT-BRIEF` §4.6 trap of asking what a metric can
+   * even express. These two are metres summed over the match:
+   *
+   *   `shakeRawSumM`  what the kick sites ASKED for, after `SHAKE_MAX_M` and before
+   *                   proximity. This is EXACTLY the pre-change build's delivered
+   *                   amplitude — same events, same damage, same 1.25x local bias, the
+   *                   only difference being the factor applied after it.
+   *   `shakeSumM`     what actually reached `rig.shake()`.
+   *
+   * So their RATIO is a **paired before/after inside one run, on one event stream** —
+   * exact, not an aggregate across two builds with two different seeds, and immune to the
+   * `rg_lib` class of A/B where both arms silently read the same tree.
+   */
+  shakeSumM: number;
+  shakeRawSumM: number;
+  /** Peak of the same pair. `peakShakeM` is what the camera got; this is what was asked
+   * for, so "the loudest kick still lands at full strength when it is close" is a number. */
+  peakShakeRawM: number;
 }
 
 /** Every key `FeelDebug.events` can carry, allocated up front so the record never
@@ -660,6 +687,7 @@ export class GameSession {
     hitStopBudgetMs: 0, hitStopBankedMs: 0, lastHitStopMs: 0, rawDtMs: 0, stepDtMs: 0,
     frames: 0, frozenFrames: 0, repayingFrames: 0,
     peakHitAmount: 0, peakShakeM: 0,
+    shakeSumM: 0, shakeRawSumM: 0, peakShakeRawM: 0,
   };
 
   // ── Hit-stop bookkeeping ──────────────────────────────────────────────────
@@ -689,6 +717,11 @@ export class GameSession {
    * the two or three frames a kick survives.
    */
   private static readonly SHAKE_MAX_M = 0.40;
+
+  /** Memo for `CameraRig.shakeFadeRadiusUnits()`, world units; `-1` = not yet asked.
+   *  Lazy rather than eager because the rig is built with the Stage and this is only
+   *  needed once a kick happens. A pure function of pitch, fov and the fair radius. */
+  private shakeFadeUnits = -1;
 
   // ── Visual-only knockback ────────────────────────────────────────────────
   // The sim never moves a fighter on a hit (see combat.ts), so this nudges only the
@@ -925,6 +958,7 @@ export class GameSession {
     this.feel.responses.knockback = 0; this.feel.responses.damageNumber = 0; this.feel.responses.screenFlash = 0;
     this.feel.frames = 0; this.feel.frozenFrames = 0; this.feel.repayingFrames = 0;
     this.feel.peakHitAmount = 0; this.feel.peakShakeM = 0; this.feel.lastHitStopMs = 0;
+    this.feel.shakeSumM = 0; this.feel.shakeRawSumM = 0; this.feel.peakShakeRawM = 0;
     // Reallocated rather than zeroed in place: the roster length can change between
     // matches once anything seats more than two, and a stale sixth entry holding the
     // previous match's nudge is exactly the class of bug `vfx.ts:clear()` documents.
@@ -1218,11 +1252,50 @@ export class GameSession {
    * side it moves toward. `SHAKE_MAX_M` bounds that at ~1% of the 199.2 wu guarantee.
    * `tools/aspect.mjs` cannot see this — it reads `__fairView()`, which is computed
    * from `computeDistance()` and never sees the shake — so the bound has to be here. */
-  private kick(amount: number, decay?: number): void {
-    const a = Math.min(amount, GameSession.SHAKE_MAX_M);
+  private kick(amount: number, proximity: number, decay?: number): void {
+    // ⚠️ CLAMP FIRST, THEN ATTENUATE. At `proximity === 1` this delivers byte-for-byte
+    // what the pre-change build delivered, so every close-range kick in the game is
+    // untouched BY CONSTRUCTION rather than by a tolerance. Attenuating before the clamp
+    // would quietly re-scale the two kicks that sit ON the ceiling (death 0.42, slam
+    // 0.55) at every distance including zero, which is a feel change nobody asked for.
+    const raw = Math.min(amount, GameSession.SHAKE_MAX_M);
+    const a = raw * proximity;
     this.stage.rig.shake(a, decay);
     this.feel.responses.shake++;
+    this.feel.shakeSumM += a;
+    this.feel.shakeRawSumM += raw;
     if (a > this.feel.peakShakeM) this.feel.peakShakeM = a;
+    if (raw > this.feel.peakShakeRawM) this.feel.peakShakeRawM = raw;
+  }
+
+  /**
+   * HOW MUCH OF A KICK SURVIVES THE DISTANCE TO WHATEVER CAUSED IT.
+   *
+   * 🚨 Reported by Uri on the deployed six-fighter build — *"the screen shakes a lot ...
+   * make sure that the shake only happens when the proximity is close"* — and the cause
+   * was that **not one of the three kick sites had a distance term**. See
+   * `SHAKE_PROXIMITY` in `render/camera.ts` for the derivation of both radii and of the
+   * floor; the short version is full strength inside the disc EVERY display is guaranteed
+   * to show, a floor beyond the farthest ground point ANY display can show, smoothstep
+   * between so neither boundary pops.
+   *
+   * ⚠️ Proximity MULTIPLIES with the 1.25x local-seat bias, it does not subsume it. They
+   * answer different questions — WHERE it happened and WHO it happened to — and because
+   * the scale is exactly 1.0 at distance 0, a hit on the local seat keeps the bias intact
+   * to the last bit.
+   *
+   * The centre is the LOCAL SEAT'S SIM POSITION, not `CameraRig`'s follow target. The two
+   * differ only by the follow lerp, and the sim position is the one that puts a hit on YOU
+   * at exactly 0 — which is what makes the two-seat arm of `tools/tmp/sh_dist.mjs` a real
+   * control (at two seats every WEAPON hit is inside `MAX_THREAT_REACH` = 165.2 wu of one
+   * of the two fighters, i.e. inside the 199.22 wu full-strength disc) rather than a
+   * hopeful one.
+   */
+  private shakeProximity(xWU: number, yWU: number): number {
+    // Derived from pitch / fov / fair radius, none of which move during a session.
+    if (this.shakeFadeUnits < 0) this.shakeFadeUnits = this.stage.rig.shakeFadeRadiusUnits();
+    const me = localFighter(this.state);
+    return shakeProximityScale(Math.hypot(xWU - me.x, yWU - me.y), this.shakeFadeUnits);
   }
 
   /** Nudge a fighter's VISUAL model away from an attack source. Sim positions are
@@ -1289,7 +1362,7 @@ export class GameSession {
               this.feel.events['weapon-fired:giantSlam']++;
               this.hud.flashScreen(weapon.color);
               this.feel.responses.screenFlash++;
-              this.kick(0.55, 2.6);
+              this.kick(0.55, this.shakeProximity(fighter.x, fighter.y), 2.6);
               this.triggerHitStop(120);
               window.__vfxDebugGiantSlamCount = (window.__vfxDebugGiantSlamCount ?? 0) + 1;
             }
@@ -1392,7 +1465,14 @@ export class GameSession {
           // The kick is 25% harder when the hit landed on THIS screen's fighter —
           // a local-seat bias, not a slot-0 one.
           const targetBias = targetSlot === LOCAL_SLOT ? 1.25 : 1;
-          this.kick(shakeBase * targetBias * (isWeaponHit ? 1 : 0.45));
+          // The VICTIM is the reference point, not the attacker: the impact burst is drawn
+          // where the victim is, so that is the thing the player either sees or does not.
+          // (For a weapon hit the two are within `MAX_THREAT_REACH` anyway.)
+          const victim = fighterOf(this.state, ev.targetId, ev.targetRole);
+          this.kick(
+            shakeBase * targetBias * (isWeaponHit ? 1 : 0.45),
+            this.shakeProximity(victim.x, victim.y),
+          );
 
           if (isWeaponHit) {
             this.triggerHitStop(THREE.MathUtils.clamp(10 + ev.amount * 4.6, 16, 105));
@@ -1447,7 +1527,7 @@ export class GameSession {
           const color = lastHitColor[slot] ?? '#FFFFFF';
           this.vfx.spawnDeathBurst(fighter.x, fighter.y, color);
           this.feel.responses.vfx++;
-          this.kick(0.42, 3);
+          this.kick(0.42, this.shakeProximity(fighter.x, fighter.y), 3);
           this.triggerHitStop(90);
           break;
         }
