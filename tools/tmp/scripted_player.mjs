@@ -84,6 +84,62 @@
  * **five** characters: taco (Filling/Onion->Double), burrito (Disc->Swarm),
  * sushi (Fish/Seaweed->Rice), soup (Noodle->Splash), waterbottle (Cap/Glass->Spray).
  *
+ * ── The two faults the WIND-UP made visible, landed 2026-08-18 ──────────────
+ *
+ * Both are the same shape as fault 3 — *a rule the AI already obeys and the player's
+ * half of it was never written* — and they were invisible until a weapon grew a
+ * `castMs`, because until then there was nothing for either half to be about.
+ *
+ * **5. THE DRIVER COULD NOT DODGE A TELEGRAPH.** Before this, `grep -c cast` on this
+ * file returned **0**. `a06c0fd` gave the AI `ai.ts:castThreat` + `dangerSteer`'s third
+ * loop, so a bot steers out of an incoming wind-up; the human seat had nothing. That is
+ * the recorded stun-silence asymmetry pointed the other way — *"it would have measured as
+ * 'the ultimate is fine' on every AI-vs-AI corpus in the repo, which is every corpus in
+ * the repo"* (`ai.ts:dangerSteer`) — and here it measured as the opposite, because the
+ * one shipped wind-up sits on the seat the driver was OPPOSITE. **Every `waterbottle.Mega`
+ * figure in `DECISIONS §77–79` — the −35.0 pp, the +19.7 pp, the 9.8% — was measured
+ * against an opponent that could not react to the mechanic being measured.**
+ *
+ * **6. THE DRIVER OPENED A WIND-UP IT COULD NOT FINISH.** `ai.ts:pickWeapon` takes a
+ * `castBudgetMs` — *"the question is never 'may I cast' but 'may I stand still for THIS
+ * long'"* — and refuses a `castMs` at or above it. `bestWeapon` had no such question, so
+ * the scripted player rooted itself for 1100 ms inside a hazard, or with less fog life
+ * left than the wind-up costs, where the AI would not have.
+ *
+ * ── WHAT IS BORROWED, AND WHAT IS DELIBERATELY NOT ──────────────────────────
+ *
+ * `castThreat` is IMPORTED from the caller's `ai.ts`, never re-derived: it carries three
+ * geometries (melee disc, homing disc, non-homing wedge) and *"five AI driver bugs on
+ * record all had one shape — a rule stated once and implemented differently elsewhere"*.
+ * `AI_HAZARD_MARGIN`, `AI_HAZARD_WEIGHT`, `AI_ESCAPE_PRIORITY` and `FOG_DPS` come from
+ * the caller's `rules.ts` for the same reason. The counterfactual encoded is exactly the
+ * one fault 3 encodes: **the player dodges exactly as well as the AI already does.** A
+ * hand-tuned dodge would make every number below a tuning artefact instead of a
+ * measurement of the game.
+ *
+ * 🚨 **BUT THE ATTACK SUPPRESSION IS NOT BORROWED, AND THAT IS A DERIVATION, NOT AN
+ * OMISSION.** `stepAI` computes `escaping = urgent && !rooted` and passes `null` for the
+ * weapon, because *"the CHASE branch fires OR moves, never both, so an AI with a weapon
+ * ready simply stops moving"*. **The scripted player has no such trade**: one
+ * `MatchInput` carries `move` AND `attack`, and `sim.ts` applies both on the same tick,
+ * so withholding the shot costs the tick and buys nothing. That is the stun-silence bug
+ * again — `ai.ts`'s own flee branch declines to suppress its shot for precisely this
+ * reason. **The dodge therefore changes MOVEMENT ONLY.**
+ *
+ * ⚠️ **AND THE POT AND THE RING ARE DELIBERATELY NOT ADDED.** `dangerSteer` blends three
+ * hazards; only the wind-up term is mirrored here. The driver has its own ring/pot ladder
+ * and re-stating them as a blend would move **every** figure this driver has printed —
+ * which is exactly the arm that proves this pass changed nothing it should not have. The
+ * cast term cannot reach a castless roster BY CONSTRUCTION (`hasCastWeapon` below), which
+ * is a stronger statement than a measured null.
+ *
+ * ⚠️ **SCOPE, and it is split by what each half IS.** The dodge is a MOVEMENT rule, so it
+ * lands in `smart`/`smart2`'s decision tree and nowhere else: `chase` is the naive-player
+ * control whose *"numbers are only meaningful as a continuous series"*, and `survive` and
+ * `kite` are passivity controls with their own stated meanings. The budget is a WEAPON
+ * SELECTION rule, so it lands in `bestWeapon`, which `chase` shares — the same place
+ * `ai.ts` puts it, and it can only ever refuse a weapon carrying a `castMs`.
+ *
  * ── What is DELIBERATELY not fixed: `preferredRange` ────────────────────────
  *
  * `preferredRange` (below) carries the SAME damage-ranking key and sets `band`, which
@@ -103,8 +159,10 @@
  *     --decide-during-countdown    fault 2 (the re-seeding decision loop)
  *     --no-player-heal             fault 3 (the player cannot press a heal)
  *     --damage-ranking-key         fault 4 (rank by authored per-pellet `damage`)
+ *     --no-player-dodge            fault 5 (the player cannot dodge a telegraph)
+ *     --no-player-cast-budget      fault 6 (the player opens a wind-up it cannot finish)
  *
- * `parseDriverFlags(args)` reads all four, so every tool spells them the same way, and
+ * `parseDriverFlags(args)` reads all six, so every tool spells them the same way, and
  * any of them sets `isHistorical`.
  *
  * ── Guard ───────────────────────────────────────────────────────────────────
@@ -119,12 +177,20 @@
 /**
  * 1 = pre-2026-08-05. 2 = range-before-LOS (`match-sim.mjs` rev 2). 3 = + both countdown
  * guards. 4 = + `bestWeapon` ranks by delivered press value and can press the heal.
+ * 5 = + the driver can SEE a wind-up: it dodges an incoming telegraph and declines to open
+ * one it cannot finish.
  *
  * ⚠️ REV 4 RE-BASES EVERY BALANCE FIGURE THIS DRIVER HAS EVER PRINTED that involves
  * Hamburger, Taco, Burrito, Sushi, Soup or Water Bottle. That is the point of the pass,
  * not a side effect — but a rev-3 baseline JSON is not comparable to a rev-4 run.
+ *
+ * ⚠️ **REV 5 RE-BASES EXACTLY THE FIGURES THAT INVOLVE A `castMs` WEAPON, AND NOTHING
+ * ELSE.** Both new terms are unreachable on a roster with no wind-up — not by measurement
+ * but by construction (`hasCastWeapon`) — so a rev-4 baseline stays comparable for every
+ * matchup that contains no caster, and is NOT comparable for one that does.
+ * `tools/tmp/dv_bitid.mjs` is the two-armed proof of exactly that sentence.
  */
-export const DRIVER_REV = 4;
+export const DRIVER_REV = 5;
 
 /** mulberry32. Identical stream to the copies this file replaces — do not "improve" it. */
 export function rng(seed) {
@@ -152,6 +218,8 @@ export function parseDriverFlags(args) {
     decideDuringCountdown: !!args['decide-during-countdown'],
     noPlayerHeal: !!args['no-player-heal'],
     damageRankingKey: !!args['damage-ranking-key'],
+    noPlayerDodge: !!args['no-player-dodge'],
+    noPlayerCastBudget: !!args['no-player-cast-budget'],
   };
 }
 
@@ -199,6 +267,48 @@ try {
 }
 
 /**
+ * ── THE CAST TERMS, RESOLVED FROM THE SAME PLACE AND FOR THE SAME REASON ────
+ *
+ * Faults 5 and 6. `castThreat` is the AI's threat geometry — three shapes, a signed
+ * margin and the cheapest exit direction — and it is IMPORTED rather than re-derived
+ * because *"a rule stated once and implemented differently elsewhere"* is the origin of
+ * five recorded AI driver bugs and of this whole file. The four AI constants come from
+ * the caller's `rules.ts` for the same reason `AI_SELF_HEAL_HP_FRACTION` does.
+ *
+ * ⚠️ **A PARTIAL RESOLVE IS TREATED AS NO RESOLVE.** Reading nine names off two modules
+ * and keeping whichever ones happened to exist is the silent-degradation shape
+ * `assertRankKeyKnowsKit` exists to refuse — an older sim missing `AI_HAZARD_WEIGHT`
+ * would otherwise produce a dodge with weight `undefined`, i.e. `NaN` steering, which
+ * `axesToward` quantises to a perfectly plausible `{x: 0, y: 0}`. Any missing name nulls
+ * the whole record and `assertCastAwarenessKnowsKit` then throws — but ONLY for a kit
+ * that actually carries a wind-up, so every pre-cast sim (`099119a` and every tool that
+ * pins to it) still binds exactly as before.
+ */
+let RESOLVED_CAST = null;
+let RESOLVED_CAST_MISSING = ['ai.ts / rules.ts / state.ts did not load'];
+try {
+  const ai = await import(`${RESOLVED_SIM_DIR}/ai.ts`);
+  const rules = await import(`${RESOLVED_SIM_DIR}/rules.ts`);
+  const st = await import(`${RESOLVED_SIM_DIR}/state.ts`);
+  const need = {
+    castThreat: ai.castThreat,
+    hazardMargin: rules.AI_HAZARD_MARGIN,
+    hazardWeight: rules.AI_HAZARD_WEIGHT,
+    escapePriority: rules.AI_ESCAPE_PRIORITY,
+    slowMultiplier: rules.SLOW_MOVE_MULTIPLIER,
+    playerSpeed: rules.PLAYER_SPEED,
+    speedFor: rules.speedFor,
+    fogDps: rules.FOG_DPS,
+    suddenDeathActive: rules.suddenDeathActive,
+    movementLocked: st.movementLocked,
+  };
+  RESOLVED_CAST_MISSING = Object.keys(need).filter((k) => need[k] === undefined || need[k] === null);
+  RESOLVED_CAST = RESOLVED_CAST_MISSING.length ? null : { ...need, source: RESOLVED_SIM_DIR };
+} catch (e) {
+  RESOLVED_CAST_MISSING = [`import failed: ${String(e).split('\n')[0]}`];
+}
+
+/**
  * A weapon whose ONE PRESS delivers something other than its authored `damage`: a combo,
  * a multi-pellet fan, or a multi-peck swing. This reads the weapon's own fields — it does
  * not re-implement `pressValue`'s arithmetic, which is stated once in `ai.ts`.
@@ -231,6 +341,37 @@ function assertRankKeyKnowsKit(rankKey, CHARACTERS) {
 }
 
 /**
+ * KNOWN-BAD-INPUT VALIDATION for the cast terms — `assertRankKeyKnowsKit`'s argument one
+ * level out, and it returns the fact both terms are gated on.
+ *
+ * Returns TRUE when this kit carries a wind-up. When it does not, both terms are
+ * unreachable BY CONSTRUCTION rather than by measurement, which is the property
+ * `dv_bitid.mjs`'s null arm rests on — and it is why a missing `castThreat` is not an
+ * error there: there is nothing for it to be wrong about.
+ *
+ * When the kit DOES carry one and the terms did not resolve, this throws. The failure it
+ * refuses is precise and it is the same one `pressValue` has: the caller hands a
+ * `--sim <staged>` kit whose `Mega` has a `castMs`, the driver silently has no way to see
+ * it, and the run reports `castMs`'s balance cost measured against a driver that ignored
+ * it — a wrong number with nothing printed. Loud beats likely.
+ */
+function assertCastAwarenessKnowsKit(CHARACTERS, cast, reproducingBothFaults) {
+  const casters = [];
+  for (const id of Object.keys(CHARACTERS)) {
+    for (const w of CHARACTERS[id].weapons) if ((w.castMs ?? 0) > 0) casters.push(`${id}.${w.key}`);
+  }
+  if (!casters.length) return false;
+  if (cast || reproducingBothFaults) return true;
+  throw new Error(
+    'createScriptedPlayer: this kit carries a wind-up '
+    + `(${casters.length}: ${casters.join(', ')}) but the cast terms did not resolve `
+    + `(missing: ${RESOLVED_CAST_MISSING.join(', ')}; tried ${RESOLVED_SIM_DIR}). `
+    + 'Pass `castDeps` from the same sim your `CHARACTERS` came from, or run with both '
+    + '`--no-player-dodge --no-player-cast-budget` if you meant the pre-rev-5 driver.',
+  );
+}
+
+/**
  * Bind the driver to one sim's rules and one arena.
  *
  * `CHARACTERS` / `REACH` come from the CALLER's `rules.ts`, not from a hard import —
@@ -242,7 +383,8 @@ export function createScriptedPlayer({
   CHARACTERS, REACH, arena, hazard = null,
   navCountdownBug = false, decideDuringCountdown = false,
   noPlayerHeal = false, damageRankingKey = false,
-  pressValue = null, selfHealHpFraction = null,
+  noPlayerDodge = false, noPlayerCastBudget = false,
+  pressValue = null, selfHealHpFraction = null, castDeps = null,
 }) {
   if (!CHARACTERS || !REACH) throw new Error('createScriptedPlayer: CHARACTERS and REACH are required');
   if (!arena) throw new Error('createScriptedPlayer: arena is required');
@@ -267,6 +409,129 @@ export function createScriptedPlayer({
       return press(w, d);
     };
   if (!damageRankingKey) assertRankKeyKnowsKit(rankKey, CHARACTERS);
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // FAULTS 5 & 6 — the wind-up, from the human seat
+  // ───────────────────────────────────────────────────────────────────────────
+
+  const CAST = castDeps ?? RESOLVED_CAST;
+  /**
+   * ⚠️ THE GATE BOTH TERMS HANG ON, AND IT IS A CONSTRUCTION AND NOT A MEASUREMENT.
+   * False for a roster with no `castMs`, and then neither term below reads one byte of
+   * `state` — so a castless corpus is bit-identical to rev 4 because the code cannot run,
+   * not because it ran and returned the same answer. That distinction is the whole reason
+   * `dv_bitid.mjs`'s null arm is worth running: it checks the construction is what I say
+   * it is, against a positive control that must move.
+   */
+  const HAS_CAST_WEAPON = assertCastAwarenessKnowsKit(
+    CHARACTERS, CAST, noPlayerDodge && noPlayerCastBudget,
+  );
+
+  /**
+   * The speed this fighter will ACTUALLY move at this tick, in wu/ms — the player-seat
+   * mirror of `stepAI`'s `ownSpeed`, and it is passed to the same test for the same
+   * reason: *"a conservative guess there would be a second, quieter statement of the
+   * speed"*. `PLAYER_SPEED` where the AI reads `AI_CHASE_SPEED`, and
+   * `SLOW_MOVE_MULTIPLIER` (0.45) where it reads `AI_SLOW_MULTIPLIER` (0.35) — the
+   * asymmetry `DECISIONS §75` records, taken from the side this seat is actually on.
+   *
+   * ⚠️ It ignores the trail boost and the terrain slow, EXACTLY as `stepAI` does. Those
+   * are `sim.ts:moveFighter`'s terms and neither seat's decision layer reads them; adding
+   * them here would make the human dodge better than the bot for a reason that is not
+   * this pass. `movementLocked` — stunned OR casting — is 0, which is what makes a
+   * stunned fighter correctly stop attempting an escape it cannot make.
+   */
+  function ownSpeed(state, f) {
+    if (CAST.movementLocked(f, state.elapsed)) return 0;
+    const mult = state.elapsed < f.status.slowedUntil ? CAST.slowMultiplier : 1;
+    return CAST.speedFor(f.characterId, CAST.playerSpeed) * mult;
+  }
+
+  /**
+   * WHAT IS WINDING UP AT THIS FIGHTER, and where the cheapest way out points.
+   *
+   * The player-seat copy of `ai.ts:dangerSteer`'s third loop — the same three questions
+   * in the same order, with the geometry deferred to the same imported `castThreat`:
+   *
+   *   1. is the fighter inside the threatened set, or within `AI_HAZARD_MARGIN` of it;
+   *   2. **can it actually clear the escape distance before `resolvesAt`** — a range
+   *      test is BINARY, so 90% of the way out is worth exactly zero and a hopeless flee
+   *      is strictly worse than ignoring the cast;
+   *   3. how hard to push — `t`, normalised identically: 0 at the outer edge of the
+   *      margin, exactly 1 at the boundary, 2 one full margin inside it.
+   *
+   * Returns `null` when there is nothing to do about anything, which is every tick of
+   * every match on a roster with no wind-up.
+   *
+   * ⚠️ `state.fighters` absent is answered NULL rather than guarded against: a hand-built
+   * partial fixture (`driver_guard.mjs`'s `at()`) has no fighters, so nobody in it is
+   * casting, so "no incoming telegraph" is the true answer and not a degradation. The
+   * degradation that WOULD be dangerous — a real kit whose `castThreat` never resolved —
+   * is refused at bind time, loudly, by `assertCastAwarenessKnowsKit`.
+   */
+  function incomingCast(state) {
+    // `!CAST` is reachable in exactly one situation and it is not a degradation: a driver
+    // built with BOTH cast faults flagged binds on a wind-up kit without resolving the
+    // terms (that is what `--damage-ranking-key` does for the ranking key, and for the
+    // same reason). Nothing on the shipped path can reach here with a null.
+    if (!HAS_CAST_WEAPON || !CAST) return null;
+    const others = state.fighters;
+    if (!Array.isArray(others)) return null;
+    const p = state.player;
+    const own = ownSpeed(state, p);
+    let worst = 0;
+    let dx = 0;
+    let dy = 0;
+    for (const other of others) {
+      if (other === p || !other.alive) continue;
+      const c = other.cast;
+      if (c === null || c === undefined) continue;
+      const w = CHARACTERS[other.characterId].weapons[c.weaponIndex];
+      if (w === undefined) continue;
+      // `p.hitRadius`, not a constant: `stepProjectiles` reads the VICTIM's number and
+      // this is asked about one named fighter.
+      const threat = CAST.castThreat(other, w, p.x, p.y, p.hitRadius);
+      if (threat === null) continue;
+      const margin = threat.margin;
+      if (margin >= CAST.hazardMargin) continue;
+      const remainingMs = Math.max(0, c.resolvesAt - state.elapsed);
+      if (margin < 0 && -margin > own * remainingMs) continue;
+      const t = Math.min(2, (CAST.hazardMargin - margin) / CAST.hazardMargin);
+      dx += threat.outX * t * CAST.hazardWeight;
+      dy += threat.outY * t * CAST.hazardWeight;
+      if (t > worst) worst = t;
+    }
+    if (worst <= 0) return null;
+    return { x: dx, y: dy, t: worst, urgent: worst >= CAST.escapePriority };
+  }
+
+  /**
+   * FAULT 6 — `ai.ts:pickWeapon`'s `castBudgetMs`, from the human seat.
+   *
+   * The longest wind-up this fighter may commit to right now, in ms. `Infinity` is the
+   * ordinary case and refuses nothing. It drops in the same two situations `stepAI`
+   * derives it from, and both are *"a cast I open now will not be alive to resolve"*:
+   *
+   *   1. **STANDING IN SOMETHING THAT HURTS** — here, scoped to an incoming telegraph.
+   *      `stepAI` reads its own `urgent`, which also covers the pot and the closing ring;
+   *      this driver has its own ladder for those two and re-stating them would move
+   *      every castless figure it has ever printed. **The scoping is the price of the
+   *      null arm and it is declared, not hidden.**
+   *   2. **SUDDEN DEATH** — `SUDDEN_DEATH_RADIUS` is 0, so surviving a wind-up costs
+   *      `castMs * FOG_DPS / 1000` HP flat and `hp * 1000 / FOG_DPS` is how many ms of
+   *      standing is left. `FOG_DPS` is imported, never written as `15 / 300`.
+   */
+  function castBudgetFor(state) {
+    if (noPlayerCastBudget || !HAS_CAST_WEAPON || !CAST) return Infinity;
+    const inc = incomingCast(state);
+    if (inc !== null && inc.urgent) return 0;
+    // A partial fixture with no clock is not in sudden death; a real `MatchState` always
+    // carries one.
+    if (typeof state.timeRemaining === 'number' && CAST.suddenDeathActive(state.timeRemaining)) {
+      return (state.player.hp * 1000) / CAST.fogDps;
+    }
+    return Infinity;
+  }
 
   /** `ai.ts:AI_SELF_HEAL_HP_FRACTION` — the same threshold, read from the same sim. */
   const HEAL_HP_FRACTION = selfHealHpFraction ?? RESOLVED_SELF_HEAL_FRACTION;
@@ -328,10 +593,25 @@ export function createScriptedPlayer({
     const healSlot = healWeapon(state);
     if (healSlot !== null) return healSlot;
     let best = null, bestScore = -Infinity;
+    /**
+     * FAULT 6. Computed AT MOST ONCE, and only once a wind-up has survived the three
+     * eligibility tests above it — so on a kit with no `castMs`, and on every tick where
+     * the wind-up is on cooldown or out of range, this line never runs and `state` is
+     * never read. That is what keeps a hand-built fixture (and a castless roster) on
+     * exactly the rev-4 code path.
+     */
+    let budget;
     ws.forEach((w, i) => {
       if (w.type === 'self') return;                  // ranked by `healWeapon`, never offensively
       if (state.elapsed - p.lastUsed[i] < w.cooldown) return;
       if (d > (w.range ?? Infinity)) return;
+      const castMs = w.castMs ?? 0;
+      if (castMs > 0) {
+        if (budget === undefined) budget = castBudgetFor(state);
+        // Strict `>=`, matching `pickWeapon`: a wind-up that finishes exactly when the
+        // budget runs out has not finished in time. The budget is a deadline.
+        if (castMs >= budget) return;
+      }
       const s = rankKey(w, d);
       if (s > bestScore) { bestScore = s; best = i; }
     });
@@ -554,8 +834,38 @@ export function createScriptedPlayer({
         target = { x: p.x + Math.cos(ang) * 100, y: p.y + Math.sin(ang) * 100 };
       }
 
+      /**
+       * FAULT 5 — the incoming telegraph, blended in exactly as `stepAI`'s `steer` does:
+       * the ladder's choice becomes a UNIT intent of weight 1 and the escape is added at
+       * `AI_HAZARD_WEIGHT`. A blend rather than a branch, for `dangerSteer`'s own stated
+       * reason — *"a branch would be a fourth thing competing with the pot, the ring and
+       * the fighter's own intent, arbitrated by whichever `if` came first"*.
+       *
+       * ⚠️ NO LEAD DISTANCE IS INVENTED. `ai.ts` re-projects the blended heading through
+       * `STEER_LEAD` because `moveToward` takes a POINT; `axesToward` reads only the
+       * DIRECTION from `(p → target)`, so the un-normalised blend vector is the same
+       * input, and a second copy of a constant that changes nothing here is a liability.
+       *
+       * ⚠️ AND IT STILL GOES THROUGH `nav`. The alternative — bypassing it the way
+       * `survive` does — would drop the wall sidestep for the one second a fighter most
+       * needs it, and the stuck detector cannot latch on a fighter that is moving. Zero
+       * intent (the ladder targeting the fighter's own feet) degrades to the pure escape
+       * rather than to a normalisation of `0/0`.
+       */
+      const inc = noPlayerDodge ? null : incomingCast(state);
+      let navX = target.x, navY = target.y;
+      if (inc !== null) {
+        const ix = target.x - p.x, iy = target.y - p.y;
+        const im = Math.hypot(ix, iy);
+        // 1e-6 is `ai.ts`'s own EPS, which is module-private there. Same guard, same job:
+        // a zero-length blend must leave the target alone rather than become NaN.
+        const bx = (im > 1e-6 ? ix / im : 0) + inc.x;
+        const by = (im > 1e-6 ? iy / im : 0) + inc.y;
+        if (Math.hypot(bx, by) > 1e-6) { navX = p.x + bx; navY = p.y + by; }
+      }
+
       return {
-        move: nav(state, target.x, target.y),
+        move: nav(state, navX, navY),
         aim: { x: e.x - p.x, y: e.y - p.y },
         selectedWeapon: idx ?? 0,
         // Don't spend cooldowns on shots that cannot reach OR cannot arrive. A `self`
@@ -615,11 +925,23 @@ export function createScriptedPlayer({
     POLICY_NAMES: Object.keys(POLICY_FNS),
     makeNav, lineOfSight, bestWeapon, healWeapon, rankKey, preferredRange, maxNormalRange, axesToward,
     createDecisionLoop,
+    /** Faults 5 and 6, exported for the same reason `bestWeapon` and `healWeapon` are:
+     *  a guard that re-implemented either would be testing its own copy. */
+    incomingCast, castBudgetFor, ownSpeed,
+    /** Whether the bound kit carries a wind-up at all — the gate both terms hang on. */
+    hasCastWeapon: HAS_CAST_WEAPON,
     /** Which sim the ranking key and the heal threshold were resolved from. */
     rankKeySource: pressValue ? 'injected' : RESOLVED_SIM_DIR,
+    /** …and the cast terms. `null` means they did not resolve, which is only legal on a
+     *  kit with no wind-up. */
+    castSource: castDeps ? 'injected' : (RESOLVED_CAST ? RESOLVED_CAST.source : null),
     selfHealHpFraction: HEAL_HP_FRACTION,
-    flags: { navCountdownBug, decideDuringCountdown, noPlayerHeal, damageRankingKey },
+    flags: {
+      navCountdownBug, decideDuringCountdown, noPlayerHeal, damageRankingKey,
+      noPlayerDodge, noPlayerCastBudget,
+    },
     /** True when this driver is reproducing a historical defect and its numbers are NOT current. */
-    isHistorical: navCountdownBug || decideDuringCountdown || noPlayerHeal || damageRankingKey,
+    isHistorical: navCountdownBug || decideDuringCountdown || noPlayerHeal || damageRankingKey
+      || noPlayerDodge || noPlayerCastBudget,
   };
 }
