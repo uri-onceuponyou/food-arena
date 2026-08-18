@@ -518,7 +518,7 @@ export function resolveDueCast(state: MatchState, fighter: Fighter, events: Game
 /**
  * Attempt one attack with `weapons[weaponIndex]` for `attacker`. Returns false
  * only when the attack could not even be attempted (unknown weapon slot, still
- * on cooldown, or a wind-up already running) — everything else (too far, wrong facing
+ * on cooldown, or a SECOND wind-up while one is already running) — everything else (too far, wrong facing
  * for a melee cone, target already dead) still returns true and still consumes the
  * cooldown, because that is exactly what the prototype does: `w.lastUsed = now` is set
  * unconditionally, before any range/cone/target checks run. Whether the attack actually
@@ -534,12 +534,27 @@ export function resolveDueCast(state: MatchState, fighter: Fighter, events: Game
  * function has always drawn: "too far", "wrong direction" and "target already dead" all
  * still consume the press.
  *
- * 🚨 **A FIGHTER MID-CAST CANNOT PRESS ANYTHING.** Without that gate a caster could stack
- * a second cast over the first (the second press would overwrite `cast` and the first
- * weapon's cooldown would be spent on nothing) or interleave a cheap ranged shot into a
- * window it has committed to standing still in. One `ActiveCast` per fighter, and the
- * refusal is stated once, here, for the human and the AI alike — they share this function
- * precisely so the two sides cannot play by different rules.
+ * 🚨 **A FIGHTER MID-CAST CANNOT OPEN A SECOND CAST. IT MAY PRESS EVERYTHING ELSE.**
+ *
+ * ⚠️ **THIS PARAGRAPH IS REVERSED AND THE OLD WORDING IS KEPT, because it is the sentence
+ * `DECISIONS §78` overturned.** It read, verbatim:
+ *
+ *   > *"🚨 **A FIGHTER MID-CAST CANNOT PRESS ANYTHING.** Without that gate a caster could
+ *   > stack a second cast over the first (the second press would overwrite `cast` and the
+ *   > first weapon's cooldown would be spent on nothing) or interleave a cheap ranged shot
+ *   > into a window it has committed to standing still in. One `ActiveCast` per fighter,
+ *   > and the refusal is stated once, here, for the human and the AI alike — they share
+ *   > this function precisely so the two sides cannot play by different rules."*
+ *
+ * **Half of that survives and is now the whole rule: one `ActiveCast` per fighter.** The
+ * other half — "or interleave a cheap ranged shot" — was the *lockout*, and Uri's answer
+ * on 2026-08-18 is that **a wind-up costs POSITION, not SILENCE**: the root and the frozen
+ * aim stay (they are what make the telegraph tell the truth about where the effect lands,
+ * and the arm run to confirm the opposite story REFUTED it — removing the root costs its
+ * owner 6.6 pp), and the attack lockout goes. See the gate below for what that measured.
+ *
+ * The refusal is still stated once, here, for the human and the AI alike — they share this
+ * function precisely so the two sides cannot play by different rules.
  */
 export function attemptAttack(
   state: MatchState,
@@ -553,38 +568,55 @@ export function attemptAttack(
   if (!w) return false;
 
   const now = state.elapsed;
-  // The wind-up gate sits ABOVE the cooldown gate deliberately: a fighter mid-cast is not
-  // "on cooldown for this slot", it is busy for every slot, and asking the narrower
-  // question first would let a second weapon's ready cooldown answer the wider one.
+  const castMs = w.castMs ?? 0;
+
+  // ── 🚨 THE SECOND-CAST GATE. IT USED TO BE THE ATTACK LOCKOUT. ──────────────
   //
-  // ── 🚨 THIS ONE LINE IS 19.7 pp OF WATER BOTTLE, AND IT IS BUYING THE DODGE ──
+  // It still sits ABOVE the cooldown gate deliberately: "am I already committed to a
+  // wind-up" is a wider question than "is THIS slot ready", and asking the narrower one
+  // first would let a second weapon's ready cooldown answer the wider one. A press this
+  // line refuses consumes nothing — `lastUsed` is stamped below it — which is what stops a
+  // refused second press from laundering the first cast's cooldown.
   //
-  // Measured 2026-08-18 (`DECISIONS §77`, `roster_lab --seeds 32`, 3,520 paired matches,
-  // a detached worktree of `a06c0fd` with only this line relaxed to
-  // `attacker.cast !== null && (w.castMs ?? 0) > 0` — i.e. no SECOND cast, but the rest of
-  // the kit stays live through a wind-up):
+  // IT USED TO READ, and this is the term `DECISIONS §78` removed:
   //
-  //     waterbottle strength   9.8% -> 29.5%  (+19.7 smart2, +17.5 chase)
-  //     roster sd              13.6 -> 8.5 pp · range 53.9 -> 33.4 pp · settled 28 -> 22
+  //   > `if (attacker.cast !== null) return false;`
   //
-  // It is the single largest term in what a wind-up costs its owner — larger than the
-  // frozen aim (+8.8) and the movement root (-6.5, which HELPS when kept). **And it must
-  // not be relaxed**, because the same arm deletes the counterplay the feature exists for.
-  // Measured on the fixture, not argued: with the gate relaxed, Water Bottle fires
-  // `Spray, Glass, Cap, Spray, Cap` during its own 1100 ms Mega wind-up; Spray and Cap
-  // carry `slow` and Glass carries `stun`; a target that ran the entire window finishes
-  // **1.46 wu** from the caster against an 84 wu reach. `sim.test.mjs` §33(l)'s three dodge
-  // rows go red on that arm and they are correct to.
+  // ── WHY THE OLD LINE WAS THERE, AND WHAT OF IT SURVIVES ────────────────────
   //
-  // So the gate is load-bearing in the design sense and not only the mechanical one: it is
-  // what keeps *"Spray -> Mega is a two-press combo on one character"*
-  // (`rules.ts:Weapon.castMs`) a DECISION rather than an automatic execute. Relaxing it is
-  // a nerf to the telegraph disguised as a buff to the caster.
-  if (attacker.cast !== null) return false;
+  // Two refusals were bundled into one comparison:
+  //
+  //   1. **NO SECOND CAST.** A second press would overwrite `cast`, and the first weapon's
+  //      cooldown — already stamped — would be spent on a wind-up that never resolved.
+  //      **This half is kept**, and it is why the test is `&& castMs > 0` rather than a
+  //      deletion. It also refuses re-pressing the SAME ultimate mid-cast, which would be a
+  //      free reset of `resolvesAt` on a weapon whose whole cost is the wait.
+  //   2. **NO OTHER WEAPON EITHER** — the attack lockout. **This half is gone.**
+  //
+  // ── WHAT THE LOCKOUT COST, MEASURED BEFORE IT WAS REMOVED ──────────────────
+  //
+  // 2026-08-18 (`DECISIONS §78`), three single-variable ablations at `a06c0fd`,
+  // `Mega` held at 1100 throughout, `roster_lab --seeds 32` = 3,520 paired matches:
+  //
+  //     term removed      site                        waterbottle (smart2)
+  //     -- (shipped)      --                                9.8%
+  //     ATTACK LOCKOUT    this line                        29.5%   +19.7
+  //     FROZEN AIM        sim.ts:applyAim + ai.ts          10.5%    +0.6
+  //     MOVEMENT ROOT     state.ts:movementLocked           3.3%    -6.6
+  //
+  // The obvious story — "the cost is the root" — is FALSE: an unrooted caster walks off its
+  // own frozen bearing and misses. **The root and the frozen aim stay.** A super is a
+  // commitment of POSITION, not a period of SILENCE.
+  //
+  // ⚠️ **AND THE PRICE IS REAL AND IS NOT HIDDEN HERE.** The same arm that buys the
+  // +19.7 pp lets Water Bottle spend its own wind-up applying `slow` and `stun`, which is
+  // the counterplay the telegraph exists for. `sim.test.mjs` §33(p) measures exactly that
+  // — the dodge under a caster that is now shooting back — and is the row to read before
+  // anyone concludes this was free.
+  if (attacker.cast !== null && castMs > 0) return false;
   if (now - attacker.lastUsed[weaponIndex] < w.cooldown) return false;
   attacker.lastUsed[weaponIndex] = now;
 
-  const castMs = w.castMs ?? 0;
   if (castMs > 0) {
     attacker.cast = { weaponIndex, startedAt: now, resolvesAt: now + castMs };
     events.push({

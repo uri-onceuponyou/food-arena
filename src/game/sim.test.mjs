@@ -6868,6 +6868,27 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
     (e) => e.type === 'hit-landed' && e.source?.kind === 'weapon' && e.source.weaponKey === 'Mega',
   );
 
+  /**
+   * ── HOLD EVERY SLOT BUT THE WIND-UP SHUT, FOR THE ROWS THAT MEASURE THE WIND-UP ──
+   *
+   * Stamps `lastUsed` far into the future so `combat.ts`'s own cooldown gate refuses those
+   * slots — no new code path in the sim, and the refusal is the one that already exists.
+   *
+   * ⚠️ **THIS EXISTS BECAUSE `DECISIONS §78` DELETED THE SILENCE THAT USED TO BE FREE.**
+   * Before it, a fighter mid-cast could press nothing, so any fixture that opened a cast
+   * was isolating the wind-up whether it meant to or not. (d) and (n) meant to; §33(p)
+   * deliberately does not, and the two must not be confused.
+   *
+   * 🚨 IT IS NOT ALLOWED TO SILENCE THE CAST ITSELF. If `MEGA_I` were ever wrong this
+   * would shut the weapon under test and every row below would pass over nothing — the
+   * `[].every()` class with a different shape. Both callers assert a POSITIVE outcome from
+   * `Mega` in at least one arm (d's `fast` arm requires `dealt === MEGA.damage`, n's
+   * standing arm requires `dealt > 0`), so a fixture that silenced the cast goes red.
+   */
+  const silenceExceptCast = (fighter) => {
+    for (let i = 0; i < fighter.lastUsed.length; i++) if (i !== MEGA_I) fighter.lastUsed[i] = 1e9;
+  };
+
   // ── (a) THE VACUITY GUARD FOR EVERY ROW BELOW ─────────────────────────────
   //
   // 🚨 `[].every()` IS `true`. That exact vacuity fired three times in three files in one
@@ -7009,6 +7030,23 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
   // ⚠️ RESOLUTION FLOOR: the two arms sit ±104.55 ms either side of the boundary, which is
   // 6.3 ticks. **This row cannot resolve a `castMs` change smaller than one tick
   // (16.667 ms)**, and a pair moved inside that would be reporting noise.
+  //
+  // ── 🚨 THE CASTER IS NOW HELD SILENT, AND THAT IS A REVERSAL OF SOMETHING IMPLICIT ──
+  //
+  // Until `DECISIONS §78` this fixture's AI caster could not act during its own wind-up:
+  // `combat.ts:attemptAttack` refused EVERY press from a fighter mid-cast, so the silence
+  // that makes this row a measurement of the WIND-UP came free and nobody wrote it down.
+  // §78 dropped that lockout. Re-run unchanged, this row measured **18 damage at
+  // separation 20.36 wu** — the runner was slowed for 1100 of the 1100 ms and STUNNED for
+  // 1083 of them by `Spray, Glass, Cap, Spray, Cap`.
+  //
+  // That is a true fact about Water Bottle and it is NOT what (d) claims. (d) claims the
+  // WIND-UP is escapable and buys its way out of "the resolve is broken" by varying
+  // `castMs`; a row whose outcome also depends on the caster's other three weapons cannot
+  // carry either claim. So the isolation is now EXPLICIT — the caster's other slots are
+  // stamped out of cooldown range — instead of being a side effect of a rule that no
+  // longer exists. **§33(p) measures the un-isolated case and is where the price is
+  // pinned**; deleting either row would hide half of what §78 did.
   {
     const escapeBoundaryMs = (REACH.meleeHeavy / (speedFor('egg', PLAYER_SPEED) * 1000)) * 1000;
     const run = (castMs) => {
@@ -7022,6 +7060,7 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
       state.player.x = 2000; state.player.y = 2000;
       state.enemy.facing = { x: 1, y: 0 };
       state.player.hp = 1e9; state.player.maxHp = 1e9;
+      silenceExceptCast(state.enemy);
       const evs = [];
       attemptAttack(state, state.enemy, MEGA_I, evs);
       const away = { move: { x: 1, y: 0 }, selectedWeapon: 0, attack: false };
@@ -7826,6 +7865,12 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
   //
   // The target is the SLOWEST human (Egg/Soup, 105.60 wu/s), i.e. the roster's worst case
   // for escaping, so "it got away" is the hardest version of that claim.
+  //
+  // ⚠️ AND THE CASTER IS HELD SILENT HERE FOR THE REASON (d) STATES AT LENGTH: after
+  // `DECISIONS §78` a caster may press its other weapons, and with Water Bottle's full kit
+  // live this row read **18 damage at separation 20.36 wu**. The wind-up is not what
+  // changed — §33(p)'s `silent` arm reproduces 135.73 wu on the same tree — so isolating it
+  // here is restoring the row's own claim, not repairing a regression.
   {
     check('`waterbottle.Mega` carries a wind-up at all — (n) is not measuring a castless weapon',
       (MEGA.castMs ?? 0) > 0, `castMs ${MEGA.castMs}`);
@@ -7836,6 +7881,7 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
       state.player.x = 2000 + 20; state.player.y = 2000;
       state.enemy.facing = { x: 1, y: 0 };
       state.player.hp = 1e9; state.player.maxHp = 1e9;
+      silenceExceptCast(state.enemy);
       const evs = [];
       attemptAttack(state, state.enemy, MEGA_I, evs);
       const input = { move, selectedWeapon: 0, attack: false };
@@ -7919,6 +7965,201 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
       && roundUp50(windowMs(GIANT, slowestHuman) + REACTION_MS) > GIANT.cooldown / 2,
       `derived ${roundUp50(windowMs(GIANT, slowestHuman) + REACTION_MS)} ms against a `
       + `${GIANT.cooldown} ms cooldown; escape window ${windowMs(GIANT, slowestHuman).toFixed(2)} ms`);
+  }
+
+  // ── (p) A CAST COMMITS POSITION, NOT SILENCE — `DECISIONS §78` ────────────
+  //
+  // Uri, 2026-08-18: **keep the root, drop the attack lockout.** Three single-variable
+  // ablations at `a06c0fd` with `Mega` held at 1100, `roster_lab --seeds 32`:
+  //
+  //     term removed      site                        waterbottle (smart2)
+  //     -- (shipped)      --                                9.8%
+  //     ATTACK LOCKOUT    combat.ts:attemptAttack          29.5%   +19.7
+  //     FROZEN AIM        sim.ts:applyAim + ai.ts          10.5%    +0.6
+  //     MOVEMENT ROOT     state.ts:movementLocked           3.3%    -6.6
+  //
+  // The root and the frozen aim STAY — removing the root is measurably NEGATIVE, because an
+  // unrooted caster walks off its own frozen bearing and misses. Only the lockout goes.
+  //
+  // ── THIS SECTION IS IN TWO HALVES AND THE SECOND ONE IS THE UNCOMFORTABLE ONE ──
+  //
+  // The mechanism rows say what the change does. The PRICE rows say what it costs, because
+  // *"it got better"* is the easy half and `combat.ts` carried an explicit warning —
+  // *"the same arm deletes the counterplay the feature exists for"* — that a win-rate
+  // number cannot answer. It is measured here rather than argued, and the two CONTROLS are
+  // what turn it from a verdict into a diagnosis:
+  //
+  //     arm       what the caster may press          runner's separation at the resolve
+  //     silent    nothing but the wind-up            135.73 wu   ESCAPED
+  //     open      everything (SHIPPED after §78)      20.36 wu   HIT, slowed 1100/1100 ms,
+  //                                                              stunned 1083/1100 ms
+  //     nocast    everything, and NO wind-up at all     0.00 wu   caught outright
+  //
+  // 🚨 **`nocast` IS THE ONE THAT CHANGES THE READING.** A Water Bottle that never presses
+  // its ultimate closes the same runner to **0.00 wu** with the same three weapons. So the
+  // status lock belongs to the KIT, not to the telegraph — and a target facing a casting
+  // Water Bottle is measurably BETTER OFF (20.36 wu) than one facing a Water Bottle that
+  // simply chases, because the cast root is what stops it closing. The old §33(n) was never
+  // measuring "the wind-up is dodgeable"; it was measuring "the wind-up is dodgeable
+  // BECAUSE THE LOCKOUT SILENCED THE CASTER", which is a property of the lockout.
+  // (`tools/tmp/lk_dodge.mjs` is the same four arms outside the suite, with its own
+  // known-bads on the suppression.)
+  {
+    const WB = CHARACTERS.waterbottle.weapons;
+    // DERIVED, never typed: a castless slot on the caster, and a SINGLE-PROJECTILE one for
+    // the bearing row (Spray is a 3-pellet fan and its pellets do not share one heading).
+    const PLAIN_I = WB.findIndex((w, i) => i !== MEGA_I && (w.castMs ?? 0) === 0);
+    const BOLT_I = WB.findIndex((w, i) => i !== MEGA_I && (w.castMs ?? 0) === 0
+      && w.type === 'ranged' && (w.pellets ?? 1) === 1);
+    check('(p) has a castless slot on the caster to press mid-cast — the section is not vacuous',
+      PLAIN_I >= 0 && PLAIN_I !== MEGA_I && BOLT_I >= 0,
+      `plain slot ${PLAIN_I} (${WB[PLAIN_I]?.key}) · single-projectile slot ${BOLT_I} (${WB[BOLT_I]?.key})`);
+
+    const soloFixture = () => {
+      const state = playingMatch(castArena(), 'waterbottle', 'donut');
+      state.player.x = 2000; state.player.y = 2000;
+      state.enemy.x = 2000 + 20; state.enemy.y = 2000;
+      state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      state.player.facing = { x: 1, y: 0 };
+      return state;
+    };
+
+    // ── (p.1) THE MECHANISM ────────────────────────────────────────────────
+    {
+      const state = soloFixture();
+      const evs = [];
+      attemptAttack(state, state.player, MEGA_I, evs);
+      const opened = state.player.cast === null ? null : { ...state.player.cast };
+      check('PREMISE: the wind-up opened, so every row below is about a live cast',
+        opened !== null && opened.weaponIndex === MEGA_I, JSON.stringify(state.player.cast));
+
+      state.elapsed += 200;                       // mid-cast, well before `resolvesAt`
+      const midEvs = [];
+      const pressed = attemptAttack(state, state.player, PLAIN_I, midEvs);
+      check('a caster MAY press a castless weapon mid-cast — the attack lockout is gone',
+        pressed === true && midEvs.some((e) => e.type === 'weapon-fired' && e.weaponKey === WB[PLAIN_I].key),
+        `returned ${pressed}, fired [${midEvs.filter((e) => e.type === 'weapon-fired').map((e) => e.weaponKey).join(', ')}]`);
+      check('…and firing it does NOT cancel the wind-up, and does NOT move `resolvesAt`',
+        state.player.cast !== null
+        && state.player.cast.resolvesAt === opened.resolvesAt
+        && state.player.cast.startedAt === opened.startedAt
+        && state.player.cast.weaponIndex === opened.weaponIndex
+        && !midEvs.some((e) => e.type === 'cast-cancelled'),
+        `cast ${JSON.stringify(state.player.cast)} vs ${JSON.stringify(opened)}`);
+
+      // 🚨 THE HALF OF THE OLD GATE THAT IS KEPT. Re-pressing the SAME ultimate mid-cast
+      // would push `resolvesAt` forward for free on a weapon whose entire cost is the wait;
+      // a DIFFERENT cast weapon would overwrite `cast` and spend the first one's cooldown on
+      // nothing. One `ActiveCast` per fighter, still.
+      const spentAt = state.player.lastUsed[MEGA_I];
+      const second = attemptAttack(state, state.player, MEGA_I, midEvs);
+      check('KNOWN-BAD: the SAME ultimate pressed again mid-cast is REFUSED — no free reset',
+        second === false && state.player.cast !== null
+        && state.player.cast.resolvesAt === opened.resolvesAt,
+        `returned ${second}, resolvesAt ${state.player.cast?.resolvesAt} vs ${opened.resolvesAt}`);
+      check('…and the refusal consumes NOTHING — `lastUsed` is untouched, so it can neither refund nor re-charge the ultimate',
+        state.player.lastUsed[MEGA_I] === spentAt && spentAt > -Infinity,
+        `lastUsed ${state.player.lastUsed[MEGA_I]} vs ${spentAt}`);
+
+      // The resolve still arrives on schedule after all that.
+      let resolvedAt = null;
+      for (let i = 0; i < 400 && resolvedAt === null; i++) {
+        state.enemy.x = 2000 + 20; state.enemy.y = 2000;
+        const e = stepMatch(state, CAST_TICK, noInput);
+        if (e.some((ev) => ev.type === 'weapon-fired' && ev.weaponKey === 'Mega')) resolvedAt = state.elapsed;
+      }
+      check('…and the wind-up still resolves at `resolvesAt`, to the tick, after a mid-cast press',
+        resolvedAt !== null && resolvedAt >= opened.resolvesAt && resolvedAt < opened.resolvesAt + CAST_TICK,
+        `resolved at ${resolvedAt}, resolvesAt ${opened.resolvesAt}`);
+    }
+
+    // ── (p.2) A MID-CAST SHOT IS FIRED FROM THE FROZEN BEARING ─────────────
+    //
+    // The caster cannot re-aim (§33(f)), so the weapon it presses mid-cast flies along the
+    // bearing it committed to at the press. That is coherent — it is the same promise the
+    // telegraph makes — but it has to be SHOWN, because if it were false the telegraph
+    // would be a lie, and if it were shown only on a still target it would be a tautology.
+    // So the target is placed BEHIND the caster and the input aims AT it: a caster that
+    // could re-aim would fire backwards and hit.
+    {
+      const state = soloFixture();
+      state.enemy.x = 2000 - 60;                 // behind the caster, which faces +x
+      const aimBack = { move: { x: 0, y: 0 }, aim: { x: -1, y: 0 }, selectedWeapon: BOLT_I, attack: true };
+
+      const control = soloFixture();
+      control.enemy.x = 2000 - 60;
+      stepMatch(control, CAST_TICK, aimBack);
+      check('CONTROL: with no cast open, that same input turns the caster around and fires BACKWARDS',
+        control.player.facing.x < 0 && control.projectiles.length > 0 && control.projectiles[0].vx < 0,
+        `facing.x ${control.player.facing.x} · projectiles ${control.projectiles.length}`
+        + `${control.projectiles[0] ? ` vx ${control.projectiles[0].vx.toFixed(3)}` : ''}`);
+
+      attemptAttack(state, state.player, MEGA_I, []);
+      stepMatch(state, CAST_TICK, aimBack);
+      check('a weapon pressed MID-CAST flies along the FROZEN bearing, not the new aim',
+        state.player.facing.x === 1 && state.projectiles.length > 0 && state.projectiles[0].vx > 0,
+        `facing.x ${state.player.facing.x} · projectiles ${state.projectiles.length}`
+        + `${state.projectiles[0] ? ` vx ${state.projectiles[0].vx.toFixed(3)}` : ''}`);
+    }
+
+    // ── (p.3) THE PRICE, AND THE TWO CONTROLS THAT DIAGNOSE IT ─────────────
+    {
+      // §33(n)'s fixture exactly: the slowest human running directly away from a hand-opened
+      // `Mega`, with Water Bottle as the AI so its own driver decides what else to press.
+      const runAway = ({ silent, openCast }) => {
+        const state = playingMatch(castArena(), 'egg', 'waterbottle');
+        state.enemy.x = 2000; state.enemy.y = 2000;
+        state.player.x = 2000 + 20; state.player.y = 2000;
+        state.enemy.facing = { x: 1, y: 0 };
+        state.player.hp = 1e9; state.player.maxHp = 1e9;
+        state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+        if (silent) silenceExceptCast(state.enemy);
+        const evs = [];
+        if (openCast) attemptAttack(state, state.enemy, MEGA_I, evs);
+        else state.enemy.lastUsed[MEGA_I] = 1e9;   // and it may not open one later either
+        const input = { move: { x: 1, y: 0 }, selectedWeapon: 0, attack: false };
+        let dealt = 0;
+        const fired = [];
+        const tally = (list) => {
+          for (const e of megaHits(list)) dealt += e.amount;
+          for (const e of list) if (e.type === 'weapon-fired' && e.fighterId === state.enemy.id) fired.push(e.weaponKey);
+        };
+        tally(evs);
+        const budget = Math.ceil(MEGA.castMs / CAST_TICK);
+        for (let i = 0; i < budget && (openCast ? state.enemy.cast !== null : true); i++) tally(stepMatch(state, CAST_TICK, input));
+        tally(stepMatch(state, CAST_TICK, input));
+        return { dealt, fired, sep: Math.hypot(state.player.x - state.enemy.x, state.player.y - state.enemy.y) };
+      };
+
+      const silent = runAway({ silent: true, openCast: true });
+      const open = runAway({ silent: false, openCast: true });
+      const nocast = runAway({ silent: false, openCast: false });
+
+      check('NON-VACUOUS: with nothing held shut the caster really does spend its wind-up SHOOTING',
+        open.fired.filter((k) => k !== 'Mega').length > 0,
+        `fired [${open.fired.join(', ')}]`);
+      check('CONTROL: the wind-up ITSELF is untouched — a silenced caster still cannot land it on a runner',
+        silent.dealt === 0 && silent.sep > REACH.meleeHeavy,
+        `dealt ${silent.dealt} at separation ${silent.sep.toFixed(2)} vs reach ${REACH.meleeHeavy}`);
+      // ⚠️ THE PRICE, PINNED SO IT CANNOT BE FORGOTTEN. This row asserts the UNCOMFORTABLE
+      // direction on purpose: after §78 the runner does NOT get away, and a future change
+      // that made it get away again would be a real change to this feature and must show up
+      // here rather than pass silently.
+      check('⚠️ THE PRICE: with its full kit live the caster holds the runner inside reach and LANDS the ultimate',
+        open.dealt === MEGA.damage && open.sep < REACH.meleeHeavy,
+        `dealt ${open.dealt} at separation ${open.sep.toFixed(2)} vs reach ${REACH.meleeHeavy}`);
+      check('…but the CAST is not what does it: the same caster with NO wind-up at all catches the runner OUTRIGHT',
+        nocast.sep < open.sep,
+        `no-cast separation ${nocast.sep.toFixed(2)} vs casting ${open.sep.toFixed(2)} — the root is the runner's only friend here`);
+      // The middle option — "mid-cast presses, but only for weapons that carry no status
+      // effect" — is refuted by the ROSTER rather than by taste: every one of Water Bottle's
+      // castless weapons carries one, so that rule is the attack lockout under a new name
+      // for the only character in the game that has a wind-up.
+      check('a status-free carve-out would be the LOCKOUT again — every castless weapon this character owns carries an effect',
+        WB.every((w, i) => i === MEGA_I || (w.effect ?? 'none') !== 'none'),
+        WB.map((w, i) => `${w.key}:${i === MEGA_I ? 'CAST' : (w.effect ?? 'none')}`).join(' '));
+    }
   }
 }
 
