@@ -5377,3 +5377,59 @@ answer for `lollipop.Giant` exactly, which is what proves the diagnosis rather t
 side of every balance corpus here has no notion of a wind-up — it neither dodges one nor refuses to
 open one it cannot land. **Every cast win-rate in this file is therefore role-dependent**, and the
 asymmetry widens with each conversion. Fixing that is its own pass.
+
+---
+
+## 79. ✅ ANSWERED — the lock is a KIT property, so fix the kit. Not the cast system.
+
+**Uri, 2026-08-18**, after `§78`'s lockout removal was measured against his own acceptance bar.
+
+### What §78 bought, and what it spent
+
+Dropping the attack lockout gave Water Bottle **+19.7 pp** — and cost the dodge. Measured on one
+fixture by `tools/tmp/lk_dodge.mjs`:
+
+```
+arm      megaDmg  otherDmg  sep@resolve  slowed  fired during the wind-up
+lockout        0         0      135.73     0ms   []                            ESCAPED
+open          18        37       20.36  1100ms   [Spray Glass Cap Spray Cap]  ** HIT **
+nocast         0        37        0.00  1100ms   [Spray Glass Cap Spray Cap]   ESCAPED
+```
+
+The caster crowd-controls the runner for **the whole 1100 ms wind-up** and lands the ultimate.
+`§78` priced the lockout in **win rate** and never priced it in **counterplay** — and counterplay is
+the stated bar, Uri's own *"a telegraph you can dodge"*.
+
+### 🚨 The two escapes that are already closed, so nobody re-proposes them
+
+* **"Only non-status weapons may fire mid-cast" IS THE LOCKOUT AGAIN** for this character — **every
+  castless weapon Water Bottle owns carries an effect** (slow on Spray and Cap, stun on Glass).
+* **The cast is not what catches the runner.** The `nocast` arm holds it just as hard. **The lock is
+  a KIT property, not a cast property** — which is the whole basis of Uri's answer.
+
+### The answer
+
+**Fix the kit.** Water Bottle carries **slow on three of four weapons plus a stun**; that is what
+makes the telegraph theatre. `§77` authorises redesigning a super to retain sanity, and this is the
+same authority applied one level down: **trim the CC on the basic kit so a wind-up is survivable.**
+Keep the lockout gone; keep the +19.7 pp.
+
+⚠️ **And the constraint that makes this delicate rather than mechanical:** `§75` records that the
+status *chain* was already the thing making fights unplayable (Noodle **83.3%** locked, Cheese
+**76.9%**), and diminishing returns fixed the CHAIN. **It does not fix a SINGLE application**, which
+is all a 1100 ms wind-up needs — the first slow is full-length at 2500 ms and covers the whole cast
+by itself. **So this is not "apply DR harder". It is a kit-composition question**: how many CC
+weapons may one character hold?
+
+### What must be measured, not argued
+
+* **The dodge has to come back** — re-run `lk_dodge` and require the `open` arm to ESCAPE. That is
+  the acceptance test and it already exists.
+* **Do not pay for it in win rate without saying so.** Water Bottle sits **37 pp below the roster**
+  (`12bd5fa`) *before* any CC is removed. Report aggregate and **paired** separately; the aggregate
+  floor is ~9 pp and a paired per-matchup delta on identical seeds is EXACT.
+* ⚠️ **Do not re-tune the rest of the roster to compensate.** `§77`.
+* ⚠️ **Every cast number remains role-dependent**: `tools/tmp/scripted_player.mjs` contains the
+  string `cast` **zero times**, so the driver opposite every corpus never dodges a wind-up and never
+  declines to open one. **That should be fixed before these numbers are trusted hard** — it is its
+  own pass and it is now the highest-value instrument work outstanding.
