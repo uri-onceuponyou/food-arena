@@ -45,8 +45,43 @@
  * Separation and runner sensitivity is a SEPARATE question — see `dg_fix.mjs`.
  *
  *   node tools/tmp/dg_grid.mjs --selftest
- *   node tools/tmp/dg_grid.mjs --dir /private/tmp/fa-dg-a --ref a756cd0 --plan stun
- *   node tools/tmp/dg_grid.mjs --dir /private/tmp/fa-dg-a --cell 'STUN_DURATION_MS=700;waterbottle.Mega.range=70'
+ *   node tools/tmp/dg_grid.mjs --dir /private/tmp/fa-dg-a --ref a756cd0 --plan gate
+ *   node tools/tmp/dg_grid.mjs --dir /private/tmp/fa-dg-a --plan stun
+ *   node tools/tmp/dg_grid.mjs --dir /private/tmp/fa-dg-a --axis 'STUN_DURATION_MS=,900,700' --axis 'waterbottle.Mega.castMs=2400,3000'
+ *
+ * ── 🔴 WHAT THE SEARCH FOUND, 2026-08-18, baseline `a756cd0` (0 of 36) ───────
+ *
+ * **`STUN_DURATION_MS` IS A GATE AND THE OTHER LEVERS SIT BEHIND IT.** At the shipped
+ * 2000 ms stun the runner never leaves 20.36 wu, so the whole radius x slow plane is
+ * **35 of 35 cells at 0 of 36** — radius down to 34 (below `meleeQuick` 58), slow down to
+ * 0, i.e. the slow effect DELETED. The radius has to fall below **21** and the cone below
+ * **15 degrees** before ONE bearing opens. The gate itself opens between stun **805**
+ * (0 of 36) and **800** (6 of 36), and saturates at 23 of 36 — the radial bearings never
+ * open on the stun axis alone, because the surviving 2500 ms slow caps the clear at
+ * 71.84 wu against a reach of 84.
+ *
+ * **THE WIND-UP IS THE ONLY LEVER THAT REACHES 36 OF 36 WITHOUT A GLOBAL CONSTANT.**
+ * `§80` warns *"do not shorten the wind-up"*; the sweep says LENGTHEN it. At the shipped
+ * stun, `castMs` 2400 -> 17 of 36 and **3000 -> 36 of 36**, because escape means clearing
+ * the reach before resolve and the CC now expires first. `castMs` 600 is 0 of 36, so
+ * `§78`'s 1100 -> 600 is the wrong direction, confirmed at six stun levels.
+ *
+ * ⚠️ **AND THE SURFACE IS NOT MONOTONE IN THE STUN — A SHORTER STUN CAN BE WORSE.** At
+ * `castMs` 3000: stun **1800 -> 36 of 36** but stun **1600 -> 29**. At stun 900: slow
+ * **500 -> 17 of 36** but slow **400 -> 0**. Cross-verified on `dg_fix`'s independent
+ * implementation. This is `§75`'s cooldown sawtooth on the DURATION axis: shortening an
+ * effect moves WHEN the next application lands, and some phases are worse. **No tuning
+ * point here can be reasoned to; it has to be swept.**
+ *
+ * **DIMINISHING RETURNS IS PROVABLY INERT.** `STATUS_DR_WINDOW_MS` 0 (DR off) and 60000
+ * (DR maximally on) are BIT-IDENTICAL to shipped on every column. `§75`'s scales only ever
+ * shorten a REPEAT, and it is the FIRST application that covers the cast.
+ *
+ * **`§80`'s LEVER 2 IS HALF RIGHT.** *"Cooldown is not a dodgeability lever"* — CONFIRMED:
+ * `Mega.cooldown` 3500 -> 10000 and `Glass.cooldown` 1100 -> 5000 both leave coverage
+ * EXACTLY unchanged, at 0 of 36 and (non-vacuously) at 21 of 36. *"It buys back POWER"* —
+ * REFUTED by `roster_lab --seeds 32`: `Mega.damage` 18 -> 34 (+89%) moves Water Bottle's
+ * paired player-seat rate by **+0.3 pp**, and a longer cooldown COSTS 0.6 pp.
  */
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
