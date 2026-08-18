@@ -4215,6 +4215,119 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     // is a REPORT, and the honest answer may be that it needs a different super rather than
     // a smaller kit."* At 26.6% it is already the roster's weakest; −15.5 pp is the cheapest
     // counterplay this kit sells, and it is a redesign question, not a tuning one.
+    //
+    // ── 🚨 §80's THREE LEVERS WERE SWEPT AND PRICED 2026-08-18 AND NOTHING IS APPLIED.
+    //    THE DODGEABLE REGION IS **NOT EMPTY** — AND EVERY POINT IN IT COSTS THIS
+    //    CHARACTER 16–24 pp ON THE SEAT A HUMAN PLAYS. ─────────────────────────
+    //
+    // `DECISIONS §80`, Uri: *"You should be able to dodge a super. Now that the map is
+    // bigger, we can do a few things: 1. reduce the effect radius of the super. 2. increase
+    // the cooldown time, reduce the stun time."* Coverage is `kt_bearing`'s 36-bearing
+    // sweep on `lk_dodge`'s fixture (sep 20, slowest runner); the acceptance bar §80 states
+    // is that **`lk_dodge`'s `open` arm ESCAPES**, i.e. the RADIAL bearing, which §78
+    // measured as the most expensive one. Baseline reproduced at **0 of 36**.
+    //
+    // ── (1) LEVER 1 IS INERT ACROSS THE WHOLE STUN AXIS, NOT MERELY BEHIND THE SHIPPED
+    //        STUN — which is a wider claim than `eff6390`'s search made, and it is the
+    //        plane that search never swept (it moved radius only at stun 2000) ───
+    //
+    //     bearings escaping of 36        Mega.range  84    70    58    42
+    //     STUN_DURATION_MS 2000 (shipped)             -     -     -     -
+    //                      1600 / 1400 / 1100 / 900   -     -     -     -
+    //                       700                      17    17    17    17
+    //                       500                      19    19    19    32
+    //
+    // **Halving the radius changes NOTHING at six of the seven stun levels**, because the
+    // runner's separation at resolve (20.36 wu stunned, 39.37 at stun 700) is already below
+    // every radius worth shipping. Radius is not a dodge lever at any stun this roster can
+    // wear; it becomes one only at stun 500 AND range 42, which is half a body-check.
+    //
+    // ── (2) THE ARMS THAT DO REACH THE BAR, AND THE TWO FACTS THE SEARCH DID NOT MEASURE ──
+    //
+    // `DECISIONS §75(b)` — **ANSWERED and NOT YET APPLIED** — takes `PLAYER_SPEED` 0.12 →
+    // 0.09. A dodge that exists only at today's speed is a dodge that a decision already on
+    // the books silently deletes. And a telegraph answerable at 75–95% elapsed is `§77`'s
+    // *"a super nobody presses"*, which is why the reaction deadline is measured at all
+    // (`tools/tmp/dl_land.mjs`, new; 6/6, known-bad = the same stationary target outside the
+    // reach must NOT be hit, so the control cannot pass by measuring nothing).
+    //
+    //     arm                            0.12 shipped   0.09 §75(b)   radial reaction deadline
+    //     baseline                        0/36  HIT      —            never
+    //     drop Glass(stun)               23/36  HIT      —            never
+    //       + Mega.castMs 1500           36/36  ESC     23/36  HIT     142 ms   ( 9% of cast)
+    //       + Mega.castMs 1800           36/36  ESC     26/36  ESC     440 ms   (24%)
+    //     Mega.castMs 3000  (the search) 36/36  ESC     23/36  HIT    2239 ms   (75%)
+    //     Mega.castMs 3400                —           36/36  ESC       —        (97% of cooldown)
+    //     STUN 400 + SLOW 400 (global)   36/36  ESC     23/36  HIT     480 ms   (44%)
+    //
+    // 🔴 **`eff6390`'s recommended point, `Mega.castMs 3000`, FAILS §80's own acceptance
+    // test under §75(b)** — the radial bearing goes back to HIT — **and at 0.12 it is
+    // already a dead button**: the target may ignore the telegraph until 2239 ms of 3000
+    // (75%) radially and 2757–2840 ms (92–95%) at every other bearing and still get away.
+    // Making the full kit robust needs `castMs` **3400 = 97% of its own cooldown**, and
+    // `§77` flagged lollipop's 59% as a problem. **The only arm that clears the bar at BOTH
+    // speeds is the kit trim at `castMs` 1800** — and it is the most expensive arm measured.
+    //
+    // ── (3) THE PRICE. `roster_lab --seeds 32`, 3,520 paired matches per policy, driver
+    //        rev 5 (`c441ac2`), `smart2`. Base wb 26.6% aggregate / 32.2% player seat ───
+    //
+    // ⚠️ **AGGREGATE AND PLAYER SEAT MOVE DIFFERENT AMOUNTS AND THE AGGREGATE IS THE
+    // FLATTERING ONE** — `roster_lab`'s strength averages both seats, and this character's
+    // ENEMY seat RISES in every arm below (79.1% → 84.7–95.3%). A human only ever plays the
+    // player seat.
+    //
+    //     arm                       wb agg    Δagg   wb seat   Δseat   range    non-wb moved
+    //     drop Glass(stun)           11.1%   -15.5     17.5%   -14.7   52.7 pp     0 of 90
+    //       + Mega.castMs 1500       12.7%   -13.9     15.9%   -16.3   51.2 pp     0 of 90
+    //       + Mega.castMs 1800        8.9%   -17.7      8.1%   -24.1   55.0 pp     0 of 90
+    //     Mega.castMs 3000           13.1%   -13.4     10.9%   -21.3   50.8 pp     0 of 90
+    //     STUN 400 + SLOW 400        11.4%   -15.2     15.6%   -16.6   68.3 pp    77 of 90
+    //
+    // The per-weapon arms are **CONFINED** — 0 of 90 matchups not involving this character
+    // move, `§77`'s property, and that includes the kit arms, which the search priced only
+    // for the `castMs` ones. The global arm is not: it moves 77 of 90 and takes **three
+    // other characters past the ~9 pp aggregate floor** (hamburger −21.1, donut +23.4,
+    // egg +9.2). ⚠️ `drop Glass(stun)` reproduces §79's rev-4 −15.5 pp **to the digit under
+    // rev 5**, so that one figure was not role-dependent after all — but `castMs` 1800 on
+    // top of it costs a further −9.4 on the seat while the aggregate says −2.2, so §79's
+    // *"the lengthening is FREE in win rate"* is true at 1400 and false by 1800.
+    //
+    // ── (4) THE CONTROL: EVERY ARM STILL LANDS ON A TARGET THAT DOES NOT RUN ────
+    //
+    // 18 of 18 damage on all five arms, at every starting separation from 5 to 80 wu. So
+    // none of these is refused for being a whiffing button; they are refused on price.
+    // ⚠️ Separately, and pre-existing on the SHIPPED tree: at separation **exactly 0** the
+    // slam deals 0 — degenerate cone geometry in `deliverWeapon`, unchanged by every arm
+    // here, measure-zero, and not this file's to fix.
+    //
+    // ── (5) WHY NOTHING IS APPLIED, AND WHAT WOULD CHANGE THE ANSWER ────────────
+    //
+    //   * Every point that meets the bar puts the roster's already-weakest character at
+    //     **8–16% on the player seat** and widens the roster range from 37.0 pp to 51–68.
+    //     `§79` refused at −15.5 (`f3bdeaf`); every arm here is at least that expensive.
+    //   * **`§80`'s lever 2 cannot pay it back.** Cooldown: `eff6390` measured `Mega.damage`
+    //     18 → 34 (+89%) buying **+0.3 pp** and a longer cooldown COSTING 0.6. And damage is
+    //     not even confined: `sim.test.mjs` §19(b) caps the roster's undodgeable slam at
+    //     `dodgeableMax`, whose **unique argmax is this weapon at 18** — `lollipop.Giant`
+    //     sits exactly on it, so raising `Mega.damage` hands Giant headroom and LOWERING it
+    //     turns §19(b) red. Lever 2 is confined only while it does nothing.
+    //   * 🚨 **And §19(b)'s justification is falsified by §80's own baseline**: it caps the
+    //     undodgeable slam at *"the biggest **DODGEABLE** hit in the roster"* — and that hit
+    //     is `Mega`, measured **undodgeable at 0 of 36 bearings**. The anchor of the
+    //     undodgeable ceiling is itself undodgeable. Nothing is red today; the reasoning is.
+    //   * The `sim.test.mjs` reversals §80 asks for are CONTINGENT on a behavioural change
+    //     and are correctly NOT made: §33(p.3)'s *"⚠️ THE PRICE"* row asserts `open.dealt
+    //     === MEGA.damage`, which remains TRUE while nothing lands. Measured red-row counts
+    //     if one ever does: `castMs 3000` reds **4**, `drop Glass + castMs 1800` reds **7**
+    //     (§17(d)'s roster CC census and §33(p.3)'s status-free-carve-out row are the two
+    //     the kit route adds, and both are genuine reversals, not breakage).
+    //
+    // **What would change the answer is a mechanism, not a constant.** Every zero in (1) is
+    // the same fact — *the target is crowd-controlled while somebody is casting* — and every
+    // constant that fixes it also removes that CC from normal play, which is where the
+    // 16–24 pp lives. A rule that suppresses CC only on a fighter inside a cast's threat
+    // window buys the dodge without touching the kit anywhere else; that is `combat.ts`, and
+    // it is a design question for Uri rather than a tuning point.
     weapons: [
       // Water Bottle is the only four-weapon fighter with three ranged slots, so
       // Spray and Glass each drop a rung to keep all four reaches distinct.
