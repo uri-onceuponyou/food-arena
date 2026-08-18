@@ -5234,3 +5234,64 @@ and export/import of an override set (so a good set can be committed, shared, an
 measurement*).
 
 **Not started. No agent dispatched. Nothing in `src/` touched.**
+
+---
+
+## 77. ✅ STANDING AUTHORISATION — build the mechanics, and a SUPER may be redesigned to keep it sane
+
+**Uri, 2026-08-18:**
+
+  > *"We have time until we launch the game, so we can build anything we need. If something is
+  > excessive and ruins the gameplay or makes someone unbeatable, we can consider changing some
+  > supers in order to retain sanity. In the meantime, keep building. We have time."*
+
+**This is the permission that was missing, and it retroactively changes two decisions.**
+
+`§74` chose BUILD over reword for the 20-of-34 false weapon cards. The build then stalled at
+**1 of 6** ultimates, and *both* stalls were of the form *"the number says no"*:
+
+| | why it stalled | what §77 changes |
+|---|---|---|
+| `soup.Dump` | wind-up took Soup **50.3% → 0.6%** over 3,520 paired matches; **reverted** | 0.6% is a reason to **redesign Dump**, not to abandon the wind-up |
+| `lollipop.Giant` | derived wind-up **4100 ms = 59% of its own 7000 ms cooldown**; below ~3.3 s nobody escapes a 400 wu disc | the **ability** can change — a 400 wu disc is a choice, not a constraint |
+
+⚠️ **What it does NOT authorise, and the distinction is the whole point:**
+
+* **It is not permission to re-tune the roster.** Range is **9.8 pp** and was earned. If a redesign
+  moves a character out of band, that is still a finding to report, not a licence to adjust five
+  other characters until the aggregate looks calm. 🚨 **Remember what the Soup measurement proved:
+  the aggregate moved −3.2 pp — INSIDE its own ~9 pp floor — while a character left the game.**
+  An aggregate that looks fine is not evidence.
+* **It is not permission to weaken a super until it is safe.** *"Retain sanity"* is Uri's phrase for
+  *unbeatable*, not for *strong*. A super that is scary and dodgeable is the target; a super nobody
+  presses is the same failure as one nobody survives, and it is quieter.
+* **The sim still contains ZERO randomness**, and that underwrites every balance number in the
+  project. **Region membership is the only safe form of variability** — it is how concealment
+  shipped. No rolls, no jitter, no `Math.random`.
+
+### The real blocker is one line, and it is not a balance question
+
+`ai.ts:dangerSteer` opens `if (w.type !== 'melee') continue;` — **deliberately**, with a comment
+saying so. So a ranged wind-up is a telegraph **no bot can ever react to**, which fails Uri's
+*"a telegraph you can dodge"* from the other side. That single refusal blocks **three** of the five
+(`taco.Double`, `burrito.Swarm`, `sushi.Catch`).
+
+⚠️ **And the comment's stated reason is HALF WRONG, which changes the fix.** Measured: for a
+**homing** weapon the threatened set really *is* a disc (`range + hitRadius` = 165.20 wu, and the
+measured 1523.39 ms is 165.20/105.60 to three figures). For a **non-homing fan** it is not —
+`taco.Double`'s 823.39 ms is the ±10° fan walking off, against the 1450.76 ms a disc would predict.
+**So lifting the block needs per-shape threat geometry (disc / fan / cone), not one formula.**
+
+### Already paid for, and currently dormant
+
+`a0370a0` shipped **five telegraphs, drawn and measured**, for exactly these weapons — and every
+one is unreachable today because `spawnCastTelegraph` returns immediately without a `castMs`.
+**The drawn half is done; only the sim half is missing.**
+
+### Still out of reach after wind-ups, and worth saying plainly
+
+Some promises are not wind-ups at all and need their own mechanics: sushi's *"lures every enemy
+toward it"* is **forced movement**; burrito's *"the flying toppings can be destroyed"* is
+**projectile destructibility**; *"the seaweed scatters across the map"* is a **map-wide effect**.
+**"Build the mechanics" is three or four projects, not one**, and this entry authorises all of
+them — but they should be sequenced, not attempted together.
