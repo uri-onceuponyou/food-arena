@@ -5433,3 +5433,64 @@ weapons may one character hold?
   string `cast` **zero times**, so the driver opposite every corpus never dodges a wind-up and never
   declines to open one. **That should be fixed before these numbers are trusted hard** — it is its
   own pass and it is now the highest-value instrument work outstanding.
+
+---
+
+## 80. ✅ ANSWERED — a super MUST be dodgeable. Three levers, and they do two different jobs.
+
+**Uri, 2026-08-18**, after `§79`'s kit trim was measured and refused:
+
+  > *"You should be able to dodge a super. Now that the map is bigger, we can do a few things:
+  > 1. reduce the effect radius of the super. 2. increase the cooldown time, reduce the stun time."*
+
+**This settles the question `§79` could not**: a super is something you **dodge**, not something you
+set up. The cards may keep saying so.
+
+### 🚨 The levers split into two jobs and must not be tuned as one knob
+
+| lever | what it actually buys |
+|---|---|
+| **1. smaller effect radius** | **DODGEABILITY** — less ground to clear before resolve |
+| **3. shorter stun** | **DODGEABILITY** — the target has to be able to *move* during the wind-up |
+| **2. longer cooldown** | **NOT dodgeability. It buys back POWER** — a rarer super may be a stronger one |
+
+So 1 and 3 are the fix; 2 is the compensation that stops the fix ending the character. `§79`
+measured that removing the stun outright costs Water Bottle **26.6% → 12.8%** on the roster's
+already-weakest character — lever 2 exists to pay that back **without** re-tuning anyone else.
+
+### The arithmetic the search has to satisfy
+
+* `STUN_DURATION_MS` **2000** and `SLOW_DURATION_MS` **2500** both exceed an 1100 ms wind-up, so
+  **one application covers the entire cast.** That is why `§79` found **9 of 11 characters** would
+  lock a wind-up, **four of them holding a single slow weapon**, and why dropping two of Water
+  Bottle's three CC weapons moved the escape by **0.00 wu**.
+* Unslowed, the runner clears `REACH.meleeHeavy` 84 in **795.45 ms**. Slowed at
+  `SLOW_MOVE_MULTIPLIER` 0.45 it needs **~1347 ms**.
+* 🔴 **So the target is: the CC must EXPIRE, or the radius must SHRINK, before the cast resolves.**
+  Both levers are the same inequality from opposite ends.
+
+⚠️ **And `§79`'s constructive finding inverts the obvious instinct: a LONGER wind-up is MORE
+dodgeable**, because escape means clearing the reach *before* resolve. `§78`'s `1100 → 600` was
+derived with the stun live, **where no cast length works at all** — 1400 / 1800 / 2200 all HIT at
+0 of 36 bearings. **Do not shorten the wind-up to help the dodge. It does the opposite.**
+
+### What "dodgeable" means, measured
+
+`tools/tmp/lk_dodge.mjs`'s `open` arm must **ESCAPE**, and `tools/tmp/kt_bearing.mjs` sweeps **36
+bearings** — ⚠️ **`lk_dodge` alone drives bearing 0 only**, which is how "undodgeable at every
+bearing" went unnoticed. Baseline today is **0 of 36**. State the bearing coverage, not a verdict.
+
+### Constraints on the search
+
+* ⚠️ `STUN_DURATION_MS` and `SLOW_DURATION_MS` are **GLOBAL — 11 characters**. Moving them is a
+  systemic design change Uri is authorising here, and it is **not** the roster re-tuning `§77`
+  forbids. But it must be **priced across the whole roster**, not just on Water Bottle.
+* ⚠️ **Re-measure with the NEW driver.** `c441ac2` taught `scripted_player.mjs` to dodge a wind-up
+  and to refuse one it cannot land (rev 4 → 5), and it immediately re-priced `§78` from **+19.7 pp
+  to +17.4**. **Every cast number recorded before it is role-dependent**, including `§79`'s 12.8%.
+* ⚠️ **`§75` is still live and interacts.** Diminishing returns already shortens *repeat* CC
+  (`[1, 0.5, 0.25, 0]`); shortening the base duration compounds with it. Check the combination, and
+  remember DR does nothing for the **first** application, which is the one that matters here.
+* 🔴 **`src/game/sim.test.mjs` §33(p.3) — the "⚠️ THE PRICE" row — asserts `open.dealt ===
+  MEGA.damage`, the exact logical NEGATION of the acceptance test above.** Its own comment
+  anticipates the reversal. **It must be reversed with its old wording kept**, per house style.
