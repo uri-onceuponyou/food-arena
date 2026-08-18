@@ -10,6 +10,15 @@
  * documented **361** does not move. Adding a row there means editing `menu_accept.mjs`
  * and `docs/TOOLS.md`'s gate table, neither of which is in this agent's owned file set.
  *
+ * ⚠️ **SUPERSEDED 2026-08-18 — the paragraph above is kept because its OBSERVATION was
+ * right and is what got this fixed.** `menu_accept`'s screen list is no longer typed: it
+ * is DERIVED from the router (`tools/tmp/mc_routes.mjs`), so `lobby` and `admin` are both
+ * in it, and in `menu_accept_portrait` too. `admin` is iterated there with one measured
+ * exemption (the simulated notch cannot reach a screen that pads with raw `env()`), so
+ * the sentence "a new screen does not join that gate by existing" no longer holds.
+ * **This file is still the right gate for everything below** — none of it is expressible
+ * as a menu-layout assertion.
+ *
  * It would also be the wrong gate. `menu_accept` asserts a hero fills its panel, a WebGL
  * portrait is in frame, and the game's own safe-area contract — assertions about a GAME
  * screen. This one is a data table that is explicitly not the game, so it is measured on

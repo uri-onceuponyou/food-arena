@@ -11,6 +11,13 @@
  * battery is a screen nothing checks — so until `lobby` is routed into those lists, this
  * is the battery, and it deliberately measures the things those two structurally cannot:
  *
+ * ⚠️ **SUPERSEDED 2026-08-18, and only the first clause — kept because the observation is
+ * what got this fixed.** Both batteries now DERIVE their screen list from the router
+ * (`tools/tmp/mc_routes.mjs`), so `lobby` is in both and passes every row of each. The
+ * rest of this header is unchanged and still load-bearing: the `button:not([disabled])`
+ * census below still gives the disabled join controls ZERO coverage in either battery,
+ * which is why §L4 exists.
+ *
  *   🚨 `menu_accept_portrait.mjs:416` selects `button:not([disabled])`. **Every disabled
  *   join control on the lobby would therefore get ZERO coverage from its 219 assertions**,
  *   and would be measured for the first time on the day the transport enables them. §L4

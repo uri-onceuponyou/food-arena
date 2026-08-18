@@ -35,6 +35,16 @@
  *     Every box is currently a strict loss (its best possible payout is below its own
  *     price, in all four), so no purchase control may be live — and the screen has to
  *     say so. Both halves are asserted, the same way the gem store's are.
+ *  9. THE SCREEN LIST IS DERIVED, AND THE SCREEN THAT MOUNTED IS THE ONE ASKED FOR.
+ *     ⚠️ **This file used to iterate a HARDCODED SIX**, and `lobby` (`2d4840e`) and
+ *     `admin` (`eb3e44d`) both shipped without joining it: **a screen does not join a
+ *     gate by existing.** The list now comes off the router — `tools/tmp/mc_routes.mjs`
+ *     parses `types.ts`'s `Route` union and reconciles it against `shell.ts:ROUTE_NAMES`
+ *     and `main.ts`'s `?screen=` ladder — so a new screen is IN unless someone writes
+ *     down why it is out. And because an unknown `?screen=` value silently lands on the
+ *     TITLE CARD rather than erroring, every navigation now asserts `window.__screen`
+ *     is the screen it requested. Without that, a route missing from `main.ts`'s ladder
+ *     produces a full green row measured on `opening`.
  *
  * Usage: node tools/tmp/menu_accept.mjs [--flow-only]
  *
@@ -72,6 +82,7 @@
 import { chromium } from 'playwright';
 import { readdir, readFile } from 'node:fs/promises';
 import { settleScreen } from './settle.mjs';
+import { routeChecks, selftest as routeSelftest, CONDITIONAL_SCREENS } from './mc_routes.mjs';
 
 /**
  * How long a screen is allowed to take to paint.
@@ -202,6 +213,84 @@ const SAFE = { t: 0, r: 44, b: 21, l: 44 };
 
 const MIN_TAP = 44;
 
+/**
+ * ── THE TAP FLOOR IS PER SCREEN NOW, AND ONLY ONE SCREEN MOVES IT ───────────
+ *
+ * 44 px is the TOUCH floor (WCAG 2.2 SC 2.5.5 *Target Size (Enhanced)*), and it is the
+ * right bar for every screen of a game that is played with a thumb.
+ *
+ * `admin` is the exception, and it is an exception by MEASUREMENT rather than by
+ * assertion. Measured on a snapshot (`tools/tmp/mc_smoke.mjs`, 2026-08-18), its eight
+ * controls are **31–38 px tall at 1280×800 and exactly 44.0 px at 390×844** — because
+ * `src/admin/styles.ts` carries one flat `@media (max-width: 760px)` that raises
+ * `.adm-btn`/`.adm-tab`/`.adm-input`/`.adm-search` to `min-height: 44px`. All five
+ * viewports in this file are ≥ 844 wide, so none of them meets that query; all three in
+ * `menu_accept_portrait.mjs` are ≤ 430, so all of them do.
+ *
+ * So the touch floor **is** asserted on this screen — at 44, in the portrait battery,
+ * where a thumb is what is holding it. `adminScreen.ts` states the decision the CSS
+ * encodes: *"it is a tuning tool, not a place the game is played… this is used on a
+ * laptop beside the game"*, and narrow *"gets every control to a 44 px tap target"*.
+ *
+ * ⚠️ **This is a LOWER floor, not a removed one, and lowering it needs a reason that is
+ * not "otherwise it goes red".** 24 px is WCAG 2.2 SC 2.5.8 *Target Size (Minimum)*, the
+ * published POINTER bar — a real standard, not a number chosen to fit today's rects. It
+ * is not vacuous: the smallest control on the screen is 31 px, so 7 px of shrink fails
+ * it. And every run prints how many controls sit below the GAME floor beside the
+ * verdict, so the cost of the exemption is visible in the log rather than implied by a
+ * missing row.
+ *
+ * 🔴 **Do NOT add a screen here to make it green.** The alternative on the table was to
+ * exclude `admin` from the battery entirely; that was refused because an unexamined
+ * exclusion is exactly the hole that let `lobby` and `admin` sit outside this gate for
+ * five days. A screen that fails at 44 because its controls are genuinely too small for
+ * a finger is a DEFECT and belongs in the report, not in this map.
+ */
+const TAP_FLOOR = { admin: 24 };
+
+/**
+ * ── THE SIMULATED NOTCH CANNOT REACH `admin`, SO ITS NOTCH ROW WOULD BE A FALSE FAILURE ──
+ *
+ * MEASURED FIRST, 2026-08-18, with `admin` under the full battery and no exemption at
+ * all: **482/487, and every one of the five failures was `admin+notch inside-safe-area`,
+ * one per landscape viewport, all reading `adm-tab[Combat…] L0`.** `L0` is the finding:
+ * with `--fa-safe-l: 44px` injected, the tab bar had not moved a pixel.
+ *
+ * The cause is one line of `src/admin/styles.ts`:
+ *
+ *     .adm { padding: env(safe-area-inset-top) env(safe-area-inset-right) … ; }
+ *
+ * against `src/ui/screens/theme.ts`, whose `--fa-safe-*` are declared on `:root`
+ * **precisely so a test can override them** — its own comment says so — and whose
+ * `.fa-screen` pads with `calc(var(--fa-safe-l) + var(--gutter))`. `.adm` reads the raw
+ * `env()` instead, and **`env(safe-area-inset-*)` is 0 in headless Chromium and cannot be
+ * set by any test.** So on a real notched device `.adm` insets correctly, and in this
+ * battery the injection is a no-op.
+ *
+ * 🚨 That makes the unexempted row a **FALSE FAILURE** — `docs/LESSONS.md` §10's
+ * direction, the one that sends someone hunting a layout bug that does not exist. It also
+ * would have made the repo's most-run gate permanently red for every peer, which is the
+ * documented reason `menu_accept_portrait` was made opt-in in the first place.
+ *
+ * ⚠️ **THE EXEMPTION IS NOT A FREE PASS — IT IS RE-EARNED ON EVERY RUN, AND IT
+ * SELF-DESTRUCTS.** A row that always passes is a comment with a tick next to it
+ * (`docs/AGENT-BRIEF.md` §4.4), so what is asserted in its place is the exemption's own
+ * PRECONDITION: that injecting `--fa-safe-*` provably does not move this screen. Every
+ * control's rect is hashed in the zero-inset pass and re-hashed in the notch pass, and
+ * they must be IDENTICAL. The implementation that fails it is the FIX: swap `env(...)`
+ * for `var(--fa-safe-*)` in `src/admin/styles.ts` and the hash moves, this row goes red,
+ * and its message says to delete the entry below and restore the assertion.
+ *
+ * ⚠️ `admin`'s ZERO-inset `inside-safe-area` row is untouched and still asserted — the
+ * exemption is one pass on one screen, not a screen-wide waiver.
+ *
+ * Remedy, one line, NOT in this agent's owned file set → reported for routing.
+ */
+const SAFE_AREA_EXEMPT = {
+  admin: 'src/admin/styles.ts pads with raw env(safe-area-inset-*), not var(--fa-safe-*), '
+    + 'and env() is 0 in headless Chromium — the injection cannot reach this screen',
+};
+
 const results = [];
 let failures = 0;
 
@@ -294,9 +383,14 @@ const MIN_CONTROLS = { opening: 1, default: 3 };
  */
 const MIN_HERO_HEIGHT_FRAC = 0.47;
 
-/** Every check that can run against a mounted menu screen. */
-async function auditScreen(page, vp, screen, { safe }) {
-  const data = await page.evaluate(({ MIN_TAP, safe }) => {
+/**
+ * Everything measured off rects, in one `page.evaluate`.
+ *
+ * Top-level and named — not an inline closure — so the POSITIVE and NEGATIVE controls in
+ * `safeAreaProbeFires()` can run the SAME code path they are validating. A control that
+ * exercises a copy of the logic validates the copy.
+ */
+function collectMenu({ MIN_TAP, TAP, safe }) {
     const de = document.documentElement;
     const vw = de.clientWidth;
     const vh = de.clientHeight;
@@ -310,23 +404,61 @@ async function auditScreen(page, vp, screen, { safe }) {
     const controls = [...document.querySelectorAll(
       '.fa-root button:not([disabled]), .fa-root .fa-menuitem:not([disabled])',
     )].filter(visible);
-    // Scroll viewports must themselves be inside the safe area.
-    const scrollers = [...document.querySelectorAll('.fa-root .fa-scroll')].filter(visible);
+    // 🚨 **A SCROLL REGION IS COMPUTED OVERFLOW, NOT A CLASS NAME — AND THIS USED TO
+    // TEST FOR THE CLASS.** The rule below was written correctly and implemented as
+    // `.closest('.fa-scroll')`, which is only the game screens' own scroller. `admin`'s
+    // tab bar is `.adm-tabs { overflow-x: auto }` (`src/admin/styles.ts`), so at 360–430
+    // px its 3rd–5th tabs are SCROLLED AWAY, exactly like a trophy-road node — and the
+    // class test reported all three as safe-area violations on the ZERO-inset pass,
+    // where there is no inset to violate. Measured: 6 such rows across the three
+    // portrait viewports, every one a FALSE FAILURE.
+    // ⚠️ Its two neighbours in the portrait battery (`layout-fits-viewport`,
+    // `nothing-clipped-by-frame`) already walked computed overflow and already passed on
+    // the same elements — so the three checks disagreed about what a scroller is, and the
+    // odd one out was this one. Same model everywhere now: `.fa-scroll` is a SPECIAL CASE
+    // of "an ancestor whose overflow is auto/scroll", not the definition.
+    const scrollAxes = (el) => {
+      let x = false; let y = false; let node = null;
+      for (let p = el.parentElement; p && p !== de; p = p.parentElement) {
+        const ps = getComputedStyle(p);
+        const sx = ps.overflowX === 'auto' || ps.overflowX === 'scroll';
+        const sy = ps.overflowY === 'auto' || ps.overflowY === 'scroll';
+        if ((sx || sy) && !node) node = p;
+        if (sx) x = true;
+        if (sy) y = true;
+      }
+      return { x, y, node };
+    };
+    // Scroll viewports must themselves be inside the safe area — the scrolled-away
+    // children are the scroller's business, the scroller is the layout's.
+    const scrollers = [...new Set([
+      ...document.querySelectorAll('.fa-root .fa-scroll'),
+      ...controls.map((el) => scrollAxes(el).node).filter(Boolean),
+    ])].filter(visible);
 
-    const small = controls
-      .map((el) => ({ el, r: el.getBoundingClientRect() }))
-      .filter(({ r }) => r.width < MIN_TAP - 0.5 || r.height < MIN_TAP - 0.5)
+    const rects = controls.map((el) => ({ el, r: el.getBoundingClientRect() }));
+    const small = rects
+      .filter(({ r }) => r.width < TAP - 0.5 || r.height < TAP - 0.5)
       .map(({ el, r }) => `${el.className.split(' ')[0]}[${el.textContent.trim().slice(0, 14)}] ${Math.round(r.width)}x${Math.round(r.height)}`);
+    // Always measured against the GAME's 44 px floor as well, whatever this screen's own
+    // floor is, so an exemption costs a printed number instead of a missing row.
+    const belowGame = rects
+      .filter(({ r }) => r.width < MIN_TAP - 0.5 || r.height < MIN_TAP - 0.5).length;
 
     // Elements inside a scrolling region are clipped by it, so their own rect can
     // legitimately sit outside the viewport. The thing that has to respect the safe
     // area is the SCROLLER, not its scrolled-away children.
+    //
+    // ⚠️ PER AXIS, deliberately. A horizontally scrolling tab bar does not license its
+    // children to sit under the status bar; it only excuses them on x. The old
+    // `.closest('.fa-scroll')` test excused BOTH axes wholesale, so it was simultaneously
+    // too narrow (missed `.adm-tabs`) and too wide (excused y for anything inside a
+    // horizontal scroller).
     const outside = controls
-      .filter((el) => !el.closest('.fa-scroll'))
-      .map((el) => ({ el, r: el.getBoundingClientRect() }))
-      .filter(({ r }) =>
-        r.left < safe.l - 1 || r.top < safe.t - 1 ||
-        r.right > vw - safe.r + 1 || r.bottom > vh - safe.b + 1)
+      .map((el) => ({ el, r: el.getBoundingClientRect(), ax: scrollAxes(el) }))
+      .filter(({ r, ax }) =>
+        (!ax.x && (r.left < safe.l - 1 || r.right > vw - safe.r + 1)) ||
+        (!ax.y && (r.top < safe.t - 1 || r.bottom > vh - safe.b + 1)))
       .map(({ el, r }) => `${el.className.split(' ')[0]}[${el.textContent.trim().slice(0, 14)}] L${Math.round(r.left)} T${Math.round(r.top)} R${Math.round(vw - r.right)} B${Math.round(vh - r.bottom)}`)
       .concat(scrollers
         .map((el) => ({ el, r: el.getBoundingClientRect() }))
@@ -335,24 +467,139 @@ async function auditScreen(page, vp, screen, { safe }) {
           r.right > vw - safe.r + 1 || r.bottom > vh - safe.b + 1)
         .map(({ el, r }) => `scroller.${el.className.split(' ').pop()} L${Math.round(r.left)} T${Math.round(r.top)} R${Math.round(vw - r.right)} B${Math.round(vh - r.bottom)}`));
 
+    // 🚨 NON-EMPTY BEFORE THE ASSERTION (CLAUDE.md #6). `outside` is a FILTERED set, and
+    // widening the scroller exclusion widens what can be filtered out of it — so a screen
+    // whose every control sits inside some scroller would report `0 violations` while
+    // having checked nothing, and `[].every()` is `true`. This is the count of elements
+    // the safe-area rule actually ran over, and the verdict requires it to be > 0.
+    const checked = controls.filter((el) => {
+      const ax = scrollAxes(el);
+      return !ax.x || !ax.y;
+    }).length + scrollers.length;
+
     return {
       scrollW: de.scrollWidth, clientW: vw,
       scrollH: de.scrollHeight, clientH: vh,
       controlCount: controls.length,
-      small, outside,
+      small, belowGame, outside, checked,
+      // A layout fingerprint over every control's rect. Used only by SAFE_AREA_EXEMPT,
+      // to prove the injected insets DID NOT MOVE an exempt screen — the precondition
+      // that earns the exemption, re-measured on every run.
+      sig: rects.reduce((h, { r }) => {
+        for (const v of [r.left, r.top, r.width, r.height]) {
+          h = (Math.imul(h ^ Math.round(v), 0x01000193) >>> 0);
+        }
+        return h;
+      }, 0x811c9dc5),
       hero: window.__charStage?.() ?? null,
     };
-  }, { MIN_TAP, safe });
+}
+
+/**
+ * ── POSITIVE **AND** NEGATIVE CONTROL FOR THE SAFE-AREA RULE ────────────────
+ *
+ * The scroller exclusion just went from a class name to computed overflow, i.e. it got
+ * WIDER — and a widened exclusion is how an assertion quietly stops asserting. Both
+ * directions therefore have to be proved on the live screen, with the real `collectMenu`:
+ *
+ *   MOVES  a plain in-flow button pinned into the inset band, with no scrolling
+ *          ancestor, must be REPORTED. An exclusion that swallowed everything fails here.
+ *   HOLDS  the same button inside an `overflow-x: auto` wrapper, pushed off to the right,
+ *          must NOT be reported — it is scrolled away, not clipped by the frame. A rule
+ *          that reports everything fails here, and that is the false failure this change
+ *          removed (6 of them on `admin`).
+ *
+ * ⚠️ The HOLDS arm is deliberately x-only: the wrapper scrolls horizontally, so its child
+ * is excused on x and still asserted on y. A both-axes waiver would pass this control and
+ * still be wrong.
+ *
+ * Runs once, on the first viewport, against whatever screen is mounted — it plants its own
+ * subject, so it does not depend on the screen having anything in particular.
+ */
+async function safeAreaProbeFires(page, vp) {
+  const SAFE_PROBE = { t: 60, r: 60, b: 60, l: 60 };
+  const plant = (mode) => page.evaluate((m) => {
+    document.querySelector('.qa-safe-probe')?.remove();
+    const frame = document.querySelector('.fa-root');
+    if (!frame) return;
+    const btn = document.createElement('button');
+    btn.className = 'qa-safe-probe';
+    btn.textContent = 'probe';
+    if (m === 'plain') {
+      // Top-left corner: inside a 60px inset band on both axes, no scrolling ancestor.
+      btn.style.cssText = 'position: absolute; left: 2px; top: 2px; width: 48px; height: 48px;';
+      frame.appendChild(btn);
+    } else {
+      const wrap = document.createElement('div');
+      wrap.className = 'qa-safe-probe';
+      wrap.style.cssText = 'position: absolute; left: 100px; top: 100px; width: 120px;'
+        + ' height: 60px; overflow-x: auto; overflow-y: hidden; white-space: nowrap;';
+      btn.className = 'qa-safe-probe-child';
+      btn.style.cssText = 'display: inline-block; margin-left: 4000px; width: 48px; height: 48px;';
+      wrap.appendChild(btn);
+      frame.appendChild(wrap);
+    }
+  }, mode);
+  const named = (d, cls) => d.outside.some((s) => s.startsWith(cls));
+
+  await plant('plain');
+  await page.waitForTimeout(60);
+  const seen = await page.evaluate(collectMenu, { MIN_TAP, TAP: MIN_TAP, safe: SAFE_PROBE });
+  record(vp.name, 'instrument', 'safe-area-rule-reports-a-planted-violation',
+    named(seen, 'qa-safe-probe['),
+    named(seen, 'qa-safe-probe[') ? 'planted a 48px button at 2,2 inside a 60px band — reported'
+      : `PLANTED VIOLATION NOT SEEN — the rule is blind (${seen.checked} checked)`);
+
+  await plant('scrolled');
+  await page.waitForTimeout(60);
+  const hid = await page.evaluate(collectMenu, { MIN_TAP, TAP: MIN_TAP, safe: SAFE_PROBE });
+  record(vp.name, 'instrument', 'safe-area-rule-excuses-a-scrolled-away-child',
+    !named(hid, 'qa-safe-probe-child'),
+    named(hid, 'qa-safe-probe-child')
+      ? 'a child scrolled 4000px inside an overflow-x:auto box was reported — the FALSE FAILURE is back'
+      : 'scrolled-away child not reported; its scroller still is');
+
+  await page.evaluate(() => document.querySelectorAll('.qa-safe-probe, .qa-safe-probe-child')
+    .forEach((n) => n.remove()));
+}
+
+/** Every check that can run against a mounted menu screen. */
+async function auditScreen(page, vp, screen, { safe, baseline = null }) {
+  // Per-screen tap floor — see TAP_FLOOR. `screen` can be `admin+notch`.
+  const base = screen.split('+')[0];
+  const floor = TAP_FLOOR[base] ?? MIN_TAP;
+  const data = await page.evaluate(collectMenu, { MIN_TAP, TAP: floor, safe });
 
   record(vp.name, screen, 'no-page-scroll',
     data.scrollW <= data.clientW + 1 && data.scrollH <= data.clientH + 1,
     `${data.scrollW}x${data.scrollH} vs ${data.clientW}x${data.clientH}`);
 
-  record(vp.name, screen, 'tap-targets>=44',
-    data.small.length === 0, data.small.slice(0, 4).join(' | '));
+  // The check NAME carries the floor, so a lowered floor is visible in the log rather
+  // than hidden behind a row that reads the same as everyone else's.
+  record(vp.name, screen, `tap-targets>=${floor}`,
+    data.small.length === 0,
+    `${data.belowGame}/${data.controlCount} below the ${MIN_TAP}px game floor`
+      + (data.small.length ? `; ${data.small.slice(0, 4).join(' | ')}` : ''));
 
-  record(vp.name, screen, 'inside-safe-area',
-    data.outside.length === 0, data.outside.slice(0, 4).join(' | '));
+  // The notch pass is the one with insets injected; the zero-inset pass is always
+  // asserted normally, on every screen, exemption or not.
+  const notchPass = safe.t + safe.r + safe.b + safe.l > 0;
+  const exemptWhy = SAFE_AREA_EXEMPT[base];
+  if (exemptWhy && notchPass) {
+    const unmoved = baseline !== null && data.sig === baseline;
+    record(vp.name, screen, 'safe-area-exemption-earned', unmoved,
+      baseline === null ? 'no zero-inset baseline was captured — cannot earn the exemption'
+        : unmoved
+          ? `layout bit-identical with --fa-safe-* injected (sig ${data.sig}) — ${exemptWhy}`
+          : `LAYOUT MOVED (sig ${baseline} -> ${data.sig}): "${base}" now honours --fa-safe-*, `
+            + `so the exemption is STALE — delete SAFE_AREA_EXEMPT['${base}'] and let `
+            + 'inside-safe-area assert it again');
+  } else {
+    record(vp.name, screen, 'inside-safe-area',
+      data.outside.length === 0 && data.checked > 0,
+      data.checked === 0 ? 'VACUOUS: every element was excluded, so nothing was checked'
+        : `${data.checked} elements checked${data.outside.length ? `; ${data.outside.slice(0, 4).join(' | ')}` : ''}`);
+  }
 
   const h = data.hero;
   if (h && h.feet) {
@@ -376,9 +623,10 @@ async function auditScreen(page, vp, screen, { safe }) {
     }
   }
 
-  const minControls = MIN_CONTROLS[screen.split('+')[0]] ?? MIN_CONTROLS.default;
+  const minControls = MIN_CONTROLS[base] ?? MIN_CONTROLS.default;
   record(vp.name, screen, 'controls-present', data.controlCount >= minControls,
     `${data.controlCount} controls (min ${minControls})`);
+  return data.sig;
 }
 
 /**
@@ -788,9 +1036,56 @@ async function auditSettings(browser) {
   await page.close();
 }
 
+/**
+ * Did `?screen=X` actually mount X?
+ *
+ * 🚨 **`bootRoute` DOES NOT ERROR ON AN UNKNOWN `?screen=` — IT RETURNS THE TITLE CARD.**
+ * So a route that is in `types.ts` and in `ROUTE_NAMES` but missing a branch in
+ * `main.ts`'s ladder mounts `opening`, sets `__previewReady`, and every assertion below
+ * runs green against the wrong screen under the right label. `main.ts`'s own comment
+ * names this trap — *"the trap that once made a capture labelled `home` photograph a
+ * different screen entirely."*
+ *
+ * It is also the honest failure for a CONDITIONAL screen. `admin` is reachable only
+ * where `src/admin/gate.ts` says so (`DEV || VITE_FA_ADMIN=1`); every snapshot this file
+ * is pointed at is a Vite **dev** server (`tools/snapshot.mjs` spawns `vite`), so admin
+ * unreachable here is a real defect — either the gate or the ladder — and this row says
+ * which build made it one instead of quietly measuring the title card.
+ *
+ * ⚠️ The audit still RUNS after a mismatch, deliberately: skipping would make the
+ * battery's total a function of which screens happened to mount, and a count that moves
+ * for a reason other than coverage is a count nobody can check. The row is red; the
+ * rows beside it are measurements of whatever did mount, and this one names it.
+ */
+async function assertRequestedScreen(page, vp, screen) {
+  const landed = await page.evaluate(() => window.__screen ?? '(none)');
+  const gate = CONDITIONAL_SCREENS[screen];
+  record(vp.name, screen, 'screen-is-the-one-requested', landed === screen,
+    landed === screen ? `?screen=${screen}` : `?screen=${screen} mounted "${landed}"`
+      + (gate ? ` — this screen is gated on ${gate}` : ''));
+  return landed === screen;
+}
+
 async function run() {
   const flowOnly = process.argv.includes('--flow-only');
   await lintCssLiterals();
+
+  // The screen list, derived from the router rather than typed. See mc_routes.mjs and
+  // header note 9 — a hardcoded six is how `lobby` and `admin` shipped outside this gate.
+  const { checks: routeRows, screens: SCREENS } = await routeChecks();
+  for (const r of routeRows) record('static', 'routes', r.check, r.ok, r.detail);
+
+  // ── The derivation's OWN known-bad battery, run inside the gate that depends on it ──
+  // `mc_routes.mjs` is not in `gatecount`'s registry (that file is another owner's), so
+  // without this its `--selftest` would only ever run when somebody remembered to type
+  // it — which is the exact failure mode that put `lobby` and `admin` outside this
+  // battery for five days. Each row drives a parser against a source carrying the defect
+  // it exists for, plus a REPAIRED control, so "the guard fired" is distinguished from
+  // "everything fired". ~0.2 s, no browser.
+  for (const r of await routeSelftest()) {
+    record('static', 'routes-selftest', r.name, r.ok, r.detail);
+  }
+
   const browser = await chromium.launch({ args: LAUNCH_ARGS });
 
   if (!flowOnly) {
@@ -800,7 +1095,8 @@ async function run() {
       page.on('pageerror', (e) => errs.push(String(e)));
       page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
 
-      for (const screen of ['opening', 'home', 'characters', 'trophies', 'shop', 'settings']) {
+      let probedSafeArea = false;
+      for (const screen of SCREENS) {
         // `hold` pins the title card open. Without it the screen navigates itself to
         // home after 4.5s and every measurement below races that timer — see the
         // comment on `holdMs()` in `opening.ts`. The auto-continue is asserted at its
@@ -808,6 +1104,7 @@ async function run() {
         const hold = screen === 'opening' ? '&hold=120000' : '';
         await page.goto(`${BASE}/?screen=${screen}${hold}`, { waitUntil: 'networkidle', timeout: 45000 });
         await page.waitForFunction('window.__previewReady === true', null, { timeout: 45000 });
+        await assertRequestedScreen(page, vp, screen);
         // NOT a 250ms sleep. Measured: `__previewReady` fires 0-26 ms into a 260 ms
         // entry animation, so the sleep expired somewhere between 10 ms BEFORE and
         // 16 ms after the animation ended — a coin flip, not a margin. Every rect
@@ -820,7 +1117,11 @@ async function run() {
           for (const k of ['t', 'r', 'b', 'l']) document.documentElement.style.removeProperty(`--fa-safe-${k}`);
         });
         await page.waitForTimeout(80);
-        await auditScreen(page, vp, screen, { safe: { t: 0, r: 0, b: 0, l: 0 } });
+        // Once per viewport: prove the safe-area rule can still both FIRE and HOLD.
+        if (!probedSafeArea) { probedSafeArea = true; await safeAreaProbeFires(page, vp); }
+        // The zero-inset layout fingerprint. Only SAFE_AREA_EXEMPT screens use it, and
+        // it is what makes their exemption a measurement instead of a waiver.
+        const zeroSig = await auditScreen(page, vp, screen, { safe: { t: 0, r: 0, b: 0, l: 0 } });
 
         // Pass 2: simulated notch. `--fa-safe-*` are declared on :root precisely so
         // this is testable without a device.
@@ -832,7 +1133,7 @@ async function run() {
           s.setProperty('--fa-safe-l', `${safe.l}px`);
         }, SAFE);
         await page.waitForTimeout(160);
-        await auditScreen(page, vp, `${screen}+notch`, { safe: SAFE });
+        await auditScreen(page, vp, `${screen}+notch`, { safe: SAFE, baseline: zeroSig });
       }
 
       record(vp.name, '-', 'no-console-errors', errs.length === 0, errs.slice(0, 3).join(' | '));
