@@ -195,6 +195,273 @@ const HAZARD_TANGENT = 0.6;
 const DANGER = { x: 0, y: 0 };
 const STEER = { dirX: 0, dirY: 0, navX: 0, navY: 0 };
 
+/** Degrees to radians. One statement, read by the fan geometry and by `PRESS_VALUE`. */
+const DEG2RAD = Math.PI / 180;
+
+/** The single on-axis ray a weapon that fans nothing puts metal along. Shared, never rebuilt. */
+const ON_AXIS: readonly number[] = [0];
+
+/**
+ * ── THE FAN, STATED ONCE: WHICH BEARINGS A PRESS PUTS METAL ALONG ───────────
+ *
+ * `combat.ts:deliverWeapon` spawns a combo part at its authored `angle` and pellet `i` of
+ * `n` at `(i - (n-1)/2) * spreadDeg`, both measured off the caster's `facing` at the
+ * instant the weapon goes off. That arithmetic already exists twice in the repo — there,
+ * and in `PRESS_VALUE`'s builder below, which turns each offset into `hitRadius / |sin θ|`,
+ * the separation at which that part stops landing. A THIRD copy inside the threat geometry
+ * is exactly the defect this file is named for, so both readers here take their angles from
+ * this one function, and `sim.test.mjs` §33(m) pins it against the bearings the REAL
+ * `combat.ts` spawns rather than against another copy of the formula.
+ *
+ * A weapon that fans nothing returns the single on-axis ray, which is the correct
+ * description of a lone projectile and of a melee swing alike.
+ */
+function fanOffsetsDeg(w: Weapon): readonly number[] {
+  if (w.comboParts) return w.comboParts.map((p) => p.angle);
+  const n = w.pellets ?? 1;
+  if (n <= 1) return ON_AXIS;
+  const spread = w.spreadDeg ?? 0;
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) out.push((i - (n - 1) / 2) * spread);
+  return out;
+}
+
+/**
+ * Precomputed at module load for the same reason `PRESS_VALUE` is: `dangerSteer` runs
+ * every tick of every match and this file allocates nothing in the steady state. Keyed on
+ * Weapon OBJECT IDENTITY, which is safe here and stated in `DECISIONS §75` — `CHARACTERS`
+ * is a module-level `Record`, so weapon records are process-wide singletons.
+ */
+const FAN_OFFSETS: ReadonlyMap<Weapon, readonly number[]> = (() => {
+  const m = new Map<Weapon, readonly number[]>();
+  for (const id of CHARACTER_IDS) for (const w of CHARACTERS[id].weapons) m.set(w, fanOffsetsDeg(w));
+  return m;
+})();
+
+/**
+ * Where `(x, y)` stands relative to the set of points an OPEN CAST can put damage on, and
+ * the cheapest way out of it.
+ *
+ * `margin` is a signed distance in world units: **negative inside** the threatened set and
+ * equal to how far the fighter must travel to leave it, **positive outside** and equal to
+ * the clearance it has. `outX/outY` is the unit direction along which `margin` grows
+ * fastest — the shortest way out, which is not always "straight away from the caster".
+ * `null` means this weapon threatens nothing at all.
+ *
+ * ⚠️ It returns a FRESH object rather than writing a module-level scratch the way `DANGER`
+ * and `STEER` do, and that is a deliberate departure from this file's no-allocation rule:
+ * it allocates only while a wind-up is actually open — at most one per living fighter per
+ * tick, for the ~1 s a cast lasts, and never in the steady state — and a shared mutable
+ * return is exactly the footgun that has cost this project a differ, an accessor and a
+ * getter. Correctness at the call site is worth more than an allocation nobody can measure.
+ *
+ * ⚠️ **THIS IS A PREDICTION, NOT A SECOND COPY OF THE RESOLUTION RULE.** The authoritative
+ * answer to "does this connect" lives in `combat.ts:deliverWeapon` and
+ * `sim.ts:stepProjectiles` and stays there. What this returns is a CONSERVATIVE BOUND on
+ * it — it may call a fighter threatened that would in fact have been missed; it must never
+ * call one safe that would have been hit. It is exported for the reason `pressValue` above
+ * it is exported: `sim.test.mjs` §33(m) checks this bound against the damage the REAL
+ * combat path delivers over a swept grid of bearings and separations, and a copy of the
+ * arithmetic in the test would only have tested the copy.
+ */
+export interface CastThreat {
+  /** Signed wu to the boundary of the threatened set. < 0 inside (= the escape distance). */
+  margin: number;
+  /** Unit direction in which `margin` grows fastest. */
+  outX: number;
+  outY: number;
+}
+
+/**
+ * ── ⚠️ THE OLD REFUSAL, KEPT VERBATIM, BECAUSE IT WAS RIGHT FOR MELEE ──────
+ *
+ * This function replaces a line that read `if (w === undefined || w.type !== 'melee')
+ * continue;`, under this reasoning:
+ *
+ *   > *"A melee weapon resolves on `range` alone from the caster's frozen position (there
+ *   > is no `hitRadius` term — that is projectiles), so the threatened set is a disc of
+ *   > `w.range` centred on the caster. A CONE weapon threatens only a wedge of that disc;
+ *   > fleeing the whole disc is conservative in the safe direction and needs no bearing.
+ *   > ⚠️ A RANGED cast would need a different answer entirely — a ranged `range` is how
+ *   > far the projectile TRAVELS, not an area around the caster, and reading it as a
+ *   > radius here would make an AI flee a circle that does not exist. There are no ranged
+ *   > casts today; this refuses them explicitly rather than by accident."*
+ *
+ * **The melee half of that is exactly right and is reproduced below unchanged.** The
+ * refusal was also right on the day it was written: a ranged cast read as a disc of
+ * `w.range` IS a circle that does not exist for a fan. What made it wrong to KEEP is that
+ * it made a ranged wind-up a telegraph no bot can ever react to, which fails Uri's
+ * *"a telegraph you can dodge"* from the other seat — `DECISIONS §77`.
+ *
+ * ⚠️ **AND ITS STATED REASON IS HALF WRONG, WHICH IS WHY THE FIX IS THREE SHAPES AND NOT
+ * ONE FORMULA.** Under AUTHORISED DEVIATION #12 `Projectile.traveled` is charged with the
+ * ground GAINED on the target, not with path length — so for a HOMING volley the circle is
+ * real: the shot dies once it has closed `range` of separation and connects inside
+ * `hitRadius`, which is a disc of `range + hitRadius` centred on the caster and carries no
+ * bearing at all. For a NON-HOMING fan it is not a disc: the pellets fly the frozen
+ * bearings `fanOffsetsDeg` returns and never turn, so the threatened set is the union of
+ * their `hitRadius` tubes — a wedge — and the cheapest exit from a wedge is SIDEWAYS, not
+ * outward. One disc law would make a bot flee 153 wu of open ground to dodge something a
+ * 43 wu sidestep clears, and would flee a fan aimed 90° away from it.
+ *
+ * ── WHY `hitRadius` IS THE VICTIM'S AND NOT A CONSTANT ────────────────────
+ *
+ * `sim.ts:stepProjectiles` reads `target.hitRadius` — a property of whoever is being shot
+ * at, not of the shooter and not of a seat. `PRESS_VALUE` above uses the constant
+ * `HIT_RADIUS_VS_PLAYER` because it ranks a press before a target is known; this is asked
+ * about ONE named fighter, so it takes that fighter's own number and cannot drift from the
+ * sim the way a seat-name branch did (`sim.ts:1184`).
+ *
+ * ── WHAT THIS DELIBERATELY OVER-APPROXIMATES, AND IN WHICH DIRECTION ──────
+ *
+ *   * **A cast hits ONE fighter — `nearestLivingOpponent` AT THE RESOLVE** — so at N>2
+ *     everyone else inside the set is fleeing a shot that was never theirs. That is
+ *     already true of the melee term and is left alone deliberately: predicting who will
+ *     be nearest 1.1 s from now is a second, quieter statement of the target rule, and at
+ *     N=2 — every corpus in this repo — the two answers are identical.
+ *   * **A melee `cone` is treated as the whole disc**, unchanged from the line above.
+ *   * **A fan is bounded at `range + hitRadius` along the beam**, which is the homing
+ *     bound; a straight pellet chasing a receding target drifts off its own axis and dies
+ *     sooner, so the real wedge is shorter. Over-approximating length is safe; the test
+ *     measures how much.
+ */
+export function castThreat(
+  caster: Fighter,
+  w: Weapon,
+  x: number,
+  y: number,
+  hitRadius: number,
+): CastThreat | null {
+  const range = w.range ?? 0;
+  if (range <= 0) return null;
+
+  const dx = x - caster.x;
+  const dy = y - caster.y;
+  const d = Math.hypot(dx, dy);
+  // Coincident with the caster: any direction is equally out. +x, matching the pot's own
+  // degeneracy answer in `dangerSteer` — and reachable (measured: 1,582 of 160,642 ticks
+  // across 110 real matches sit at separation exactly 0).
+  const ux = d > EPS ? dx / d : 1;
+  const uy = d > EPS ? dy / d : 0;
+
+  switch (w.type) {
+    // A heal targets its caster. There is nothing to stand outside of.
+    case 'self':
+      return null;
+
+    // UNCHANGED, ARITHMETIC AND ALL: `margin = d - radius`, radial exit. Every castless
+    // weapon and every melee cast therefore produce the identical steering they did
+    // before this function existed, which is the claim `csx_bitid` measures.
+    case 'melee':
+      return { margin: d - range, outX: ux, outY: uy };
+
+    case 'ranged': {
+      // The shot dies once it has GAINED `range` on its target (AUTHORISED DEVIATION #12)
+      // and connects inside `hitRadius`, so `range + hitRadius` is the separation past
+      // which it cannot arrive. For a homing volley that is the whole answer.
+      const reach = range + hitRadius;
+      const radial = d - reach;
+      if (w.homing) return { margin: radial, outX: ux, outY: uy };
+
+      // ── THE WEDGE ───────────────────────────────────────────────────────
+      //
+      // The beam axis is the caster's FROZEN facing — `sim.ts:applyAim` and this file's
+      // own facing block are the sim's only two writers of `facing` and both refuse while
+      // a cast runs, so the bearing at the press survives to the resolve by construction.
+      // A caster with no bearing cannot happen (`sim.ts:defaultFacing` never writes a zero
+      // one) but a zero axis would silently make every wedge point due east, which is how
+      // "a cornered AI fires due east" got into this project once already — so it falls
+      // back to the disc rather than to a direction it invented.
+      const am = Math.hypot(caster.facing.x, caster.facing.y);
+      if (am < EPS) return { margin: radial, outX: ux, outY: uy };
+      const fx = caster.facing.x / am;
+      const fy = caster.facing.y / am;
+      // Coordinates in the beam's frame: `along` down the axis, `perp` 90° to its left.
+      const along = dx * fx + dy * fy;
+      const perp = -dx * fy + dy * fx;
+
+      // How far this fighter would have to travel PERPENDICULAR to the beam — left
+      // (`needLeft`) or right (`needRight`) — before every pellet misses it. In pellet
+      // `j`'s own frame the fighter sits `a` down its ray and `s` to its left; the pellet
+      // misses once |s| >= hitRadius, and a step of Δ to the beam's left moves `s` by
+      // `Δ·cos θ`. The binding pellet is the one that needs the LARGEST step, which is why
+      // this is a max and not a min: leaving one tube by entering another is not an escape.
+      //
+      // 🚨 **A RAY IS NOT A LINE, AND THE FIRST DRAFT OF THIS FUNCTION USED THE LINE.**
+      // `|s|` is the distance to the pellet's INFINITE line, which is small directly BEHIND
+      // the caster as well as in front of it — so the wedge ran out of the muzzle in both
+      // directions and the model called a fighter standing 100 wu behind a Taco threatened
+      // by a fan pointing away from it. Caught by `tools/tmp/ub_threat.mjs`'s bearing sweep
+      // (over-reach 130.00 wu at β=180°, against a sim that hits nothing past 20 wu there),
+      // and it is exactly the class this project keeps paying for: an assertion I could not
+      // have talked myself out of, from a grid I did not choose to flatter the model.
+      // A pellet with `a < 0` has the fighter behind its muzzle and cannot reach it by
+      // flying forwards, so it constrains nothing.
+      //
+      // NEITHER TERM IS CLAMPED AT ZERO, deliberately — a negative `need` is the clearance
+      // an already-safe fighter has, and clamping it would report every fighter in the
+      // arena as sitting exactly on the boundary of every fan.
+      let needLeft = -Infinity;
+      let needRight = -Infinity;
+      let anyForward = false;
+      let lateral = true;
+      for (const deg of FAN_OFFSETS.get(w) ?? fanOffsetsDeg(w)) {
+        const r = deg * DEG2RAD;
+        const c = Math.cos(r);
+        const sn = Math.sin(r);
+        const a = along * c + perp * sn;
+        if (a < 0) continue;
+        // A part fanned 90° or more off the beam cannot be escaped by a lateral step —
+        // stepping left carries you ACROSS it. There is no such part in the roster today
+        // (the widest is Topping Swarm's ±82.5°, and it homes), and rather than invent a
+        // rule for one, the whole weapon falls back to the disc bound, which is the
+        // conservative direction.
+        if (c <= EPS) { lateral = false; break; }
+        anyForward = true;
+        const s = perp * c - along * sn;
+        const l = (hitRadius - s) / c;
+        const rr = (hitRadius + s) / c;
+        if (l > needLeft) needLeft = l;
+        if (rr > needRight) needRight = rr;
+      }
+      if (!lateral) return { margin: radial, outX: ux, outY: uy };
+      // EVERY pellet has already gone past this fighter, so the only thing that can still
+      // touch it is the muzzle itself: a projectile spawns AT the caster and the hit test
+      // runs from the first tick, so anything inside `hitRadius` of a firing caster is hit
+      // whatever the bearing. Measured: the sim lands Double Toss at 20 wu and β=180°.
+      // Straight out is the exit, and `d - hitRadius` is nearer than `d - reach`, so this
+      // is the larger margin and returning it is still "the cheapest way out".
+      if (!anyForward) return { margin: d - hitRadius, outX: ux, outY: uy };
+
+      // The cheaper of the two sideways exits, as a signed margin on the same scale as
+      // `radial`: leaving the wedge costs `need` wu, so the margin is `-need`.
+      //
+      // ⚠️ THE TIE GOES LEFT, AND IT IS A TIE OFTEN — a fighter standing exactly on the
+      // beam is equidistant from both edges, and that is the commonest case there is,
+      // because the caster was aiming AT it when it pressed. `dangerSteer`'s pot tiebreak
+      // resolves the same degeneracy with the fighter's own intent; this one cannot see
+      // it, and reaching for anything less deterministic than "left" is out of the
+      // question — **the sim contains zero randomness and that underwrites every balance
+      // number in the project** (`DECISIONS §77`). Fixed left is the honest answer: it is
+      // deterministic, it is symmetric between the two seats, and the fighter's own intent
+      // is still blended in one line later, which is what actually bends the dodge.
+      const left = needLeft <= needRight;
+      const sideways = left ? -needLeft : -needRight;
+      // Outrunning the beam and stepping out of it are two ways to be safe, so the fighter
+      // needs whichever is nearer — the LARGER signed margin. A fan is a wedge, so far
+      // enough down the axis the radial exit is the cheap one and this picks it up without
+      // a second branch.
+      if (radial >= sideways) return { margin: radial, outX: ux, outY: uy };
+      return { margin: sideways, outX: left ? -fy : fy, outY: left ? fx : -fx };
+    }
+  }
+  // `WeaponType` is a closed union, so a fourth weapon category cannot be added to
+  // `rules.ts` without `tsc` demanding an answer here — the same compiler-as-guard device
+  // `WeaponAllow` uses below, and for the same reason: three code reviews were not enough.
+  const exhaustive: never = w.type;
+  return exhaustive;
+}
+
 /**
  * Accumulate a steering vector AWAY from every damaging hazard and BACK INSIDE the
  * closing ring into `DANGER`, and return the worst ENCROACHMENT.
@@ -293,29 +560,28 @@ function dangerSteer(
   // way, and it would have measured as "the ultimate is fine" on every AI-vs-AI corpus in
   // the repo — which is every corpus in the repo.
   //
-  // ── THE GEOMETRY, AND WHY MELEE ONLY ─────────────────────────────────────
+  // ── THE GEOMETRY IS PER SHAPE, AND IT LIVES IN `castThreat` ──────────────
   //
-  // A melee weapon resolves on `range` alone from the caster's frozen position (there is
-  // no `hitRadius` term — that is projectiles), so the threatened set is a disc of
-  // `w.range` centred on the caster. A CONE weapon threatens only a wedge of that disc;
-  // fleeing the whole disc is conservative in the safe direction and needs no bearing.
-  // ⚠️ A RANGED cast would need a different answer entirely — a ranged `range` is how far
-  // the projectile TRAVELS, not an area around the caster, and reading it as a radius here
-  // would make an AI flee a circle that does not exist. There are no ranged casts today;
-  // this refuses them explicitly rather than by accident.
+  // WAS `if (w === undefined || w.type !== 'melee') continue;`, with a comment giving the
+  // reason. **That comment is kept verbatim on `castThreat`**, because it was a deliberate
+  // decision and it was right for melee — and because half of its stated reason turned out
+  // to be false, which is what decided the shape of the replacement. Read it there.
+  //
+  // What is left in this loop is the part that was never about shape: how far into the
+  // threatened set this fighter is, whether it can get out before `resolvesAt`, and how
+  // hard to push. All three are unchanged, arithmetic included, which is why every melee
+  // cast and every castless weapon steers bit-identically to before.
   for (const other of state.fighters) {
     if (other === self || !other.alive) continue;
     const cast = other.cast;
     if (cast === null) continue;
     const w = CHARACTERS[other.characterId].weapons[cast.weaponIndex];
-    if (w === undefined || w.type !== 'melee') continue;
-    const radius = w.range ?? 0;
-    if (radius <= 0) continue;
-
-    const dx = x - other.x;
-    const dy = y - other.y;
-    const d = Math.hypot(dx, dy);
-    const margin = d - radius; // > 0 = already outside the disc and safe
+    if (w === undefined) continue;
+    // `self.hitRadius`, not a constant: it is the VICTIM's number that `stepProjectiles`
+    // reads, and this is asked about one named fighter.
+    const threat = castThreat(other, w, x, y, self.hitRadius);
+    if (threat === null) continue;
+    const margin = threat.margin; // > 0 = already outside the threatened set and safe
     if (margin >= AI_HAZARD_MARGIN) continue;
 
     // ⚠️ **ONLY RUN FROM A TELEGRAPH YOU CAN ACTUALLY CLEAR.** Without this the AI flees
@@ -324,23 +590,24 @@ function dangerSteer(
     // of the way out is worth exactly zero, so a hopeless flee is strictly worse than
     // ignoring the cast. Same arithmetic as the caster's own "do not open what you cannot
     // land", pointed the other way, which is why they are stated in the same units.
+    //
+    // ⚠️ **AND IT IS THE ESCAPE DISTANCE FOR *THIS* SHAPE, NOT A RADIUS.** For a wedge
+    // that is a sideways step of tens of wu where the disc reading would have demanded
+    // hundreds — so a bot that would correctly refuse a hopeless disc now correctly
+    // ATTEMPTS a dodgeable fan. One quantity, three geometries, one test.
     const remainingMs = Math.max(0, cast.resolvesAt - state.elapsed);
     if (margin < 0 && -margin > ownSpeed * remainingMs) continue;
 
-    // Coincident with the caster: any direction is equally out. +x, matching the pot's
-    // own degeneracy answer above, and reachable here (measured: 1,582 of 160,642 ticks
-    // across 110 real matches sit at separation exactly 0).
-    const ux = d > EPS ? dx / d : 1;
-    const uy = d > EPS ? dy / d : 0;
     // Same normalisation every other hazard uses: 0 at the outer edge of the margin,
     // exactly 1 at the boundary, 2 one full margin inside it.
     const t = Math.min(2, (AI_HAZARD_MARGIN - margin) / AI_HAZARD_MARGIN);
-    // PURE RADIAL, with no tangential term. The pot gets `HAZARD_TANGENT` because it is a
-    // fixed obstacle the fighter wants to get PAST; a cast disc is transient and there is
-    // nothing on the far side of it to reach. Straight out is the shortest path to the
-    // only thing that matters, which is `d > radius` before `resolvesAt`.
-    DANGER.x += ux * t * AI_HAZARD_WEIGHT;
-    DANGER.y += uy * t * AI_HAZARD_WEIGHT;
+    // PURE ESCAPE, with no tangential term. WAS "PURE RADIAL", and the argument is
+    // unchanged: the pot gets `HAZARD_TANGENT` because it is a fixed obstacle the fighter
+    // wants to get PAST; a cast is transient and there is nothing on the far side of it to
+    // reach. The shortest path out is the only thing that matters — `castThreat` now says
+    // which way that is, and for a wedge it is across the beam rather than away from it.
+    DANGER.x += threat.outX * t * AI_HAZARD_WEIGHT;
+    DANGER.y += threat.outY * t * AI_HAZARD_WEIGHT;
     if (t > worst) worst = t;
   }
 
@@ -520,7 +787,9 @@ interface PressProfile {
 }
 
 const PRESS_VALUE: ReadonlyMap<Weapon, PressProfile> = (() => {
-  const DEG2RAD = Math.PI / 180;
+  // WAS a local `const DEG2RAD = Math.PI / 180;`. Hoisted to module scope when the threat
+  // geometry became a second reader of the same conversion — one statement, same value, so
+  // every cell of `press_value.mjs`'s 183 is unchanged.
   const m = new Map<Weapon, PressProfile>();
   /** How close the target must be for a part fanned `deg` off the axis to still land. */
   const reachOfAngle = (deg: number): number => {

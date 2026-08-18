@@ -23,7 +23,10 @@ import { createMatch, stepMatch } from './sim.ts';
 // half. `pressValue` is imported rather than re-derived for the same reason
 // `statusReadyAt` is: a copy of the driver's ranking arithmetic would only test the copy,
 // and the whole point of that check is that the key and the sim cannot drift apart.
-import { pressValue, stepAI } from './ai.ts';
+// §33(m) imports `castThreat` for the third time this rule appears: the AI's model of what
+// an open cast can hit is checked against the damage the REAL combat path delivers over a
+// swept grid, and a copy of the wedge arithmetic here would only have tested the copy.
+import { castThreat, pressValue, stepAI } from './ai.ts';
 // Section 17 needs the real damage path to prove that taking a hit restarts the
 // out-of-combat delay — modelling `lastDamagedAt` by hand would test the model.
 // Section 19 fires Lollipop's slam directly, because the thing under test is that it
@@ -7501,55 +7504,315 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
       hopelessSep < REACH.meleeHeavy, `separation ${hopelessSep.toFixed(2)}`);
   }
 
-  // ── (m) EVERY WIND-UP IN THE ROSTER IS `melee`, BECAUSE `ai.ts` ONLY SEES THOSE ──
+  // ── (m) A RANGED WIND-UP IS STEERABLE NOW, AND THE GEOMETRY IS PER SHAPE ───
   //
-  // 🚨 THIS IS A BLOCKER WRITTEN DOWN AS A GATE, NOT A STYLE RULE. `ai.ts:dangerSteer`'s
-  // cast hazard opens with `if (w === undefined || w.type !== 'melee') continue;`, and its
-  // own comment says the refusal is deliberate: *"There are no ranged casts today; this
-  // refuses them explicitly rather than by accident."* So a RANGED `castMs` shipped while
-  // that line stands is a telegraph **no AI can ever react to** — which is precisely the
-  // asymmetry (l) exists to prevent, pointed at the other seat, and it would measure as
-  // "the special got weaker" on every corpus in the repo without ever naming the cause.
+  // ⚠️ THIS SECTION WAS A RATCHET IN THE OPPOSITE DIRECTION AND IT FIRED AS DESIGNED. It
+  // read, verbatim:
   //
-  // `Weapon.castMs` carries the three derived-but-unshipped values (`taco.Double` 1150,
-  // `burrito.Swarm` and `sushi.Catch` 1850) so lifting this is one edit rather than a
-  // re-derivation.
+  //   > *"(m) EVERY WIND-UP IN THE ROSTER IS `melee`, BECAUSE `ai.ts` ONLY SEES THOSE.
+  //   > 🚨 THIS IS A BLOCKER WRITTEN DOWN AS A GATE, NOT A STYLE RULE. `ai.ts:dangerSteer`'s
+  //   > cast hazard opens with `if (w === undefined || w.type !== 'melee') continue;`, and
+  //   > its own comment says the refusal is deliberate … So a RANGED `castMs` shipped while
+  //   > that line stands is a telegraph no AI can ever react to … `sim.test.mjs` §33(m) is
+  //   > the ratchet: it FAILS the moment a ranged weapon grows a `castMs` while that refusal
+  //   > stands."*
   //
-  // ⚠️ THE FIRST ROW IS WHAT STOPS THIS BEING VACUOUS THE DAY `ai.ts` IS FIXED. Stated as
-  // "no ranged casts" alone, this section would keep passing for a reason that had ceased
-  // to exist — a guard whose premise evaporated, which is the shape `CLAUDE.md` #6 records
-  // three times in one session. So the premise is SCANNED, and when the ranged term lands
-  // this row goes red and says what to do.
+  // The refusal is now LIFTED (`DECISIONS §77` — Uri: *"we can build anything we need"*), so
+  // the rows that policed it would have gone vacuous the good way: "no ranged weapon carries
+  // a `castMs`" stays true for as long as nobody ships one, and says nothing about whether
+  // the AI could cope if they did. They are replaced by the test the old block's own failure
+  // message asked for — *"replace this row with the ranged dodge test"* — which asserts the
+  // BEHAVIOUR the refusal was standing in for.
+  //
+  // ── WHAT REPLACED IT, AND WHY IT IS THREE SHAPES ─────────────────────────
+  //
+  // `ai.ts:castThreat` is the AI's model of the set of points an open cast can put damage
+  // on: a disc of `range` for melee, a disc of `range + hitRadius` for a HOMING volley, and
+  // a WEDGE — the union of the pellets' `hitRadius` tubes along their frozen bearings — for
+  // a non-homing fan. A model is worth nothing until it is checked against the thing it
+  // models, so the rows below check it against the damage `combat.ts` + `sim.ts` actually
+  // deliver, and the rival ONE-FORMULA disc law is scored on the same fixture so that
+  // "three shapes" is a measurement rather than a preference.
   {
-    const aiSrc = stripComments(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'ai.ts'), 'utf8'));
-    const refusesRanged = /w\.type\s*!==\s*'melee'\s*\)\s*continue/.test(aiSrc);
-    check('PREMISE: `ai.ts:dangerSteer` still refuses to steer out of a RANGED cast',
-      refusesRanged,
-      'the refusal is gone — the block is LIFTED: re-derive and ship the parenthesised '
-      + 'values in `rules.ts:Weapon.castMs`, then replace this row with the ranged dodge test');
+    const UB_ARENA = () => makeArena({ width: 8000, height: 8000, maxSafeRadius: 7000 });
+    const RANGED_CANDIDATES = [
+      { casterId: 'taco', weaponKey: 'Double' },     // non-homing ±10° combo fan
+      { casterId: 'burrito', weaponKey: 'Swarm' },   // homing, 4 pellets, 55° spread
+      { casterId: 'sushi', weaponKey: 'Catch' },     // homing, 3 pellets, 40° spread
+    ];
+    /**
+     * ONE SHOT, FOR REAL, at bearing `betaDeg` and separation `d` off a caster facing +x,
+     * with `castMs` forced to 0 so the press IS the resolve. The target does not move,
+     * which is the MAXIMAL hit set — every shape in the roster closes on its target, so
+     * moving can only shrink it — and that is the set a conservative bound must contain.
+     *
+     * ⚠️ THE CASTER IS GAGGED AFTER THE PRESS. It is slot 1, so `stepAI` drives it and its
+     * OTHER weapons would fire during the flight; Burrito's Roll STUNS, which would freeze
+     * the target and quietly turn a geometry measurement into a status measurement.
+     * `lastUsed[i] = 1e9` makes every cooldown gate in `attemptAttack` refuse. Damage is
+     * ALSO filtered by `weaponKey`, so the two guards are independent.
+     */
+    const shot = ({ casterId, weaponKey, d, betaDeg, targetId = 'pizza' }) => {
+      const weapons = CHARACTERS[casterId].weapons;
+      const wi = weapons.findIndex((w) => w.key === weaponKey);
+      const w = weapons[wi];
+      const prev = w.castMs;
+      w.castMs = 0;
+      try {
+        const state = playingMatch(UB_ARENA(), targetId, casterId);
+        state.enemy.x = 4000; state.enemy.y = 4000;
+        state.enemy.facing = { x: 1, y: 0 };
+        const r = (betaDeg * Math.PI) / 180;
+        state.player.x = 4000 + d * Math.cos(r);
+        state.player.y = 4000 + d * Math.sin(r);
+        state.player.hp = 1e9; state.player.maxHp = 1e9;
+        state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+        const threat = castThreat(state.enemy, w, state.player.x, state.player.y, state.player.hitRadius);
+        const evs = [];
+        attemptAttack(state, state.enemy, wi, evs);
+        for (let i = 0; i < state.enemy.lastUsed.length; i++) state.enemy.lastUsed[i] = 1e9;
+        let dealt = 0;
+        const collect = (list) => {
+          for (const e of list) {
+            if (e.type === 'hit-landed' && e.source?.kind === 'weapon'
+              && e.source.weaponKey === weaponKey && e.source.attackerId === state.enemy.id) dealt += e.amount;
+          }
+        };
+        collect(evs);
+        for (let t = 0; t < 12000; t += CAST_TICK) {
+          collect(stepMatch(state, CAST_TICK, noInput));
+          if (!state.projectiles.some((pr) => pr.weapon.key === weaponKey) && t > 4 * CAST_TICK) break;
+        }
+        return { dealt, margin: threat === null ? Infinity : threat.margin, w };
+      } finally {
+        if (prev === undefined) delete w.castMs; else w.castMs = prev;
+      }
+    };
+    /** The rival single-law model §77 says is not enough: a disc of `range + hitRadius`. */
+    const discMargin = (w, d, hitRadius) => d - ((w.range ?? 0) + hitRadius);
 
-    const castWeapons = CHARACTER_IDS.flatMap((id) =>
-      CHARACTERS[id].weapons.filter((w) => (w.castMs ?? 0) > 0).map((w) => ({ id, w })));
-    check('…and the set this row runs over is NON-EMPTY before anything filters it',
-      castWeapons.length > 0, `${castWeapons.length} cast weapons`);
-    const ranged = castWeapons.filter(({ w }) => w.type !== 'melee');
-    check('…so no weapon in the roster carries a `castMs` the AI cannot steer out of',
-      ranged.length === 0,
-      `ranged casts: [${ranged.map(({ id, w }) => `${id}.${w.key} ${w.castMs}ms`).join(', ')}]`);
+    // ── THE MODEL CONTAINS THE REAL HIT SET ─────────────────────────────────
+    const BEARINGS = [0, 20, 45, 90, 180];
+    const SEPS = [20, 40, 60, 80, 100, 120, 140, 160, 180];
+    const cells = [];
+    for (const c of RANGED_CANDIDATES) {
+      for (const b of BEARINGS) {
+        for (const d of SEPS) cells.push({ ...c, b, d, ...shot({ ...c, d, betaDeg: b }) });
+      }
+    }
+    const hitCells = cells.filter((c) => c.dealt > 0);
+    check('§33(m) NON-VACUOUS: the swept grid actually LANDS shots — "nothing was hit" would satisfy every row below',
+      hitCells.length > 0, `${hitCells.length} of ${cells.length} cells hit`);
+    const leaks = hitCells.filter((c) => !(c.margin < 0));
+    check('CONTAINMENT: every cell the real combat path HIT, `castThreat` had already called threatened',
+      leaks.length === 0,
+      leaks.slice(0, 4).map((c) => `${c.casterId}.${c.weaponKey} β=${c.b}° d=${c.d} margin ${c.margin.toFixed(2)}`).join(' · '));
 
-    // KNOWN-BAD: plant the exact defect this row exists to catch. `sushi.Catch` is the
-    // weapon whose value is already derived, so the plant is the real candidate rather
-    // than a straw one, and the predicate must go FALSE.
-    const CATCH = CHARACTERS.sushi.weapons.find((w) => w.key === 'Catch');
-    CATCH.castMs = 1850;
-    const withPlant = CHARACTER_IDS.flatMap((id) =>
-      CHARACTERS[id].weapons.filter((w) => (w.castMs ?? 0) > 0 && w.type !== 'melee'));
-    delete CATCH.castMs;
-    check('KNOWN-BAD: give a RANGED special a wind-up and this row goes red',
-      withPlant.length === 1 && withPlant[0].key === 'Catch',
-      `planted set: [${withPlant.map((w) => w.key).join(', ')}]`);
-    check('…and the plant was undone, so no row below inherits it',
-      CHARACTERS.sushi.weapons.find((w) => w.key === 'Catch').castMs === undefined);
+    // ── AND THE ONE-FORMULA DISC LAW IS NOT ENOUGH — THE KNOWN-BAD FOR THE MODEL ──
+    //
+    // 🚨 A ROW THAT ONLY ASSERTED CONTAINMENT WOULD BE PASSED BY `margin = -Infinity`.
+    // "Everything is threatened" contains every hit set there has ever been. So the model
+    // has to be shown to REFUSE something too, and the thing it must refuse is exactly what
+    // §77 says one disc law gets wrong: a fan pointing somewhere else.
+    const TACO_DOUBLE = CHARACTERS.taco.weapons.find((w) => w.key === 'Double');
+    const side = shot({ casterId: 'taco', weaponKey: 'Double', d: 60, betaDeg: 90 });
+    check('KNOWN-BAD: a single `range + hitRadius` DISC law calls a 90°-off target threatened…',
+      discMargin(TACO_DOUBLE, 60, HIT_RADIUS_VS_PLAYER) < 0,
+      `disc margin ${discMargin(TACO_DOUBLE, 60, HIT_RADIUS_VS_PLAYER).toFixed(2)}`);
+    check('…the sim cannot touch it — a non-homing fan is NOT a disc…', side.dealt === 0, `dealt ${side.dealt}`);
+    check('…and the shipped WEDGE agrees with the sim rather than with the disc',
+      side.margin >= 0, `wedge margin ${side.margin.toFixed(2)}`);
+    // The other half of "not everything is threatened": the model must clear a target that
+    // is simply too far, on the axis, where the wedge and the disc agree.
+    const beyond = shot({ casterId: 'burrito', weaponKey: 'Swarm', d: 200, betaDeg: 0 });
+    check('…and a target beyond `range + hitRadius` is called safe by BOTH, and is',
+      beyond.margin >= 0 && beyond.dealt === 0, `margin ${beyond.margin.toFixed(2)} dealt ${beyond.dealt}`);
+
+    // 🚨 A RAY IS NOT A LINE, AND THIS ROW EXISTS BECAUSE THE FIRST DRAFT USED THE LINE.
+    // The perpendicular distance to a pellet's infinite line is just as small BEHIND the
+    // caster as in front of it, so the wedge ran out of the muzzle in both directions and
+    // the model called a fighter standing 100 wu behind a Taco threatened by a fan pointing
+    // away from it — over-reach 130.00 wu at β=180°, caught by `tools/tmp/ub_threat.mjs`'s
+    // bearing sweep and by nothing else. It is the CONTAINMENT direction's blind spot: an
+    // over-approximation leaks nothing and passes every row above.
+    const behind = shot({ casterId: 'taco', weaponKey: 'Double', d: 100, betaDeg: 180 });
+    check('KNOWN-BAD: a fighter BEHIND the caster is outside a fan pointing away from it',
+      behind.margin >= 0 && behind.dealt === 0,
+      `margin ${behind.margin.toFixed(2)} dealt ${behind.dealt}`);
+    // …and the muzzle itself still threatens, at any bearing: a projectile spawns AT the
+    // caster and the hit test runs from the first tick. Without this the row above would be
+    // satisfied by a model that had simply stopped looking backwards.
+    const muzzle = shot({ casterId: 'taco', weaponKey: 'Double', d: 20, betaDeg: 180 });
+    check('…but the MUZZLE does, at every bearing — the sim lands Double Toss at 20 wu and 180°',
+      muzzle.dealt > 0 && muzzle.margin < 0,
+      `margin ${muzzle.margin.toFixed(2)} dealt ${muzzle.dealt}`);
+
+    // ── THE FAN BEARINGS ARE THE SIM'S, NOT A THIRD COPY OF THE FORMULA ──────
+    //
+    // `combat.ts:deliverWeapon` fans part `i` at its authored angle and pellet `i` of `n`
+    // at `(i - (n-1)/2) * spreadDeg`. `ai.ts` states that once, in `fanOffsetsDeg`, and the
+    // wedge is built from it — so the two can only agree by construction if they are the
+    // same statement, which is the whole point. This reads the bearings the sim ACTUALLY
+    // spawned, off the projectiles' velocities, so a drift in either copy shows up here.
+    {
+      const state = playingMatch(UB_ARENA(), 'pizza', 'taco');
+      state.enemy.x = 4000; state.enemy.y = 4000;
+      state.enemy.facing = { x: 1, y: 0 };
+      state.player.x = 4060; state.player.y = 4000;
+      const wi = CHARACTERS.taco.weapons.findIndex((w) => w.key === 'Double');
+      attemptAttack(state, state.enemy, wi, []);
+      const spawned = state.projectiles
+        .map((pr) => (Math.atan2(pr.vy, pr.vx) * 180) / Math.PI)
+        .sort((a, b) => a - b);
+      check('the bearings `combat.ts` really fired Double Toss along are the ±10° the wedge is built from',
+        spawned.length === 2 && Math.abs(spawned[0] + 10) < 1e-6 && Math.abs(spawned[1] - 10) < 1e-6,
+        `[${spawned.map((a) => a.toFixed(4)).join(', ')}]`);
+    }
+
+    // ── MELEE IS UNTOUCHED, ARITHMETIC INCLUDED ─────────────────────────────
+    //
+    // The corpus-scale proof is `tools/tmp/csx_bitid.mjs` against a worktree of HEAD; this
+    // is the same claim stated where a reader of the diff will look. `Mega` is the roster's
+    // one shipped wind-up, so a change of steering here is a change of shipped behaviour.
+    {
+      const state = playingMatch(UB_ARENA(), 'pizza', 'waterbottle');
+      state.enemy.x = 4000; state.enemy.y = 4000;
+      state.enemy.facing = { x: 0, y: 1 }; // deliberately NOT pointing at the target
+      state.player.x = 4050; state.player.y = 4000;
+      const t = castThreat(state.enemy, MEGA, state.player.x, state.player.y, state.player.hitRadius);
+      check('a MELEE cast is still the bearing-free disc of `range`, to the last digit',
+        t !== null && t.margin === 50 - REACH.meleeHeavy && t.outX === 1 && t.outY === 0,
+        `margin ${t?.margin} out (${t?.outX}, ${t?.outY}) vs ${50 - REACH.meleeHeavy}`);
+      const heal = CHARACTERS.hamburger.weapons.find((w) => w.type === 'self');
+      check('…and a `self` weapon threatens nothing at all — there is nothing to stand outside of',
+        heal !== undefined && castThreat(state.enemy, heal, state.player.x, state.player.y, 25) === null);
+    }
+
+    // ── AND THE POINT OF ALL OF IT: THE BOT DODGES A RANGED WIND-UP ─────────
+    //
+    // 🚨 THIS IS THE ROW §77 IS ABOUT. Without it the counterplay Uri asked for exists only
+    // for the bot on MELEE specials and for nobody at all on the three ranged ones. The
+    // caster is the PLAYER seat so it stands still and its aim stays frozen; the dodger is
+    // an AI with no wind-up of its own, FOUND rather than named for the reason §33(l)
+    // records — a control AI rooted by its own cast would satisfy "it did not close in" for
+    // an unrelated reason.
+    //
+    // 🚨 AND IT MUST NOT CARRY A STUN, WHICH IS A RESULT AND NOT A CONVENIENCE. The first
+    // draft named the first castless character, `hamburger`, and its Cheese Stun CANCELLED
+    // the wind-up 483 ms in (`combat.ts:cancelCast` — a stun and death are the two
+    // cancelling terminators). The dodger then took zero damage from a weapon THAT NEVER
+    // FIRED, so the headline row was green in the arm where the block is still in place.
+    // A vacuous pass in the one direction the section exists to prove.
+    const CASTLESS = CHARACTER_IDS.find((id) => id !== 'taco'
+      && CHARACTERS[id].weapons.every((w) => (w.castMs ?? 0) === 0 && w.effect !== 'stun'));
+    check('§33(m) has a castless, STUN-FREE dodger — it can neither cast its own wind-up nor interrupt the one under test',
+      CASTLESS !== undefined, 'every character now carries a wind-up or a stun');
+    const DOUBLE_I = CHARACTERS.taco.weapons.findIndex((w) => w.key === 'Double');
+    const dodgeFix = (sep) => {
+      const state = playingMatch(UB_ARENA(), 'taco', CASTLESS);
+      state.player.x = 4000; state.player.y = 4000;
+      state.player.facing = { x: 1, y: 0 };
+      state.enemy.x = 4000 + sep; state.enemy.y = 4000;
+      state.player.hp = 1e9; state.player.maxHp = 1e9;
+      state.enemy.hp = 1e9; state.enemy.maxHp = 1e9;
+      return state;
+    };
+    /**
+     * Run `ms`, then long enough for every Double Toss pellet to expire. Returns the damage
+     * it did and WHERE THE DODGER STOOD AT THE RESOLVE — which is the instant the model
+     * describes, and not where it ends up after the pellets have flown.
+     */
+    const runShot = (state, ms) => {
+      let dealt = 0;
+      let atResolve = null;
+      let cancelled = false;
+      const collect = (list) => {
+        for (const e of list) {
+          if (e.type === 'hit-landed' && e.source?.kind === 'weapon'
+            && e.source.weaponKey === 'Double') dealt += e.amount;
+          if (e.type === 'cast-cancelled') cancelled = true;
+        }
+      };
+      for (let t = 0; t < ms + 4000; t += CAST_TICK) {
+        const wasCasting = state.player.cast !== null;
+        collect(stepMatch(state, CAST_TICK, noInput));
+        if (wasCasting && state.player.cast === null) atResolve = { x: state.enemy.x, y: state.enemy.y };
+        if (t > ms && state.player.cast === null
+          && !state.projectiles.some((pr) => pr.weapon.key === 'Double')) break;
+      }
+      return { dealt, atResolve, cancelled };
+    };
+
+    // The two arms are the SAME fixture and the SAME weapon; the only thing that differs is
+    // the wind-up, which is what decides whether the dodge is achievable. Both numbers are
+    // DERIVED here rather than typed, so a roster edit re-derives them instead of silently
+    // making one arm vacuous.
+    const SEP = 100;
+    const escapeWu = -castThreat(
+      { x: 4000, y: 4000, facing: { x: 1, y: 0 } }, TACO_DOUBLE, 4000 + SEP, 4000, HIT_RADIUS_VS_PLAYER,
+    ).margin;
+    const dodgerSpeed = speedFor(CASTLESS, AI_CHASE_SPEED) * 1000; // wu/s
+    const ESCAPABLE = 1150;  // the value `rules.ts:Weapon.castMs` already derives for Double
+    const HOPELESS = 300;
+    check('PREMISE: at 100 wu the wedge is a SIDESTEP, and the derived 1150 ms affords it while 300 ms does not',
+      escapeWu > 0 && (dodgerSpeed * ESCAPABLE) / 1000 > escapeWu && (dodgerSpeed * HOPELESS) / 1000 < escapeWu,
+      `${escapeWu.toFixed(2)} wu sideways · ${((dodgerSpeed * ESCAPABLE) / 1000).toFixed(2)} wu at ${ESCAPABLE}ms · ${((dodgerSpeed * HOPELESS) / 1000).toFixed(2)} wu at ${HOPELESS}ms`);
+
+    const prevDouble = TACO_DOUBLE.castMs;
+    try {
+      TACO_DOUBLE.castMs = ESCAPABLE;
+      const dodging = dodgeFix(SEP);
+      attemptAttack(dodging, dodging.player, DOUBLE_I, []);
+      const startY = dodging.enemy.y;
+      const dodged = runShot(dodging, ESCAPABLE);
+      check('PREMISE: the wind-up RESOLVED — an interrupted cast would give every row below a zero it did not earn',
+        !dodged.cancelled && dodged.atResolve !== null);
+      check('an AI facing a RANGED wind-up it CAN escape takes ZERO from it',
+        dodged.dealt === 0, `took ${dodged.dealt}`);
+      // 🚨 THE COUNTERFACTUAL, NOT A SHAPE OF THE DISPLACEMENT VECTOR. The first draft of
+      // this row asserted |Δy| > |Δx| and went red on a CORRECT dodge: the AI closes as well
+      // as sidesteps, and closing is not a mistake — the wedge narrows as `d` falls, so the
+      // two motions cooperate. What actually distinguishes the wedge from a radial disc law
+      // is that the SIDESTEP is load-bearing: hold the closing, drop the lateral, and the
+      // fighter is still inside. A radial law at β=0 produces exactly zero lateral by
+      // symmetry, so it cannot pass this.
+      const resolveMargin = castThreat(dodging.player, TACO_DOUBLE,
+        dodged.atResolve.x, dodged.atResolve.y, dodging.enemy.hitRadius).margin;
+      const noSidestep = castThreat(dodging.player, TACO_DOUBLE,
+        dodged.atResolve.x, startY, dodging.enemy.hitRadius).margin;
+      check('…and it was the SIDESTEP that got it out — keep the closing, drop the lateral, and it is still inside',
+        resolveMargin >= 0 && noSidestep < 0,
+        `at the resolve margin ${resolveMargin.toFixed(2)}; without the sidestep ${noSidestep.toFixed(2)}`);
+
+      // KNOWN-BAD 1: the same fixture with NO cast open. This is exactly `ai.ts` before the
+      // ranged term — a `dangerSteer` with nothing to see — so it stages the pre-change
+      // behaviour honestly rather than by describing it.
+      const control = dodgeFix(SEP);
+      const controlStartY = control.enemy.y;
+      runShot(control, ESCAPABLE);
+      check('KNOWN-BAD: the SAME fixture with no cast open does NOT sidestep — the cast term is what moved it',
+        Math.abs(control.enemy.y - controlStartY) < 1e-6
+          && control.enemy.x - 4000 < SEP,
+        `moved (${(control.enemy.x - 4000 - SEP).toFixed(2)}, ${(control.enemy.y - controlStartY).toFixed(2)}) wu`);
+
+      // KNOWN-BAD 2: THE DIRECTION THAT IS EASY TO LOSE. A range test is BINARY and 90% of
+      // the way out is worth exactly zero, so a bot that flees everything is not a fix — it
+      // is the same bug with better manners. At 300 ms the sidestep is unreachable and the
+      // AI is required to spend the window on something else and eat the shot.
+      TACO_DOUBLE.castMs = HOPELESS;
+      const hopeless = dodgeFix(SEP);
+      attemptAttack(hopeless, hopeless.player, DOUBLE_I, []);
+      const hopelessStartY = hopeless.enemy.y;
+      const hopelessRun = runShot(hopeless, HOPELESS);
+      check('…and one it CANNOT escape it does not run from — it is hit, having spent the window closing',
+        !hopelessRun.cancelled && hopelessRun.dealt > 0
+          && Math.abs(hopelessRun.atResolve.y - hopelessStartY) < 1e-6,
+        `took ${hopelessRun.dealt}, moved sideways ${(hopelessRun.atResolve.y - hopelessStartY).toFixed(2)} wu`);
+    } finally {
+      if (prevDouble === undefined) delete TACO_DOUBLE.castMs; else TACO_DOUBLE.castMs = prevDouble;
+    }
+    check('…and the planted `castMs` was undone, so no row below inherits it',
+      TACO_DOUBLE.castMs === undefined);
   }
 
   // ── (n) THE OTHER DIRECTION: A TARGET THAT STANDS STILL IS HIT ────────────
