@@ -618,6 +618,76 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
       // for the identical reason. The declaration has no side effect, so below it is
       // free; above it costs a peer's instrument.
       resolveDueCast(state, fighter, events);
+      // ── 🚨 A CORPSE DOES NOT TAKE ITS TURN. ONE STATEMENT, BOTH CONTROLLERS. ──
+      //
+      // Uri, playing the deployed six-player build on 2026-08-18:
+      //
+      //   > *"In gameplay, when I played 6 players and lost, I continued to move as dead,
+      //   > able to fire and move."*
+      //
+      // He is describing this loop. There was no `alive` check anywhere on the human path:
+      // `applyAim`, `attemptAttack` and `moveFighter` all ran for a dead fighter, and the
+      // only refusal — `applyWorldTick`'s `if (!fighter.alive) return` — is BELOW them and
+      // is about what the world does TO a fighter, not about what a fighter does.
+      // `attemptAttack` gates on phase, weapon, cast and cooldown, never on
+      // `attacker.alive`. Measured on the pre-fix tree by `tools/tmp/dd_bitid.mjs`: over
+      // 839 playing ticks after its own death a corpse walked 2100,1000 -> 2779,1979 and
+      // fired the whole way.
+      //
+      // ── ⚠️ IT WAS AN ASYMMETRY, WHICH IS THIS FILE'S MOST EXPENSIVE DEFECT CLASS ──
+      //
+      // `ai.ts:stepAI` DOES refuse — `if (self.hp <= 0 || target === null) return false;`.
+      // So a dead BOT already stopped and a dead HUMAN did not: one rule, stated once on
+      // one side of a `controller` branch and not on the other. That is the same shape as
+      // the five recorded AI-driver defects (`ai.ts`'s header) and as the stun-silence bug
+      // — the stunned player fired 100% of its shots and the stunned AI 0%. The guard is
+      // therefore placed ABOVE the branch, where it cannot be true of one side only, and
+      // not duplicated inside the three human calls.
+      //
+      // ── 🚨 WHY NO GATE EVER SAW IT: IT IS UNREACHABLE AT TWO SEATS ────────────
+      //
+      // At N=2 the death makes `lastFighterStanding` non-null, `combat.ts:applyDamage`
+      // sets `phase = 'ended'`, and `attemptAttack`/`moveFighter` are never reached again
+      // because the loop itself is gated on `phase === 'playing'`. At N>2 a knockout
+      // deliberately does NOT end the match — §28(e) and `conceal_lab`'s N-fighter battery
+      // both assert exactly that — so the phase stays `'playing'` and the corpse keeps
+      // playing. Every two-seat test in this file passed throughout. See §34.
+      //
+      // ── WHY IT IS *BELOW* `resolveDueCast` AND NOT ABOVE IT ───────────────────
+      //
+      // Because `combat.ts`'s TERMINATOR 3 already owns "a corpse does not finish its
+      // wind-up": it calls `cancelCast(target, 'death', events)` in the same statement
+      // that sets `alive = false`, and every HP write in the sim routes through
+      // `applyDamage` (`combat.ts:211` is the only one that can reach 0; the heal and the
+      // regen both clamp upward). So a corpse ALWAYS has `cast === null` and this call is
+      // already inert for one — verified, not assumed, by `tools/tmp/dd_probe.mjs`, which
+      // opens a real 1100 ms `Mega` wind-up, kills the caster mid-cast and reads
+      // `cast=null` back. Hoisting the guard over it would be a second statement of a rule
+      // that is already stated once, which is the very thing this comment is about.
+      //
+      // ── AND IT FREEZES THE AIM TOO, DELIBERATELY ──────────────────────────────
+      //
+      // `applyAim` is the cosmetic one of the three, so freezing it needs its own reason.
+      // It has exactly one consumer for a dead fighter — `match.ts:syncModelTransform`'s
+      // `model.root.rotation.y = atan2(facing.x, facing.y)` — and a corpse that pirouettes
+      // to follow the mouse is as wrong as one that walks. The spectator camera does NOT
+      // read it: `match.ts` follows `groundPos(observer.x, observer.y)` and `camera.ts`
+      // takes its bearing from a fixed `yawDeg`, so nothing about a frozen `facing` can
+      // lock a camera. (What IS still wrong for a spectator is that the camera is pinned to
+      // the body — reported to the orchestrator; `match.ts` is not this file's to fix.)
+      //
+      // ── ⚠️ `continue`, NOT A WRAPPING `if (fighter.alive) { … }` ──────────────
+      //
+      // Two reasons, and neither is style. **Structural:** everything below this line is
+      // unreachable for a corpse FOREVER, so a fourth action call added to either branch
+      // later inherits the refusal; a wrapping block only covers what is inside it, and
+      // the defect being fixed here is precisely a call that sat outside the one guard
+      // that existed. **Mechanical:** `tools/tmp/nc_measure.mjs`'s `HUMAN_ANCHOR` is the
+      // three human-branch lines below *at their exact indentation* and its `--selftest`
+      // §F asserts the patch landed, so wrapping them would silently break a peer's
+      // instrument — the same trap `conceal_lab`'s `FIGHTER_LOOP_ANCHOR` sets two
+      // paragraphs up, found by grepping for the anchors rather than by being told.
+      if (!fighter.alive) continue;
       if (fighter.controller === 'human') {
         // A hole in the array — a shorter list, an explicit null, a seat nobody is sitting
         // in — is NEUTRAL, never the previous slot's input. `?? NEUTRAL_INPUT` rather than a
@@ -936,6 +1006,17 @@ function moveFighter(state: MatchState, fighter: Fighter, dt: number, input: Mat
 // ─────────────────────────────────────────────────────────────────────────────
 
 function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attemptedMove: boolean, events: GameEvent[]): void {
+  // ⚠️ **NOW UNREACHABLE FROM THE ONLY CALL SITE, AND KEPT ON PURPOSE.** The fighter loop
+  // `continue`s on `!fighter.alive` before it gets here (see the corpse guard there), and
+  // this is the loop's sole caller — so as of 2026-08-18 nothing can enter this function
+  // with a corpse. It is retained as this function's own PRECONDITION rather than deleted
+  // as dead code, because the loop's guard is about what a fighter DOES and this one is
+  // about what the world does TO it, and the state removing it would admit is not a
+  // cosmetic one: the regen block below runs `fighter.hp = min(maxHp, hp + REGEN_AMOUNT)`,
+  // so a corpse reaching it comes out with `alive === false` and `hp > 0` — a fighter that
+  // is dead and healthy at once, which `lastFighterStanding`, `nearestLivingOpponent` and
+  // `resolveTimeout` all read and none of them expect. **Do not tidy it away**, and do not
+  // read it as a live guard either: a second caller is what would make it fire again.
   if (!fighter.alive) return;
 
   // Publish this tick's terrain slow strength for the renderer (see the field doc on

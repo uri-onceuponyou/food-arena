@@ -8163,6 +8163,340 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 34. A CORPSE CANNOT ACT — AND THE ONLY ARM THAT CAN SEE IT IS AT SIX SEATS
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Uri, playing the deployed six-player build on 2026-08-18:
+//
+//   > *"In gameplay, when I played 6 players and lost, I continued to move as dead, able
+//   > to fire and move."*
+//
+// ── THE KNOWN-BAD IS FREE: IT IS THE TREE THIS SECTION WAS WRITTEN AGAINST ───
+//
+// `sim.ts`'s fighter loop had no `alive` check anywhere on the human path. `applyAim`,
+// `attemptAttack` and `moveFighter` all ran for a dead fighter; the only refusal was
+// `applyWorldTick`'s, which sits BELOW all three and answers a different question (what
+// the world does TO a fighter). Measured on that tree by `tools/tmp/dd_bitid.mjs`: over
+// 839 playing ticks after its own death a corpse walked 2100,1000 -> 2779,1979 with the
+// trigger held. Every row of (b), (d) and (e) below FAILS on it, and (a), (c), (f) and (g)
+// pass on it — which is the point of (a), (c) and (f): they are the non-vacuity, the
+// positive control and the explanation, and a section where they moved too would be a
+// section that had changed the experiment rather than the sim.
+//
+// ── 🚨 WHY EVERY EXISTING TEST IN THIS FILE STAYED GREEN ──────────────────────
+//
+// At two seats the death ends the match — `lastFighterStanding` goes non-null,
+// `applyDamage` sets `phase = 'ended'`, and the fighter loop is gated on
+// `phase === 'playing'`, so a corpse is never stepped again. **The defect is unreachable
+// below three seats.** At six a knockout deliberately does NOT end the match (§28(e), and
+// `conceal_lab`'s N-fighter battery asserts it in the wild), so the phase stays
+// `'playing'` and the corpse keeps playing. Same class as the result card reading in slot
+// order: a rule that is only wrong above two seats, shipping while every two-seat
+// assertion passes. (f) pins the two-seat behaviour so that reason is recorded rather
+// than rediscovered.
+//
+// ── AND IT WAS AN ASYMMETRY ──────────────────────────────────────────────────
+//
+// `ai.ts:stepAI` already refused on `self.hp <= 0`, so a dead BOT stopped and a dead HUMAN
+// did not — one rule implemented on one side of a `controller` branch only, which is this
+// project's most expensive recorded defect class (`ai.ts`'s header; the stunned player
+// fired 100% of its shots and the stunned AI 0%). (e) asserts BOTH sides in one experiment
+// for that reason: a fix stated on the human side alone would leave it green and would
+// leave the asymmetry, just pointing the other way.
+console.log('\n34. A corpse cannot act (six seats — the defect is unreachable at two)');
+{
+  const N = MAX_FIGHTERS;
+  const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 900 });
+  // Derived from the fixture's own centre, never retyped: a hardcoded coordinate here
+  // would be a legal point on any map and therefore invisible to every legality check —
+  // the stale-map-literal class `tools/tmp/al_guard.mjs` exists for.
+  const ringSpawn = (i) => ({
+    x: arena.center.x + 700 * Math.cos((i / N) * Math.PI * 2),
+    y: arena.center.y + 700 * Math.sin((i / N) * Math.PI * 2),
+  });
+  const seat = (i, controller) => ({ characterId: 'hamburger', spawn: ringSpawn(i), ...(controller ? { controller } : {}) });
+  const sixSeats = (controller) => {
+    const st = createMatch(arena, Array.from({ length: N }, (_, i) => seat(i, i === 0 ? controller : 'ai')));
+    st.phase = 'playing';
+    return st;
+  };
+  /** A maximal press: run hard on both axes, aim somewhere new, hold the trigger. */
+  const PRESS = { move: { x: 1, y: 1 }, aim: { x: -1, y: 0 }, selectedWeapon: 0, attack: true };
+  /** Every way this event stream names the fighter that CAUSED an event. */
+  const authoredBy = (e, id) => e.fighterId === id || e.ownerId === id
+    || e.source?.attackerId === id || e.source?.ownerId === id;
+  const snap = (f) => ({ x: f.x, y: f.y, fx: f.facing.x, fy: f.facing.y });
+  const stillAt = (f, s) => f.x === s.x && f.y === s.y && f.facing.x === s.fx && f.facing.y === s.fy;
+
+  // ── (a) THE PRECONDITIONS, ASSERTED BEFORE ANYTHING IS ASKED OF THE CORPSE ──
+  //
+  // 🚨 This block is the whole reason the section is trustworthy. "A dead fighter did not
+  // fire" is true of a match that already ENDED, of a fighter that is not actually dead,
+  // and of a seat that is not driven by a human — three ways for (b) to pass while
+  // measuring nothing, and the third of them is exactly how the defect survived. So the
+  // state under test is established first and asserted, and only then acted on.
+  {
+    const state = sixSeats('human');
+    const me = state.fighters[0];
+    check('(a) slot 0 really is the HUMAN seat — the branch the defect lives on',
+      me.controller === 'human', me.controller);
+    check('(a) …and every other seat is an AI, so nothing else is driven by the same input',
+      state.fighters.slice(1).every((f) => f.controller === 'ai'));
+
+    applyDamage(state, me, me.maxHp * 10, null, { kind: 'hazard' }, []);
+
+    check('(a) the fighter really is DEAD — `alive` false and the pool empty',
+      me.alive === false && me.hp === 0, `alive=${me.alive} hp=${me.hp}`);
+    check('(a) 🚨 …and the match is STILL PLAYING, which is the entire reason this is reachable',
+      state.phase === 'playing', state.phase);
+    check('(a) …because a knockout at six seats is one death among survivors, not a victory',
+      lastFighterStanding(state) === null && state.fighters.filter((f) => f.alive).length === N - 1,
+      `${state.fighters.filter((f) => f.alive).length} still up of ${N}`);
+
+    // ── (b) THE DEFECT ITSELF ───────────────────────────────────────────────
+    const before = snap(me);
+    const events = stepMatch(state, 16.67, PRESS);
+    check('(b) 🔴 a dead HUMAN does not MOVE, however hard the stick is pushed',
+      me.x === before.x && me.y === before.y,
+      `${before.x.toFixed(2)},${before.y.toFixed(2)} -> ${me.x.toFixed(2)},${me.y.toFixed(2)}`);
+    check('(b) 🔴 …does not FIRE, however long the trigger is held',
+      !events.some((e) => e.type === 'weapon-fired' && e.fighterId === 0),
+      JSON.stringify(events.filter((e) => e.type === 'weapon-fired')));
+    // Aim is the cosmetic third, and it is frozen deliberately: `match.ts` rotates the
+    // model by `facing`, so a corpse that follows the mouse pirouettes. Nothing about the
+    // camera reads it — `match.ts` follows the observer's POSITION and `camera.ts` takes
+    // its bearing from a fixed `yawDeg` — so freezing it cannot lock a spectator view.
+    check('(b) 🔴 …and does not TURN, so the body does not pirouette to follow the cursor',
+      me.facing.x === before.fx && me.facing.y === before.fy,
+      `${before.fx},${before.fy} -> ${me.facing.x},${me.facing.y}`);
+    check('(b) …authoring NOTHING in the event stream at all, by any of its four names',
+      !events.some((e) => authoredBy(e, 0)),
+      JSON.stringify(events.filter((e) => authoredBy(e, 0)).map((e) => e.type)));
+
+    // ── (c) THE POSITIVE CONTROL: THE SAME PRESS ON A LIVING FIGHTER ────────
+    //
+    // Without this every row above passes on an input that does nothing — which is the
+    // single most likely way to write this section wrong, because `PRESS` is a literal and
+    // a literal that has quietly stopped meaning anything looks exactly like a fix.
+    const alive = sixSeats('human');
+    const you = alive.fighters[0];
+    const wasAt = snap(you);
+    const liveEvents = stepMatch(alive, 16.67, PRESS);
+    check('(c) POSITIVE CONTROL — the identical press MOVES a living fighter',
+      you.x !== wasAt.x && you.y !== wasAt.y,
+      `${wasAt.x.toFixed(2)},${wasAt.y.toFixed(2)} -> ${you.x.toFixed(2)},${you.y.toFixed(2)}`);
+    check('(c) POSITIVE CONTROL — …FIRES it',
+      liveEvents.some((e) => e.type === 'weapon-fired' && e.fighterId === 0));
+    check('(c) POSITIVE CONTROL — …and TURNS it',
+      you.facing.x !== wasAt.fx || you.facing.y !== wasAt.fy,
+      `${wasAt.fx},${wasAt.fy} -> ${you.facing.x},${you.facing.y}`);
+  }
+
+  // ── (d) IT STAYS DEAD. NOT JUST ON THE TICK IT DIED ─────────────────────────
+  //
+  // A guard that only refused on the death tick, or that a later `phase` flip released,
+  // would pass (b) and still ship the bug Uri reported — he played on for a whole match,
+  // not for one frame. The tick budget is spent inside the match rather than at its end,
+  // and the run asserts it stayed `'playing'` for every one of them: a corpse that stops
+  // moving because the MATCH stopped is the two-seat non-result again.
+  {
+    const state = sixSeats('human');
+    const me = state.fighters[0];
+    applyDamage(state, me, me.maxHp * 10, null, { kind: 'hazard' }, []);
+    const before = snap(me);
+    const HELD = 300; // 5 s at 60 Hz
+    let playingTicks = 0;
+    let authored = 0;
+    for (let t = 0; t < HELD; t++) {
+      const evs = stepMatch(state, 16.67, { ...PRESS, selectedWeapon: t % CHARACTERS.hamburger.weapons.length });
+      if (state.phase === 'playing') playingTicks++;
+      authored += evs.filter((e) => authoredBy(e, 0)).length;
+    }
+    check(`(d) NON-VACUOUS: the match stayed 'playing' for all ${HELD} held ticks`,
+      playingTicks === HELD, `${playingTicks}/${HELD}, phase ${state.phase}, ${state.fighters.filter((f) => f.alive).length} up`);
+    check(`(d) 🔴 …and after ${HELD} ticks of held movement and fire the body has not moved a unit`,
+      stillAt(me, before),
+      `${before.x.toFixed(4)},${before.y.toFixed(4)} -> ${me.x.toFixed(4)},${me.y.toFixed(4)}`);
+    check('(d) 🔴 …and authored not one event in any of them',
+      authored === 0, `${authored} events`);
+    check('(d) …and it is still dead, so nothing resurrected it to explain the silence',
+      me.alive === false && me.hp === 0);
+  }
+
+  // ── (e) BOTH SIDES OF THE `controller` BRANCH, IN ONE EXPERIMENT ────────────
+  //
+  // The refusal must not be a human-only rule, or it is the same asymmetry pointing the
+  // other way. Slot 0 human and slot 1 AI are killed in the same match and neither may
+  // act; the surviving AI seats are the non-vacuity — they prove the arena, the input and
+  // the tick are all still capable of producing events.
+  {
+    const state = sixSeats('human');
+    const dead = [state.fighters[0], state.fighters[1]];
+    for (const f of dead) applyDamage(state, f, f.maxHp * 10, null, { kind: 'hazard' }, []);
+    check('(e) NON-VACUOUS: two seats down, one human and one AI, match still playing',
+      dead.every((f) => !f.alive) && state.phase === 'playing'
+      && dead[0].controller === 'human' && dead[1].controller === 'ai',
+      `phase ${state.phase}`);
+    const before = dead.map(snap);
+    let authoredByDead = 0;
+    let authoredByLiving = 0;
+    let playing = 0;
+    // ⚠️ 400, AND THE NUMBER IS MEASURED RATHER THAN PICKED. It was 120 first and the
+    // living-seat control below FAILED at 0 events — not because the survivors were
+    // refusing anything, but because six seats spawn 700 wu apart on this ring and the
+    // first AI weapon does not come into range until tick 264 (`tools/tmp/dd_budget.mjs`
+    // swept R=200/300/400/700: first event at tick 28/75/122/264). A control that reports
+    // "nobody acted" during a window in which nobody COULD act is the vacuity this whole
+    // section is built to avoid, and it very nearly shipped inside the row whose job is to
+    // catch it. 400 clears 264 with margin and is still far short of the ~900 at which the
+    // survivors thin out enough to end the match.
+    const HELD_E = 400;
+    for (let t = 0; t < HELD_E; t++) {
+      const evs = stepMatch(state, 16.67, PRESS);
+      if (state.phase === 'playing') playing++;
+      authoredByDead += evs.filter((e) => authoredBy(e, 0) || authoredBy(e, 1)).length;
+      authoredByLiving += evs.filter((e) => state.fighters.slice(2).some((f) => authoredBy(e, f.id))).length;
+    }
+    check(`(e) NON-VACUOUS: the match stayed 'playing' for all ${HELD_E} ticks`,
+      playing === HELD_E, `${playing}/${HELD_E}, phase ${state.phase}`);
+    check('(e) 🔴 neither corpse moved — the rule is stated ONCE, above the controller branch',
+      dead.every((f, i) => stillAt(f, before[i])),
+      dead.map((f, i) => `${f.controller}: ${before[i].x.toFixed(2)},${before[i].y.toFixed(2)} -> ${f.x.toFixed(2)},${f.y.toFixed(2)}`).join(' · '));
+    check('(e) 🔴 …and neither authored an event',
+      authoredByDead === 0, `${authoredByDead}`);
+    check('(e) NON-VACUOUS: the LIVING seats were busy the whole time, so silence means refusal',
+      authoredByLiving > 0, `${authoredByLiving} events from the four survivors`);
+  }
+
+  // ── (f) THE BLIND SPOT, PINNED SO THE REASON SURVIVES ───────────────────────
+  //
+  // This row asserts the OLD behaviour on purpose. At two seats the corpse is inert for a
+  // completely different reason — there is no match left — so a two-seat version of (b)
+  // would have passed against the broken sim. That is not a hypothetical: it is why this
+  // shipped. If a future change makes a two-seat knockout leave the phase `'playing'`,
+  // this row goes red and whoever made it learns that (b) has just become reachable at
+  // two seats as well.
+  {
+    const duel = createMatch(arena, [seat(0, 'human'), seat(1, 'ai')]);
+    duel.phase = 'playing';
+    const me = duel.fighters[0];
+    applyDamage(duel, me, me.maxHp * 10, null, { kind: 'hazard' }, []);
+    check('(f) at TWO seats the same killing blow ENDS the match — which is why no gate saw this',
+      duel.phase === 'ended' && duel.winnerId === 1,
+      `phase ${duel.phase}, winnerId ${duel.winnerId}`);
+    const before = snap(me);
+    stepMatch(duel, 16.67, PRESS);
+    check('(f) …so the two-seat corpse is inert for a DIFFERENT reason, and proves nothing about (b)',
+      stillAt(me, before) && duel.phase === 'ended');
+  }
+
+  // ── (g) WHY THE GUARD SITS BELOW `resolveDueCast` AND NOT ABOVE IT ──────────
+  //
+  // The guard is one line below terminator 1. That is only defensible if a corpse can
+  // never be holding a wind-up for terminator 1 to resolve — otherwise the placement is a
+  // hole. `combat.ts`'s TERMINATOR 3 claims exactly that, cancelling the cast in the same
+  // statement that clears `alive`. This row is the claim, checked: a real wind-up is
+  // opened and the caster is killed mid-cast. A second `alive` guard above `resolveDueCast`
+  // would be a second statement of THIS rule, and this is the row that says so.
+  {
+    const CAST_I = CHARACTERS.waterbottle.weapons.findIndex((w) => (w.castMs ?? 0) > 0);
+    check('(g) NON-VACUOUS: the roster still has a weapon with a real wind-up to test with',
+      CAST_I !== -1 && CHARACTERS.waterbottle.weapons[CAST_I].castMs > 0,
+      `index ${CAST_I}`);
+    const state = createMatch(arena, Array.from({ length: N }, (_, i) => ({
+      characterId: 'waterbottle', spawn: ringSpawn(i), controller: i === 0 ? 'human' : 'ai',
+    })));
+    state.phase = 'playing';
+    const caster = state.fighters[0];
+    stepMatch(state, 16.67, { move: { x: 0, y: 0 }, selectedWeapon: CAST_I, attack: true });
+    check('(g) NON-VACUOUS: the wind-up really opened, so there is something to cancel',
+      caster.cast !== null && caster.cast.weaponIndex === CAST_I,
+      caster.cast === null ? 'no cast' : `weapon ${caster.cast.weaponIndex} due at ${caster.cast.resolvesAt}`);
+    applyDamage(state, caster, caster.maxHp * 10, null, { kind: 'hazard' }, []);
+    check('(g) TERMINATOR 3 already clears it — a corpse NEVER carries a cast for terminator 1 to resolve',
+      caster.cast === null && caster.alive === false && state.phase === 'playing',
+      `cast ${caster.cast === null ? 'null' : 'OPEN'}, alive ${caster.alive}, phase ${state.phase}`);
+    // …and the wind-up therefore cannot go off after death, which is the behaviour the
+    // placement is buying. Stepped past the resolve time it would have had.
+    let fired = 0;
+    for (let t = 0; t < 120; t++) {
+      fired += stepMatch(state, 16.67, { move: { x: 0, y: 0 }, selectedWeapon: CAST_I, attack: true })
+        .filter((e) => e.type === 'weapon-fired' && e.fighterId === 0).length;
+    }
+    check('(g) 🔴 …and nothing fires from that seat past the moment the cast would have landed',
+      fired === 0, `${fired} shots`);
+  }
+
+  // ── (h) 🚨 THE INVARIANT `resolveTimeout` RESTS ON: A CORPSE'S HP STAYS 0 ────
+  //
+  // This is the row that says the defect was not cosmetic, and it was found by running
+  // (d) against the pre-fix tree rather than by reasoning: *"…and it is still dead, so
+  // nothing resurrected it"* went RED, which was not predicted. The reason is that
+  // Hamburger's `Onion` is a `type: 'self'` weapon and `combat.ts:deliverWeapon` heals the
+  // ATTACKER — so a corpse that could still attack could still heal ITSELF.
+  // `tools/tmp/dd_zombie.mjs` measured it on that tree: hp 0 -> 18/70 within three ticks of
+  // dying, and holding the heal took the corpse to **70/70, a fighter at FULL HEALTH with
+  // `alive === false`** — that ceiling over 1,800 ticks, where THIS row's 600-tick window
+  // reached 36/70 on the pre-fix tree. The two numbers are the same effect at two budgets
+  // and are quoted separately on purpose; the heal is cooldown-limited, so the corpse
+  // climbs at a fixed rate and the only question a longer window answers is how far.
+  //
+  // That matters because `resolveTimeout` ranks on HP FRACTION over `state.fighters` with
+  // **no `alive` filter**, and that is DELIBERATE — `state.ts:lastFighterStanding` records
+  // the simultaneous-wipe case it exists to answer: *"a ranked sort over the fighter list
+  // [that] has an answer for every fighter, alive or not."* So the ladder is not wrong; it
+  // rests on an invariant the corpse broke. Measured on the shipped resolver: a dead
+  // fighter at 65/70 against five living at 60/70 is named the WINNER on the whistle. A
+  // player who lost could therefore hold the heal button and win the match.
+  //
+  // ⚠️ **The fix is upstream and this row is deliberately NOT a second guard in the
+  // resolver.** The ladder is a design decision (§49a) with a documented reason to include
+  // the dead; hardening it would be a change to a shipped rule to defend against a state
+  // that can no longer occur. What was missing was never a filter — it was the invariant,
+  // which is now enforced at the one place a corpse could have broken it, and asserted
+  // here. The second half of this row is the positive control: it plants the broken
+  // invariant BY HAND and shows the resolver really does crown the corpse, so the first
+  // half is a claim about a real consequence rather than a tidy-sounding one.
+  {
+    const HEAL_I = CHARACTERS.hamburger.weapons.findIndex((w) => w.type === 'self');
+    check('(h) NON-VACUOUS: the kit under test still has the self-heal that made this reachable',
+      HEAL_I !== -1, `index ${HEAL_I}`);
+    const state = sixSeats('human');
+    const me = state.fighters[0];
+    applyDamage(state, me, me.maxHp * 10, null, { kind: 'hazard' }, []);
+    let peak = me.hp;
+    let heals = 0;
+    let playing = 0;
+    for (let t = 0; t < 600; t++) {
+      const evs = stepMatch(state, 16.67, { move: { x: 0, y: 0 }, selectedWeapon: HEAL_I, attack: true });
+      if (state.phase === 'playing') playing++;
+      peak = Math.max(peak, me.hp);
+      heals += evs.filter((e) => e.type === 'heal' && e.fighterId === 0).length;
+    }
+    check('(h) NON-VACUOUS: the match stayed \'playing\' for all 600 ticks of held heal',
+      playing === 600, `${playing}/600, phase ${state.phase}`);
+    check('(h) 🔴 a corpse cannot HEAL ITSELF — hp never leaves 0, so `alive === false` still implies `hp === 0`',
+      peak === 0 && me.hp === 0 && heals === 0 && me.alive === false,
+      `peak hp ${peak}/${me.maxHp}, ${heals} heal events (pre-fix, same 600 ticks: 36/70 and 2 heals)`);
+
+    // THE POSITIVE CONTROL FOR THE CONSEQUENCE. Plant the invariant broken — which is
+    // exactly the state the pre-fix sim reached on its own — and read what the shipped
+    // timeout resolver does with it. If this ever stops crowning the corpse, the row above
+    // has stopped being about anything and should be re-derived, not deleted.
+    const rigged = sixSeats('human');
+    rigged.fighters[0].alive = false;
+    rigged.fighters[0].hp = Math.round(rigged.fighters[0].maxHp * 0.93);
+    for (let i = 1; i < N; i++) rigged.fighters[i].hp = Math.round(rigged.fighters[i].maxHp * 0.86);
+    rigged.timeRemaining = 0;
+    stepMatch(rigged, 16.67, { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false });
+    const crowned = rigged.fighters[rigged.winnerId];
+    check('(h) POSITIVE CONTROL — with the invariant broken the whistle really does crown the CORPSE',
+      rigged.phase === 'ended' && crowned.id === 0 && crowned.alive === false,
+      `winnerId ${rigged.winnerId} alive=${crowned.alive} hp=${crowned.hp}/${crowned.maxHp} vs five living at ${rigged.fighters[1].hp}/${rigged.fighters[1].maxHp}`);
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) {
   console.log('\nFailed checks:');

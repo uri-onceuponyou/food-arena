@@ -1,0 +1,38 @@
+[
+  {
+    "name": "A  every seat AI (HOLD)",
+    "sha": "5a401f60624991daa21d608397501cda6d919df85d8799cd064565f9dc3cd5f5",
+    "deaths": 3,
+    "postDeathPlayingTicks": 839,
+    "slot0": {
+      "alive": false,
+      "x": 2056.444363862282,
+      "y": 1046.4491901068502
+    },
+    "finalPhase": "playing"
+  },
+  {
+    "name": "B  human slot 0, NEUTRAL input (HOLD)",
+    "sha": "f2d613975a501c07a3fc89fb7c9b5f60d37d743cd8af1f008b9b13b2bdd61a39",
+    "deaths": 3,
+    "postDeathPlayingTicks": 839,
+    "slot0": {
+      "alive": false,
+      "x": 2100,
+      "y": 1000
+    },
+    "finalPhase": "playing"
+  },
+  {
+    "name": "C  human slot 0, LIVE input (MOVE)",
+    "sha": "5c949263fdd01ff50b1fd58da91d6fdf12c3db0fb6513379474c3e103cb35fba",
+    "deaths": 3,
+    "postDeathPlayingTicks": 839,
+    "slot0": {
+      "alive": false,
+      "x": 2779,
+      "y": 1979
+    },
+    "finalPhase": "playing"
+  }
+]
