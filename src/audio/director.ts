@@ -73,6 +73,7 @@ import type { Fighter, GameEvent, MatchState, FighterId, FighterRole } from '../
 // `tools/audio-probe.mjs`, whose duck-typed states carry NO `fighters` array and whose
 // synthetic `hit-landed` events carry NO `targetId` and NO `attackerId`.
 import { fighterOf, fightersOf, LOCAL_SLOT, slotOf, weaponAttackerOf } from '../game/roster';
+import { proximityGain, SFX_FADE_WU, SFX_FULL_WU } from '../proximity';
 import { Priority, type AudioEngine } from './engine';
 import * as S from './sounds';
 import type { SoundFn, SynthCtx } from './synth';
@@ -771,9 +772,31 @@ export class MatchAudio {
     const dy = yWU - me.y;
     const pan = Math.max(-1, Math.min(1, dx / PAN_FULL_WU)) * PAN_MAX;
     const dist = Math.hypot(dx, dy);
-    // Simple rational falloff — no inverse-square, because a brawler wants distant
-    // threats audible, not physically accurate.
-    const gain = Math.max(MIN_DISTANCE_GAIN, 1 / (1 + dist / DISTANCE_HALF_WU));
+    // ⚠️ REVERSED 2026-08-18 BY URI, AND THE OLD WORDING IS KEPT BECAUSE IT WAS A
+    // DELIBERATE RULE THAT BECAME WRONG WHEN THE MAP QUADRUPLED:
+    //
+    //   > *"Simple rational falloff — no inverse-square, because a brawler wants distant
+    //   > threats audible, not physically accurate."*
+    //   > `const gain = Math.max(MIN_DISTANCE_GAIN, 1 / (1 + dist / DISTANCE_HALF_WU));`
+    //
+    // Uri, playing six seats: *"I shouldn't hear loudly or at all something very far, and
+    // as I get closer to it it becomes louder, while what sits in the screen is the
+    // loudest."* Measured by `tools/tmp/sx_at_cens.mjs` on the OLD curve: the 0.32 floor
+    // binds beyond 893 wu, so **74% of the map diagonal played at one flat volume** —
+    // 80.6% of all voices were neither attacker nor target, median distance **1,372 wu**,
+    // every one at exactly 0.320. A hit just off-screen and one in the opposite corner
+    // arrived identically.
+    //
+    // 🚨 AND THE FLOOR WAS PROTECTING A CASE THAT CANNOT OCCUR. Its comment defended
+    // "you must be able to hear that you are being shot at" — but a hit ON the local seat
+    // is at distance **0.00 wu** by construction (measured: 1,128 of them, max distance
+    // 0.00, min gain 1.000). You never lose your own incoming fire; you lose other
+    // people's, which is what "scenery" means.
+    //
+    // Shares ONE curve with the camera shake (`d0a42ea`) rather than restating it —
+    // Uri asked for "the same behavior as the shake", and one rule in two places is this
+    // repo's most repeated defect.
+    const gain = proximityGain(dist, SFX_FULL_WU, SFX_FADE_WU);
     return { pan, gain };
   }
 }
