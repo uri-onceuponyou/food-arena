@@ -81,17 +81,44 @@ const argv = process.argv.slice(2);
 const arg = (k, d = null) => { const i = argv.indexOf(`--${k}`); return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : (i >= 0 ? true : d); };
 const has = (k) => argv.includes(`--${k}`);
 
-// ── Constants, read from rules.ts rather than typed in ──────────────────────
-const RULES_SRC = readFileSync(`${ROOT}/src/game/rules.ts`, 'utf8');
-const num = (re, what) => {
-  const m = re.exec(RULES_SRC);
-  if (!m) throw new Error(`sp_place: could not read ${what} out of rules.ts`);
-  return Number(m[1]);
-};
-export const PLAYER_SIZE = num(/export const PLAYER_SIZE = (\d+)/, 'PLAYER_SIZE');
-export const PLAYER_SPEED = num(/export const PLAYER_SPEED = ([\d.]+)/, 'PLAYER_SPEED');
-const MIN_SAFE_RADIUS = num(/export const MIN_SAFE_RADIUS = ([\d.]+)/, 'MIN_SAFE_RADIUS');
-const CONCEAL_ENDGAME_PROGRESS = num(/export const CONCEAL_ENDGAME_PROGRESS = ([\d.]+)/, 'CONCEAL_ENDGAME_PROGRESS');
+// ── Constants, IMPORTED from rules.ts rather than typed in ──────────────────
+//
+// 🚨 **THESE WERE REGEXES OVER `rules.ts` SOURCE UNTIL 2026-08-18, AND §76 BROKE THEM —
+// ONE OF THEM SILENTLY.** The old wording, kept because the rule it encoded is right and
+// only the mechanism was wrong: *"Constants, read from rules.ts rather than typed in"*.
+// Reading beats typing; **importing beats reading**, and here is the number that says so.
+//
+// `c5b9754` turned `export const MIN_SAFE_RADIUS = 140;` into
+// `export const MIN_SAFE_RADIUS = tune('MIN_SAFE_RADIUS', 140, {…})`. The literal is still
+// on the line, but it is no longer the first thing after the `=`, so
+// `/export const MIN_SAFE_RADIUS = ([\d.]+)/` stopped matching and this file threw at import
+// — taking `sp_gate`, `kx_seatfair` and `kx_fogcover` down with it, none of which scrape
+// anything themselves.
+//
+// 🔴 **AND `PLAYER_SPEED` DID NOT THROW. IT KEPT WORKING, OFF A COMMENT.** §76 documented
+// itself in `rules.ts`'s own header, and line 34 of that header reads, in prose:
+//
+//     * So nothing moved. `export const PLAYER_SPEED = 0.12` became
+//
+// The regex is unanchored, so it matched **line 34, a historical anecdote**, not line 633,
+// the declaration. It returned 0.12 and was RIGHT — because the anecdote quotes the
+// pre-§76 value. Set an override and this file would have gone on reporting the number the
+// comment remembers while the sim ran on the tuned one, in green, forever. `MIN_RUNWAY_WU`
+// below is `PLAYER_SPEED * 500`, so the whole runway minimum hung off that sentence.
+//
+// **A regex cannot be type-checked, cannot see a `tune()` wrapper, and cannot tell a
+// declaration from a comment about one.** An import does all three. It is also how this file
+// already loads `movement.ts` below, so nothing new is introduced.
+const R = await import(`${ROOT}/src/game/rules.ts`);
+export const PLAYER_SIZE = R.PLAYER_SIZE;
+export const PLAYER_SPEED = R.PLAYER_SPEED;
+const MIN_SAFE_RADIUS = R.MIN_SAFE_RADIUS;
+const CONCEAL_ENDGAME_PROGRESS = R.CONCEAL_ENDGAME_PROGRESS;
+for (const [k, v] of Object.entries({ PLAYER_SIZE, PLAYER_SPEED, MIN_SAFE_RADIUS, CONCEAL_ENDGAME_PROGRESS })) {
+  // An import that resolves but exports nothing under that name yields `undefined`, which
+  // arithmetics into `NaN` and prints as a plausible blank rather than as a failure.
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`sp_place: rules.ts exported no finite ${k} (got ${v})`);
+}
 
 /** `spawn_runway.mjs`'s own minimum: 0.5 s of held input. Derived the same way, from the same constant. */
 export const MIN_RUNWAY_WU = Math.round(PLAYER_SPEED * 500);

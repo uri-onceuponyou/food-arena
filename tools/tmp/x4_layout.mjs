@@ -50,7 +50,7 @@
  *   node tools/tmp/x4_layout.mjs --selftest      # the known-bad battery
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync } from 'node:fs';   // ⚠️ `readFileSync` went with the rules.ts scrapes
 import { dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -64,18 +64,48 @@ export const W = 2800;
 export const H = 2000;
 export const CX = W / 2, CY = H / 2;
 
-const RULES_SRC = readFileSync(`${ROOT}/src/game/rules.ts`, 'utf8');
-const num = (re, what) => { const m = re.exec(RULES_SRC); if (!m) throw new Error(`x4_layout: cannot read ${what}`); return Number(m[1].replace(/_/g, '')); };
-export const PLAYER_SIZE = num(/export const PLAYER_SIZE = (\d+)/, 'PLAYER_SIZE');
-const MATCH_DURATION_MS = num(/export const MATCH_DURATION_MS = ([\d_]+)/, 'MATCH_DURATION_MS');
-const POT_BODY_RADIUS = num(/bodyRadius: (\d+)/, 'POT.bodyRadius');
-const POT_DANGER_RADIUS = num(/dangerRadius: (\d+)/, 'POT.dangerRadius');
-const POT_DAMAGE = num(/damage: (\d+)/, 'POT.damage');
-const POT_TICK_MS = num(/tickMs: (\d+)/, 'POT.tickMs');
-const MIN_SAFE_RADIUS = num(/export const MIN_SAFE_RADIUS = (\d+)/, 'MIN_SAFE_RADIUS');
-const CONCEAL_ENDGAME_PROGRESS = num(/export const CONCEAL_ENDGAME_PROGRESS = ([\d.]+)/, 'CONCEAL_ENDGAME_PROGRESS');
-const MELEE_HEAVY = num(/meleeHeavy: (\d+)/, 'REACH.meleeHeavy');
-const RANGED_MAX = num(/rangedMax: (\d+)/, 'REACH.rangedMax');
+// ── The sim's constants, IMPORTED. Ten of them were regexes over `rules.ts` source
+//    until 2026-08-18. ──────────────────────────────────────────────────────
+//
+// The line below this block already read `await import(`${ROOT}/src/game/rules.ts`)` — for
+// `minSafeRadiusFor`, with a header explaining at length that a second copy of that
+// arithmetic was wrong by 1.60 wu within the hour. **The module was therefore already
+// loaded, and eleven lines above it the same file was regexing the same file's source.**
+// That is the whole lesson in one screen: importing was never the hard part; nobody had
+// noticed there were two mechanisms in one file.
+//
+// §76 (`c5b9754`) then made the difference load-bearing. `export const MATCH_DURATION_MS =
+// 150_000;` became `= tune('MATCH_DURATION_MS', 150_000, {…})`, so
+// `/export const MATCH_DURATION_MS = ([\d_]+)/` matched nothing and this file threw
+// `x4_layout: cannot read MATCH_DURATION_MS` at import — before its first assertion.
+//
+// 🚨 **AND TWO OF THESE WOULD HAVE GONE WRONG QUIETLY RATHER THAN LOUDLY.**
+// `/damage: (\d+)/` and `/tickMs: (\d+)/` are not anchored to `POT` at all — they take the
+// **first** `damage:` and the **first** `tickMs:` anywhere in a 2000-line file that is
+// mostly weapon tables. They are correct today only because `POT` happens to be declared
+// above every weapon. Move that declaration, or add a hazard above it, and this file starts
+// certifying the arena against some weapon's damage with a green tick. A regex has no idea
+// which object it is standing in; `R.POT.damage` cannot be pointed at the wrong one.
+const R = await import(`${ROOT}/src/game/rules.ts`);
+export const PLAYER_SIZE = R.PLAYER_SIZE;
+const MATCH_DURATION_MS = R.MATCH_DURATION_MS;
+const POT_BODY_RADIUS = R.POT.bodyRadius;
+const POT_DANGER_RADIUS = R.POT.dangerRadius;
+const POT_DAMAGE = R.POT.damage;
+const POT_TICK_MS = R.POT.tickMs;
+const MIN_SAFE_RADIUS = R.MIN_SAFE_RADIUS;
+const CONCEAL_ENDGAME_PROGRESS = R.CONCEAL_ENDGAME_PROGRESS;
+const MELEE_HEAVY = R.REACH.meleeHeavy;
+const RANGED_MAX = R.REACH.rangedMax;
+for (const [k, v] of Object.entries({
+  PLAYER_SIZE, MATCH_DURATION_MS, POT_BODY_RADIUS, POT_DANGER_RADIUS, POT_DAMAGE, POT_TICK_MS,
+  MIN_SAFE_RADIUS, CONCEAL_ENDGAME_PROGRESS, MELEE_HEAVY, RANGED_MAX,
+})) {
+  // The old `num()` threw by name when its regex missed. An import that resolves but has no
+  // such export yields `undefined`, which arithmetics to `NaN` and PRINTS — `NaN wu` reads
+  // as a formatting bug, not as a missing constant. Keep the loud failure.
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`x4_layout: rules.ts exported no finite ${k} (got ${v})`);
+}
 
 /**
  * 🔴 THE LARGEST FINAL RING THIS ARENA CAN BE ASKED TO CLOSE TO — IMPORTED, NOT RE-DERIVED.
@@ -93,7 +123,7 @@ const RANGED_MAX = num(/rangedMax: (\d+)/, 'REACH.rangedMax');
  * displaying a green tick. The sim's own function is imported instead. There is no version
  * of this file that is allowed to own a second copy of that arithmetic.
  */
-const { minSafeRadiusFor } = await import(`${ROOT}/src/game/rules.ts`);
+const { minSafeRadiusFor } = R;   // ← the same module object imported above; it was loaded twice
 const { MAX_FIGHTERS } = await import(`${ROOT}/src/game/state.ts`);
 export function finalRing(n = MAX_FIGHTERS) { return minSafeRadiusFor(n); }
 
@@ -721,7 +751,9 @@ async function report(arena) {
     const v = d(arena.spawns[i], arena.spawns[j]);
     if (v < minSep) { minSep = v; minPair = [i, j]; }
   }
-  const RANGED_MAX = num(/rangedMax: (\d+)/, 'REACH.rangedMax');
+  // ⚠️ WAS a third copy of the `rangedMax` scrape, shadowing the module-scope constant of
+  // the same name with an identical value. Shadowing a constant with a re-read of the same
+  // constant is how two of them come to disagree; the module-scope `RANGED_MAX` is in scope.
   console.log(`     min pairwise separation ${minSep.toFixed(1)} wu (slots ${minPair.join('/')}) vs REACH.rangedMax ${RANGED_MAX} — ${minSep >= RANGED_MAX ? 'CLEAR' : '🔴 A WEAPON REACHES BETWEEN TWO SPAWNS'}`);
   if (minSep < RANGED_MAX) bad++;
 
@@ -990,7 +1022,7 @@ async function selftest() {
       const v = sp.violations(arena.spawns[i], arena);
       check(`slot ${i} (${arena.spawns[i].x},${arena.spawns[i].y}) clears every hard constraint`, v.length === 0, v.join(' '));
     }
-    const RANGED_MAX = num(/rangedMax: (\d+)/, 'REACH.rangedMax');
+    // ⚠️ WAS a second copy of the `rangedMax` scrape — see the note in `report()`.
     let minSep = Infinity;
     for (let i = 0; i < 6; i++) for (let j = i + 1; j < 6; j++) minSep = Math.min(minSep, Math.hypot(arena.spawns[i].x - arena.spawns[j].x, arena.spawns[i].y - arena.spawns[j].y));
     check(`every pair of seats is >= REACH.rangedMax (${RANGED_MAX}) apart`, minSep >= RANGED_MAX, `min ${minSep.toFixed(1)} wu`);

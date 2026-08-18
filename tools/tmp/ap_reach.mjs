@@ -72,8 +72,27 @@ const argv = process.argv.slice(2);
 const arg = (k, d = null) => { const i = argv.indexOf(`--${k}`); return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : (i >= 0 ? true : d); };
 const has = (k) => argv.includes(`--${k}`);
 
-/** The sim's own fighter box. Read from `rules.ts` rather than typed in. */
-const PLAYER_SIZE = Number(/export const PLAYER_SIZE = (\d+)/.exec(readFileSync(`${ROOT}/src/game/rules.ts`, 'utf8'))[1]);
+/**
+ * The sim's own constants. ⚠️ THIS COMMENT USED TO READ *"Read from `rules.ts` rather than
+ * typed in"* and the code under it was
+ * `Number(/export const PLAYER_SIZE = (\d+)/.exec(readFileSync('…/rules.ts'))[1])`.
+ *
+ * The rule was right and the mechanism was wrong. §76 (`c5b9754`) wrapped ten of `rules.ts`'s
+ * constants in `tune(key, literal, {…})`; the literal stays on the line but stops being the
+ * first token after the `=`, so every unanchored `= ([\d.]+)` regex in this repo either
+ * stopped matching or — worse — matched somewhere else. **§G below died on
+ * `Cannot read properties of null (reading '1')` for `MIN_SAFE_RADIUS`, five sections into a
+ * run that had already printed eight green ticks.**
+ *
+ * `PLAYER_SIZE` itself is untuned and its regex still matched. It is imported anyway: the
+ * defect is not that a particular regex broke, it is that **a regex over source text cannot
+ * be type-checked, cannot see a wrapper, and cannot distinguish a declaration from a comment
+ * about one.** `src/game/**` spells its imports with explicit `.ts` extensions so Node can
+ * load them; this file already does exactly that for `movement.ts` in `analyse()`.
+ */
+const R = await import(`${ROOT}/src/game/rules.ts`);
+const PLAYER_SIZE = R.PLAYER_SIZE;
+if (!Number.isFinite(PLAYER_SIZE)) throw new Error(`ap_reach: rules.ts exported no finite PLAYER_SIZE (got ${PLAYER_SIZE})`);
 
 const L = Number(arg('lattice', 2));
 const BODY = Number(arg('body', PLAYER_SIZE));
@@ -601,10 +620,17 @@ async function selftest() {
   console.log('\n§G — every shipped region is inside the AI ceiling and outside the endgame keepout');
   {
     const arena = loadLayout();
-    const rules = readFileSync(`${ROOT}/src/game/rules.ts`, 'utf8');
-    const meleeHeavy = Number(/meleeHeavy:\s*([\d.]+)/.exec(rules)[1]);
-    const endgameProgress = Number(/export const CONCEAL_ENDGAME_PROGRESS = ([\d.]+)/.exec(rules)[1]);
-    const minSafe = Number(/export const MIN_SAFE_RADIUS = ([\d.]+)/.exec(rules)[1]);
+    // ⚠️ WAS three regexes over `readFileSync('…/rules.ts')`, and this is the line §76 killed:
+    // `/export const MIN_SAFE_RADIUS = ([\d.]+)/` no longer matches
+    // `= tune('MIN_SAFE_RADIUS', 140, {…})`, and `.exec(…)[1]` on `null` is a TypeError, not a
+    // diagnosis. The comment above still holds and is why this matters: *"Both numbers come
+    // out of `rules.ts` rather than being typed here, so a change to either constant moves
+    // this gate rather than silently invalidating it."* A regex is a copy of the constant that
+    // agrees by construction until `rules.ts` is REFORMATTED — which is a different event from
+    // the constant CHANGING, and it is the event that happened.
+    const meleeHeavy = R.REACH.meleeHeavy;
+    const endgameProgress = R.CONCEAL_ENDGAME_PROGRESS;
+    const minSafe = R.MIN_SAFE_RADIUS;
     const ceiling = meleeHeavy * 2;
     const keepout = Math.max(minSafe, arena.maxSafeRadius * (1 - endgameProgress));
     const regions = arena.concealment ?? [];

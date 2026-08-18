@@ -69,14 +69,58 @@ const has = (k) => argv.includes(`--${k}`);
 const DUMP = `${ROOT}/tools/arena.gameplay.json`;
 const loadArena = () => JSON.parse(readFileSync(String(arg('layout', DUMP)), 'utf8'));
 
-const RULES = readFileSync(`${ROOT}/src/game/rules.ts`, 'utf8');
-const ruleNum = (re) => Number(re.exec(RULES)[1]);
-const MIN_SAFE_RADIUS = ruleNum(/export const MIN_SAFE_RADIUS = ([\d.]+)/);
-const POT_DANGER = ruleNum(/dangerRadius:\s*([\d.]+)/);
-const POT_BODY = ruleNum(/bodyRadius:\s*([\d.]+)/);
-const REACH = Object.fromEntries(
-  [...RULES.matchAll(/^\s{2}(melee\w+|ranged\w+):\s*(\d+),/gm)].map((m) => [m[1], Number(m[2])]),
-);
+// ── The sim's constants, IMPORTED. They were regexes over `rules.ts` source until
+//    2026-08-18, and §76 killed every one of them. ─────────────────────────
+//
+// The old code, kept so the failure is legible rather than forgotten:
+//
+//     const RULES = readFileSync(`${ROOT}/src/game/rules.ts`, 'utf8');
+//     const ruleNum = (re) => Number(re.exec(RULES)[1]);
+//     const MIN_SAFE_RADIUS = ruleNum(/export const MIN_SAFE_RADIUS = ([\d.]+)/);
+//     const REACH = Object.fromEntries(
+//       [...RULES.matchAll(/^\s{2}(melee\w+|ranged\w+):\s*(\d+),/gm)].map(…));
+//
+// `c5b9754` wrapped the declaration in `tune('MIN_SAFE_RADIUS', 140, {…})`, the regex
+// stopped matching, and `ruleNum` — which indexes `[1]` on the match with no null check —
+// died on `Cannot read properties of null`. This file never even got that far: it imports
+// `sp_place.mjs`, whose identical scrape threw first.
+//
+// 🚨 **BUT THE REGEX WAS ALREADY THE WRONG TOOL BEFORE §76, AND THE `REACH` TABLE SHOWS WHY
+// BETTER THAN `MIN_SAFE_RADIUS` DOES.** `/^\s{2}(melee\w+|ranged\w+):\s*(\d+),/gm` is
+// coupled to things that are not the value: **two spaces** of indentation, a **trailing
+// comma**, an **integer** literal, and a **key spelling**. Reformat `rules.ts` — prettier,
+// a nested object, a trailing entry losing its comma — and this table silently loses a
+// rung, with no error anywhere, because a shorter list is a perfectly well-formed list.
+// A regex cannot be type-checked and cannot be told that a rung went missing. An import
+// can: `REACH` is `as const` in `rules.ts`, so a renamed key is a compile error there and
+// an immediate `undefined` here.
+//
+// ⚠️ **`ultimateSlam` IS THE ONE PLACE THE IMPORT IS NOT A DROP-IN, AND IT IS FILTERED BACK
+// OUT ON PURPOSE.** The old alternation `(melee\w+|ranged\w+)` excluded
+// `REACH.ultimateSlam: 400`; importing `REACH` whole would have added it, and the endgame
+// table's chords (166–235 wu) are all under 400, so **all five rows would have flipped from
+// "nothing — out of every reach" to "INSIDE REACH.ultimateSlam"** — a silent behaviour
+// change dressed as a bug fix. The exclusion is `rules.ts`'s own, stated at the declaration:
+// *"DELIBERATELY NOT ON THE LADDER … excluded from the fair-play radius in
+// `render/camera.ts`"*, and `rangedMax` is documented as *"the longest reach any weapon has,
+// ultimates aside"*. So the filter keeps the prefix convention the alternation encoded —
+// a new `melee*`/`ranged*` rung joins automatically, a new `ultimate*` does not — and is now
+// applied to a typed object instead of to source text.
+const R = await import(`${ROOT}/src/game/rules.ts`);
+const MIN_SAFE_RADIUS = R.MIN_SAFE_RADIUS;
+const POT_DANGER = R.POT.dangerRadius;
+const POT_BODY = R.POT.bodyRadius;
+const { MAX_FIGHTERS } = await import(`${ROOT}/src/game/state.ts`);
+const LADDER = /^(melee|ranged)/;
+const REACH = Object.fromEntries(Object.entries(R.REACH).filter(([k]) => LADDER.test(k)));
+// ⚠️ NON-EMPTY BEFORE ANYTHING QUANTIFIES OVER IT. Every consumer of `REACH` below is a
+// `.filter(…)[0]`, and an empty table makes all of them answer "outside every weapon's
+// reach" — the reassuring answer — in green. `[].every()` returning `true` has fired five
+// times in this repo (`CLAUDE.md` #6); this is the same trap wearing `.filter()`.
+if (Object.keys(REACH).length === 0) throw new Error('sp_gate: REACH has no melee/ranged rungs — the ladder filter matched nothing');
+for (const [k, v] of Object.entries({ MIN_SAFE_RADIUS, POT_DANGER, POT_BODY })) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`sp_gate: rules.ts exported no finite ${k} (got ${v})`);
+}
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -229,15 +273,32 @@ export function sourceFaults(arena) {
  * endgame floor is an ANNULUS, and the honest description of six seats is the width of that
  * annulus against the width of a body — measured here, not guessed.
  */
-const HIT_RADIUS_MAX = Math.max(
-  PLAYER_SIZE * Number(/export const HIT_RADIUS_VS_PLAYER = PLAYER_SIZE \* ([\d.]+)/.exec(RULES)[1]),
-  ruleNum(/export const HIT_RADIUS_VS_ENEMY = ([\d.]+)/),
-);
-const ENDGAME_STANDOFF = REACH.rangedMax + HIT_RADIUS_MAX;
-/** `rules.ts:minSafeRadiusFor`, re-derived here rather than imported (this file reads no TS). */
-const minSafeRadiusFor = (n) => (!Number.isFinite(n) || n < 3
-  ? MIN_SAFE_RADIUS
-  : Math.max(MIN_SAFE_RADIUS, ENDGAME_STANDOFF / Math.sin(Math.PI / n) - POT_DANGER));
+// 🚨 **THE WORST SCRAPE IN THIS FILE WAS THIS ONE, AND IT WAS NOT BROKEN BY §76.** It read
+//
+//     PLAYER_SIZE * Number(/export const HIT_RADIUS_VS_PLAYER = PLAYER_SIZE \* ([\d.]+)/…)
+//
+// — a regex that hardcodes **the shape of the right-hand side**, not just the constant's
+// name. It only works while the declaration is spelled `PLAYER_SIZE * 0.6`; rewrite it as
+// `25.2`, or as `BODY_LENGTH * 0.6`, and the match is gone. The value is exported. Import it.
+const HIT_RADIUS_MAX = Math.max(R.HIT_RADIUS_VS_PLAYER, R.HIT_RADIUS_VS_ENEMY);
+/**
+ * ⚠️ THIS LINE USED TO READ `const ENDGAME_STANDOFF = REACH.rangedMax + HIT_RADIUS_MAX;`,
+ * with the comment *"`rules.ts:minSafeRadiusFor`, re-derived here rather than imported
+ * (this file reads no TS)"* on the function below. **The parenthetical is no longer true —
+ * this file reads TS now — and the re-derivation was the exact thing `x4_layout.mjs`'s
+ * header forbids**: *"THE FIRST DRAFT RE-DERIVED IT AND WAS WRONG BY 1.60 wu WITHIN THE
+ * HOUR … There is no version of this file that is allowed to own a second copy of that
+ * arithmetic."* Both are now the sim's own symbols.
+ *
+ * **Measured before the swap, not assumed:** the local copy and `rules.ts:minSafeRadiusFor`
+ * agree to a delta of EXACTLY 0.0 at N = 1,2,3,4,5,6,7,8,12 and at `NaN`/`Infinity`
+ * (140.000000 / 187.416068 / 237.000000 / 287.590969 / 338.778904 / 546.374749), and
+ * `ENDGAME_STANDOFF` matches at 166 with delta 0. The one difference is real but unreachable
+ * from here: `rules.ts` does `Math.floor(fighterCount)` first and the copy did not, so they
+ * part company only on a non-integer N, which no caller in this file produces.
+ */
+const ENDGAME_STANDOFF = R.ENDGAME_STANDOFF;
+const minSafeRadiusFor = R.minSafeRadiusFor;
 
 function endgame(arena) {
   const rIn = POT_DANGER;                                   // inside this the ground burns
@@ -282,7 +343,11 @@ function gate(arena) {
   // `MAX_FIGHTERS` against the state layout; nothing pinned it against the ARENA, so
   // raising it to 8 would produce a sim that seats 8 and a kitchen that can start 6 —
   // and `createMatch` would throw on slot 6 with no gate having said why.
-  const MAX_FIGHTERS = Number(/export const MAX_FIGHTERS = (\d+)/.exec(readFileSync(`${ROOT}/src/game/state.ts`, 'utf8'))[1]);
+  // ⚠️ WAS `Number(/export const MAX_FIGHTERS = (\d+)/.exec(readFileSync(state.ts))[1])`.
+  // Same class as the `rules.ts` scrapes above and the same fix: `src/game/**` spells its
+  // imports with explicit `.ts` extensions precisely so Node can load them, so there is no
+  // reason to read this one as text. Hoisted to module scope because the import is `await`ed
+  // once and this function is synchronous.
   check(`the arena seats exactly MAX_FIGHTERS (${MAX_FIGHTERS}) — state.ts and src/arena/** agree`,
     s.length === MAX_FIGHTERS, `spawns ${s.length} vs MAX_FIGHTERS ${MAX_FIGHTERS}`);
 
