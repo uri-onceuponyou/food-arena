@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LK3 — level-badge harness</title>
+    <style>
+      /* ── THIS LINE IS THE INSTRUMENT, NOT DECORATION ────────────────────────
+         Copied deliberately from tools/tmp/hud_harness.html, which records why:
+         index.html applies `* { box-sizing: border-box }` to the whole game and a
+         harness that does not reproduces the layout 12% wide. `hud_fit.mjs` read
+         "0px overflow" through a content-box harness against a real 15.1px, and
+         hud.ts then QUOTED that zero in a source comment. Every number this
+         harness produces about a pill's width is worthless without this line. */
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: #6b4a2f; }
+    </style>
+  </head>
+  <body>
+    <div id="hud"></div>
+    <script type="module">
+      /**
+       * WHY THIS HARNESS EXISTS AT ALL — it is the only way to make the per-slot
+       * assertion NON-VACUOUS.
+       *
+       * The shipped game cannot produce a match whose seats hold different levels:
+       * `tuning.ts:ENEMY_LEVEL_MODE` is 'mirror', so `enemyLevelFor(n)` returns n and
+       * `match.ts:newMatch` gives EVERY non-local seat `this.levels.enemy`. The QA
+       * `?fighters=` transport carries no level at all, so every seat there is
+       * `LEVEL_MIN`. An assertion of the form "each nameplate shows its own slot's
+       * level" measured on either of those states is satisfied just as happily by a
+       * HUD that writes slot 0's level into all six plates — the exact `[].every()`
+       * class of vacuity CLAUDE.md #6 lists three instances of.
+       *
+       * So the levels here are DISTINCT BY CONSTRUCTION and lk3_level.mjs asserts they
+       * are distinct before it asserts anything about them.
+       *
+       * ⚠️ The state is built by the SHIPPED `createMatch` over the SHIPPED arena, not
+       * hand-rolled. A duck-typed fixture is how `hud_harness.html` ends up handing the
+       * HUD a `Fighter` with no `level` field at all.
+       */
+      import { createHud } from '/src/ui/hud.ts';
+      import { createMatch } from '/src/game/sim.ts';
+      import { createKitchenArena } from '/src/arena/kitchen.ts';
+
+      if (new URLSearchParams(location.search).has('touch')) {
+        document.documentElement.classList.add('fa-touch-capable', 'fa-touch');
+      }
+
+      const hud = createHud(document.getElementById('hud'), { onRestart() {} });
+      const arena = createKitchenArena();
+
+      /**
+       * `ids` in slot order, `levels[i]` the level for slot i. Returns what the SIM
+       * says, so the probe compares the DOM against the sim rather than against its
+       * own input — a probe that echoes its own array back has proved nothing about
+       * the path from `Fighter.level` to the screen.
+       */
+      window.__lk3Set = (ids, levels) => {
+        const state = createMatch(
+          arena,
+          ids.map((characterId, i) => ({ characterId, level: levels[i] })),
+        );
+        hud.setCharacters(ids);
+        hud.update(state, { selectedWeapon: 0 });
+        return {
+          levels: state.fighters.map((f) => f.level),
+          maxHp: state.fighters.map((f) => f.maxHp),
+          hp: state.fighters.map((f) => f.hp),
+        };
+      };
+
+      window.__lk3Ready = true;
+    </script>
+  </body>
+</html>

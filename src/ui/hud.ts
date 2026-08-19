@@ -642,6 +642,22 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
   // Rebuilt only when the COUNT changes, so a restart at the same size touches no DOM.
   interface FighterSlotEls {
     name: HTMLDivElement; emoji: HTMLDivElement;
+    /**
+     * The NUMERAL inside the `LV n` badge — `.hud-fighter-level-n`, not the badge
+     * itself. Written by `update()`; the `LV` label beside it is static markup that a
+     * media query drops on a phone, so the two cannot be one text node.
+     */
+    level: HTMLSpanElement;
+    /**
+     * The level this slot's badge currently STATES, so `update()` writes `textContent`
+     * on a change instead of sixty times a second. `-1` is not a level (`LEVEL_MIN` is
+     * 1), so the first `update()` after a rebuild always writes.
+     *
+     * ⚠️ This is a write-elision cache and NOT an assertion — it can only be stale in
+     * the direction of writing too often, because `buildFighterSlots` throws the whole
+     * array away whenever the seat count changes and a level cannot move inside a match.
+     */
+    levelValue: number;
     bar: HTMLDivElement; fill: HTMLDivElement; hpText: HTMLDivElement;
     float: HTMLDivElement; floatEmoji: HTMLDivElement; floatFill: HTMLDivElement;
     blip: HTMLDivElement;
@@ -728,10 +744,37 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       plate.className = `hud-fighter hud-fighter--${mod}${chip ? ' hud-fighter--chip' : ''}`;
       // The pill is MIRRORED on the opponent side — portrait outboard, name inboard —
       // and that was expressed as two hand-written templates. It is one branch now.
+      // The level badge is MIRRORED with everything else — outboard portrait, then the
+      // name, then the level on the inboard end — so the reading order is the same
+      // "who, then how strong" on both sides of the bar.
+      //
+      // 🚨 TWO SPANS, NOT ONE STRING, AND THE SPLIT IS A MEASURED FIX.
+      //
+      // The badge began as one `LV 15` run. Measured at 390x844 by `tools/tmp/lk3_level.mjs`
+      // against the PILL'S CONTENT BOX:
+      //
+      //   the shipped game, in Rubik ......... no overflow, at 2 and at 6 seats
+      //   `lk3_harness.html`, FALLBACK METRICS  badge 44px, OVERFLOWING BY 7.0px
+      //
+      // The harness carries no font link, so it reproduces the state `ft_faces.mjs` exists
+      // for: the app makes exactly one external request, and with it blocked
+      // `document.fonts.size` goes 33 -> 0 and pills all over this UI clip. A readout that
+      // fits only while the network is up is not a readout that fits. With the label
+      // dropped the same badge measures 27.9px under the same fallback metrics and clears
+      // the box at every width tested. A numeral alone is also what every shipped brawler
+      // draws at this size.
+      //
+      // ⚠️ The label is dropped at <=720px; the NAME yields at <=560px, which is a separate
+      // and larger decision — see that media query for its arithmetic.
+      const lvl = `<div class="hud-fighter-level" data-el="${key}-level">`
+        + `<span class="hud-fighter-level-tag">LV</span>`
+        + `<span class="hud-fighter-level-n" data-el="${key}-level-n"></span>`
+        + `</div>`;
       const pill = i === 0
         ? `<div class="hud-fighter-emoji" data-el="${key}-emoji"></div>` +
-          `<div class="hud-fighter-name" data-el="${key}-name"></div>`
-        : `<div class="hud-fighter-name" data-el="${key}-name"></div>` +
+          `<div class="hud-fighter-name" data-el="${key}-name"></div>` + lvl
+        : lvl +
+          `<div class="hud-fighter-name" data-el="${key}-name"></div>` +
           `<div class="hud-fighter-emoji" data-el="${key}-emoji"></div>`;
       plate.innerHTML =
         `<div class="hud-fighter-pill">${pill}</div>` +
@@ -771,6 +814,8 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       fighterSlots.push({
         name: plate.querySelector(`[data-el="${key}-name"]`)!,
         emoji: plate.querySelector(`[data-el="${key}-emoji"]`)!,
+        level: plate.querySelector(`[data-el="${key}-level-n"]`)!,
+        levelValue: -1,
         bar: plate.querySelector(`[data-el="${key}-bar"]`)!,
         fill: plate.querySelector(`[data-el="${key}-fill"]`)!,
         hpText: plate.querySelector(`[data-el="${key}-hp"]`)!,
@@ -1557,6 +1602,29 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         const s = fighterSlots[i];
         if (!s) return;
         setBar(s.fill, s.hpText, f.hp, f.maxHp);
+        // ── THE FIGHTER'S OWN LEVEL, READ OFF THE FIGHTER ───────────────────────
+        // Uri, playing the deployed build: *"In the gameplay add player level on
+        // player data."*
+        //
+        // 🚨 `f.level` — NOT a second derivation. `state.ts` puts `level` on every
+        // `Fighter` and `sim.ts:createFighter` seeds it, and `GameSessionOptions`'
+        // `playerLevel` field comment in `match.ts` records
+        // `economy/levels.ts:enemyLevelFor()` as *"the single place Uri's answer
+        // lives"* on bot levels. A HUD that called that function itself would be a
+        // second source of truth that AGREES TODAY — `ENEMY_LEVEL_MODE` is `'mirror'`,
+        // so every non-local seat is at the player's level — and silently disagrees
+        // the day a seat carries its own. The badge reads the number the sim is
+        // actually fighting at, which is the same number `levelDamageMultiplier` and
+        // `maxHpFor` were derived from.
+        //
+        // No `?? LEVEL_MIN`. `level` is a REQUIRED field on `Fighter`; a state that
+        // omits it is invalid, and `LV undefined` in the corner of the screen is the
+        // loud failure. A default here would print a plausible `LV 1` over a broken
+        // wiring, which is this project's most expensive failure shape.
+        if (s.levelValue !== f.level) {
+          s.levelValue = f.level;
+          s.level.textContent = String(f.level);
+        }
         // Danger pulse once a fighter's own bar reads critically low — a fast,
         // unmistakable "you are about to die" signal that doesn't depend on reading
         // the numeric text at all.
@@ -1969,6 +2037,80 @@ const CSS = `
   text-overflow: ellipsis;
 }
 
+/* ── THE FIGHTER'S CHARACTER LEVEL, 1-15 ─────────────────────────────────────
+   Uri, playing the deployed build: "In the gameplay add player level on player
+   data." It rides the PILL rather than the bar, and that is the whole of the
+   layout decision:
+
+     * The bar is the one readout whose backdrop moves under it (see
+       .hud-healthbar-text). Anything parked in it either covers the fill or
+       collides with the centred HP run at narrow widths.
+     * The pill has slack and the bar does not. The local plate stretches to the
+       full .hud-fighter width (380px at desk) and the name uses a fraction of it,
+       so on the seat Uri asked about the badge lands in dead space. MEASURED at
+       1280x720, c9a2ed0 vs this tree: the name's own clip is 0px BEFORE and 0px
+       AFTER, at two seats and at six. The opponent pill is content-sized
+       (.hud-fighter--enemy sets align-items: flex-end) so it GROWS leftward
+       instead - width only, never height.
+
+   HEIGHT IS THE BUDGET AND IT IS DELIBERATELY UNDERSPENT. 20px against the 24px
+   portrait beside it, so .hud-fighter-pill's height is still set by the portrait
+   and the top bar's measured height does not move. h49_chips PRINTS that height
+   ("precisely so no budget gets invented here and then quoted"), so a badge that
+   moved it would be a number this pass owed an explanation for.
+
+   flex: 0 0 auto, so the badge never shrinks; between 560 and 720px it is the NAME
+   that ellipsizes (it already carries overflow: hidden for exactly that), and below
+   560 the name is dropped outright - see that media query. A shrinking level badge
+   would clip a digit off a two-digit level, and a level 15 reading "LV 1" is worse
+   than a truncated name by a long way.
+
+   CONTRAST IS NOT INHERITED HERE. The badge carries its own opaque plate, so the
+   ratio is fixed at #1a1224 on #FFC93C = 11.83:1 whatever the arena does behind
+   it - the same mechanism the HP run uses, and the reason this class adds no new
+   WCAG failure to a HUD that went from 20 to 0.
+
+   #FFC93C IS "mustard", A NAMED PROJECT TOKEN - theme.ts's --mustard, icons/svg.ts,
+   and rules.ts's palette all spell it. It is deliberately NOT #F4A300, the amber
+   this HUD already spends on the selected weapon border, the weapon key badge, the
+   countdown and the podium place: that amber means CONTROL AFFORDANCE here, and a
+   level is data. Two warm accents with two jobs beats one warm accent with two
+   meanings. (#1a1224 on #F4A300 would have been 8.72:1 - also safe, so this is a
+   semantics choice and not a contrast one.) */
+.hud-fighter-level {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  padding: 0 7px;
+  border: 2px solid #1a1224;
+  border-radius: 999px;
+  background: #FFC93C;
+  color: #1a1224;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  box-shadow: 0 1px 0 rgba(0,0,0,0.35);
+  gap: 3px;
+}
+/* The label is the part that goes. See buildFighterSlots: at 390px under fallback font
+   metrics the whole badge measured 44px against a 73px content box that also had to hold
+   a 24px portrait and two 6px gaps. The NUMERAL never shrinks and never wraps - a level
+   15 that reads "LV 1" because a digit got clipped is worse than every failure this
+   badge is meant to prevent.
+
+   ⚠️ AND THE LABEL CARRIES NO OPACITY. The first draft de-emphasised it at 0.75, which
+   is a CONTRAST spend: screen_metrics/home_metrics measure WCAG against the pixels
+   actually behind a run, so an inherited opacity counts, and 0.75 takes this run from
+   11.83:1 to 6.41:1. It still passes AA - and it is 5.4 points of the margin that made
+   this badge safe on any backdrop, bought for a hierarchy nobody asked for. */
+.hud-fighter-level-tag { flex: 0 0 auto; }
+.hud-fighter-level-n { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+
 .hud-healthbar {
   position: relative;
   width: 100%;
@@ -2131,6 +2273,31 @@ const CSS = `
    faster than 8px type would. The element stays so nothing that reads it by name
    stops matching — see buildFighterSlots' note on what that costs np_nfighter. */
 .hud-fighter--chip .hud-fighter-name { display: none; }
+/* ── AND NEITHER IS THE LEVEL. THIS IS THE DECISION, NOT AN OVERSIGHT ─────────
+   The chip is 48px wide (40px below 720px) and holds a 30px portrait over an
+   11px bar. A level badge there has exactly two places to go and both are worse
+   than not drawing it:
+
+     * a THIRD ROW in the chip - which grows the rail, and the rail's height is
+       the top bar's height, a number h49_chips publishes on purpose;
+     * ON the portrait - which is the chip's ONLY identity now that the name is
+       gone, at 30px, on a phone at 26px.
+
+   And what it would buy is nothing a player does not already have. Measured in
+   the source, not assumed: tuning.ts:ENEMY_LEVEL_MODE is 'mirror', so
+   economy/levels.ts:enemyLevelFor() returns clampLevel(playerLevel) and
+   match.ts:newMatch hands this.levels.enemy to EVERY non-local seat. So all
+   five chips carry the same number, and that number is the one already printed
+   on the local plate two feet to the left. Five redundant copies, in the corner
+   html.fa-touch-capable also puts the radar in.
+
+   ⚠️ THE ELEMENT IS STILL BUILT AND STILL WRITTEN, exactly like the name and the
+   numeric HP above it. The day a seat carries its own level - a per-seat level
+   input on GameSessionOptions, or a second human - this is one line of CSS, and
+   update() is already writing the right number into it. Deleting the element
+   instead would make that a change to buildFighterSlots, to the slot interface
+   and to every probe that counts [data-el$="-level"]. */
+.hud-fighter--chip .hud-fighter-level { display: none; }
 .hud-fighter--chip .hud-fighter-emoji {
   width: 30px;
   height: 30px;
@@ -2146,8 +2313,14 @@ const CSS = `
 }
 .hud-fighter--chip .hud-healthbar-fill { inset: 1px; right: auto; }
 /* "99 / 108" at 12px in an 11px track is unreadable AND overflows it. The bar's
-   FILL is the readout at this size; the number lives on the float pill over the
-   fighter's own head and on the local seat's full bar. */
+   FILL is the readout at this size, and on the local seat's own full bar.
+   ⚠️ THIS COMMENT USED TO ALSO SAY "the number lives on the float pill over the
+   fighter's own head". IT DOES NOT AND NEVER DID: .hud-float-pill holds
+   .hud-float-emoji and .hud-float-bar, and there is no text node anywhere in it
+   (buildFighterSlots writes the whole float in one template). Corrected rather
+   than deleted, because it is the shape this project keeps paying for - a
+   consolation readout named in a comment as the reason a real one was dropped,
+   where nobody checked that the consolation exists. */
 .hud-fighter--chip .hud-healthbar-text { display: none; }
 
 .hud-clock {
@@ -3417,6 +3590,14 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 
 @media (max-width: 720px) {
   .hud-fighter-name { font-size: 12px; }
+  /* Down with the name, and still SHORTER than the 24px portrait beside it (this
+     media query does not shrink the full plate's portrait — only the chip's), so
+     .hud-fighter-pill's height is unchanged here too and the top bar keeps the
+     height h49_chips publishes. */
+  .hud-fighter-level { height: 18px; font-size: 10px; padding: 0 6px; gap: 0; }
+  /* THE MEASURED LINE. 44px of badge did not fit a 73px pill at 390px under fallback
+     metrics; the numeral alone is ~22px and clears it by ~9px even there. */
+  .hud-fighter-level-tag { display: none; }
   .hud-healthbar { height: 18px; }
   /* ── The chip rail, narrowed ────────────────────────────────────────────────
      Arithmetic, not taste, and it is the same geometry the radar/tray rules at the
@@ -3502,6 +3683,40 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
     justify-self: center;
     justify-content: center;
   }
+}
+
+/* ── PORTRAIT PHONES: THE NAME YIELDS TO THE LEVEL, AND IT IS A MEASURED LINE ─
+   Not a taste call and not a blanket phone rule. The arithmetic is the one the
+   720px block below already sets out for the chip rail:
+
+     side track = (W - 28 padding - 156 clock - 20 gap) / 2
+     name box   = track - 16 pill padding - 4 border - 24 portrait - 12 gaps - 28 badge
+
+   "HAMBURGER" measures ~107px at the 12px/800 this HUD gives a phone, so the name
+   needs a 107px box and gets:
+
+     W = 667 (landscape phone) .. track 231 .. name box 147   -> fits, with slack
+     W = 430 .................. track 113 .. name box  29   -> one character
+     W = 390 .................. track  93 .. name box   9   -> nothing
+
+   MEASURED, both trees, at 390x844: the name was ALREADY ellipsised to "HAM…" before
+   this pass (clipped 39px) and the badge took it to a 1-2px sliver (clipped 76px).
+   A stub that reads as a rendering fault is worse than no name, and this is exactly
+   the trade .hud-fighter--chip .hud-fighter-name already makes 40 lines up: THE
+   PORTRAIT IS THE IDENTITY AT THIS SIZE. It is also your OWN character, chosen
+   seconds earlier on the select screen.
+
+   560, not 720: at 667 the name fits WITH the badge and dropping it there would
+   remove something that works. The crossover solves at W = 586 (name box = 107), and
+   560 is the round number below it with the nearest real viewport (430) far to the
+   other side. ⚠️ Both 156 and 107 are measured, not derived — if the clock or the
+   type scale moves, this number is stale. lk3_level asserts BOTH sides of it.
+
+   ⚠️ The element is not removed, exactly as on a chip. [data-el="<slot>-name"] is
+   still there and still carries its own slot's name — np_nfighter and h49_chips both
+   read it by name. */
+@media (max-width: 560px) {
+  .hud-fighter-name { display: none; }
 }
 
 /* Short viewports (19.5:9 / 21:9 phones) — keep the radar clear of the weapon bar. */
