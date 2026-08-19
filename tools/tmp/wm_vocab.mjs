@@ -413,7 +413,16 @@ export function buildVocab(env) {
   T('homing', 'discriminating', '`homing` — steers toward the target in flight (one target; see `multi-target`)', (c) => c.w?.homing === true);
   T('repeat-hits', 'discriminating', '`peckHits`/`peckInterval` — arrives, then strikes repeatedly', (c) => (c.w?.peckHits ?? 1) > 1);
   T('splatter', 'discriminating', `\`splatter\` — leaves a ground splat, r=${SPLAT_RADIUS}, ${SPLAT_DURATION_MS}ms. Slows. Deals NO damage.`, (c) => c.w?.splatter === true);
-  T('splat-slows-anyone', 'none-today', 'a splat that slows BOTS as well as the human seat — MEASURED each run', (c) => c.w?.splatter === true && env.splatSlow.reachesBot);
+  // WAS `'none-today'`, and the change of one word is the most interesting event this
+  // vocabulary has recorded. `b2be2f7` made `terrainSlowFactor` reach the AI, so 2 of 33
+  // weapons now satisfy this and the annotation went stale IN THE DIRECTION NOBODY
+  // WATCHES FOR — a term getting BETTER.
+  //
+  // 🚨 THIS IS THE GAP `--ratchet` STRUCTURALLY CANNOT COVER. A ratchet compares fault
+  // sets, so it sees regressions; a mechanic being BUILT shows up as a fault vanishing,
+  // which reads as "stale ledger" and nothing more. The annotation census is the arm that
+  // names WHICH mechanic arrived. Keep the annotations honest or this arm goes quiet.
+  T('splat-slows-anyone', 'discriminating', 'a splat that slows BOTS as well as the human seat — MEASURED each run', (c) => c.w?.splatter === true && env.splatSlow.reachesBot);
   // ONE press, MORE THAN ONE victim — and only on the melee side. `3483d23` made a swing
   // resolve against every opponent inside `cone`/`range` rather than against
   // `nearestLivingOpponent`; a ranged press still resolves one projectile against one
