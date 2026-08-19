@@ -151,7 +151,19 @@ const AIM_DX = Number(args.aimDx ?? 320);
 const AIM_DY = Number(args.aimDy ?? 0);
 /** Half-width of the photographed crop, in full-resolution page px. */
 const CROP = Number(args.crop ?? 150);
-const REPO = resolve(new URL('../..', import.meta.url).pathname);
+const SELF = new URL(import.meta.url).pathname.split('/').pop();
+
+// 🚨 THE SERVED TREE, NOT THIS ONE. `with_snapshot`/`sx_snap` copy the repo, serve the
+// copy, and export `SNAPSHOT_DIR`; every tool here then parsed `rules.ts` out of its OWN
+// checkout and labelled the run with it. On 2026-08-19 that printed `soup.Splash #E8792A`
+// while measuring a worktree where the weapon is `#CC9F0D` — the NUMBERS were of the
+// served tree and the LABEL was of another, which is the worst way for an A/B to be wrong,
+// because both halves look right in isolation. Prefer the snapshot; print which won.
+const LOCAL_REPO = resolve(new URL('../..', import.meta.url).pathname);
+const REPO = process.env.SNAPSHOT_DIR
+  ? resolve(process.env.SNAPSHOT_DIR)
+  : LOCAL_REPO;
+if (REPO !== LOCAL_REPO) console.log(`[${SELF}] parsing rules.ts from the SERVED tree: ${REPO}`);
 
 const log = (...a) => console.log(...a);
 const pad = (s, n) => String(s).padEnd(n);
@@ -185,8 +197,6 @@ function widestGap(lightnesses) {
 }
 
 /** `rules.ts` parsed, not imported — same reason `pj_probe` gives: it is TypeScript. */
-const SELF = new URL(import.meta.url).pathname.split('/').pop();
-
 async function rangedWeapons() {
   const src = await readFile(resolve(REPO, 'src/game/rules.ts'), 'utf8');
   const out = new Map();
