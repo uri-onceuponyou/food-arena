@@ -880,11 +880,38 @@ export function opponentOf(state: MatchState, fighter: Fighter): Fighter {
  * instruments pin `hp` directly (`match-sim.mjs:768`'s forced-immortal idiom is the shipped
  * example) and the conjunction is the one that cannot be surprised by that.
  */
+/**
+ * IS `candidate` SOMEBODY `fighter` MAY HIT — not itself, and still up.
+ *
+ * ── WHY THIS IS A FUNCTION AND NOT AN INLINE `continue` ─────────────────────
+ *
+ * It was inline, once, inside `nearestLivingOpponent` below and nowhere else. It stopped
+ * being "nowhere else" when `combat.ts:deliverWeapon`'s melee branch grew a loop over
+ * EVERY opponent in the arc rather than resolving against the single nearest one — two
+ * loops, two `continue`s, one rule. That is `ai.ts`'s oldest and most expensive defect
+ * shape (a rule stated once in `rules.ts` and implemented twice), and the version of it
+ * that would have hurt here is specific: a swing that hit a corpse, or hit its own
+ * attacker, because one of the two copies forgot a clause.
+ *
+ * `alive && hp > 0` rather than either alone, for the reason `nearestLivingOpponent`'s own
+ * doc gives: `alive` is written only by `applyDamage` at the instant `hp` reaches 0, so the
+ * two agree for any state the SIM produces — but instruments pin `hp` directly
+ * (`match-sim.mjs`'s forced-immortal idiom) and the conjunction is the one that cannot be
+ * surprised by that.
+ *
+ * ⚠️ IDENTITY (`===`), NOT `id`, for "not me" — the same choice `nearestLivingOpponent`
+ * made and for the same reason: a fighter object is the identity the sim moves around, and
+ * two `MatchState`s never share one.
+ */
+export function isLivingOpponentOf(candidate: Fighter, fighter: Fighter): boolean {
+  return candidate !== fighter && candidate.alive && candidate.hp > 0;
+}
+
 export function nearestLivingOpponent(state: MatchState, fighter: Fighter): Fighter | null {
   let best: Fighter | null = null;
   let bestDist = Infinity;
   for (const other of state.fighters) {
-    if (other === fighter || !other.alive || other.hp <= 0) continue;
+    if (!isLivingOpponentOf(other, fighter)) continue;
     const d = Math.hypot(other.x - fighter.x, other.y - fighter.y);
     if (d < bestDist) {
       bestDist = d;

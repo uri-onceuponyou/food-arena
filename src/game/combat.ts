@@ -34,7 +34,7 @@ import {
   type Weapon,
 } from './rules.ts';
 import type { DamageSource, Fighter, GameEvent, MatchState, Vec2 } from './state.ts';
-import { lastFighterStanding, nearestLivingOpponent } from './state.ts';
+import { isLivingOpponentOf, lastFighterStanding, nearestLivingOpponent } from './state.ts';
 import { breakConcealment } from './movement.ts';
 
 const RAD2DEG = 180 / Math.PI;
@@ -723,12 +723,49 @@ function deliverWeapon(
   if (target === null) return true;
 
   if (w.type === 'melee') {
-    const toTargetX = target.x - attacker.x;
-    const toTargetY = target.y - attacker.y;
-    const dist = Math.hypot(toTargetX, toTargetY);
-    if (dist > (w.range ?? 0)) return true; // "too far"
-
+    // ── 🚨 A SWING HITS EVERY OPPONENT INSIDE ITS ARC, NOT THE NEAREST ONE ────
+    //
+    // IT USED TO READ, and the whole branch below resolved against this one fighter:
+    //
+    //   > `const toTargetX = target.x - attacker.x;` … `applyDamage(state, target, …)`
+    //
+    // **AT TWO SEATS THAT IS THE SAME SENTENCE AND THE BUG CANNOT EXPRESS ITSELF.**
+    // `nearestLivingOpponent` returns the only opponent there is, so "hit the nearest" and
+    // "hit everyone in the arc" name the identical fighter and emit the identical events.
+    // `MAX_FIGHTERS` is 6, Uri plays six-player, and above two seats the two sentences come
+    // apart: `lollipop.Giant` is `cone: 360`, `range: 400`, `giantSlam: true` and its card
+    // promises *"hits the whole map, making everyone dizzy"* — it hit exactly one fighter.
+    // Same class as the four other six-seat defects this repo has already paid for (the
+    // result card, corpse input, shake proximity, the seat-order bug): correct at N=2,
+    // silent at N=6, invisible to every N=2 instrument in the tree.
+    //
+    // ⚠️ **THE GEOMETRY IS UNCHANGED, LINE FOR LINE — ONLY THE VICTIM SET GREW.** Range
+    // test, coincident-epsilon test and cone test are the same three comparisons in the
+    // same order against the same frozen `facing`; `return true` became `continue` so a
+    // miss on one opponent stops rejecting the swing for all of them. That is what makes
+    // the N=2 stream bit-identical rather than merely equivalent, and `sim.test.mjs`
+    // §35(a) asserts the bit-identity over a real match rather than reasoning about it.
+    //
+    // ⚠️ **SLOT ORDER, AND DETERMINISM DEPENDS ON IT.** `state.fighters` is the sim's one
+    // iteration order (see `MatchState.fighters`); resolving victims in it makes "who was
+    // stunned first" a pure function of `createMatch`'s arguments. A distance sort would be
+    // a second ordering rule, and ties in it would be decided by `Array.prototype.sort`.
+    //
+    // ⚠️ **THE LOOP DOES NOT STOP WHEN THE MATCH ENDS MID-SWING, DELIBERATELY.** One swing
+    // is one instant: every fighter inside the arc is hit by it, and `applyDamage`'s own
+    // `phase === 'playing'` gate already stops a second `match-ended` from being emitted
+    // (and its `!target.alive` guard stops a corpse being hit twice). Breaking out would
+    // make the last two victims' fate depend on their slot index, which is the unearned
+    // seat advantage `nearestLivingOpponent`'s "nearest, not lowest slot" rule exists to
+    // refuse.
+    //
+    // ⚠️ **NO NEW `rules.ts` FIELD, AND THAT WAS CHECKED RATHER THAN ASSUMED.** `cone` and
+    // `range` already say exactly which ground a swing threatens; a `multiTarget` flag would
+    // be a second statement of the same geometry, and the first weapon whose flag and cone
+    // disagreed would be a silent balance bug. `giantSlam` stays what its own vocabulary
+    // entry says it is — a map-scale VISUAL — and is read by nothing here.
     const cone = w.cone ?? 360;
+    const range = w.range ?? 0;
 
     // ── WHAT FACING MEANS AT ZERO SEPARATION ──────────────────────────────────
     //
@@ -758,14 +795,22 @@ function deliverWeapon(
     // above the epsilon everything is continuous: approach from inside the cone and
     // the swing lands right up to the last representable distance, approach from
     // outside and it misses.
-    if (cone < 360) {
-      if (dist < MELEE_COINCIDENT_EPS) return true; // "coincident: no bearing to swing along"
-      const dot = (attacker.facing.x * toTargetX + attacker.facing.y * toTargetY) / dist;
-      const angleTo = Math.acos(Math.max(-1, Math.min(1, dot))) * RAD2DEG;
-      if (angleTo > cone / 2) return true; // "wrong direction"
-    }
+    for (const victim of state.fighters) {
+      if (!isLivingOpponentOf(victim, attacker)) continue;
+      const toVictimX = victim.x - attacker.x;
+      const toVictimY = victim.y - attacker.y;
+      const dist = Math.hypot(toVictimX, toVictimY);
+      if (dist > range) continue; // "too far"
 
-    applyDamage(state, target, w.damage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: attacker.id }, events);
+      if (cone < 360) {
+        if (dist < MELEE_COINCIDENT_EPS) continue; // "coincident: no bearing to swing along"
+        const dot = (attacker.facing.x * toVictimX + attacker.facing.y * toVictimY) / dist;
+        const angleTo = Math.acos(Math.max(-1, Math.min(1, dot))) * RAD2DEG;
+        if (angleTo > cone / 2) continue; // "wrong direction"
+      }
+
+      applyDamage(state, victim, w.damage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: attacker.id }, events);
+    }
     return true;
   }
 
