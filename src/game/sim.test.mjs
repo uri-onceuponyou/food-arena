@@ -3299,10 +3299,45 @@ console.log('\n23. Character levels');
     check('the PLAYER is slowed by terrain, at exactly PUDDLE_SLOW_FACTOR',
       approx(wet.player / dry.player, PUDDLE_SLOW_FACTOR, 1e-9),
       `ratio ${(wet.player / dry.player).toFixed(9)} vs ${PUDDLE_SLOW_FACTOR}`);
-    check('the AI is NOT — a pinned diagnosis, measured and priced; read rules.ts before fixing',
-      approx(wet.enemy / dry.enemy, 1, 1e-9),
-      `ratio ${(wet.enemy / dry.enemy).toFixed(9)} — if this now reads ${PUDDLE_SLOW_FACTOR} the defect was fixed; `
-      + 'update the record in rules.ts and re-measure settled/tier spread');
+    // ── 🚨 REVERSED 2026-08-19. THE OLD ROW, AND IT PASSED FOR TWO WEEKS: ──────
+    //
+    //   > `check('the AI is NOT — a pinned diagnosis, measured and priced; read rules.ts
+    //   >        before fixing', approx(wet.enemy / dry.enemy, 1, 1e-9),`
+    //   >   `` `ratio ${…} — if this now reads ${PUDDLE_SLOW_FACTOR} the defect was fixed; `
+    //   >   + 'update the record in rules.ts and re-measure settled/tier spread'`` )
+    //
+    // It was written as a guard in BOTH directions precisely so that landing the fix would
+    // FAIL it and force this record to be re-read. That is what happened, so here is the
+    // reading, in full — it is kept rather than deleted because the number that parked the
+    // fix is real and somebody will want to know it was weighed rather than forgotten.
+    //
+    // THE PRICE, RE-DERIVED (not pasted) on `roster_lab --seeds 32`, 110 matchups, paired
+    // on identical seeds, detached worktree of `a42224c` against the fixed tree — the
+    // measurement is quoted in `rules.ts:SPLAT_DURATION_MS`, which is the one place it
+    // lives. The 2026-08-05 staging recorded settled 17 -> 19.
+    //
+    // WHY IT WAS LANDED ANYWAY. `rules.ts` states the rule twice, both times for *anyone*.
+    // The settled-matchup count is a property of an INSTRUMENT CORPUS — 110 bot-vs-scripted
+    // duels — while the defect is a property of every match a HUMAN plays: the person is
+    // slowed by terrain and no bot ever is, in every puddle and every splat, forever.
+    // `DECISIONS §77` is the standing authorisation to build the mechanic and rebalance
+    // afterwards if it lands somebody out of band; a fairness defect on the only seat a
+    // person occupies outranks a cell count on a corpus nobody plays.
+    //
+    // ⚠️ THE ROW IS STILL A GUARD IN BOTH DIRECTIONS, WITH THE SIGN FLIPPED. If terrain
+    // ever stops reaching the AI again — an `aiSlowMult` refactor, a second private copy of
+    // the geometry in `ai.ts` — this goes red and names it.
+    check('🔴 the AI IS slowed by terrain too, at exactly the same factor — `rules.ts` says *anyone*',
+      approx(wet.enemy / dry.enemy, PUDDLE_SLOW_FACTOR, 1e-9),
+      `ratio ${(wet.enemy / dry.enemy).toFixed(9)} vs ${PUDDLE_SLOW_FACTOR} `
+      + '— if this reads 1.000000000 the fifth ai.ts defect is back; see rules.ts:SPLAT_DURATION_MS');
+    // The whole point of the fix is that ONE rule now reaches both seats. Asserting the two
+    // ratios are EQUAL is a different statement from asserting each equals the constant:
+    // it is the one that a second, privately-copied implementation in `ai.ts` would fail
+    // the moment the two copies disagreed by a hair.
+    check('🔴 …and it is the SAME multiplier on both seats — one rule, one implementation',
+      approx(wet.enemy / dry.enemy, wet.player / dry.player, 1e-12),
+      `enemy ${(wet.enemy / dry.enemy).toFixed(12)} vs player ${(wet.player / dry.player).toFixed(12)}`);
   }
 
   // ── (b) THE BLAST RADIUS OF (a), AS A PROPERTY OF `rules.ts` ──────────────
@@ -8474,8 +8509,32 @@ console.log('\n34. A corpse cannot act (six seats — the defect is unreachable 
       peak = Math.max(peak, me.hp);
       heals += evs.filter((e) => e.type === 'heal' && e.fighterId === 0).length;
     }
-    check('(h) NON-VACUOUS: the match stayed \'playing\' for all 600 ticks of held heal',
-      playing === 600, `${playing}/600, phase ${state.phase}`);
+    // ── ⚠️ THIS ROW WAS REVERSED 2026-08-19, AND THE OLD WORDING IS KEPT ────────
+    //
+    //   > `check('(h) NON-VACUOUS: the match stayed \'playing\' for all 600 ticks of held
+    //   >        heal', playing === 600, …)`
+    //
+    // It went RED when the terrain-slow rule started reaching the AI (`ai.ts:aiSlowMult`,
+    // `rules.ts:SPLAT_DURATION_MS`). Six Hamburgers carry `Tomato`, which is `splatter:
+    // true`, so the bots now slow each other on their own splats, the six-way resolves
+    // faster, and this fixture ends at **tick 486 of 600 with one fighter left** where it
+    // used to run all 600 with three.
+    //
+    // 🚨 **`playing === 600` WAS NEVER THE QUANTITY THIS ROW IS ABOUT.** What (h) needs is
+    // that the corpse got enough PLAYING TIME to have healed if it could — the pre-fix
+    // corpse reached 36/70, which is exactly `2 x healAmount`, because 600 ticks is 10,002
+    // ms and the heal is on a 6,000 ms cooldown. So the precondition is DERIVED from the
+    // weapon rather than from the loop bound: one press at t=0, one more the moment the
+    // cooldown opens. 486 ticks is 8,102 ms and still buys both. A fixed tick count was a
+    // proxy that happened to agree, and it is exactly the shape `docs/LESSONS.md` warns
+    // about — an assertion that goes red when the SIM changes underneath it rather than
+    // when the CLAIM stops holding.
+    const HEAL_CD = CHARACTERS.hamburger.weapons[HEAL_I].cooldown;
+    const playingMs = playing * 16.67;
+    check('(h) NON-VACUOUS: the corpse got long enough to press the heal TWICE if it could',
+      playing > 0 && playingMs >= HEAL_CD,
+      `${playing} playing ticks = ${playingMs.toFixed(0)}ms vs a ${HEAL_CD}ms heal cooldown `
+      + `(phase ${state.phase}; pre-terrain-fix this fixture ran all 600 = 10002ms)`);
     check('(h) 🔴 a corpse cannot HEAL ITSELF — hp never leaves 0, so `alive === false` still implies `hp === 0`',
       peak === 0 && me.hp === 0 && heals === 0 && me.alive === false,
       `peak hp ${peak}/${me.maxHp}, ${heals} heal events (pre-fix, same 600 ticks: 36/70 and 2 heals)`);
@@ -8494,6 +8553,237 @@ console.log('\n34. A corpse cannot act (six seats — the defect is unreachable 
     check('(h) POSITIVE CONTROL — with the invariant broken the whistle really does crown the CORPSE',
       rigged.phase === 'ended' && crowned.id === 0 && crowned.alive === false,
       `winnerId ${rigged.winnerId} alive=${crowned.alive} hp=${crowned.hp}/${crowned.maxHp} vs five living at ${rigged.fighters[1].hp}/${rigged.fighters[1].maxHp}`);
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 35. A SWING HITS EVERY OPPONENT IN ITS ARC — at SIX seats, because at two the
+//     defect cannot express itself
+//
+// `combat.ts:deliverWeapon` resolved its whole melee branch against a single
+// `nearestLivingOpponent`. At N=2 "the nearest opponent" and "everyone inside the arc"
+// name the SAME fighter and emit the SAME events, so the bug is unreachable and every
+// two-seat assertion in this file — all 34 sections of it — passed throughout. That is
+// the fifth six-seat defect on this project's record (the result card, corpse input,
+// shake proximity, the seat-order bug), and the shape is identical: correct at two,
+// silent at six, invisible to every instrument that only seats two.
+//
+// The card that made it visible is `lollipop.Giant` — `cone: 360`, `range:
+// REACH.ultimateSlam`, `giantSlam: true`, *"Grows huge and hits the whole map, making
+// everyone dizzy"* — which hit exactly one fighter. `tools/tmp/wm_gate.mjs` records it as
+// `multi-target` MISSING on three weapons; this section closes the melee one. The other
+// two (`burrito.Swarm`, `sushi.Catch`) are PROJECTILE weapons and are NOT closed by this
+// change: `sim.ts:stepProjectiles` resolves each projectile against its own `p.targetId`
+// and flies through everybody else. (f) asserts that gap rather than leaving it implied,
+// so nobody reads a green section as "multi-target is done".
+//
+// ── EVERY ROW IS SHOWN RED ON THE PRE-FIX TREE ───────────────────────────────
+//
+// `node tools/tmp/mv_multi.mjs --knownbad` runs (b), (c) and (e) against a detached
+// worktree of the tree without the fix and requires them to FAIL; a guard that has not
+// been shown to fail on the bug it guards against is not a guard. (a), (d) and (g) are
+// the non-vacuity, the over-fix control and the two-seat reduction — those pass on BOTH
+// trees, deliberately, and a section where they moved too would have changed the
+// experiment rather than the sim.
+//
+// ⚠️ EVERY DISTANCE IS A FRACTION OF THE WEAPON'S OWN `range`, never a literal. A
+// hardcoded 400 would be a legal coordinate on any map and therefore invisible to every
+// legality check — the stale-map-literal class `tools/tmp/al_guard.mjs` exists for — and
+// it would keep passing after `REACH.ultimateSlam` moved out from under it.
+console.log('\n35. A melee swing hits EVERY opponent in its arc (six seats)');
+{
+  const N = MAX_FIGHTERS;
+  const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+  const GIANT_IDX = CHARACTERS.lollipop.weapons.findIndex((w) => w.key === 'Giant');
+  const GIANT = CHARACTERS.lollipop.weapons[GIANT_IDX];
+  const SMASH_IDX = CHARACTERS.hamburger.weapons.findIndex((w) => w.key === 'Smash');
+  const SMASH = CHARACTERS.hamburger.weapons[SMASH_IDX];
+
+  /** Seat `n` fighters at `offsets` from the arena centre; slot 0 is the attacker. */
+  const ring = (charId, offsets) => {
+    const st = createMatch(arena, [
+      { characterId: charId, spawn: { x: arena.center.x, y: arena.center.y }, controller: 'human' },
+      ...offsets.map((o) => ({
+        characterId: 'hamburger',
+        spawn: { x: arena.center.x + o.dx, y: arena.center.y + o.dy },
+        controller: 'ai',
+      })),
+    ]);
+    st.phase = 'playing';
+    // Point the swing due east. `applyAim` refuses while casting and `Giant` has no
+    // `castMs`, but the facing is set directly so the cone arm below is a statement about
+    // GEOMETRY and not about whether an aim input happened to be applied this tick.
+    st.fighters[0].facing = { x: 1, y: 0 };
+    return st;
+  };
+  /** Who did this press damage, in the order the events name them. */
+  const victimsOf = (events) => events.filter((e) => e.type === 'hit-landed').map((e) => e.targetId);
+
+  // ── (a) THE PRECONDITIONS. NOTHING BELOW MEANS ANYTHING WITHOUT THEM ────────
+  //
+  // 🚨 Every row after this one FILTERS a set and then counts it, which is the vacuity
+  // trap this repo has now been bitten by at least seven times — `[].every()` is `true`,
+  // and a fixture pointed at the wrong object keeps its count perfectly. So the set is
+  // asserted NON-EMPTY, at the right size, and geometrically inside the weapon first.
+  const FIVE = [0.15, 0.35, 0.55, 0.75, 0.95].map((f) => ({ dx: GIANT.range * f, dy: 0 }));
+  {
+    const state = ring('lollipop', FIVE);
+    const opponents = state.fighters.filter((f) => f !== state.fighters[0]);
+    check('(a) the fixture really seats SIX and five of them are living opponents (non-vacuity)',
+      state.fighters.length === N && N === 6 && opponents.length === 5
+      && opponents.every((f) => f.alive && f.hp > 0),
+      `${state.fighters.length} seats, ${opponents.filter((f) => f.alive).length} living opponents`);
+    check('(a) the weapon under test really is the omnidirectional one — cone 360, and a `giantSlam`',
+      (GIANT.cone ?? 360) === 360 && GIANT.giantSlam === true && GIANT.type === 'melee',
+      `cone ${GIANT.cone} giantSlam ${GIANT.giantSlam} type ${GIANT.type}`);
+    check('(a) …and all five opponents stand INSIDE its range, so "five" is the arithmetic answer',
+      opponents.every((f) => Math.hypot(f.x - state.fighters[0].x, f.y - state.fighters[0].y) <= GIANT.range),
+      opponents.map((f) => Math.hypot(f.x - state.fighters[0].x, f.y - state.fighters[0].y).toFixed(1)).join(' · '));
+  }
+
+  // ── (b) 🔴 THE FIX: ONE PRESS, FIVE VICTIMS ────────────────────────────────
+  //
+  // Pre-fix this reads ONE — `nearestLivingOpponent` is slot 1 at 0.15 x range and the
+  // other four are never looked at.
+  {
+    const state = ring('lollipop', FIVE);
+    const events = [];
+    attemptAttack(state, state.fighters[0], GIANT_IDX, events);
+    const victims = victimsOf(events);
+    check('(b) 🔴 a 360-degree slam damages EVERY opponent inside its range — five, not one',
+      victims.length === 5 && new Set(victims).size === 5,
+      `victims [${victims.join(',')}] (pre-fix: [1])`);
+    check('(b) …and each of them took the weapon\'s own damage, once',
+      state.fighters.slice(1).every((f) => f.maxHp - f.hp === GIANT.damage),
+      state.fighters.slice(1).map((f) => `${f.id}:${f.maxHp - f.hp}`).join(' '));
+    check('(b) …and the ATTACKER took none of it — a swing does not hit its own swinger',
+      state.fighters[0].hp === state.fighters[0].maxHp,
+      `${state.fighters[0].hp}/${state.fighters[0].maxHp}`);
+    check('(b) …and every one of them carries the weapon\'s status, so `everyone dizzy` is true too',
+      GIANT.effect === 'stun' && state.fighters.slice(1).every((f) => f.status.stunnedUntil > state.elapsed),
+      `effect ${GIANT.effect}, stunned ${state.fighters.slice(1).filter((f) => f.status.stunnedUntil > state.elapsed).length}/5`);
+  }
+
+  // ── (c) 🔴 SLOT ORDER, AND WHY IT IS THE ONE THAT MATTERS ──────────────────
+  //
+  // The victim list is `state.fighters` order, which is a pure function of
+  // `createMatch`'s arguments. A distance sort would be a SECOND ordering rule whose ties
+  // `Array.prototype.sort` would decide, and this sim's determinism underwrites every
+  // balance number in the project.
+  {
+    const state = ring('lollipop', FIVE);
+    const events = [];
+    attemptAttack(state, state.fighters[0], GIANT_IDX, events);
+    const victims = victimsOf(events);
+    const again = [];
+    const rerun = ring('lollipop', FIVE);
+    attemptAttack(rerun, rerun.fighters[0], GIANT_IDX, again);
+    check('(c) 🔴 victims resolve in SLOT order, and a re-run is bit-identical (determinism)',
+      victims.join(',') === '1,2,3,4,5' && victimsOf(again).join(',') === victims.join(','),
+      `[${victims.join(',')}] vs [${victimsOf(again).join(',')}]`);
+  }
+
+  // ── (d) THE OVER-FIX CONTROL: A DIRECTIONAL SWING STILL DISCRIMINATES ──────
+  //
+  // "Hits everyone in the arc" is one edit away from "hits everyone", and that edit would
+  // leave (b) and (c) green. So the same press is run through a `cone: 80` swing against
+  // five opponents placed so that each MISS has a different, named reason — two inside,
+  // one behind, one abeam, one out of range. This row passes on BOTH trees (pre-fix it
+  // reads one victim for a different reason), which is exactly what makes it a control
+  // rather than a second copy of (b).
+  {
+    const half = (SMASH.cone ?? 360) / 2;
+    const r = SMASH.range;
+    const OFFSETS = [
+      { dx: r * 0.4, dy: 0 },                                              // 1  dead ahead   HIT
+      { dx: r * 0.6 * Math.cos(half * 0.5 * Math.PI / 180),                // 2  inside cone  HIT
+        dy: r * 0.6 * Math.sin(half * 0.5 * Math.PI / 180) },
+      { dx: -r * 0.4, dy: 0 },                                             // 3  behind       MISS (cone)
+      { dx: 0, dy: r * 0.85 },                                             // 4  abeam        MISS (cone)
+      { dx: r * 2.5, dy: 0 },                                              // 5  far ahead    MISS (range)
+    ];
+    const state = ring('hamburger', OFFSETS);
+    const me = state.fighters[0];
+    const bearing = (f) => {
+      const dx = f.x - me.x, dy = f.y - me.y;
+      const d = Math.hypot(dx, dy);
+      return { d, deg: Math.acos(Math.max(-1, Math.min(1, (me.facing.x * dx + me.facing.y * dy) / d))) * 180 / Math.PI };
+    };
+    const inArc = state.fighters.slice(1).filter((f) => { const b = bearing(f); return b.d <= r && b.deg <= half; });
+    check('(d) the directional fixture really does put TWO inside the arc and THREE outside it (non-vacuity)',
+      inArc.length === 2 && inArc.map((f) => f.id).join(',') === '1,2',
+      state.fighters.slice(1).map((f) => { const b = bearing(f); return `${f.id}:d${b.d.toFixed(0)}/a${b.deg.toFixed(0)}`; }).join(' '));
+    const events = [];
+    attemptAttack(state, me, SMASH_IDX, events);
+    const victims = victimsOf(events);
+    check(`(d) a cone-${SMASH.cone} swing hits BOTH fighters inside its wedge and NEITHER of the two outside it`,
+      victims.join(',') === '1,2',
+      `victims [${victims.join(',')}] — 3 is behind, 4 is abeam, 5 is ${(bearing(state.fighters[5]).d / r).toFixed(1)}x range`);
+    check('(d) …and the three misses cost them exactly nothing',
+      state.fighters.slice(3).every((f) => f.hp === f.maxHp),
+      state.fighters.slice(3).map((f) => `${f.id}:${f.hp}/${f.maxHp}`).join(' '));
+  }
+
+  // ── (e) 🔴 A CORPSE IS NOT SWEPT UP BY THE SWING ───────────────────────────
+  //
+  // The victim predicate is `state.ts:isLivingOpponentOf`, shared with
+  // `nearestLivingOpponent` so the two loops cannot drift apart. Pre-fix this row reads
+  // one victim (the nearest LIVING one) for the wrong reason, so it is RED there too.
+  {
+    const state = ring('lollipop', FIVE);
+    applyDamage(state, state.fighters[2], state.fighters[2].maxHp * 10, null, { kind: 'hazard' }, []);
+    check('(e) the fixture really does contain a corpse and four living opponents (non-vacuity)',
+      state.fighters[2].alive === false && state.fighters.slice(1).filter((f) => f.alive).length === 4
+      && state.phase === 'playing',
+      `slot 2 alive=${state.fighters[2].alive}, ${state.fighters.slice(1).filter((f) => f.alive).length} living, phase ${state.phase}`);
+    const events = [];
+    attemptAttack(state, state.fighters[0], GIANT_IDX, events);
+    const victims = victimsOf(events);
+    check('(e) 🔴 the slam hits the four survivors and steps over the corpse',
+      victims.join(',') === '1,3,4,5',
+      `victims [${victims.join(',')}] (pre-fix: [1])`);
+  }
+
+  // ── (f) THE GAP THIS SECTION DOES **NOT** CLOSE, ASSERTED SO IT CANNOT BE READ SHUT ──
+  //
+  // `wm_gate` names three `multi-target` weapons. Two are RANGED and are unaffected:
+  // `sim.ts:stepProjectiles` resolves every projectile against its own `p.targetId` and
+  // passes through any other fighter it flies over, so a four-pellet homing volley damages
+  // one fighter however many bodies are in the way. That is a real, separate mechanic
+  // (projectile-vs-anybody collision) and it is recorded here as an assertion rather than
+  // as prose, so the day somebody lands it this row goes red and gets re-read.
+  {
+    const rangedMulti = ['burrito', 'sushi'].flatMap((id) =>
+      CHARACTERS[id].weapons.filter((w) => (w.pellets ?? 1) > 1 && w.homing).map((w) => `${id}.${w.key}`));
+    check('(f) the two OTHER `multi-target` promises are ranged volleys and are NOT closed by this change',
+      rangedMulti.length === 2 && rangedMulti.includes('burrito.Swarm') && rangedMulti.includes('sushi.Catch'),
+      `[${rangedMulti.join(', ')}] — projectiles still resolve against p.targetId alone`);
+  }
+
+  // ── (g) THE TWO-SEAT REDUCTION, WHICH IS WHY THIS WAS SAFE TO LAND ─────────
+  //
+  // At N=2 there is exactly one living opponent, so the loop visits it and nothing else:
+  // same three geometry tests, same `applyDamage`, same event. That is the property the
+  // whole 110-matchup balance corpus rests on, and `tools/tmp/mv_multi.mjs --bitid`
+  // measures it over REAL matches against a detached worktree rather than asserting it —
+  // this row is the unit-scale statement of the same claim.
+  {
+    const two = createMatch(arena, [
+      { characterId: 'lollipop', spawn: { x: arena.center.x, y: arena.center.y }, controller: 'human' },
+      { characterId: 'hamburger', spawn: { x: arena.center.x + GIANT.range * 0.5, y: arena.center.y }, controller: 'ai' },
+    ]);
+    two.phase = 'playing';
+    two.fighters[0].facing = { x: 1, y: 0 };
+    check('(g) the two-seat fixture has exactly one living opponent (non-vacuity)',
+      two.fighters.length === 2 && two.fighters[1].alive,
+      `${two.fighters.length} seats`);
+    const events = [];
+    attemptAttack(two, two.fighters[0], GIANT_IDX, events);
+    const victims = victimsOf(events);
+    check('(g) at TWO seats the same 360-degree slam damages exactly ONE fighter — the reduction holds',
+      victims.length === 1 && victims[0] === 1,
+      `victims [${victims.join(',')}]`);
   }
 }
 

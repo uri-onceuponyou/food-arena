@@ -25,8 +25,10 @@
  */
 
 import type { ArenaDefinition, CoverBox } from '../arena/types.ts';
-import type { Fighter } from './state.ts';
-import { CONCEAL_REVEAL_RADIUS, concealmentKeepoutRadius } from './rules.ts';
+import type { Fighter, Splat } from './state.ts';
+import {
+  CONCEAL_REVEAL_RADIUS, concealmentKeepoutRadius, PUDDLE_SLOW_FACTOR, SPLAT_RADIUS,
+} from './rules.ts';
 
 /** True if two centre+full-extent AABBs overlap. */
 export function boxesOverlap(
@@ -336,6 +338,66 @@ export function concealmentInsideRadius(arena: ArenaDefinition, radius: number):
  */
 export function concealmentKeepoutViolations(arena: ArenaDefinition): ConcealBox[] {
   return concealmentInsideRadius(arena, concealmentKeepoutRadius(arena.maxSafeRadius));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TERRAIN SLOW — the movement rule that reached the human seat and no other
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The strongest (smallest) terrain slow multiplier at a point: 1 where nothing applies,
+ * `PUDDLE_SLOW_FACTOR` inside a `kind: 'slow'` hazard or a splat.
+ *
+ * ── 🚨 IT LIVES HERE BECAUSE IT USED TO LIVE IN `sim.ts` AND REACHED ONE SEAT ─
+ *
+ * `rules.ts` states this rule TWICE, in prose, and both times for *anyone* —
+ * `PUDDLE_SLOW_FACTOR` (*"slows anyone inside it"*) and `SPLAT_DURATION_MS` (*"slows
+ * anyone standing in it"*). Until 2026-08-19 it was implemented ONCE, as a private
+ * function in `sim.ts` called only by `moveFighter`, which moves HUMAN-controlled
+ * fighters. `ai.ts:stepAI` built its own `aiSlowMult` out of the STATUS slow alone, so
+ * **every bot in the game walked through every puddle and every splat at full speed** —
+ * measured, not inferred, by a one-tick control with both fighters pinned 900 wu apart on
+ * flooded floor against dry floor: **player ratio 0.450000, enemy ratio 1.000000**
+ * (`sim.test.mjs` §25(a)).
+ *
+ * That was the fifth instance of `ai.ts`'s oldest and most expensive defect shape — a rule
+ * stated once in `rules.ts` and implemented twice — and it was the one that mattered most,
+ * because the asymmetry ran against **the only seat a person occupies**. It is fixed by
+ * DELETION rather than by addition: there is now one implementation, in the module that
+ * exists precisely so `sim.ts` and `ai.ts` can share a movement rule without an import
+ * cycle, and both call it.
+ *
+ * ⚠️ **A POINT TEST, NOT A BODY TEST, AND THAT IS DELIBERATE.** `hypot(fighter − hz) <
+ * hz.radius` is a CENTRE test, exactly as `isConcealed` above is, and the two are stated to
+ * agree in `isConcealed`'s own header. Widening either to the 42 wu body would make the
+ * effective puddle 21 wu larger than the drawn one in every direction — the render/sim
+ * mismatch `docs/LESSONS.md` §1 keeps finding.
+ *
+ * ⚠️ **THE FACTOR IS THE SAME NUMBER ON BOTH SIDES, WHICH `AI_SLOW_MULTIPLIER` IS NOT.**
+ * `DECISIONS §75` records that a slowed BOT is slowed harder than a slowed PLAYER
+ * (`AI_SLOW_MULTIPLIER` 0.35 against `SLOW_MOVE_MULTIPLIER` 0.45) — a deliberate STATUS
+ * asymmetry. Terrain has no such dial and must not grow one: the floor is the floor, and
+ * a second constant here would be this defect again with the sign flipped.
+ */
+export function terrainSlowAt(
+  x: number,
+  y: number,
+  arena: ArenaDefinition,
+  splats: readonly Splat[],
+): number {
+  let factor = 1;
+  for (const hz of arena.hazards) {
+    if (hz.kind !== 'slow') continue;
+    if (Math.hypot(x - hz.x, y - hz.y) < hz.radius) {
+      factor = Math.min(factor, hz.slowFactor ?? PUDDLE_SLOW_FACTOR);
+    }
+  }
+  for (const s of splats) {
+    if (Math.hypot(x - s.x, y - s.y) < SPLAT_RADIUS) {
+      factor = Math.min(factor, PUDDLE_SLOW_FACTOR);
+    }
+  }
+  return factor;
 }
 
 /** Bounded so a fighter wedged between boxes cannot spin here forever. */

@@ -83,7 +83,6 @@ import {
   PLAYER_MAX_HP,
   PLAYER_SIZE,
   PLAYER_SPEED,
-  PUDDLE_SLOW_FACTOR,
   projectileMaxAgeMs,
   REGEN_AMOUNT,
   REGEN_DELAY_MS,
@@ -91,7 +90,6 @@ import {
   SLOW_MOVE_MULTIPLIER,
   speedFor,
   SPLAT_DURATION_MS,
-  SPLAT_RADIUS,
   SUDDEN_DEATH_RADIUS,
   SUDDEN_DEATH_REMAINING_MS,
   suddenDeathActive,
@@ -105,7 +103,7 @@ import type {
 } from './state.ts';
 import { createFighter, fighterBit, isCasting, MAX_FIGHTERS, MIN_FIGHTERS, movementLocked, sightingIndex } from './state.ts';
 import { applyDamage, attemptAttack, isOnOwnTrail, resolveDueCast } from './combat.ts';
-import { boxesOverlap, isHidden, isVisibleFrom, tryMove } from './movement.ts';
+import { boxesOverlap, isHidden, isVisibleFrom, terrainSlowAt, tryMove } from './movement.ts';
 import { stepAI } from './ai.ts';
 
 /**
@@ -910,21 +908,26 @@ function expireGroundEffects(state: MatchState): void {
   }
 }
 
-/** Strongest (smallest) terrain slow multiplier affecting `fighter` right now, or 1 if none applies. */
+/**
+ * Strongest (smallest) terrain slow multiplier affecting `fighter` right now, or 1 if none
+ * applies.
+ *
+ * ── ⚠️ THE BODY MOVED TO `movement.ts` AND THE OLD WORDING IS KEPT BELOW ──────
+ *
+ * It used to be a private function here, and that was the whole of the defect:
+ *
+ *   > *"Strongest (smallest) terrain slow multiplier affecting `fighter` right now"* —
+ *   > implemented once, in `sim.ts`, called only by `moveFighter`, which moves HUMAN
+ *   > fighters. `ai.ts:stepAI` built `aiSlowMult` out of the STATUS slow alone.
+ *
+ * So `rules.ts`'s *"slows anyone"* reached the human seat and no other, for every puddle
+ * and every splat in the game. `movement.ts:terrainSlowAt` is now the ONE implementation
+ * and both files call it; this wrapper survives only to spell the `(state, fighter)`
+ * signature the two call sites below already read naturally. See `terrainSlowAt` for the
+ * measurement, and `rules.ts:SPLAT_DURATION_MS` for what landing it cost.
+ */
 function terrainSlowFactor(state: MatchState, fighter: Fighter): number {
-  let factor = 1;
-  for (const hz of state.arena.hazards) {
-    if (hz.kind !== 'slow') continue;
-    if (Math.hypot(fighter.x - hz.x, fighter.y - hz.y) < hz.radius) {
-      factor = Math.min(factor, hz.slowFactor ?? PUDDLE_SLOW_FACTOR);
-    }
-  }
-  for (const s of state.splats) {
-    if (Math.hypot(fighter.x - s.x, fighter.y - s.y) < SPLAT_RADIUS) {
-      factor = Math.min(factor, PUDDLE_SLOW_FACTOR);
-    }
-  }
-  return factor;
+  return terrainSlowAt(fighter.x, fighter.y, state.arena, state.splats);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

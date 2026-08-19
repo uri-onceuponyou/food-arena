@@ -159,7 +159,7 @@ import {
 import type { Fighter, GameEvent, MatchState } from './state.ts';
 import { isCasting, movementLocked, nearestLivingOpponent, sightingIndex } from './state.ts';
 import { attemptAttack } from './combat.ts';
-import { isVisibleFrom, moveToward } from './movement.ts';
+import { isVisibleFrom, moveToward, terrainSlowAt } from './movement.ts';
 
 /**
  * How far ahead a steered move aims. `moveToward` runs the flow field toward a TARGET
@@ -1072,7 +1072,40 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
   const hasBearing = separation > 1e-6;
 
   const fleeing = self.hp < self.maxHp * AI_FLEE_HP_FRACTION;
-  const aiSlowMult = now < self.status.slowedUntil ? AI_SLOW_MULTIPLIER : 1;
+  /**
+   * ── 🚨 TERRAIN IS IN HERE NOW, AND ITS ABSENCE WAS THE FIFTH DEFECT ────────
+   *
+   * IT USED TO READ, and the wording is kept because the rule it states is NOT reversed —
+   * the STATUS half is exactly as it was:
+   *
+   *   > `const aiSlowMult = now < self.status.slowedUntil ? AI_SLOW_MULTIPLIER : 1;`
+   *
+   * `rules.ts` states the terrain rule twice, in prose, and both times for *anyone*:
+   * `PUDDLE_SLOW_FACTOR` (*"slows anyone inside it"*) and `SPLAT_DURATION_MS` (*"slows
+   * anyone standing in it"*). It was implemented ONCE, in `sim.ts:moveFighter`, which moves
+   * HUMAN-controlled fighters — so **every bot walked through every puddle and every splat
+   * at full speed while the human seat crawled.** Measured with a one-tick control rather
+   * than read off the source (`sim.test.mjs` §25(a)): player ratio 0.450000, enemy ratio
+   * 1.000000. That is a permanent handicap on the only seat a person ever occupies, and Uri
+   * has been playing this build.
+   *
+   * ⚠️ **THE TWO TERMS MULTIPLY, THEY DO NOT `Math.min`.** `moveFighter` has always
+   * multiplied its terrain factor by `SLOW_MOVE_MULTIPLIER` (and by `TRAIL.speedBoost`), so
+   * a slowed player standing in a puddle is 0.45 x 0.45. Taking the strongest of the two
+   * instead would make the AI's stacking rule differ from the player's, which is the very
+   * shape being closed here — one rule, two implementations.
+   *
+   * ⚠️ **`terrainSlowAt` IS IMPORTED, NEVER RE-DERIVED.** `movement.ts` exists so this file
+   * and `sim.ts` can share a movement rule without an import cycle; a private copy of the
+   * hazard/splat geometry here would be the defect back the day either radius moved.
+   *
+   * ⚠️ The two multipliers are NOT the same constant and that is deliberate:
+   * `AI_SLOW_MULTIPLIER` (0.35) is harsher than the player's `SLOW_MOVE_MULTIPLIER` (0.45)
+   * — `DECISIONS §75` records it as a live asymmetry in the STATUS effect. Terrain has one
+   * factor for everybody, because a floor does not know who is standing on it.
+   */
+  const aiSlowMult = (now < self.status.slowedUntil ? AI_SLOW_MULTIPLIER : 1)
+    * terrainSlowAt(self.x, self.y, state.arena, state.splats);
 
   /**
    * ── WHAT A STUN LOCKS ────────────────────────────────────────────────────
