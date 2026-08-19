@@ -65,7 +65,12 @@ Not style preferences. Every one exists because breaking it cost hours.
    🚨 **THERE ARE TWO SHIPPED CAMERAS, AND THEY EXPOSE DIFFERENT DEFECTS. USE BOTH.**
    `src/ui/screens/charStage.ts:451` is **`pitchDeg: 20`** — the lobby, close and shallow, where Uri
    looks at a character and where every one of his reject sheets came from.
-   `src/render/camera.ts:265` defaults the **match** to **58** — steep and far.
+   `src/render/camera.ts:476` — `CameraRig`'s constructor, `this.pitchDeg = opts.pitchDeg ?? 58`
+   — defaults the **match** to **58**, steep and far. ⚠️ **This said `:265` for a session and
+   `:265` is a distance helper**, so a rule about looking at the right camera pointed at the
+   wrong line. Caught by an agent re-deriving it, not by any check. **Cite the SYMBOL as well
+   as the line** — the line drifts, the symbol is greppable, and every citation in this file
+   is one refactor away from being confidently wrong.
    `limbmatch`, `sepscan`, `valuescan` and the per-part pass all measure **58**.
 
    ⚠️ **This is NOT "the instruments measure the wrong camera" — that framing is wrong and it was
