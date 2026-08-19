@@ -60,7 +60,7 @@ import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox, RAMP_CHARACTER, 
 import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
-import { aim, blade as leafBlade, knob, localBounds, massAnchor, rod } from './appendages';
+import { aim, blade as leafBlade, localBounds, massAnchor, rod } from './appendages';
 
 /**
  * Limb-only toasted-crust tones, a genuine value step below the bun.
