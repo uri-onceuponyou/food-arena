@@ -1,7 +1,7 @@
 {
   "_": "Faults ACCEPTED as of the recorded SHA. --ratchet fails on any DIFFERENCE, in either direction: a new fault is a regression, and a fault that no longer reproduces means this ledger is stale and must be re-recorded WITH the fix.",
-  "sha": "e570dfb",
-  "measuredOn": "detached worktree of e570dfb (which includes 3483d23, the melee multi-target commit) + this commit's rules.ts/wm_* only. The working tree at the time carried PEERS' uncommitted ai.ts/sim.ts/movement.ts, on which the same run reports 17 faults instead of 18 — splat-slows-anyone is partly closed there and is NOT committed.",
+  "sha": "12e72b1747b854bc7b18986a4fa3955af3ec9b37",
+  "measuredOn": "committed tree",
   "faults": [
     "MISSING|burrito.Swarm|claims \"multi-target\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"fly everywhere\")",
     "MISSING|burrito.Swarm|claims \"projectile-destructible\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"the flying toppings can be destroyed\")",
@@ -19,7 +19,6 @@
     "MISSING|waterbottle.Mega|claims \"self-launch\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"launches himself up\")",
     "MISSING|waterbottle.Mega|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"heavy slow\")",
     "MISSING|waterbottle.Mega|claims \"summon-entity\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"his cap becomes a second bottle\")",
-    "MISSING|waterbottle.Spray|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"a lot\")",
-    "WRONG-VALUE|pizza.Tomato|claims \"splat-slows-anyone\" (\"slowing anyone who steps on them\") — the record does not satisfy it. a splat that slows BOTS as well as the human seat — MEASURED each run"
+    "MISSING|waterbottle.Spray|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"a lot\")"
   ]
 }
