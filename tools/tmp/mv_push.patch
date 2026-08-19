@@ -1,0 +1,311 @@
+diff --git a/src/game/combat.ts b/src/game/combat.ts
+index 933958f..df4bc0f 100644
+--- a/src/game/combat.ts
++++ b/src/game/combat.ts
+@@ -35,7 +35,7 @@ import {
+ } from './rules.ts';
+ import type { DamageSource, Fighter, GameEvent, MatchState, Vec2 } from './state.ts';
+ import { isLivingOpponentOf, lastFighterStanding, nearestLivingOpponent } from './state.ts';
+-import { breakConcealment } from './movement.ts';
++import { breakConcealment, pushDistanceForDamage, pushFighter } from './movement.ts';
+ 
+ const RAD2DEG = 180 / Math.PI;
+ const DEG2RAD = Math.PI / 180;
+@@ -259,6 +259,43 @@ export function applyDamage(
+     }
+   }
+ 
++  // ── EVERY HIT CARRIES WEIGHT: THE VICTIM IS DISPLACED ──────────────────────
++  //
++  // `movement.ts:365` recorded the gap for months — *"knockback is VISUAL-ONLY"* — and it
++  // was true: `game/match.ts:applyKnockback` nudges a THREE.js model root and never
++  // reaches `Fighter.x/y`, so the sim and the screen disagreed about where a struck
++  // fighter stood, and the ONLY consumer of a hit's direction was a renderer.
++  //
++  // ⚠️ **HERE, BECAUSE THIS IS THE SINGLE CHOKE POINT — the same argument the level
++  // multiplier's block above makes.** There are five damage call sites (melee, two
++  // projectile paths, trail marks, the environment); a displacement applied at four of
++  // them is a silent balance bug in the fifth. The magnitude reads `dealt`, so it is the
++  // number the victim actually lost and the number the floating damage text shows.
++  //
++  // ⚠️ **`kind: 'weapon'` ONLY, AND THE OMISSIONS ARE DELIBERATE.** `fog` and `hazard` have
++  // no attacker at all, so there is no direction to push along — the arena is not standing
++  // anywhere. `trail` HAS an owner and is excluded on a design ground rather than a
++  // technical one: a Sticky Trail mark damages on a per-tick cadence, so pushing off it
++  // would be a continuous shove from a stationary object rather than a blow, and it would
++  // make a trail a wall. `match.ts` nudges the model for a trail hit today; that stays a
++  // renderer choice.
++  //
++  // ⚠️ **A CORPSE IS NEVER DISPLACED, AND IT COSTS NO BRANCH HERE.** `sim.ts`'s fighter
++  // loop `continue`s on `!fighter.alive` before `stepPush` is reached, so a push handed to
++  // a fighter by its own killing blow is simply never spent. Asserted in §36 rather than
++  // left to be re-derived from two files.
++  //
++  // ⚠️ `attacker != null`, NOT `!== null`, AND THAT IS NOT PEDANTRY. `state.fighters[
++  // source.attackerId]` is `undefined` — not `null` — for a `weapon` source that carries no
++  // `attackerId`, which several fixtures in `sim.test.mjs` deliberately construct (§17
++  // spams a status through a bare `{ kind: 'weapon', weaponKey: 'T' }` for 20,000 ms). The
++  // `dealt` line above already tolerates that through a truthiness test; a strict `!== null`
++  // here threw `Cannot read properties of undefined` on the first run. Measured, not
++  // predicted.
++  if (attacker != null && source.kind === 'weapon') {
++    pushFighter(target, attacker.x, attacker.y, pushDistanceForDamage(dealt));
++  }
++
+   // `amount` on the event is what the target actually LOST, not what the weapon table
+   // says — otherwise the floating damage number and the health bar would disagree by the
+   // level multiplier, which is precisely the class of defect (`DECISIONS §13`) where a
+diff --git a/src/game/movement.ts b/src/game/movement.ts
+index 7e22e0f..f543120 100644
+--- a/src/game/movement.ts
++++ b/src/game/movement.ts
+@@ -27,7 +27,8 @@
+ import type { ArenaDefinition, CoverBox } from '../arena/types.ts';
+ import type { Fighter, Splat } from './state.ts';
+ import {
+-  CONCEAL_REVEAL_RADIUS, concealmentKeepoutRadius, PUDDLE_SLOW_FACTOR, SPLAT_RADIUS,
++  CHARACTERS, CHARACTER_IDS, CONCEAL_REVEAL_RADIUS, concealmentKeepoutRadius,
++  PLAYER_SIZE, PLAYER_SPEED, PUDDLE_SLOW_FACTOR, SPLAT_RADIUS,
+ } from './rules.ts';
+ 
+ /** True if two centre+full-extent AABBs overlap. */
+@@ -400,6 +401,142 @@ export function terrainSlowAt(
+   return factor;
+ }
+ 
++// ─────────────────────────────────────────────────────────────────────────────
++// DISPLACEMENT — the primitive that moves a fighter it did not ask to move
++//
++// `movement.ts:escapeCover` below has been waiting for this since it was written. Its own
++// header says the "fighter inside a prop" state is *"the worst shape a bug can have —
++// total, silent, and indistinguishable from 'the controls stopped working'"*, that no
++// player can reach it today because *"spawns are clear and knockback is visual-only"*, and
++// that it *"becomes reachable the moment anyone adds sim-side knockback, a dash, or a
++// pull."* This is that moment, and the recovery is already built: every displacement is
++// spent through `tryMove`, which runs `escapeCover` first.
++// ─────────────────────────────────────────────────────────────────────────────
++
++/**
++ * The largest `damage` any weapon in the roster deals, DERIVED from `CHARACTERS` rather
++ * than typed. It is the denominator of the displacement scale, so a hand-written number
++ * here would silently re-scale every knockback in the game the first time a weapon's
++ * damage moved — and `rules.ts` is the single source of truth for combat.
++ */
++const MAX_WEAPON_DAMAGE = (() => {
++  let m = 0;
++  for (const id of CHARACTER_IDS) {
++    for (const w of CHARACTERS[id].weapons) if (w.damage > m) m = w.damage;
++  }
++  return m;
++})();
++
++/**
++ * ── THE CEILING ON A SINGLE FIGHTER'S PENDING DISPLACEMENT: ONE BODY WIDTH ──
++ *
++ * `PLAYER_SIZE` is the collision box the sim already moves fighters around with, so "the
++ * biggest hit in the game moves you exactly one of yourself" is a sentence a player can
++ * read off the screen. It is also what makes chaining safe: impulses ACCUMULATE into this
++ * cap and never past it, so no sequence of hits can turn into a launch.
++ */
++export const MAX_PUSH_DISTANCE = PLAYER_SIZE;
++
++/** Below this separation there is no bearing between attacker and victim — see `pushFighter`. */
++const PUSH_COINCIDENT_EPS = 1e-6;
++
++/**
++ * How far a hit of `dealt` damage displaces its victim, in world units.
++ *
++ * `PLAYER_SIZE * dealt / MAX_WEAPON_DAMAGE` — the roster's biggest hit is worth exactly one
++ * body width and everything else is linear in damage. **Every term is derived**: there is
++ * no tuning constant here, which matters because `rules.ts` is the single source of truth
++ * for combat and it is not this owner's file. If this ever needs its own dial, the dial
++ * belongs there and this function becomes its only reader.
++ *
++ * ⚠️ `dealt`, NOT the weapon's authored `damage`: `combat.ts:applyDamage` scales by the
++ * attacker's `damageMul`, and the `hit-landed` event carries what the victim actually LOST.
++ * A displacement priced off the authored number would disagree with the damage number
++ * floating over the victim's head, which is `DECISIONS §13`'s class of defect exactly.
++ * A level-15 attacker therefore saturates the cap rather than exceeding it.
++ */
++export function pushDistanceForDamage(dealt: number): number {
++  if (!(dealt > 0) || MAX_WEAPON_DAMAGE <= 0) return 0;
++  return (PLAYER_SIZE * dealt) / MAX_WEAPON_DAMAGE;
++}
++
++/**
++ * Hand `fighter` a displacement of `distance` world units, directly away from
++ * `(fromX, fromY)`.
++ *
++ * ── 🚨 WHY THIS CANNOT BECOME A THIRD LOCK (`DECISIONS §75`, `§80`) ─────────
++ *
++ * `§75` records that slow and stun STACK into a hold — *"you essentially lock him to
++ * place"* — and `§80` is Uri's answer that a super must be DODGEABLE. A displacement that
++ * interrupted movement would be a soft stun and the third member of that family. Three
++ * properties keep it out, and each is a number rather than an intention:
++ *
++ *   1. **CONTROL AUTHORITY IS UNTOUCHED, EXACTLY.** The push is spent in its OWN
++ *      `tryMove` call, after the fighter's own movement has already been resolved in
++ *      `sim.ts`'s loop. The fighter's input therefore buys it the same displacement it
++ *      would have bought with no push in flight — bit-identically, not approximately —
++ *      and `sim.test.mjs` §36 asserts that as a difference of differences.
++ *   2. **IT PUSHES AWAY FROM THE ATTACKER, SO IT STRICTLY HELPS THE DODGE.** The one thing
++ *      `§80` asks of a super is that the target can leave the disc before it resolves.
++ *      Displacement moves the target OUT of the disc; it can never hold anybody inside one.
++ *   3. **IT CANNOT OUT-RUN A WALK BY MORE THAN A HAIR.** The spend rate is exactly
++ *      `PLAYER_SPEED`, the roster-wide movement CAP (`rules.ts:SPEED_TOP_STAT` is a cap,
++ *      not a centre, so `speedFor` can only scale DOWN). A fighter walking straight INTO
++ *      the push is therefore displaced at `PLAYER_SPEED - speedFor(c)` — between 0.0000
++ *      (Sushi and Hot Dog, which sit at the cap) and 0.0144 wu/ms — for at most
++ *      `MAX_PUSH_DISTANCE / PLAYER_SPEED` = 350 ms. **Worst case over an entire maximum
++ *      push: 5.04 wu, 12% of a body.** That is a positional cost, not a lock.
++ *
++ * ⚠️ **NEWEST DIRECTION WINS; DISTANCE ACCUMULATES TO THE CAP.** Blending two directions
++ * can produce the zero vector, which would silently cancel a hit; taking the newest is one
++ * rule, is what "the last blow shoved you" means, and is deterministic because
++ * `applyDamage` is reached in slot order from one loop.
++ *
++ * ⚠️ **AT ZERO SEPARATION THERE IS NO PUSH**, on exactly the reasoning `combat.ts`'s melee
++ * branch already applies to a coincident swing: the vector from attacker to victim is the
++ * zero vector, it points nowhere, and no amount of force can be aimed along it. Choosing a
++ * direction there would be non-determinism smuggled into a sim whose determinism
++ * underwrites every balance number in the project.
++ */
++export function pushFighter(fighter: Fighter, fromX: number, fromY: number, distance: number): void {
++  if (!(distance > 0)) return;
++  const dx = fighter.x - fromX;
++  const dy = fighter.y - fromY;
++  const mag = Math.hypot(dx, dy);
++  if (mag < PUSH_COINCIDENT_EPS) return;
++  const p = fighter.push;
++  p.x = dx / mag;
++  p.y = dy / mag;
++  p.remaining = Math.min(MAX_PUSH_DISTANCE, p.remaining + distance);
++}
++
++/**
++ * Spend this tick's share of `fighter`'s pending displacement. Returns whether it moved.
++ *
++ * ⚠️ **THE BUDGET IS CONSUMED WHETHER OR NOT THE STEP CONNECTS.** `tryMove` refuses a step
++ * into cover, so a fighter shoved against a wall would otherwise HOLD its impulse and fire
++ * off the moment the wall stopped being in the way — a stored shove that goes off later is
++ * exactly the "total, silent" class `escapeCover` exists to prevent, one level up.
++ *
++ * ⚠️ **`tryMove`, NOT A DIRECT WRITE TO `x`/`y`.** That is the whole depenetration
++ * guarantee: `tryMove` runs `escapeCover` before it moves anything, so a fighter that ends
++ * up inside a prop — the state this primitive is what makes reachable — walks back out on
++ * its next attempt instead of freezing forever. `sim.test.mjs` §36 pushes a fighter into
++ * `spice_cart` on purpose and requires it to recover.
++ *
++ * ⚠️ **`remaining` IS SNAPPED TO EXACTLY 0**, and the direction with it, so a spent push
++ * leaves no float dust in the state digest — see `Fighter.push`.
++ */
++export function stepPush(fighter: Fighter, dt: number, arena: ArenaDefinition): boolean {
++  const p = fighter.push;
++  if (p.remaining <= 0) return false;
++  const step = p.remaining < PLAYER_SPEED * dt ? p.remaining : PLAYER_SPEED * dt;
++  p.remaining -= step;
++  const moved = tryMove(fighter, p.x * step, p.y * step, arena);
++  if (p.remaining <= 0) { p.remaining = 0; p.x = 0; p.y = 0; }
++  return moved;
++}
++
+ /** Bounded so a fighter wedged between boxes cannot spin here forever. */
+ const ESCAPE_PASSES = 4;
+ /** Clear the `<` in `boxesOverlap` by a hair, so one push ends the overlap for good. */
+diff --git a/src/game/sim.ts b/src/game/sim.ts
+index 1d8149b..65b1ea2 100644
+--- a/src/game/sim.ts
++++ b/src/game/sim.ts
+@@ -103,7 +103,7 @@ import type {
+ } from './state.ts';
+ import { createFighter, fighterBit, isCasting, MAX_FIGHTERS, MIN_FIGHTERS, movementLocked, sightingIndex } from './state.ts';
+ import { applyDamage, attemptAttack, isOnOwnTrail, resolveDueCast } from './combat.ts';
+-import { boxesOverlap, isHidden, isVisibleFrom, terrainSlowAt, tryMove } from './movement.ts';
++import { boxesOverlap, isHidden, isVisibleFrom, stepPush, terrainSlowAt, tryMove } from './movement.ts';
+ import { stepAI } from './ai.ts';
+ 
+ /**
+@@ -698,6 +698,28 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
+       } else {
+         moved = stepAI(state, fighter, dt, events);
+       }
++      // ── DISPLACEMENT: WHAT THE WORLD DOES TO A FIGHTER, FOR BOTH CONTROLLERS ──
++      //
++      // ONE SITE, BELOW THE `controller` BRANCH, for the reason the corpse guard above is
++      // also above the branch: a rule stated on one side of that branch and not the other
++      // is this project's most expensive recorded defect class — five `ai.ts` bugs, the
++      // stun that silenced only the bot, and the terrain slow that reached only the human.
++      // A push handed out by `combat.ts:applyDamage` must be spent identically whoever is
++      // holding the controller.
++      //
++      // ⚠️ **AFTER the fighter's own movement, in its OWN `tryMove`, and that is the
++      // property that stops this becoming a third lock** (`DECISIONS §75`, `§80`). Resolved
++      // separately, the fighter's input buys it exactly the displacement it would have
++      // bought with nothing in flight — so being shoved never costs control, only position.
++      // Combining the two vectors into one `tryMove` would have coupled them through the
++      // per-axis collision refusal, and a blocked push would have eaten the fighter's own
++      // step. `sim.test.mjs` §36 asserts the authority as a difference of differences.
++      //
++      // ⚠️ **`moved` IS NOT SET FROM IT, DELIBERATELY.** `moved` becomes
++      // `applyWorldTick`'s `attemptedMove`, which is what drops a Sticky Trail mark — and
++      // the trail is a record of where a fighter WENT, not of where it was thrown. A
++      // shoved Donut laying track it never walked would be a free trail on every hit.
++      stepPush(fighter, dt, state.arena);
+       applyWorldTick(state, fighter, dt, moved, events);
+     }
+     // The fog is applied OUT OF the fighter loop during sudden death, and only then.
+diff --git a/src/game/state.ts b/src/game/state.ts
+index e0ab146..f8fc4c1 100644
+--- a/src/game/state.ts
++++ b/src/game/state.ts
+@@ -416,6 +416,42 @@ export interface Fighter {
+    * fields hit. `createFighter` seeds it, and it is the only place any field is seeded.
+    */
+   cast: ActiveCast | null;
++  /**
++   * SIM-SIDE DISPLACEMENT IN FLIGHT — the primitive that lets the sim move a fighter it
++   * did not ask to move.
++   *
++   * `x`/`y` are a UNIT direction and `remaining` is the world-unit distance still owed;
++   * `remaining === 0` means nothing is in flight and the direction is zeroed with it, so
++   * two behaviourally identical states are also BIT-identical (a lingering direction would
++   * make `conceal_lab --bitid` and `mv_multi --bitid` report a divergence that is not one).
++   *
++   * ── WHY IT IS STATE AND NOT AN IMMEDIATE MOVE ──────────────────────────────
++   *
++   * `movement.ts:365` recorded the gap plainly — *"spawns are clear and knockback is
++   * VISUAL-ONLY"* — and `game/match.ts:applyKnockback` is a nudge on a THREE.js model root
++   * that never reaches `Fighter.x/y`. An instantaneous positional jump would be a teleport
++   * on screen (`syncModelTransform` writes the sim position straight through), so the
++   * impulse is spent over ticks at a bounded speed instead.
++   *
++   * 🚨 **A REAL, OWN, ENUMERABLE DATA PROPERTY SEEDED IN `createFighter` — NOT `undefined`,
++   * NOT A GETTER**, for the reason `cast` and the DR fields above both carry: the bit-id
++   * differs walk `MatchState` with `Object.keys`/spread and an accessor or an
++   * absent-until-first-use key is SILENTLY DROPPED, so a divergence in it compares equal.
++   *
++   * ⚠️ **NOTHING IN THE SIM READS THIS TO DECIDE ANYTHING.** It is written by
++   * `movement.ts:pushFighter` and consumed by `movement.ts:stepPush`, both called from one
++   * site each. It is not an input to weapon choice, to steering or to the AI's belief —
++   * see `terrainSlowFactor`'s and `concealed`'s notes above for why a published
++   * observation must not become a decision input.
++   */
++  push: PushState;
++}
++
++/** See `Fighter.push`. Unit direction plus the distance still owed, in world units. */
++export interface PushState {
++  x: number;
++  y: number;
++  remaining: number;
+ }
+ 
+ /**
+@@ -484,6 +520,7 @@ export function createFighter(spec: FighterSpec): Fighter {
+     concealed: false,
+     revealedUntil: -Infinity,
+     cast: null,
++    push: { x: 0, y: 0, remaining: 0 },
+   };
+ }
+ 
