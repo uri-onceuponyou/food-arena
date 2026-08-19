@@ -210,15 +210,29 @@ const STEAM = PALETTE.steam;     // #C9C9C9
 // legible +0.110 of luma over the new broth.
 const NOODLE_TOP = '#DDB95F';    // hue 42.9, HSL L 0.620, luma 0.730 — the strand you see
 const NOODLE_WET = '#7A5510';    // hue 39.1, HSL L 0.271, luma 0.345 — a strand under the surface
-// Green and orange are here for hue range, not garnish realism: the new broth gave up
-// the frame's orange, and `CLAUDE.md` records warm chroma as the budget this frame
-// watches. A carrot coin puts a little of the old `#E8792A` family back as an ACCENT
-// instead of as 31% of the character.
+// Green and orange are here for HUE RANGE, not for garnish realism, and there is a
+// figure/ground reason. `docs/STATE.md` / `DECISIONS §73`: all 11 colour rails now
+// PASS, but the warm arrived INSIDE THE CAST'S OWN HUE BAND (`topCellsInCastBand`
+// 0.296 -> 0.648) and nothing gates that. Moving this character's largest colour
+// from hue 24.9 to 46.0 pushes it TOWARD the same band — `CERAMIC`, the bowl it sits
+// in, is hue 39.5 — so it is a real cost and it is priced rather than ignored: the
+// two colours that separate them are chroma (broth S 0.88 against ceramic S 0.28)
+// and value (0.102 of luma, plus the near-black inner wall and the ink line between
+// them), and `valuescan --mode chars --ids soup` reads the boundary term `dL` going
+// **0.1483 -> 0.2150** across this change rather than down. The carrot coin is the
+// deliberate counterweight: it puts a little of the old `#E8792A` family back as an
+// ACCENT instead of as 31% of the character. ⚠️ `arena-scan` was NOT re-run — it is
+// an 18-station whole-frame instrument and this is one character — so the effect of
+// this hue on the CAST half of that budget is unmeasured.
 const SCALLION = '#5C8A3A';      // hue 94.5, luma 0.481 — was an unnamed speck, see below
 const CARROT = '#D9601C';        // hue 21.6, luma 0.458
 // ⚠️ `NOODLE`/`NOODLE_DARK` are the LADLE's draped noodles (`buildLadle`) and are
-// deliberately left alone: they are a few hundred pixels on a metal prop, not a
-// surface a projectile flies over. They are still in the pale band above.
+// deliberately left alone — but the reason is AREA, and it is measured rather than
+// assumed: `lk1_area` puts them at 2,612 px at the lobby and 5,130 px (1.17% of the
+// character) at the match camera, on a prop held out at arm's length rather than on
+// the broad up-facing surface a projectile crosses. They are still in the pale band
+// above, and if a projectile-legibility pass ever lands on this character they are
+// the residual.
 const NOODLE = '#F2D98A';
 const NOODLE_DARK = '#D9B85E';
 const WOOD = '#8A5A34';          // ladle handle
@@ -1001,6 +1015,14 @@ export class SoupCharacter extends BaseCharacter {
    * crescent; at `+0.30 * tube` it rides the surface. Three depths plus two albedos
    * give the flat disc a value range it never had: `NOODLE_WET` 0.345, `BROTH`
    * 0.620, `NOODLE_TOP` 0.730 in luma.
+   *
+   * ── The cost, stated ─────────────────────────────────────────────────────────
+   * +20 meshes per soup fighter, i.e. +20 draw calls, derived from `lk1_area`'s own
+   * `matched` counts rather than by counting the source: the liquid group holds 26
+   * meshes after (2 disc + 1 ring + 10 float strands and their outlines + 4 sunk +
+   * 5 scallion + 4 carrot) against 6 before. At `MAX_FIGHTERS` 6 that is +120 in the
+   * worst case. Draw counts are an EXACT metric (CLAUDE.md rule 10) and this one has
+   * NOT been measured against a frame budget — `tools/perf.mjs` was not run.
    *
    * ⚠️ NOTHING HERE CRESTS THE RIM, AND THAT IS DELIBERATE. A noodle looping out of
    * the bowl is the obvious silhouette move and this file has already paid for it:
