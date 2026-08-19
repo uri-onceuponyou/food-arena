@@ -1,0 +1,29 @@
+{
+  "_": "Faults ACCEPTED as of the recorded SHA. --ratchet fails on any DIFFERENCE, in either direction: a new fault is a regression, and a fault that no longer reproduces means this ledger is stale and must be re-recorded WITH the fix.",
+  "sha": "8ca8f880d8eeee180616b7f7c0935e4a316a3476",
+  "faults": [
+    "MISSING|burrito.Swarm|claims \"multi-target\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"fly everywhere\")",
+    "MISSING|burrito.Swarm|claims \"projectile-destructible\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"the flying toppings can be destroyed\")",
+    "MISSING|egg.Tackle|claims \"self-launch\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"Launches herself at the enemy\")",
+    "MISSING|hotdog.Ketchup|claims \"control-loss\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"lose control\")",
+    "MISSING|lollipop.Giant|claims \"multi-target\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"making everyone\")",
+    "MISSING|pizza.Cheese|claims \"status-cleared-by-damage\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"until someone hits them\")",
+    "MISSING|pizza.Cheese|claims \"vision-block\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"blocks their vision\")",
+    "MISSING|pizza.Tomato|claims \"ground-effect-damage\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"damaging\")",
+    "MISSING|soup.Dump|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"heavy slow\")",
+    "MISSING|sushi.Catch|claims \"lure\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"pulling enemies\")",
+    "MISSING|sushi.Catch|claims \"multi-target\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"enemies everywhere\")",
+    "MISSING|sushi.Catch|claims \"projectile-grows\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"the fish grow huge\")",
+    "MISSING|sushi.Seaweed|claims \"lure\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"lures every enemy toward it\")",
+    "MISSING|waterbottle.Mega|claims \"merge-entities\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"together they become one giant bottle\")",
+    "MISSING|waterbottle.Mega|claims \"self-launch\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"launches himself up\")",
+    "MISSING|waterbottle.Mega|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"heavy slow\")",
+    "MISSING|waterbottle.Mega|claims \"summon-entity\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"his cap becomes a second bottle\")",
+    "MISSING|waterbottle.Spray|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"a lot\")",
+    "WRONG-VALUE|burrito.Roll|claims \"stun-few-seconds\" (\"for a few seconds\") — the record does not satisfy it. a stun lasting >= 3000ms. STUN_DURATION_MS is 2000 and is GLOBAL",
+    "WRONG-VALUE|hamburger.Lettuce|claims \"stun-few-seconds\" (\"for a few seconds\") — the record does not satisfy it. a stun lasting >= 3000ms. STUN_DURATION_MS is 2000 and is GLOBAL",
+    "WRONG-VALUE|lollipop.Giant|claims \"reach-whole-map\" (\"hits the whole map\") — the record does not satisfy it. nominal `range` >= the arena diagonal (3440.9 wu on 2800x2000)",
+    "WRONG-VALUE|pizza.Tomato|claims \"splat-slows-anyone\" (\"slowing anyone who steps on them\") — the record does not satisfy it. a splat that slows BOTS as well as the human seat — MEASURED each run",
+    "WRONG-VALUE|sushi.Catch|claims \"reach-whole-map\" (\"the seaweed scatters across the map\") — the record does not satisfy it. nominal `range` >= the arena diagonal (3440.9 wu on 2800x2000)"
+  ]
+}

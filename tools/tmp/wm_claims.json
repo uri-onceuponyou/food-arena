@@ -1,0 +1,154 @@
+{
+  "_": "WM_CLAIMS — the structured form of all 34 ability blurbs. ⚠️ THIS FILE IS A TEMPORARY SECOND SOURCE OF TRUTH. These declarations belong in `src/game/rules.ts` beside the `desc:` they describe (`AbilityBlurb.claims`), for the same reason `AbilityBlurb.weapon` lives there: a blurb and its claims that can drift apart WILL. They are here only because `rules.ts` was owned by another agent when this gate was built. See wm_gate.mjs's header for the migration. Every `span` must be an exact substring of the blurb — that is what makes an edited blurb a RED GATE rather than a silent divergence.",
+  "_thresholdNote": "The one judgement threshold is `stun-few-seconds` (>= 3000 ms), declared in wm_vocab.mjs. Everything else is a field test or a roster percentile.",
+  "claims": {
+    "hamburger.Tomato": {
+      "desc": "Slows enemies down",
+      "c": [["slow", "Slows enemies down"]]
+    },
+    "hamburger.Lettuce": {
+      "desc": "Stuns enemies for a few seconds",
+      "c": [["stun", "Stuns enemies"], ["stun-few-seconds", "for a few seconds"]]
+    },
+    "hamburger.Smash": {
+      "desc": "Deals heavy damage",
+      "c": [["damage-above-median", "Deals heavy damage"]]
+    },
+    "hamburger.Onion": {
+      "desc": "Heals himself",
+      "c": [["self-heal", "Heals himself"]]
+    },
+    "donut.Candy": {
+      "desc": "Throws candies that chip away health",
+      "c": [["ranged", "Throws"], ["cosmetic", "candies"], ["damage-per-hit-low", "chip away health"]],
+      "why": "\"candies\" is a BARE PLURAL and is read as flavour, not as a pellet count — see wm_gate's plural rule. The weapon does fire 3 pellets, which shows up as an UNDECLARED mechanic rather than as a pass."
+    },
+    "donut.~Sticky Trail": {
+      "desc": "Leaves a filling trail - hurts enemies, speeds him up",
+      "c": [["passive-trail", "Leaves a filling trail"], ["trail-damage", "hurts enemies"], ["trail-speed-boost", "speeds him up"]]
+    },
+    "taco.Filling": {
+      "desc": "Throws his filling for heavy damage",
+      "c": [["ranged", "Throws his filling"], ["damage-above-median", "heavy damage"]]
+    },
+    "taco.Onion": {
+      "desc": "Throws onion for damage",
+      "c": [["ranged", "Throws onion"], ["damage-any", "for damage"]]
+    },
+    "taco.Double": {
+      "desc": "Special: throws filling and onion together for massive damage",
+      "c": [["cosmetic", "Special"], ["combo", "throws filling and onion together"], ["damage-top3", "massive damage"]]
+    },
+    "burrito.Disc": {
+      "desc": "Throws himself like a flying disc for damage",
+      "c": [["ranged", "Throws"], ["cosmetic", "himself like a flying disc"], ["damage-any", "for damage"]],
+      "why": "\"like a\" makes this a SIMILE, so it is read as flavour rather than as a claim that the fighter itself is displaced. JUDGEMENT CALL — the literal reading would be a MISSING `self-launch` (there is no sim-side dash; `movement.ts:365` says knockback is visual-only)."
+    },
+    "burrito.Roll": {
+      "desc": "Rolls up and freezes enemies in place for a few seconds",
+      "c": [["cosmetic", "Rolls up"], ["stun", "freezes enemies in place"], ["stun-few-seconds", "for a few seconds"]]
+    },
+    "burrito.Swarm": {
+      "desc": "Special: squeezes out all his toppings, which fly everywhere and chase enemies dealing damage - the flying toppings can be destroyed",
+      "c": [["cosmetic", "Special"], ["pellets", "squeezes out all his toppings"], ["multi-target", "fly everywhere"], ["homing", "chase enemies"], ["damage-any", "dealing damage"], ["projectile-destructible", "the flying toppings can be destroyed"]]
+    },
+    "egg.Tackle": {
+      "desc": "Launches herself at the enemy for big damage - slow to charge up",
+      "c": [["self-launch", "Launches herself at the enemy"], ["damage-above-median", "big damage"], ["long-cooldown", "slow to charge up"]],
+      "why": "\"slow to charge up\" is read as RECHARGE (cooldown 2200ms, top third), not as a wind-up — this weapon has no `castMs`. JUDGEMENT CALL: if DECISIONS §77-§80 convert this ultimate, the claim upgrades to `wind-up` and this line must change with it."
+    },
+    "egg.Hatch": {
+      "desc": "She cracks open and a chick bursts out, pecking for damage",
+      "c": [["cosmetic", "cracks open and a chick bursts out"], ["repeat-hits", "pecking"], ["damage-any", "for damage"]]
+    },
+    "egg.Shards": {
+      "desc": "Broken shell pieces slow enemies and chip away their health",
+      "c": [["cosmetic", "Broken shell pieces"], ["slow", "slow enemies"], ["damage-per-hit-low", "chip away their health"]],
+      "why": "\"pieces\" is a bare plural, so the pellet count is not read as a claim. The weapon does fire 3."
+    },
+    "lollipop.Smash": {
+      "desc": "Swings herself like a hammer for heavy damage",
+      "c": [["melee", "Swings"], ["cosmetic", "herself like a hammer"], ["damage-above-median", "heavy damage"]],
+      "why": "\"like a hammer\" is a SIMILE and is read as flavour, on the same rule as burrito.Disc."
+    },
+    "lollipop.Giant": {
+      "desc": "Grows huge and hits the whole map, making everyone dizzy",
+      "c": [["giant-slam-vfx", "Grows huge"], ["reach-whole-map", "hits the whole map"], ["multi-target", "making everyone"], ["stun", "dizzy"]]
+    },
+    "pizza.Dough": {
+      "desc": "Throws dough balls that slow enemies down",
+      "c": [["ranged", "Throws"], ["cosmetic", "dough balls"], ["slow", "slow enemies down"]],
+      "why": "\"dough balls\" is a bare plural, so the pellet count is not read as a claim. STRICT READING: this weapon fires ONE projectile, so a plural-as-pellets rule would make it a WRONG VALUE."
+    },
+    "pizza.Tomato": {
+      "desc": "Tomatoes stick to the floor, damaging and slowing anyone who steps on them",
+      "c": [["cosmetic", "Tomatoes"], ["splatter", "stick to the floor"], ["ground-effect-damage", "damaging"], ["splat-slows-anyone", "slowing anyone who steps on them"]]
+    },
+    "pizza.Cheese": {
+      "desc": "Cheese sticks to an enemy's face and blocks their vision until someone hits them",
+      "c": [["cosmetic", "Cheese sticks to an enemy's face"], ["vision-block", "blocks their vision"], ["status-cleared-by-damage", "until someone hits them"]],
+      "why": "This card never mentions the stun the weapon actually applies, so `stun` shows up as an UNDECLARED mechanic — the blurb and the record describe two different weapons."
+    },
+    "sushi.Rice": {
+      "desc": "Throws a spray of rice grains - each one chips away a little health",
+      "c": [["ranged", "Throws"], ["pellets", "a spray of rice grains"], ["damage-per-hit-low", "each one chips away a little health"]]
+    },
+    "sushi.Seaweed": {
+      "desc": "Seaweed lures every enemy toward it while he shoots them",
+      "c": [["cosmetic", "Seaweed"], ["lure", "lures every enemy toward it"], ["cosmetic", "while he shoots them"]],
+      "why": "The weapon carries a `slow` the card never mentions — UNDECLARED."
+    },
+    "sushi.Fish": {
+      "desc": "Turns into a pile of fish that attack for small damage",
+      "c": [["cosmetic", "Turns into a pile of fish that attack"], ["damage-below-median", "small damage"]],
+      "why": "\"Turns into a pile of fish\" is read as flavour for a melee swing. STRICT READING: a transformation is a mechanic the sim has no state for, which would make this a MISSING MECHANIC."
+    },
+    "sushi.Catch": {
+      "desc": "Special: throws seaweed with fish - the fish grow huge and the seaweed scatters across the map, pulling enemies everywhere",
+      "c": [["cosmetic", "Special"], ["cosmetic", "throws seaweed with fish"], ["projectile-grows", "the fish grow huge"], ["reach-whole-map", "the seaweed scatters across the map"], ["lure", "pulling enemies"], ["multi-target", "enemies everywhere"]]
+    },
+    "soup.Splash": {
+      "desc": "Throws his soup liquid - each splash chips away a little health",
+      "c": [["ranged", "Throws his soup liquid"], ["pellets", "each splash"], ["damage-per-hit-low", "chips away a little health"]]
+    },
+    "soup.Noodle": {
+      "desc": "Throws noodles that slow enemies down",
+      "c": [["ranged", "Throws noodles"], ["slow", "slow enemies down"]]
+    },
+    "soup.Dump": {
+      "desc": "Special: tips himself over onto an enemy, pouring all his soup and noodles - big damage and a heavy slow",
+      "c": [["cosmetic", "Special"], ["cosmetic", "tips himself over onto an enemy, pouring all his soup and noodles"], ["damage-above-median", "big damage"], ["slow", "a heavy slow"], ["status-strength", "heavy slow"]]
+    },
+    "waterbottle.Spray": {
+      "desc": "Sprays water that slows enemies down a lot",
+      "c": [["ranged", "Sprays water"], ["slow", "slows enemies down"], ["status-strength", "a lot"]],
+      "why": "`pellets: 3` is UNDECLARED — the card reads as one stream."
+    },
+    "waterbottle.Glass": {
+      "desc": "Shoots glass shards that deal damage and freeze enemies",
+      "c": [["ranged", "Shoots glass shards"], ["damage-any", "deal damage"], ["stun", "freeze enemies"]]
+    },
+    "waterbottle.Cap": {
+      "desc": "Fires his cap - enemies slip when it hits",
+      "c": [["ranged", "Fires his cap"], ["slow", "enemies slip when it hits"]]
+    },
+    "waterbottle.Mega": {
+      "desc": "Special: launches himself up (takes a few seconds), his cap becomes a second bottle, and together they become one giant bottle that dumps water on an enemy for huge damage and a heavy slow",
+      "c": [["cosmetic", "Special"], ["self-launch", "launches himself up"], ["wind-up", "takes a few seconds"], ["summon-entity", "his cap becomes a second bottle"], ["merge-entities", "together they become one giant bottle"], ["cosmetic", "dumps water on an enemy"], ["damage-above-median", "huge damage"], ["slow", "a heavy slow"], ["status-strength", "heavy slow"]]
+    },
+    "hotdog.Mustard": {
+      "desc": "Burns enemies from a distance",
+      "c": [["damage-any", "Burns enemies"], ["ranged", "from a distance"]],
+      "why": "JUDGEMENT CALL — \"Burns\" is read as flavour for damage on a mustard weapon, not as a damage-over-time claim. There is no DoT in the sim; the literal reading would make this a MISSING mechanic."
+    },
+    "hotdog.Ketchup": {
+      "desc": "Makes enemies slide and lose control",
+      "c": [["slow", "Makes enemies slide"], ["control-loss", "lose control"]],
+      "why": "\"slide\" is read as the slow. \"lose control\" is separate and has no mechanic: `movement.ts:365` records that knockback is visual-only and that a dash or a pull would be new."
+    },
+    "hotdog.Slash": {
+      "desc": "Powerful close-range strike",
+      "c": [["damage-above-median", "Powerful"], ["melee", "close-range strike"]]
+    }
+  }
+}
