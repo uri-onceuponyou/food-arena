@@ -27,7 +27,13 @@
  *
  * ── What this file owns, and what it now DOESN'T ─────────────────────────────
  * The bowl silhouette + rising steam is the landmark. A ladle in `handR` nods at
- * all three abilities. The body below the bowl is a stoneware POT STAND rather than
+ * all three abilities. Uri, on the deployed build: *"add noodles or something in the
+ * liquid, make the liquid more yellow than brown"* — so the liquid is now a hue-46
+ * gold rather than a hue-25 orange, and it carries a noodle nest, scallion rings and
+ * carrot coins in a `soup_broth_top` group that bobs WITH the surface. It carried a
+ * depth ring and three garnish specks before that and they delivered **0 pixels at
+ * every shipped camera**; see `brothTop` and `onUpdate` for the one operator that
+ * did it. The body below the bowl is a stoneware POT STAND rather than
  * a bare rig torso, because the rig's tapered-sphere torso is 0.34 m half-wide at
  * the shoulder line while soup's shoulder pivots sit at 0.54 m — the arms and legs
  * were hanging in ~0.19 m of open background, which is Uri's *"limbs disattached"*
@@ -150,9 +156,69 @@ const LEG_STONE = '#6E675F';     // legs — darker stoneware posts, luma 0.408
 // grey. It also widens the arm/leg split: the mitt is now the only warm thing on
 // the limbs, and the boots below stay near-black stoneware.
 const MITT_CREAM = '#E0BC8A';    // hands — warm cream cloth mitts, luma 0.756
-const BROTH = PALETTE.broth;     // #E8792A
-const BROTH_DARK = '#B85A16';    // broth depth shading
+// ── THE BROTH IS YELLOW NOW, AND THE OLD VALUE WAS ORANGE BY MEASUREMENT ─────
+// Uri, playing the deployed build: *"Soup — add noodles or something in the liquid,
+// make the liquid more yellow than brown."*
+//
+// WAS `PALETTE.broth` = `#E8792A`, which is **hue 24.9 degrees**. Yellow sits at
+// 50-60 and gold at 40-50; 24.9 is ORANGE, so the report is a measurement rather
+// than a preference. `#CC9F0D` is **hue 46.0**, HSL(46, 88%, 43%) — a +21.1 degree
+// rotation into the gold-yellow band.
+//
+// ⚠️ IT IS NOT A PURE HUE ROTATION, AND THE REASON IS THE ONE ARITHMETIC TRAP HERE:
+// sRGB luma weights GREEN at 0.7152, so rotating orange -> yellow at constant HSL
+// lightness RAISES luma by ~0.15. Held at the shipped HSL lightness the broth would
+// have landed at luma 0.72 — `CERAMIC`'s exact albedo (0.722), i.e. the cream rim
+// the disc physically TOUCHES at the 58 degree match camera. Six candidates were
+// rendered at both shipped cameras and looked at (`tools/tmp/lk1_sweep.mjs`); the
+// two above luma 0.71 are the ones that start fusing with that rim. `#CC9F0D` is
+// luma **0.620**, keeping a 0.102 step under the rim, where the shipped orange had
+// 0.177 and every candidate above hue 41 read unmistakably yellow.
+//
+// 🚨 AND IT IS NO LONGER `PALETTE.broth`. That constant is ALSO read by
+// `src/arena/shared.ts:1189` for an arena material, which is not this file's to
+// move; `rules.ts` is not this agent's file set either. So soup's liquid and
+// `PALETTE.broth` have DIVERGED deliberately. `soup.Splash` and `soup.Dump` still
+// carry `color: '#E8792A'` in `rules.ts` — the splash projectile and the dump cone
+// are still the old orange. Reported rather than changed.
+const BROTH = '#CC9F0D';         // hue 46.0, HSL(46, 88%, 43%), luma 0.620
+// The pair is a VALUE STEP, not two independent colours — moving one without the
+// other flattens the bowl. The shipped pair `#E8792A`/`#B85A16` was **0.133 of
+// luma** apart, so the new dark holds exactly that step at the new hue: luma
+// 0.620 -> 0.487. (Holding the step in HSL lightness instead would have given
+// 0.198 of luma, because of the same green-weighting trap above.)
+// ⚠️ AND UNTIL THIS COMMIT THAT STEP HAD NEVER BEEN RENDERED ONCE — see the depth
+// ring in `buildBrothSolids`, which measured 0 delivered pixels at all three shipped
+// stations.
+const BROTH_DARK = '#A07D0A';    // hue 46.0, luma 0.487 — exactly 0.133 under BROTH
 const STEAM = PALETTE.steam;     // #C9C9C9
+// ── The solids, and the pale one is a MEASURED hazard rather than a taste call ───
+// Soup's own second weapon is `Noodle Toss`, `rules.ts` colour **`#FFE9A8`** — HSL
+// lightness **0.829**. `tools/tmp/p2_bgcross.mjs` measured all 23 ranged weapons
+// across the surfaces they actually cross and found the predictor of a projectile
+// vanishing is **its own lightness, not hue**: Spearman -0.738 against own HSL
+// lightness versus 0.238 for hue, and the eight weapons above 0.82 lightness ARE
+// ranks 1-8. The collision it documented is `#FFE9A8` on the arena's cream ground
+// cloth `#E9DCC0` — HSL lightness 0.833 against 0.829, a gap of **0.004**.
+//
+// So the obvious noodle colour is the trap. `NOODLE` `#F2D98A` below is HSL
+// lightness **0.745** and hue 45.6 — 0.084 and 0.8 degrees from soup's own
+// projectile. Filling 31% of this character (the broth's share of it at the match
+// camera) with that would build a second cream ground cloth on soup's own head.
+// `NOODLE_TOP` is HSL lightness **0.620**, i.e. **0.209 below** the projectile —
+// fifty times the separation of the documented collision — and it is still a
+// legible +0.110 of luma over the new broth.
+const NOODLE_TOP = '#DDB95F';    // hue 42.9, HSL L 0.620, luma 0.730 — the strand you see
+const NOODLE_WET = '#7A5510';    // hue 39.1, HSL L 0.271, luma 0.345 — a strand under the surface
+// Green and orange are here for hue range, not garnish realism: the new broth gave up
+// the frame's orange, and `CLAUDE.md` records warm chroma as the budget this frame
+// watches. A carrot coin puts a little of the old `#E8792A` family back as an ACCENT
+// instead of as 31% of the character.
+const SCALLION = '#5C8A3A';      // hue 94.5, luma 0.481 — was an unnamed speck, see below
+const CARROT = '#D9601C';        // hue 21.6, luma 0.458
+// ⚠️ `NOODLE`/`NOODLE_DARK` are the LADLE's draped noodles (`buildLadle`) and are
+// deliberately left alone: they are a few hundred pixels on a metal prop, not a
+// surface a projectile flies over. They are still in the pale band above.
 const NOODLE = '#F2D98A';
 const NOODLE_DARK = '#D9B85E';
 const WOOD = '#8A5A34';          // ladle handle
@@ -432,6 +498,23 @@ export class SoupCharacter extends BaseCharacter {
   private steamWisps: THREE.Object3D[] = [];
   private steamMats: THREE.MeshStandardMaterial[] = [];
   private brothSurface!: THREE.Mesh;
+  /**
+   * The liquid AND everything floating in it, as one object.
+   *
+   * 🚨 THEY USED TO BE SIBLINGS UNDER `head`, AND THAT IS WHY THE BOWL WAS A FLAT
+   * ORANGE DISC. `onUpdate` bobbed the broth with `position.y +=`, which INTEGRATES
+   * rather than oscillates: measured at the frozen preview time t=1.5 the disc had
+   * walked **+0.0169 m** off its authored height while its own ink outline — which
+   * `addOutline` copies the transform of exactly once, at construction — stayed put
+   * at 0.117863. The depth ring was authored 0.0011 above the disc and the garnish
+   * specks 0.0055 above it, so the disc climbed past BOTH and occluded them, and it
+   * kept climbing at a rate that depends on the frame rate because `dt` is not in
+   * that expression. `docs/LESSONS.md` §1 for the twenty-second time: they were
+   * rendering, and they were invisible.
+   */
+  private brothTop!: THREE.Group;
+  /** The authored height the bob oscillates ABOUT. Its absence is the bug above. */
+  private brothBaseY = 0;
   /**
    * How wide the pot stand is at a given torso-local height, in metres.
    *
@@ -858,32 +941,24 @@ export class SoupCharacter extends BaseCharacter {
     const brothH = 0.915;
     const brothPt = bowlSurface(0, brothH);
     const brothRadius = new THREE.Vector2(brothPt.pos.x, brothPt.pos.z).length() * 0.90;
-    this.brothSurface = new THREE.Mesh(new THREE.CircleGeometry(brothRadius, 32), brothMat);
+    // 🚨 THE LIQUID AND EVERYTHING IN IT NOW SHARE ONE PARENT. Read `brothTop`'s own
+    // note: as siblings under `head` they were pulled apart by an integrating bob and
+    // the disc ate the ring and the garnish whole. A group also means the solids can
+    // be authored in the LIQUID's frame — `y` below is metres above the surface,
+    // which is the only frame in which "half-submerged" is expressible.
+    this.brothTop = new THREE.Group();
+    this.brothTop.name = 'soup_broth_top';
+    this.brothTop.position.y = brothPt.pos.y - R * 0.02;
+    this.brothBaseY = this.brothTop.position.y;
+    head.add(this.brothTop);
+
+    this.brothSurface = new THREE.Mesh(new THREE.CircleGeometry(brothRadius, 40), brothMat);
     this.brothSurface.name = 'soup_broth';
     this.brothSurface.rotation.x = -Math.PI / 2;
-    this.brothSurface.position.y = brothPt.pos.y - R * 0.02;
     this.brothSurface.receiveShadow = true;
-    head.add(this.brothSurface);
+    this.brothTop.add(this.brothSurface);
 
-    // A darker broth-depth ring near the rim, and a couple of floating garnish bits,
-    // so the broth reads as liquid with real depth rather than a flat orange disc.
-    // Same clearcoat trap as the broth disc above, on a ring at the same height.
-    const brothDeepMat = toonMat({ color: BROTH_DARK, roughness: 0.82, rim: false });
-    const brothRing = new THREE.Mesh(new THREE.RingGeometry(brothRadius * 0.7, brothRadius * 0.98, 32), brothDeepMat);
-    brothRing.name = 'soup_broth_ring__no_outline';
-    brothRing.userData.noOutline = true;
-    brothRing.rotation.x = -Math.PI / 2;
-    brothRing.position.y = this.brothSurface.position.y + R * 0.002;
-    head.add(brothRing);
-
-    for (const [gx, gz] of [[0.3, 0.1], [-0.35, -0.15], [0.05, -0.35]] as const) {
-      const speck = new THREE.Mesh(new THREE.SphereGeometry(R * 0.035, 8, 6), toonMat({ color: '#5C8A3A', roughness: 0.4 }));
-      speck.position.set(gx * brothRadius, this.brothSurface.position.y + R * 0.01, gz * brothRadius);
-      speck.scale.set(1, 0.3, 1);
-      speck.userData.noOutline = true;
-      head.add(speck);
-    }
-
+    this.buildBrothSolids(R, brothRadius);
     this.buildSteam(R, brothPt.pos.y, brothRadius);
     this.buildFace(R, bowlSurface);
     this.buildLadle();
@@ -897,6 +972,145 @@ export class SoupCharacter extends BaseCharacter {
     outlineGroup(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
+  }
+
+  /**
+   * WHAT IS IN THE LIQUID — a noodle nest, scallion rings and carrot coins, all in
+   * the liquid's own frame so `y` is metres above the surface.
+   *
+   * ── Why this is not just "unhide the old garnish" ────────────────────────────
+   * The old build had a `BROTH_DARK` depth ring and three green specks, and its own
+   * comment claimed they stopped the broth reading as *"a flat orange disc"*.
+   * `tools/tmp/lk1_area.mjs` (same-frame ablation, same shape `pj_probe` uses)
+   * measured all four at the three shipped stations:
+   *
+   *     station        soup_broth_ring   the three specks
+   *     lobby yaw 0          0 px              0 px
+   *     lobby yaw 35         0 px              0 px
+   *     match yaw 90         0 px              0 px
+   *
+   * — while the selector MATCHED 1 and 3 objects respectively, so this is "they
+   * render and are invisible", not "they are missing". The cause is in `brothTop`'s
+   * note. The specks were also UNNAMED, which is why they had to be addressed by
+   * material hex: an unnamed mesh is invisible to every diagnostic in this repo.
+   * Everything below carries a name.
+   *
+   * ── The nest, and why the strand heights are expressed in TUBE RADII ──────────
+   * The disc is opaque, so nothing below it can be seen and "submerged" has to be
+   * faked with height and colour. A strand at `y = -0.55 * tube` shows a thin
+   * crescent; at `+0.30 * tube` it rides the surface. Three depths plus two albedos
+   * give the flat disc a value range it never had: `NOODLE_WET` 0.345, `BROTH`
+   * 0.620, `NOODLE_TOP` 0.730 in luma.
+   *
+   * ⚠️ NOTHING HERE CRESTS THE RIM, AND THAT IS DELIBERATE. A noodle looping out of
+   * the bowl is the obvious silhouette move and this file has already paid for it:
+   * the `loop` import was REMOVED because two torus arcs on the head *"read as
+   * ears"*. Every solid stays inside the liquid plane, so the silhouette — and
+   * `buildSilhouetteEvents`'s read of it — is untouched by this pass.
+   */
+  private buildBrothSolids(R: number, brothRadius: number): void {
+    const top = this.brothTop;
+    // Same clearcoat trap as the broth disc: `glossyMat` is `MeshPhysicalMaterial`
+    // with clearcoat hard-coded, and a broad flat lobe pointed at the key is what
+    // whited out the middle of this bowl for five rounds. `rim: false` for the same
+    // clipping budget the disc is on.
+    const deepMat = toonMat({ color: BROTH_DARK, roughness: 0.82, rim: false });
+    const wetMat = toonMat({ color: NOODLE_WET, roughness: 0.62, rim: false });
+    const topMat = toonMat({ color: NOODLE_TOP, roughness: 0.52, rim: false });
+    const scallionMat = toonMat({ color: SCALLION, roughness: 0.5, rim: false });
+    const carrotMat = toonMat({ color: CARROT, roughness: 0.5, rim: false });
+
+    // ── The depth ring, re-authored ──────────────────────────────────────────
+    // WAS `RingGeometry(r * 0.7, r * 0.98)` — 0.7 to 0.98 is 94% of the disc's AREA,
+    // so the moment the occlusion bug above is fixed that ring stops being a depth
+    // cue and becomes the broth. Narrowed to 0.84-1.0: the liquid darkening where it
+    // meets the wall, which is what the comment always claimed it was.
+    const brothRing = new THREE.Mesh(new THREE.RingGeometry(brothRadius * 0.84, brothRadius, 40), deepMat);
+    brothRing.name = 'soup_broth_ring__no_outline';
+    brothRing.userData.noOutline = true;
+    brothRing.rotation.x = -Math.PI / 2;
+    brothRing.position.y = R * 0.002;
+    top.add(brothRing);
+
+    const tube = R * 0.045;   // ~0.025 m — a chunky vinyl-toy strand, not a hair
+
+    /**
+     * One noodle strand. `Euler` order is XYZ, i.e. the matrix is RX·RY·RZ, so `z`
+     * spins the arc about its own ring axis (choosing WHERE the open ends sit) and
+     * `x` then lays the ring into the liquid plane. A few hundredths of extra tilt
+     * on `x` is what stops four concentric arcs reading as a target.
+     */
+    // ⚠️ `soup_noodle_float`, NOT `soup_noodle` — THE LADLE ALREADY OWNS THAT NAME.
+    // `buildLadle` drapes four `soup_noodle` capsules over the scoop, so the first
+    // version of this nest made `--hide soup_noodle` match 18 objects (5 strands + 4
+    // ladle noodles + 9 outlines) and every per-part number silently mixed a prop on
+    // the hand into a surface on the head. A duplicate name does not break the
+    // RENDER, which is exactly why it survives: it breaks the DIAGNOSTIC, and this
+    // repo's part maps and ablations all key on `name`.
+    const strand = (
+      name: string, mat: THREE.Material, radFrac: number, arc: number,
+      spin: number, tilt: number, x: number, z: number, k: number, thick = 1,
+    ): void => {
+      const t = tube * thick;
+      const m = new THREE.Mesh(new THREE.TorusGeometry(brothRadius * radFrac, t, 8, 24, arc), mat);
+      m.name = name;
+      m.rotation.set(-Math.PI / 2 + tilt, 0, spin);
+      m.position.set(x * brothRadius, t * k, z * brothRadius);
+      m.castShadow = true;
+      m.receiveShadow = true;
+      top.add(m);
+    };
+
+    // ── 🚨 ROUND 1 OF THIS NEST WAS CONCENTRIC, AND IT READ AS A SNAIL ──────────
+    // The first layout gave every strand a large radius (0.21-0.50 of the disc) and
+    // an offset near zero, so six arcs shared one centre. Rendered at BOTH cameras
+    // that is not a tangle of noodles, it is a coiled rope — a spiral occupying the
+    // middle third with a bare yellow ring around it. The fix is the opposite
+    // parameterisation: SMALL radii (0.19-0.31) pushed OUT to offsets of ~0.45, so
+    // each arc is a separate curl and the nest reaches the wall.
+    // Arc lengths are 2.0-3.4 rad (115-195 deg) for the same reason: at 4-5 rad a
+    // torus arc closes enough to read as a RING, which is what the scallion is.
+    // Bounded so ring radius + tube + offset stays inside 0.93 of the disc — a
+    // strand crossing the edge would float over the dark gap between the liquid and
+    // the inner wall and read as a crack in the bowl.
+    strand('soup_noodle_sunk', wetMat, 0.30, 3.0, 1.2, 0.03, 0.30, 0.30, -0.55, 0.92);
+    strand('soup_noodle_sunk', wetMat, 0.22, 3.4, 3.9, -0.04, -0.36, -0.14, -0.50, 0.92);
+    strand('soup_noodle_float', topMat, 0.28, 2.6, 0.4, 0.05, -0.40, 0.24, -0.10, 1.06);
+    strand('soup_noodle_float', topMat, 0.23, 3.2, 2.3, -0.06, 0.38, -0.32, 0.05, 0.94);
+    strand('soup_noodle_float', topMat, 0.26, 2.2, 4.4, 0.04, 0.08, 0.46, 0.20, 1.00);
+    strand('soup_noodle_float', topMat, 0.19, 3.4, 5.7, -0.03, -0.14, -0.44, 0.30, 0.90);
+    strand('soup_noodle_float', topMat, 0.31, 2.0, 3.1, 0.02, 0.04, -0.02, 0.12, 1.02);
+
+    // ── Scallion rings ───────────────────────────────────────────────────────
+    // A real ring, not the old flattened sphere: the hole is what makes a green dot
+    // read as a spring onion instead of as a pea, and it costs 120 triangles.
+    const scallionR = R * 0.052, scallionTube = R * 0.017;
+    for (const [sx, sz, spin] of [
+      [0.62, 0.18, 0.4], [-0.58, -0.30, 1.9], [0.10, -0.62, 3.1],
+      [-0.24, 0.60, 4.7], [0.40, 0.46, 5.9],
+    ] as const) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(scallionR, scallionTube, 6, 12), scallionMat);
+      ring.name = 'soup_scallion__no_outline';
+      ring.userData.noOutline = true;
+      ring.rotation.set(-Math.PI / 2 + 0.06, 0, spin);
+      ring.position.set(sx * brothRadius * 0.78, scallionTube * 0.2, sz * brothRadius * 0.78);
+      ring.receiveShadow = true;
+      top.add(ring);
+    }
+
+    // ── Carrot coins ─────────────────────────────────────────────────────────
+    // Six-sided rather than round: a hexagon reads as a CUT slice at 58 degrees,
+    // where a cylinder of 24 segments reads as a dot. Also where the frame's warm
+    // chroma went when the broth stopped being orange.
+    for (const [cx, cz, spin] of [[-0.44, 0.34, 0.5], [0.52, -0.36, 2.2]] as const) {
+      const coin = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.062, R * 0.062, R * 0.020, 6), carrotMat);
+      coin.name = 'soup_carrot';
+      coin.rotation.set(0.05, spin, 0);
+      coin.position.set(cx * brothRadius * 0.8, R * 0.004, cz * brothRadius * 0.8);
+      coin.castShadow = true;
+      coin.receiveShadow = true;
+      top.add(coin);
+    }
   }
 
   /**
@@ -1850,7 +2064,20 @@ export class SoupCharacter extends BaseCharacter {
     }
 
     // Broth gently shimmers via a faint bob — cheap "hot liquid" life.
-    this.brothSurface.position.y += Math.sin(this.elapsed * 3.2) * 0.0005;
+    // ── 🚨 WAS `this.brothSurface.position.y += sin(...) * 0.0005`, AND THAT `+=` IS
+    // THE WHOLE "THERE IS NOTHING IN THE LIQUID" BUG ─────────────────────────────
+    // `+=` on an absolute position with a `sin` term is an ACCUMULATOR, not an
+    // oscillator: it integrates the wave instead of tracing it, so the disc walks off
+    // its authored height and stays there. Measured at the frozen preview time
+    // t = 1.5: the disc sat at local y **0.134722** against an authored **0.117863**
+    // (its own outline, which copies the transform once at construction, is still
+    // sitting on that number) — a drift of **+0.0169 m**, against a 0.0011 m
+    // clearance to the depth ring and 0.0055 m to the garnish. Both were eaten.
+    // `dt` is not in the expression either, so the drift was frame-rate dependent.
+    // The old wording is kept above per CLAUDE.md's rule on reversed assertions: the
+    // INTENT ("a faint bob") was always right and only the operator was wrong.
+    // The whole `brothTop` group moves, so the liquid and its solids stay coplanar.
+    this.brothTop.position.y = this.brothBaseY + Math.sin(this.elapsed * 3.2) * this.rig.headRadius * 0.004;
   }
 
   /**
