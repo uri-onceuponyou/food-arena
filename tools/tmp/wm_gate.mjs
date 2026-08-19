@@ -4,6 +4,8 @@
  * asserted against the weapon record it is type-linked to.
  *
  *   node tools/tmp/wm_gate.mjs                # the matrix. exit 1 while any claim is false.
+ *   node tools/tmp/wm_gate.mjs --table        # + a one-line-per-blurb compact matrix
+ *   node tools/tmp/wm_gate.mjs -v             # + each term's definition beside its verdict
  *   node tools/tmp/wm_gate.mjs --ratchet      # exit 0 only if the fault set EQUALS wm_ledger.json
  *   node tools/tmp/wm_gate.mjs --selftest     # the known-bads
  *   node tools/tmp/wm_gate.mjs --json out.json
