@@ -8,13 +8,14 @@ Answer any subset. Unanswered items stay on the stated assumption.
 
 ---
 
-## 🔴 OPEN RIGHT NOW — four questions, four one-line answers
+## 🔴 OPEN RIGHT NOW — five questions, five one-line answers
 
-**As of `63407e8`, 2026-08-12.** Everything else on this page is history; these four are live.
-**Nothing is blocking** — every one has a default in force and running.
+**As of `63407e8`, 2026-08-12; §81 added 2026-08-19.** Everything else on this page is history;
+these are the live ones. **Nothing is blocking** — every one has a default in force and running.
 
 | # | question | in force | what I'd do | cost to reverse |
 |---|---|---|---|---|
+| **§81** | 🆕 **Lollipop's super reaches 400 wu and cannot be dodged.** Your §80 lever 1 says shrink it. The four LYING weapon cards are already fixed; this is the one number behind them that nobody may move unasked | **400 wu** | **shrink it — but it costs Lollipop −26.4 pp paired, and §77 forbids paying that back by re-tuning five other characters.** So it needs your call, not mine | one constant + the 26.4 pp |
 | **§66** | 🔴 **Six-player has NO way in.** Where does the button live? How are the other five chosen? What level are five bots? | QA URL only | **Answer (1) and I'll wire it — ~15 lines.** A "Brawl" tile on home, five bots at your own level, is the smallest coherent version | it is new UI; nothing existing changes |
 | **§58** | ✅ **ANSWERED 2026-08-12 — and by PLAYING it, not by reading this page.** Uri hit the defect in a live match and specified the replacement schedule. **→ §72.** The recommendation on this row was *"keep 30 s"* and it was **WRONG**: it treated the trigger as a tuning choice when the 30 s trigger was **truncating the ring schedule**, which is a bug | — | — | landed in §72 |
 | **§71** | **Three icon subjects** — `boxBurger`, `stun`, `wrap` | as drawn | ⚠️ **"Leave it" is a real answer for all three** — every one ships beside its own text label. If you pick one, pick `wrap`: 0 of 30 judges, ten panels, and all three geometric options are closed by measurement | one drawing each |
@@ -5207,6 +5208,7 @@ on a different station set (exit 2, refuse rather than compare).
 times.** The stat card was fiction; the rarity ramp ran backwards; the shop promised *"Epic or
 better"* after rarity stopped granting power; three menu screens showed *"a number the model does
 not compute"*; and **20 of 34 weapon descriptions** describe mechanics that do not exist.
+⚠️ **CORRECTION 2026-08-19 — that "20 of 34" is WRONG and it was quoted to Uri.** `tools/tmp/wm_gate.mjs` re-derives **13 of 34** (21 PASS); the original audit had no closed vocabulary and counted flavour prose as claims. The point of this row is unaffected — the class is real — but the number is not. **→ §81.**
 → **A field that is displayed must be wired, and a field that is wired must be clamped where the
 sim clamps it.** Anything else is that class again, with a bigger blast radius because it looks
 authoritative.
@@ -5494,3 +5496,81 @@ bearing" went unnoticed. Baseline today is **0 of 36**. State the bearing covera
 * 🔴 **`src/game/sim.test.mjs` §33(p.3) — the "⚠️ THE PRICE" row — asserts `open.dealt ===
   MEGA.damage`, the exact logical NEGATION of the acceptance test above.** Its own comment
   anticipates the reversal. **It must be reversed with its old wording kept**, per house style.
+
+---
+
+## 81. 🆕 Four weapon cards were LYING ABOUT A NUMBER. The cards moved, not the numbers — and here is what that parks.
+
+**Uri, playing it, 2026-08-19:** *"the 4th weapon doesn't even look similar to what it is stated it
+does. We need to review the weapons descriptions and to make sure that the actual weapon reflects it
+correctly both visually and technically."*
+
+`tools/tmp/wm_gate.mjs` now measures the **technical** half of that and re-derives itself every run.
+**23 faults across 13 blurbs** at `a42224c`, of 103 declared claims. Five were WRONG VALUE — the card
+and the sim disagreeing about a *number*, closeable without building anything. **Four are closed
+below; the fifth (`pizza.Tomato`) is a sim fix another agent is landing.**
+
+⚠️ **The count you were given before was 20 of 34 and it is WRONG.** That audit had no closed
+vocabulary and counted flavour prose as claims. The gate re-derives **13 of 34** false, **21 PASS**.
+
+### Every one went TEXT, not NUMBER — and each refusal has a reason you already gave
+
+| card | said | is | went | why not the number |
+|---|---|---|---|---|
+| `hamburger.Lettuce` | *"Stuns enemies **for a few seconds**"* | `STUN_DURATION_MS` **2000 ms**, global to 11 characters | *"for a moment"* | **§80 is your answer that stun time should go DOWN.** Raising it to 3000 to make the card true is that lever in reverse |
+| `burrito.Roll` | *"freezes enemies in place **for a few seconds**"* | same global 2000 ms | *"for a moment"* | same |
+| `lollipop.Giant` | *"hits **the whole map**"* | **400 wu** vs a **3440.93 wu** arena diagonal — 14% of the map's width | *"slams **the widest area in the game**"* | typing the diagonal in makes one melee reach every fighter everywhere — the exact opposite of §80's *"you should be able to dodge a super"* |
+| `sushi.Catch` | *"the seaweed **scatters across the map**"* | **140 wu** — 5% of the map's width | *"scatters **in a fan**"* — which is what `pellets: 3, spreadDeg: 40` does | it is a basic-ladder reach on a 3-pellet shot; nothing about it was ever map-wide |
+
+**Cost: zero balance risk. No constant moved, no `Weapon` field moved, no sim behaviour changed.**
+Four `desc:` strings and their claim declarations. `tsc`, the sim tests and the roster are untouched
+by construction.
+
+### 🔴 The cheap wrong fix, named so nobody reaches for it later
+
+The gate reads *"a few seconds"* as **≥ 3000 ms**. **Lowering that threshold to 2000 would have
+turned two of the four green in one character, with nothing in the game changing.** It is now
+refused structurally: `stun-few-seconds` (≥ 3000) and `stun-brief` (< 3000) are **exact complements**
+over the stun weapons, so one of them is always satisfied and a stun card cannot be made true by
+*deleting* its duration clause — only by describing the duration it has. Raise `STUN_DURATION_MS`
+past 3000 and **both cards go red the same minute**; the known-bad `KB11` drives exactly that.
+
+### ⛔ WHAT THIS PASS DELIBERATELY DID NOT DO — three things, all parked for you
+
+**(a) 🔴 `lollipop.Giant`'s 400 wu radius is still 2.86× the next longest weapon in the game, and it
+is still undodgeable.** §80's lever 1 says shrink it. `rules.ts` prices the shrink already measured:
+
+```
+range 400 -> 200 (= FAIR_PLAY.radiusUnits, no wind-up)   lollipop 59.2% -> 32.8%   -26.4 pp
+range 200 + castMs 2050 (the derived tell)               lollipop 59.2% ->  1.4%   -57.8 pp
+```
+⚠️ Aggregate moved −1.2 / −1.3 pp — **inside the ~9 pp floor** — while **20 of 110 paired matchups
+moved, max 100.0 pp, EXACT.** *The aggregate is not evidence here.* **In force: 400, unchanged.**
+The card was written as a *relative* claim (*"the widest area in the game"*) precisely so that it
+**stays true after you take lever 1** — 200 wu would still be the widest — and still goes red if some
+other weapon ever out-reaches it. **Reversing costs one constant; the −26.4 pp is the real bill and
+§77 explicitly withholds permission to pay it by re-tuning five other characters.**
+
+**(b) The card still says *"making everyone dizzy"* and that is still FALSE — on purpose.**
+`multi-target` is a MISSING MECHANIC, and **§74/§77 chose BUILD over reword for that class.** Deleting
+the phrase would have retired a roadmap item by editing the sentence that names it. Same reasoning
+kept `sushi.Catch`'s *"the fish grow huge"* and *"pulling enemies"* untouched.
+🚨 **AND IT IS ABOUT TO CLOSE FOR THE MELEE HALF.** Measured 2026-08-19 on a peer's then-uncommitted
+`combat.ts` (a swing resolving against every opponent in its arc rather than the nearest):
+`lollipop.Giant` went **1 victim → 5**. The three RANGED promises — `sushi.Catch`, `burrito.Swarm`,
+`sushi.Seaweed` — stayed at **1** on that same tree. **So one of the three `multi-target` faults is
+closing and two are not**, and the gate's `KB9c` arm carries the instructions.
+
+**(c) 🆕 `sushi.Catch`'s card says *"seaweed"* and the weapon is three homing fish pellets. That is
+probably the exact thing you saw.** Sushi's **4th** ability is Big Catch. Its `desc` opens *"throws
+seaweed with fish"*, and the seaweed in this game is a **different weapon** — `sushi.Seaweed`, Seaweed
+Bait. The gate classes that span as COSMETIC, so it is invisible to the technical axis; the *visual*
+axis is a separate pass. **Not touched here** — changing the subject of a card is a design call, not
+a number fix. **One line if you want it.**
+
+### ⚠️ One out-of-set defect found and NOT fixed — it needs the `src/ui/**` owner
+
+`src/ui/screens/characterSelect.ts:73` — `reachLabel()` returns the string **`'Whole map'`** for any
+`range >= REACH.ultimateSlam`. That is `lollipop.Giant`, and it is the same false claim the card just
+stopped making, in a second place. **One word.** Reported rather than edited: a peer owns that file.
+

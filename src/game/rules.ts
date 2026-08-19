@@ -821,6 +821,35 @@ export const STUN_DURATION_MS = tune('STUN_DURATION_MS', 2000, { // stunned = mo
 });
 
 /**
+ * ── 2026-08-19: TWO ABILITY CARDS PROMISED "a few seconds" OF THIS. THE CARDS MOVED. ──
+ *
+ * `hamburger.Lettuce` and `burrito.Roll` both read *"for a few seconds"*. This constant
+ * is **2000 ms and it is GLOBAL to all 11 characters**, so both cards were false, and
+ * `tools/tmp/wm_gate.mjs` scored them WRONG-VALUE against a 3000 ms reading of *"a few"*.
+ *
+ * 🔴 **THE NUMBER WAS THE WRONG THING TO MOVE, IN BOTH AVAILABLE DIRECTIONS.**
+ *
+ *  1. **Raising it to 3000 to make the cards true is the reverse of Uri's own answer.**
+ *     `DECISIONS §80` (2026-08-18) names *"reduce the stun time"* as one of three levers
+ *     for making a super dodgeable, and `§80`'s arithmetic is that `STUN_DURATION_MS`
+ *     2000 already **exceeds an 1100 ms wind-up**, so one application covers an entire
+ *     cast. 3000 would widen the gap the lever exists to close.
+ *  2. **And DEVIATION #5 immediately below caps the longest unbroken movement lock at
+ *     exactly this constant, by construction.** The census in the comment above measured
+ *     a **6.0 s mean engagement**. 2000 ms is 33% of one; 3000 ms would be 50%. The
+ *     defect DEVIATION #5 was built to fix is the one a longer stun re-opens.
+ *  3. Lowering the gate's 3000 ms threshold instead would have turned both cards green in
+ *     one character, with nothing in the game changing. That is the goalpost move
+ *     `CLAUDE.md` rule 6 exists to refuse.
+ *
+ * → **Both blurbs now say "for a moment"**, which is TRUE at 2000 ms and stays true if
+ *   `§80`'s lever 3 shortens it. The gate's `stun-brief` term (< 3000 ms) asserts it, and
+ *   `stun-few-seconds` (>= 3000 ms) is kept beside it as the catcher: the two are exact
+ *   complements, so a stun card cannot be made true by DELETING its duration clause.
+ *   **Raise this constant past 3000 and BOTH cards go red the same minute.** DECISIONS §81.
+ */
+
+/**
  * ── AUTHORISED DEVIATION #5 (2026-08-05): STATUS RE-APPLICATION IS NOW BOUNDED ──
  *
  * This is the fix for the defect documented immediately above. It changes the
@@ -1251,8 +1280,18 @@ export const REACH = {
 
   /**
    * Lollipop's Giant Lollipop, and nothing else. DELIBERATELY NOT ON THE LADDER: it
-   * is anchored to the ARENA (1400x1000 wu, fog closing to r=545), not to the weapon
-   * ladder, because its whole design is "hits the whole map". It is excluded from
+   * is anchored to the ARENA, not to the weapon ladder, because its whole design is
+   * "the biggest area in the game".
+   *
+   * ⚠️ WAS: *"anchored to the ARENA (1400x1000 wu, fog closing to r=545) ... because its
+   * whole design is 'hits the whole map'"*. **BOTH halves went stale.** The arena is
+   * **2800x2000** since `6631446` (`src/arena/shared.ts` is the only source of truth for
+   * that), and the live fog opening is `arena/shared.ts:MAX_SAFE_RADIUS`, derived from
+   * `ARENA_HALF_DIAGONAL`; `rules.ts:MAX_SAFE_RADIUS = 545` is a dead historical constant
+   * with no consumer, as its own doc comment says. And *"hits the whole map"* was a quote
+   * of an ability blurb that was **false** — 400 wu is 14% of the map's width — and that
+   * blurb was corrected on 2026-08-19. A comment quoting a card is a second source of
+   * truth for the card; it is kept in the past tense here for that reason. It is excluded from
    * the fair-play radius in `render/camera.ts` — covering it would demand a 918 wu
    * radius — so its warning has to be the screen-filling slam VISUAL rather than
    * sight of the caster.
@@ -3635,7 +3674,10 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     // the roster could tolerate a positional join for as long as it did.
     abilities: [
       { emoji: '🍅', name: 'Tomato Toss', desc: 'Slows enemies down', weapon: 'Tomato' },
-      { emoji: '🥬', name: 'Lettuce Fling', desc: 'Stuns enemies for a few seconds', weapon: 'Lettuce' },
+      // WAS: 'Stuns enemies for a few seconds' — false against a GLOBAL 2000 ms
+      // `STUN_DURATION_MS`. See the block beside that constant for why the constant was
+      // the wrong thing to move. DECISIONS §81.
+      { emoji: '🥬', name: 'Lettuce Fling', desc: 'Stuns enemies for a moment', weapon: 'Lettuce' },
       { emoji: '🍖', name: 'Patty Smash', desc: 'Deals heavy damage', weapon: 'Smash' },
       { emoji: '🧅', name: 'Onion Ring', desc: 'Heals himself', weapon: 'Onion' },
     ],
@@ -3793,7 +3835,9 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     ],
     abilities: [
       { emoji: '🌯', name: 'Burrito Disc', desc: 'Throws himself like a flying disc for damage', weapon: 'Disc' },
-      { emoji: '🌀', name: 'Roll Stun', desc: 'Rolls up and freezes enemies in place for a few seconds', weapon: 'Roll' },
+      // WAS: '...freezes enemies in place for a few seconds' — the second of the two cards
+      // that promised more stun than the GLOBAL 2000 ms constant delivers. DECISIONS §81.
+      { emoji: '🌀', name: 'Roll Stun', desc: 'Rolls up and freezes enemies in place for a moment', weapon: 'Roll' },
       { emoji: '✨', name: 'Topping Swarm', desc: 'Special: squeezes out all his toppings, which fly everywhere and chase enemies dealing damage - the flying toppings can be destroyed', weapon: 'Swarm' },
     ],
   }),
@@ -3910,7 +3954,26 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     ],
     abilities: [
       { emoji: '🔨', name: 'Lollipop Smash', desc: 'Swings herself like a hammer for heavy damage', weapon: 'Smash' },
-      { emoji: '💫', name: 'Giant Lollipop', desc: 'Grows huge and hits the whole map, making everyone dizzy', weapon: 'Giant' },
+      // WAS: 'Grows huge and hits the whole map, making everyone dizzy'.
+      //
+      // *"hits the whole map"* was **400 wu against a 3440.93 wu arena diagonal** — 14% of
+      // the map's width. Both ways of closing it were considered and the NUMBER is the
+      // wrong one to move: typing the diagonal in here would make this a single melee that
+      // reaches every fighter everywhere, the exact opposite of `DECISIONS §80`, where Uri
+      // answered *"you should be able to dodge a super"* and named **reducing** the effect
+      // radius as lever 1. The comment above prices the shrink at **−26.4 pp paired** and
+      // says plainly it is a redesign the roster cannot absorb unhandled — out of this
+      // pass's reach, and parked in DECISIONS §81 rather than guessed at.
+      //
+      // So the CARD moved, and it moved to a RELATIVE claim on purpose: 400 wu is the
+      // largest `range` in the roster by 2.86x (next is `REACH.rangedMax` 140), and
+      // *"the widest area in the game"* survives §80's lever 1 being taken later while
+      // still going red the moment some other weapon out-reaches this one.
+      // ⚠️ *"making everyone dizzy"* is UNCHANGED and is STILL FALSE — `multi-target` is a
+      // MISSING MECHANIC (measured: one press damages exactly 1 fighter) and §74/§77 chose
+      // BUILD over reword for that class. Rewording it away here would have retired a
+      // roadmap item by deleting the sentence that names it.
+      { emoji: '💫', name: 'Giant Lollipop', desc: 'Grows huge and slams the widest area in the game, making everyone dizzy', weapon: 'Giant' },
     ],
   }),
 
@@ -3990,7 +4053,14 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       { emoji: '🍚', name: 'Rice Spray', desc: 'Throws a spray of rice grains - each one chips away a little health', weapon: 'Rice' },
       { emoji: '🌿', name: 'Seaweed Bait', desc: 'Seaweed lures every enemy toward it while he shoots them', weapon: 'Seaweed' },
       { emoji: '🐟', name: 'Fish Pile', desc: 'Turns into a pile of fish that attack for small damage', weapon: 'Fish' },
-      { emoji: '🐡', name: 'Big Catch', desc: 'Special: throws seaweed with fish - the fish grow huge and the seaweed scatters across the map, pulling enemies everywhere', weapon: 'Catch' },
+      // WAS: '...the seaweed scatters across the map, pulling enemies everywhere'.
+      // *"scatters across the map"* was **140 wu** (`REACH.rangedMax`) against a 3440.93 wu
+      // arena diagonal — 5% of the map's width, and the most over-claimed span in the cast.
+      // Replaced with what the record actually does: `pellets: 3, spreadDeg: 40`, i.e. a
+      // fan. ONE span changed; the rest of this line is byte-identical on purpose, because
+      // `projectile-grows`, `lure` and `multi-target` are MISSING MECHANICS on the §77
+      // roadmap and rewording them away would retire them silently. DECISIONS §81.
+      { emoji: '🐡', name: 'Big Catch', desc: 'Special: throws seaweed with fish - the fish grow huge and the seaweed scatters in a fan, pulling enemies everywhere', weapon: 'Catch' },
     ],
   }),
 

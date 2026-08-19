@@ -15,6 +15,14 @@
  *
  * ── WHY THIS EXISTS AND WHY IT IS NOT A REPORT ──────────────────────────────
  *
+ * ⚠️ WAS, and it is quoted in three other documents: *"An audit found 20 of 34 blurbs..."*.
+ * **THAT COUNT IS WRONG AND THIS GATE IS WHY WE KNOW.** It re-derives **13 of 34** false
+ * (21 PASS) at `a42224c`. The original audit had no closed vocabulary, so it counted
+ * flavour prose as claims — which is precisely the failure `cosmetic` + `MECHANIC_LEXICON`
+ * exist to prevent. The wrong number was quoted to Uri. Kept in the past tense here rather
+ * than deleted, because it is still in `docs/STATE.md` and twice in `DECISIONS-FOR-URI.md`
+ * and someone will meet it there first.
+ *
  * An audit found 20 of 34 blurbs claiming something the sim does not do. It left NO
  * DURABLE RECORD: the matrix lived in agent reports and commit messages, so it went
  * stale against a tree that then moved ~30 commits, and nothing could re-run it. **A
@@ -323,14 +331,14 @@ function render(res, { verbose, compact }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-async function selftest(vocab, decls) {
+async function selftest(vocab, decls, env) {
   const clone = () => JSON.parse(JSON.stringify(decls));
   let pass = 0, fail = 0;
   const arm = (label, cond, extra = '') => {
     if (cond) { pass++; console.log(`   PASS  ${label} ${extra}`); }
     else { fail++; console.log(`   FAIL  ${label} ${extra}`); }
   };
-  const run = (d, chars = CHARACTERS) => analyse({ decls: d, chars, vocab });
+  const run = (d, chars = CHARACTERS, v = vocab) => analyse({ decls: d, chars, vocab: v });
 
   const base = run(decls);
 
@@ -405,6 +413,53 @@ async function selftest(vocab, decls) {
     arm('KB9  ROSTER  nerfing hotdog.Slash to 1 dmg -> its "Powerful" claim goes WRONG-VALUE', r.faults.some((f) => f.cls === 'WRONG-VALUE' && f.key === 'hotdog.Slash'));
   }
 
+  // ── KB11–KB13: THE THREE CLAIMS LANDED 2026-08-19, EACH SHOWN RED ON ITS OWN BUG ──
+  //
+  // Four WRONG-VALUEs were closed that day by moving the CARD rather than the number
+  // (DECISIONS §81). CLAUDE.md rule 6: a guard that has not been shown to FAIL on the bug
+  // it guards against is not a guard — and a card rewritten to be true today is worth
+  // nothing if the gate cannot notice it going false again. Each arm below drives the
+  // record from the other side and requires the WRONG-VALUE back.
+  // ⚠️ Every one asserts its affected key set is NON-EMPTY before asserting over it:
+  // `[].every()` is `true`, and these arms filter.
+
+  // KB11 — `stun-brief`. The threshold is a JUDGEMENT (3000 ms) and the cheap wrong fix
+  // was to lower it until the old cards passed. So the term is driven from the far side:
+  // at STUN_DURATION_MS 3500 "for a moment" must go WRONG-VALUE on BOTH cards, and
+  // `stun-few-seconds` — kept in the vocabulary precisely as this term's complement —
+  // must start being satisfied.
+  {
+    const stunned = ['hamburger.Lettuce', 'burrito.Roll'];
+    const declaring = stunned.filter((k) => decls[k]?.c.some(([t]) => t === 'stun-brief'));
+    const v = vocabMod.buildVocab({ ...env, stunMs: 3500 });
+    const r = run(decls, CHARACTERS, v);
+    const red = declaring.filter((k) => r.faults.some((f) => f.cls === 'WRONG-VALUE' && f.key === k));
+    arm('KB11 STUN    a 3500ms STUN_DURATION_MS -> every "for a moment" card goes WRONG-VALUE',
+      declaring.length === 2 && red.length === declaring.length, `(${red.length}/${declaring.length} declaring)`);
+    const nStun = ROSTER.rows.filter((x) => v['stun-few-seconds'].test({ w: x.w, def: CHARACTERS[x.id], tag: x.tag, burst: x.burst, perHit: x.perHit })).length;
+    arm('KB11b COMPL  ...and `stun-few-seconds`, its complement, starts being satisfied', nStun > 0, `(${nStun}/${ROSTER.nWeapons})`);
+  }
+  // KB12 — `reach-longest`. The claim that replaced "hits the whole map". Retune the one
+  // weapon that satisfies it below the next longest and the card must go red, which is
+  // what makes the claim track DECISIONS §80's lever 1 instead of outliving it.
+  {
+    const declaring = Object.keys(decls).filter((k) => decls[k].c.some(([t]) => t === 'reach-longest'));
+    const chars = { ...CHARACTERS, lollipop: { ...CHARACTERS.lollipop, weapons: CHARACTERS.lollipop.weapons.map((w) => w.key === 'Giant' ? { ...w, range: 100 } : w) } };
+    const r = run(decls, chars);
+    const red = declaring.filter((k) => r.faults.some((f) => f.cls === 'WRONG-VALUE' && f.key === k));
+    arm('KB12 REACH   dropping lollipop.Giant to 100 wu -> its "widest area" claim goes WRONG-VALUE',
+      declaring.length > 0 && red.length === declaring.length, `(${red.length}/${declaring.length} declaring)`);
+  }
+  // KB13 — `pellets`. The claim that replaced "the seaweed scatters across the map".
+  {
+    const declaring = ['sushi.Catch'].filter((k) => decls[k]?.c.some(([t]) => t === 'pellets'));
+    const chars = { ...CHARACTERS, sushi: { ...CHARACTERS.sushi, weapons: CHARACTERS.sushi.weapons.map((w) => w.key === 'Catch' ? { ...w, pellets: 1 } : w) } };
+    const r = run(decls, chars);
+    const red = declaring.filter((k) => r.faults.some((f) => f.cls === 'WRONG-VALUE' && f.key === k));
+    arm('KB13 FAN     sushi.Catch down to ONE pellet -> its "scatters in a fan" claim goes WRONG-VALUE',
+      declaring.length === 1 && red.length === 1, `(${red.length}/${declaring.length} declaring)`);
+  }
+
   // KB9b — the MISSING verdict for `multi-target` is the largest single class in the
   // matrix (3 blurbs), and it rests on a term being ABSENT from the vocabulary. An
   // absence is the easiest thing in this repo to be wrong about, so it is MEASURED:
@@ -413,7 +468,18 @@ async function selftest(vocab, decls) {
   {
     const mt = vocabMod.measureMultiTarget();
     arm('KB9b GROUND  the census CAN see two fighters (positive control)', mt.canSeeTwo, `(control victims=${mt.control.victims})`);
-    arm('KB9c GROUND  no single press damages >1 fighter, so `multi-target` is rightly ABSENT', mt.maxVictims <= 1, `(${mt.rows.map((r) => r.tag + '=' + r.victims).join(' ')})`);
+    // 🚨 WHEN THIS ARM GOES RED IT IS NOT A BROKEN TEST — IT IS THE SIM GROWING THE
+    // MECHANIC, WHICH IS THE ONE THING IT WAS BUILT TO ANNOUNCE. It fired on 2026-08-19
+    // against a peer's then-uncommitted `combat.ts` (melee swings resolving against every
+    // opponent in the arc instead of the nearest): `lollipop.Giant` went 1 -> 5 victims.
+    // The fix is NOT to relax the arm. It is, in one commit:
+    //   1. add `multi-target` to `wm_vocab.mjs` — `melee` weapons only until a RANGED one
+    //      does it too, because `sushi.Catch`/`burrito.Swarm`/`sushi.Seaweed` are ranged
+    //      and stayed at 1 victim on that same tree;
+    //   2. the three ranged rows here must STILL report 1, or the term is wider than the
+    //      sim and three MISSING verdicts silently turn green on a lie;
+    //   3. re-record `wm_ledger.json` in the SAME commit (`--write-ledger`).
+    arm('KB9c GROUND  no single press damages >1 fighter, so `multi-target` is rightly ABSENT', mt.maxVictims <= 1, `(${mt.rows.map((r) => r.tag + '=' + r.victims).join(' ')})${mt.maxVictims > 1 ? '  <- THE SIM GREW THE MECHANIC: add `multi-target` to wm_vocab, see the comment on this arm' : ''}`);
   }
 
   // KB10 — the RATCHET itself, in both directions. A ratchet that only ever reports
@@ -444,10 +510,11 @@ if (IS_MAIN) {
     console.error('INSTRUMENT INVALID — the splat-slow positive control failed (the human seat did not slow). Not reporting.');
     process.exit(2);
   }
-  const vocab = buildVocab({ splatSlow });
+  const env = { splatSlow };
+  const vocab = buildVocab(env);
   const decls = JSON.parse(readFileSync(CLAIMS_PATH, 'utf8')).claims;
 
-  if (has('--selftest')) process.exit((await selftest(vocab, decls)) ? 0 : 1);
+  if (has('--selftest')) process.exit((await selftest(vocab, decls, env)) ? 0 : 1);
 
   const res = analyse({ decls, vocab });
   render(res, { verbose: has('-v'), compact: has('--table') });
@@ -455,7 +522,19 @@ if (IS_MAIN) {
   const prints = res.faults.map(fingerprint).sort();
   if (has('--json')) writeFileSync(val('--json'), JSON.stringify({ sizes: res.sizes, rows: res.rows, faults: res.faults }, null, 2));
   if (has('--write-ledger')) {
-    writeFileSync(LEDGER_PATH, JSON.stringify({ _: 'Faults ACCEPTED as of the recorded SHA. --ratchet fails on any DIFFERENCE, in either direction: a new fault is a regression, and a fault that no longer reproduces means this ledger is stale and must be re-recorded WITH the fix.', sha: process.env.WM_SHA ?? null, faults: prints }, null, 2) + '\n');
+    // ⚠️ `measuredOn` EXISTS BECAUSE TWO OF THESE FAULTS ARE MEASURED ON THE LIVE SIM,
+    // NOT READ OFF A FIELD — `splat-slows-anyone` walks two fighters through `stepMatch`
+    // and `multi-target` counts victims through the real event pipeline. So this file
+    // records a verdict about a TREE, and the working tree is not a commit: 2026-08-19 a
+    // peer's UNCOMMITTED `combat.ts` turned `lollipop.Giant` from 1 victim into 5, which
+    // would have silently retired a roadmap item into a ledger nobody could reproduce.
+    // Say which tree the numbers came from, in the file that carries them.
+    writeFileSync(LEDGER_PATH, JSON.stringify({
+      _: 'Faults ACCEPTED as of the recorded SHA. --ratchet fails on any DIFFERENCE, in either direction: a new fault is a regression, and a fault that no longer reproduces means this ledger is stale and must be re-recorded WITH the fix.',
+      sha: process.env.WM_SHA ?? null,
+      measuredOn: process.env.WM_MEASURED_ON ?? null,
+      faults: prints,
+    }, null, 2) + '\n');
     console.log(`\nwrote ${LEDGER_PATH} (${prints.length} accepted faults)`);
     process.exit(0);
   }

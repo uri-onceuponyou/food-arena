@@ -1,6 +1,7 @@
 {
   "_": "Faults ACCEPTED as of the recorded SHA. --ratchet fails on any DIFFERENCE, in either direction: a new fault is a regression, and a fault that no longer reproduces means this ledger is stale and must be re-recorded WITH the fix.",
-  "sha": "8ca8f880d8eeee180616b7f7c0935e4a316a3476",
+  "sha": "a42224c",
+  "measuredOn": "detached worktree of a42224c + this commit's rules.ts/wm_* only. The working tree at the time carried a PEER's uncommitted combat.ts (melee multi-target) which flips lollipop.Giant to 5 victims; deliberately EXCLUDED — see the multi-target note below.",
   "faults": [
     "MISSING|burrito.Swarm|claims \"multi-target\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"fly everywhere\")",
     "MISSING|burrito.Swarm|claims \"projectile-destructible\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"the flying toppings can be destroyed\")",
@@ -20,10 +21,6 @@
     "MISSING|waterbottle.Mega|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"heavy slow\")",
     "MISSING|waterbottle.Mega|claims \"summon-entity\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"his cap becomes a second bottle\")",
     "MISSING|waterbottle.Spray|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"a lot\")",
-    "WRONG-VALUE|burrito.Roll|claims \"stun-few-seconds\" (\"for a few seconds\") — the record does not satisfy it. a stun lasting >= 3000ms. STUN_DURATION_MS is 2000 and is GLOBAL",
-    "WRONG-VALUE|hamburger.Lettuce|claims \"stun-few-seconds\" (\"for a few seconds\") — the record does not satisfy it. a stun lasting >= 3000ms. STUN_DURATION_MS is 2000 and is GLOBAL",
-    "WRONG-VALUE|lollipop.Giant|claims \"reach-whole-map\" (\"hits the whole map\") — the record does not satisfy it. nominal `range` >= the arena diagonal (3440.9 wu on 2800x2000)",
-    "WRONG-VALUE|pizza.Tomato|claims \"splat-slows-anyone\" (\"slowing anyone who steps on them\") — the record does not satisfy it. a splat that slows BOTS as well as the human seat — MEASURED each run",
-    "WRONG-VALUE|sushi.Catch|claims \"reach-whole-map\" (\"the seaweed scatters across the map\") — the record does not satisfy it. nominal `range` >= the arena diagonal (3440.9 wu on 2800x2000)"
+    "WRONG-VALUE|pizza.Tomato|claims \"splat-slows-anyone\" (\"slowing anyone who steps on them\") — the record does not satisfy it. a splat that slows BOTS as well as the human seat — MEASURED each run"
   ]
 }

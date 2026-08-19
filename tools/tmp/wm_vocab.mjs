@@ -4,6 +4,10 @@
  *
  * ── WHY A VOCABULARY AND NOT A REPORT ───────────────────────────────────────
  *
+ * ⚠️ The "20 of 34" below is the ORIGINAL audit's number and it is WRONG — the gate
+ * re-derives **13 of 34** false, 21 PASS. See `wm_gate.mjs`'s header. Kept in the past
+ * tense because three other documents still carry it.
+ *
  * An audit found 20 of 34 ability blurbs claiming something the sim does not do. That
  * finding lived only in agent reports and commit messages, so it went stale against a
  * tree that moved ~30 commits and NOTHING IN THE REPO COULD RE-RUN IT. Natural language
@@ -123,12 +127,19 @@ export const ROSTER = (() => {
   const cds = rows.map((r) => r.w.cooldown).sort((a, b) => a - b);
   const byBurst = [...damaging].sort((a, b) => b.burst - a.burst);
   const rank = new Map(byBurst.map((r, i) => [r.tag, i + 1]));
+  // Reach ordering, for `reach-longest`. `range` is undefined on `type: 'self'`
+  // (hamburger.Onion), so it coerces to 0 rather than to NaN — a NaN here would poison
+  // every comparison silently and make the term vacuously false for the whole roster.
+  const ranges = rows.map((r) => r.w.range ?? 0).sort((a, b) => b - a);
+  if (!Number.isFinite(ranges[0]) || ranges[0] <= 0) throw new Error('wm_vocab: the roster has no positive weapon range');
   return {
     rows, damaging,
     burstMedian: percentile(bursts, 0.5),
     perHitP33: percentile(perHits, 1 / 3),
     cooldownP67: percentile(cds, 2 / 3),
     burstRank: rank,
+    maxRange: ranges[0],
+    secondRange: ranges.find((x) => x < ranges[0]) ?? 0,
     nWeapons: rows.length,
   };
 })();
@@ -313,11 +324,31 @@ export function measureMultiTarget() {
 // ─────────────────────────────────────────────────────────────────────────────
 // THE VOCABULARY
 // ─────────────────────────────────────────────────────────────────────────────
-const FEW_SECONDS_MS = 3000; // ⚠️ the one JUDGEMENT threshold in this file; see the header of wm_gate.mjs
+/**
+ * ⚠️ THE ONE JUDGEMENT THRESHOLD IN THIS FILE. It is READ IN BOTH DIRECTIONS.
+ *
+ * `stun-few-seconds` (>= this) and `stun-brief` (< this) are exact complements over the
+ * stun weapons, and that is deliberate: it means a stun blurb cannot become true by
+ * DELETING its duration clause, only by describing the duration it actually has. One of
+ * the two is satisfied by every stun weapon at any setting of `STUN_DURATION_MS`, so
+ * whichever way the constant moves, exactly one set of cards goes red.
+ *
+ * 🔴 **DO NOT "FIX" A CARD BY MOVING THIS NUMBER.** 2026-08-19: `hamburger.Lettuce` and
+ * `burrito.Roll` both said *"for a few seconds"* against a 2000 ms stun, and lowering
+ * 3000 -> 2000 would have turned both green in one character. That is the goalpost move
+ * CLAUDE.md rule 6 is about. The cards moved instead; see the commit and DECISIONS §81.
+ */
+const FEW_SECONDS_MS = 3000;
 
 export function buildVocab(env) {
   const V = {};
   const T = (name, expect, doc, test) => { V[name] = { name, expect, doc, test }; };
+  // Injectable so a known-bad can drive the stun terms from the OTHER side of the
+  // threshold without editing `rules.ts`. Asserted, not defaulted-and-forgotten: a
+  // silently-undefined `stunMs` would make `stun-brief` vacuously FALSE for the whole
+  // roster and read exactly like a real regression.
+  const stunMs = env.stunMs ?? STUN_DURATION_MS;
+  if (!Number.isFinite(stunMs) || stunMs < 0) throw new Error(`wm_vocab: stunMs is ${stunMs}, which is not a duration`);
 
   // ── structure ──────────────────────────────────────────────────────────────
   T('melee', 'discriminating', "delivered by `combat.ts:deliverWeapon`'s melee branch", (c) => c.w?.type === 'melee');
@@ -328,7 +359,8 @@ export function buildVocab(env) {
   // ── status ─────────────────────────────────────────────────────────────────
   T('slow', 'discriminating', `\`effect: 'slow'\` — movement x${rules.SLOW_MOVE_MULTIPLIER} for ${SLOW_DURATION_MS}ms, diminishing on repeats`, (c) => c.w?.effect === 'slow');
   T('stun', 'discriminating', `\`effect: 'stun'\` — movement locked to 0 for ${STUN_DURATION_MS}ms, diminishing on repeats`, (c) => c.w?.effect === 'stun');
-  T('stun-few-seconds', 'none-today', `a stun lasting >= ${FEW_SECONDS_MS}ms. STUN_DURATION_MS is ${STUN_DURATION_MS} and is GLOBAL`, (c) => c.w?.effect === 'stun' && STUN_DURATION_MS >= FEW_SECONDS_MS);
+  T('stun-few-seconds', 'none-today', `a stun lasting >= ${FEW_SECONDS_MS}ms. STUN_DURATION_MS is ${stunMs} and is GLOBAL`, (c) => c.w?.effect === 'stun' && stunMs >= FEW_SECONDS_MS);
+  T('stun-brief', 'discriminating', `a stun SHORTER than ${FEW_SECONDS_MS}ms — the honest reading of "for a moment". STUN_DURATION_MS is ${stunMs} and is GLOBAL`, (c) => c.w?.effect === 'stun' && stunMs < FEW_SECONDS_MS);
 
   // ── damage. BURST, never the raw per-pellet field. ─────────────────────────
   T('damage-any', 'discriminating', 'burst damage > 0', (c) => c.burst > 0);
@@ -350,6 +382,12 @@ export function buildVocab(env) {
   T('giant-slam-vfx', 'discriminating', '`giantSlam` — a map-scale VISUAL. Read by vfx/camera/match; the sim resolves it as ordinary melee.', (c) => c.w?.giantSlam === true);
   T('long-cooldown', 'discriminating', `cooldown in the top third of the roster (>= ${ROSTER.cooldownP67}ms)`, (c) => (c.w?.cooldown ?? 0) >= ROSTER.cooldownP67);
   T('reach-whole-map', 'none-today', `nominal \`range\` >= the arena diagonal (${ARENA.diagonal.toFixed(1)} wu on ${ARENA.w}x${ARENA.h})`, (c) => (c.w?.range ?? 0) >= ARENA.diagonal);
+  // The RELATIVE reach claim, and it is deliberately relative. A card that named an
+  // absolute area would go stale the moment DECISIONS §80's lever 1 (shrink the super's
+  // radius) is taken; "the widest in the game" survives a shrink and still fails the
+  // moment some other weapon out-reaches it. `range` is compared against the SHIPPED
+  // roster's maximum, so a claim whose own weapon is retuned below another one goes red.
+  T('reach-longest', 'discriminating', `nominal \`range\` is the largest in the roster (${ROSTER.maxRange} wu; next longest ${ROSTER.secondRange} wu)`, (c) => (c.w?.range ?? 0) >= ROSTER.maxRange);
 
   // ── character-level (the one passive) ──────────────────────────────────────
   T('passive-trail', 'discriminating', '`CharacterDef.hasTrail` — drops marks while moving', (c) => c.def.hasTrail === true);
