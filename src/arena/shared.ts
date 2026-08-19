@@ -1189,8 +1189,13 @@ export function buildMaterials() {
     broth: glossyMat({ color: PALETTE.broth, roughness: 0.22, emissive: '#3a1a05', emissiveIntensity: 0.12 }),
     // ⚠️ BOTH OF THESE DELIVERED ZERO PIXELS AT EVERY STATION PROBED, ABLATED.
     // `tools/tmp/gl_occl_ab.mjs` forces a material to #FF00FF at opacity 1 and requires
-    // the frame to MOVE before believing any measurement of it. At `pot_south` (700:640)
-    // and `pot_diagonal` (570:430) — the two `arena-scan` stations that exist to put the
+    // the frame to MOVE before believing any measurement of it. At `pot_south` (1400:1200)
+    // and `pot_diagonal` (1140:940) — the two `arena-scan` stations that exist to put the
+    // ⚠️ WAS (700:640) and (570:430) — EXACTLY HALF of each, i.e. the 1x map's NW-quadrant
+    // fossils, which `6631446` retired. `al_guard` cannot see this class here because it
+    // scans CODE and these are prose; and "is this a legal point?" cannot see it either,
+    // since the 1x playfield is exactly the NW quadrant so every stale coordinate stays
+    // legal. Read the live values off `tools/arena-scan.mjs`'s STATIONS table, never here.
     // pot in frame — `kpal:flame` and `kpal:flameCore` moved the frame by **0 px**,
     // twice each, while `pot_steam` moved it by 2,394-4,332 px in the same captures. The
     // burner sits UNDER the pot body and at 58 degrees the body covers it, so this is

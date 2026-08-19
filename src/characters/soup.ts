@@ -1020,8 +1020,20 @@ export class SoupCharacter extends BaseCharacter {
    * +20 meshes per soup fighter, i.e. +20 draw calls, derived from `lk1_area`'s own
    * `matched` counts rather than by counting the source: the liquid group holds 26
    * meshes after (2 disc + 1 ring + 10 float strands and their outlines + 4 sunk +
-   * 5 scallion + 4 carrot) against 6 before. At `MAX_FIGHTERS` 6 that is +120 in the
-   * worst case. Draw counts are an EXACT metric (CLAUDE.md rule 10) and this one has
+   * 5 scallion + 4 carrot) against 6 before.
+   *
+   * ⚠️ MEASURED SINCE, AND THE MESH COUNT IS RIGHT WHILE BOTH DRAW NUMBERS WERE WRONG
+   * (`5708407`, `lq_draw.mjs`, `renderer.info` with `autoReset=false` on a frozen clock):
+   * per VISIBLE fighter it is **+19 without a shadow pass and +25 with one**, ~30% above
+   * the mesh count — and at `MAX_FIGHTERS` 6 on the ARENA'S OWN SPAWNS it is **+26, not
+   * +120**, because five of the six are frustum-culled. +139 is reachable only by packing
+   * all six into one frame, which no match does. On a mobile-tier frame (tier read back as
+   * `low`, DPR 1.25) that is 462 -> 487. **The garnish stays.**
+   * The lesson is the shape, not the number: "+20 meshes therefore +20 draw calls, times
+   * six fighters" is two unmeasured inferences stacked, and they missed in OPPOSITE
+   * directions — low per fighter, 5x high on the fleet.
+   *
+   * Draw counts are an EXACT metric (CLAUDE.md rule 10) and this one has
    * NOT been measured against a frame budget — `tools/perf.mjs` was not run.
    *
    * ⚠️ NOTHING HERE CRESTS THE RIM, AND THAT IS DELIBERATE. A noodle looping out of

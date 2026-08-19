@@ -3123,6 +3123,17 @@ export const PALETTE = {
   mustard: '#FFC93C', ketchup: '#D62839', cream: '#FFF3DE',
   egg: '#FFF8EA', cheese: '#FFD873',
   rice: '#FFFFFF', nori: '#2B2B2B', salmon: '#F4A261',
+  // ⚠️ `broth` IS THE ARENA POT'S BROTH, NOT SOUP THE CHARACTER'S. Consumed by
+  // `arena/shared.ts` -> `arena/hazards.ts` (`pot_broth`, `pot_bubble`) and by nothing
+  // else. It stays `#E8792A` on purpose while soup's own liquid moved to `#CC9F0D`.
+  //
+  // MEASURED before deciding, because "it probably delivers no pixels" was the guess:
+  // magenta-ablated at the two pot stations it is **10,769 px / 1.119% of frame** at
+  // `pot_south` and 8,155 px / 0.848% at `pot_diagonal`, self-pair 0 both times. It is a
+  // large unobstructed ellipse, not a hidden one. AND the direction is wrong twice over:
+  // recolouring it would drag a 1.1%-of-frame ARENA element from hue 24.9 into the cast's
+  // own band, which `DECISIONS §73` wants vacated, to fix a character that does not read
+  // this constant at all.
   broth: '#E8792A', steam: '#C9C9C9',
   water: '#BFEFFF', waterCap: '#1E90D8',
   glaze: '#FF9EC4', sausage: '#B23A2E',
@@ -4081,7 +4092,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     //   the way it does today.
     face: 'GIVE IT A MOUTH. Uri rejected "no mouth" on taco and the same complaint lands here — a small, calm, slightly open mouth with a dark interior behind the lip. Soup can stay the unsettling-calm one in the cast without being featureless: CALM IS AN EXPRESSION, NOT AN ABSENCE, and a blank face reads as unfinished rather than eerie. EYES: open, and NOT grey. A white sclera as the brightest value on the character, dark pupils offset for gaze, a catchlight each. Grey-on-grey was the old spec and it is why this face has no value range — it put the irises in the same family as the steam behind them. ⚠️ CLIPPING BUDGET, and it is real: `sepscan --mode chars` measures this character at 16.23% above luma 0.94 with p95 0.9753, against a reference band of 0.72–9.29% (median 2.49%). Soup is ALREADY the cast\'s worst near-white offender, so do NOT pay for the sclera by adding white. Pay for it by taking the CERAMIC bowl albedo (#DCD3C2, luma 0.947) DOWN — the bowl is where the 16.23% lives, it is a large area, and the eyes are a few dozen pixels. That trade improves both numbers at once: the sclera only reads as the brightest value if the bowl stops competing with it. And per LESSONS, scaling a warm off-white down is NOT a desaturation. SILHOUETTE: a wide bowl with rising steam, a ladle held in handR nodding at Splash/Toss/Dump, grey stoneware sleeves, cream mitts, dark boots, the near-black RIM_TRIM band carrying the dark rung. PERSONALITY: slow, heavy, eerily serene — serene WITH a face.',
     weapons: [
-      { key: 'Splash', name: 'Soup Splash', type: 'ranged', range: REACH.rangedClose, damage: 3, cooldown: 750, speed: SPEED.closeFast, color: '#E8792A', effect: null, pellets: 3, spreadDeg: 25, emoji: '💦' },
+      { key: 'Splash', name: 'Soup Splash', type: 'ranged', range: REACH.rangedClose, damage: 3, cooldown: 750, speed: SPEED.closeFast, color: '#CC9F0D', effect: null, pellets: 3, spreadDeg: 25, emoji: '💦' },
       { key: 'Noodle', name: 'Noodle Toss', type: 'ranged', range: REACH.rangedLong, damage: 5, cooldown: 1000, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '🍜' },
       // ── 🚨 `castMs: 1100` WAS DERIVED, IMPLEMENTED, MEASURED AND REVERTED. DO NOT RE-ADD IT ──
       //
@@ -4176,7 +4187,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // the press, and here the press is nearly the whole character. Nothing is changed:
       // the corrected 600 is recorded so the next pass does not re-derive it, and it is not
       // applied because it measures worse than deleting the weapon.
-      { key: 'Dump', name: 'Soup Dump', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 3000, cone: 90, color: '#E8792A', effect: 'slow', emoji: '🌊' },
+      { key: 'Dump', name: 'Soup Dump', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 3000, cone: 90, color: '#CC9F0D', effect: 'slow', emoji: '🌊' },
     ],
     abilities: [
       { emoji: '💦', name: 'Soup Splash', desc: 'Throws his soup liquid - each splash chips away a little health', weapon: 'Splash' },
