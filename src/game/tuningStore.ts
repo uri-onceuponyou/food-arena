@@ -297,9 +297,20 @@ export function assertSameTuning(
 //                                   load. This is the hook a native wrapper or a test rig
 //                                   uses; nothing in `src/` writes it.
 //   2. `localStorage[STORAGE_KEY]`  the panel's own persistence. Browser only.
-//   3. `process.env.FA_TUNING`      inline JSON, or a path to a .json file. Node only —
-//                                   this is what lets the WHOLE gate battery run under a set
-//                                   with no code change:  FA_TUNING=set.json node src/game/sim.test.mjs
+//   3. `process.env.FA_TUNING`      INLINE JSON ONLY — **not a path**, deliberately; the
+//                                   `if (envRaw)` block far below explains why (`node:fs`
+//                                   cannot be imported here without breaking the browser
+//                                   bundle) and THROWS on anything that does not start
+//                                   with `{`. Node only. This is what lets the WHOLE gate
+//                                   battery run under a set with no code change:
+//                                     FA_TUNING="$(cat set.json)" node src/game/sim.test.mjs
+//                                   🚨 WAS WRITTEN HERE AS *"inline JSON, or a path to a
+//                                   .json file"* WITH THE EXAMPLE `FA_TUNING=set.json`,
+//                                   which is a command that throws — the same file
+//                                   disagreeing with itself 60 lines apart, which
+//                                   `CLAUDE.md` names as this repo's most-repeated defect
+//                                   and which either copy could have "confirmed" by
+//                                   reading the other. Kept as a note, not deleted.
 //
 // ⚠️ A bad set here THROWS rather than being ignored. A silently-dropped override produces a
 // measurement whose stamp says "tuned" and whose numbers are stock — unreproducible in the
