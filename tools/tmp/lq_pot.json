@@ -1,0 +1,59 @@
+[
+  {
+    "id": "pot_south",
+    "x": 1400,
+    "y": 1200,
+    "found": 4,
+    "names": [
+      "pot_broth",
+      "pot_bubble__no_outline",
+      "pot_bubble__no_outline",
+      "pot_bubble__no_outline"
+    ],
+    "materials": 1,
+    "color": "#EE7C2B",
+    "visible": 4,
+    "selfPair": 0,
+    "renderPair": 0,
+    "ablatedPx": 10769,
+    "returnedPx": 679
+  },
+  {
+    "id": "pot_diagonal",
+    "x": 1140,
+    "y": 940,
+    "found": 4,
+    "names": [
+      "pot_broth",
+      "pot_bubble__no_outline",
+      "pot_bubble__no_outline",
+      "pot_bubble__no_outline"
+    ],
+    "materials": 1,
+    "color": "#EE7C2B",
+    "visible": 4,
+    "selfPair": 0,
+    "renderPair": 0,
+    "ablatedPx": 8155,
+    "returnedPx": 2121
+  },
+  {
+    "id": "hub_north",
+    "x": 1400,
+    "y": 780,
+    "found": 4,
+    "names": [
+      "pot_broth",
+      "pot_bubble__no_outline",
+      "pot_bubble__no_outline",
+      "pot_bubble__no_outline"
+    ],
+    "materials": 1,
+    "color": "#EE7C2B",
+    "visible": 4,
+    "selfPair": 0,
+    "renderPair": 0,
+    "ablatedPx": 0,
+    "returnedPx": 0
+  }
+]

@@ -28,9 +28,13 @@
  * mark, or worse, walk into a real puddle thinking it was someone's spill.
  *
  * Five independent separators, so the read never rests on a single one:
- *   1. VALUE + CHROMA. Broth is authored hot and bright (`#E8792A` from `rules.ts`,
- *      lifted to `BROTH_HOT` at the core); grease sits muted and dark. Authored as
- *      wanted, NOT pre-compensated — the grade reproduces hue within ~4°.
+ *   1. VALUE + CHROMA. Broth is authored hot and bright (soup's own `Weapon.color`
+ *      out of `rules.ts` — never a hex typed here, see the palette block; lifted to
+ *      `BROTH_HOT` at the core); grease sits muted and dark. Authored as wanted, NOT
+ *      pre-compensated — the grade reproduces hue within ~4°.
+ *      ⚠️ THIS LINE USED TO NAME `#E8792A`, and that is why it is worth reading twice:
+ *      the hex went stale here the moment `c9a2ed0` moved the bowl to gold, and a
+ *      separator argued from a stale colour is a separator nobody can check.
  *   2. A HOT CORE → DEEP RIM ramp. Nothing else on the floor has a two-tone
  *      temperature gradient; hazard discs are one flat body colour plus a rim.
  *   3. SHAPE. Hazards are smooth ~5 m discs. Every mark here is an irregular splat
@@ -59,26 +63,151 @@
 import * as THREE from 'three';
 import type { CharacterWeaponVfxMap, WeaponVfxCtx } from './types';
 import { CHARACTER_HEIGHT, wu } from '../../units';
-import { REACH } from '../../game/rules';
+import { CHARACTERS, REACH } from '../../game/rules';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Palette
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Bright light-catching broth, used for the CORE of every splash and the top of
- * every blob. Deliberately hotter and more luminous than `Weapon.color` so the
- * hot-core → deep-rim ramp exists (separator #2 above). */
-const BROTH_HOT = '#FFB35C';
-/** Deep, red-shifted broth for splat rims and the underside of blobs. The red shift
- * (hue ~18° vs the body's ~25°) is what keeps the rim from reading as "the same
- * orange but darker" — a real broth edge pools thicker and goes redder. */
-const BROTH_DEEP = '#B4400C';
+/**
+ * ── EVERY BROTH COLOUR IN THIS FILE IS DERIVED FROM ONE SOURCE ────────────────
+ *
+ * 🚨 **THIS BLOCK USED TO BE FOUR HARDCODED HEXES, AND IT WAS ONE RULE IN FIVE
+ * PLACES — this project's most-repeated defect by a wide margin.** The body colour
+ * `#E8792A` was typed here twice (`nextBrothMat`, `nextBodyBrothMat`), a third time
+ * in the file header, and separately in `rules.ts` at `PALETTE.broth`,
+ * `soup.Splash.color` and `soup.Dump.color`. `BROTH_HOT` and `BROTH_DEEP` were then
+ * hand-picked tints OF that colour, with their relationship to it recorded only in
+ * prose. So the day `characters/soup.ts` moved the bowl to gold (`c9a2ed0`, on Uri's
+ * *"make the liquid more yellow than brown"*), **everything that came out of the bowl
+ * stayed orange** and nothing in the tree could notice.
+ *
+ * The fix is that this file now types **no broth hex at all**. It reads soup's own
+ * `Weapon.color` out of `rules.ts` — which is what the sim, the HUD and
+ * `game/vfx.ts`'s generic telegraph already read — and derives the ramp from it.
+ * Move the weapon colour and the splash, the drips, the pool, the splat rim, the hot
+ * core and the Dump telegraph all move with it, in one commit, by construction.
+ *
+ * ⚠️ **THE OFFSETS BELOW ARE THE SHIPPED ONES, MEASURED OFF THE SHIPPED PAIR — this
+ * refactor is a PROVABLE NO-OP at today's `rules.ts` value.** Fed `#E8792A`,
+ * `warmShift` returns `#FFB35C` and `#B4400C` **byte-exactly**, i.e. the two literals
+ * it replaced. `tools/tmp/lq_hue.mjs` asserts exactly that and fails if it stops
+ * being true, so this commit can land before, after or without the `rules.ts` change
+ * and cannot move a pixel on its own.
+ */
+
+/**
+ * sRGB colour maths, deliberately NOT via `THREE.Color`.
+ *
+ * `game/vfx.ts:1767` records the trap in this exact repo: with colour management on,
+ * `THREE.Color` holds LINEAR values, so a lerp or an HSL read through it operates in
+ * linear space and lands somewhere the eye does not expect — *"intended #4FA8E1,
+ * actually rendered ~#85ADE0"*. Every number in this block is a display-space number,
+ * so it is computed in display space and handed to three as a hex string.
+ */
+function hexToRgb(hex: string): [number, number, number] {
+  const h = hex.replace('#', '');
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as [number, number, number];
+}
+function rgbToHex(rgb: readonly number[]): string {
+  return `#${rgb.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0').toUpperCase()).join('')}`;
+}
+/** sRGB-weighted luma. **Green is weighted 0.7152**, which is the one arithmetic trap
+ * here: rotating orange → yellow at constant HSL *lightness* raises luma by ~0.15, and
+ * `characters/soup.ts` records that exact trap costing the bowl its value step. Every
+ * step below is therefore held in LUMA, not in HSL lightness. */
+function lumaOf(rgb: readonly number[]): number {
+  return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+}
+function rgbToHsl([r, g, b]: readonly number[]): [number, number, number] {
+  const mx = Math.max(r, g, b); const mn = Math.min(r, g, b); const l = (mx + mn) / 2; const d = mx - mn;
+  if (d === 0) return [0, 0, l];
+  const s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+  const h = (mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4) * 60;
+  return [h, s, l];
+}
+function hslToRgb([h, s, l]: readonly number[]): [number, number, number] {
+  const hh = (((h % 360) + 360) % 360) / 360;
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const f = (t0: number): number => {
+    const t = (t0 + 1) % 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 0.5) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  return [f(hh + 1 / 3), f(hh), f(hh - 1 / 3)];
+}
+/**
+ * Shift a colour by a hue rotation and a saturation delta, then solve HSL lightness
+ * for an exact LUMA target. The bisection is 32 iterations on a monotonic function —
+ * far finer than the 1/255 the result is quantised to.
+ */
+function warmShift(baseHex: string, dHueDeg: number, dSat: number, dLuma: number): string {
+  const base = hexToRgb(baseHex);
+  const [h, s] = rgbToHsl(base);
+  const target = lumaOf(base) + dLuma;
+  const hh = h + dHueDeg;
+  const ss = Math.max(0, Math.min(1, s + dSat));
+  let lo = 0; let hi = 1;
+  for (let i = 0; i < 32; i++) {
+    const m = (lo + hi) / 2;
+    if (lumaOf(hslToRgb([hh, ss, m])) < target) lo = m; else hi = m;
+  }
+  return rgbToHex(hslToRgb([hh, ss, (lo + hi) / 2]));
+}
+
+/** Soup's own weapon colours, straight out of the single source of truth for combat.
+ * Throws rather than falling back: a silent default would put the old orange back the
+ * day a key is renamed, which is the failure this whole block exists to prevent. */
+function soupWeaponColor(key: string): string {
+  const w = CHARACTERS.soup.weapons.find((x) => x.key === key);
+  if (!w) throw new Error(`soup vfx: no weapon '${key}' in CHARACTERS.soup.weapons`);
+  return w.color;
+}
+
+/** THE liquid. Splash and Dump are one substance and `rules.ts` gives them one colour;
+ * if that ever stops being true this file has picked the projectile's. */
+const BROTH_BODY = soupWeaponColor('Splash');
+/** Bright light-catching broth, used for the CORE of every splash and the top of every
+ * blob. Deliberately hotter and more luminous than the body so the hot-core → deep-rim
+ * ramp exists (separator #2 above): **+7.1° of hue, +19.5 pp of saturation, +0.196 of
+ * LUMA.** At `#E8792A` that is the shipped `#FFB35C`. */
+const BROTH_HOT = warmShift(BROTH_BODY, 7.1, 0.195, 0.196);
+/** Deep, red-shifted broth for splat rims and the underside of blobs. The red shift —
+ * **−6.4° of hue**, with **−0.212 of LUMA** — is what keeps the rim from reading as
+ * "the same colour but darker": a real broth edge pools thicker and goes redder. At
+ * `#E8792A` that is the shipped `#B4400C`. */
+const BROTH_DEEP = warmShift(BROTH_BODY, -6.4, 0.070, -0.212);
 /** Warm off-white steam. Warm, not neutral grey: grey wisps read as smoke/dust, of
- * which this arena already has a field. */
+ * which this arena already has a field. Not part of the broth ramp — deliberately
+ * outside the hue stack, like the contact flash. */
 const STEAM_COLOR = '#FFF2E2';
-/** Noodle body — matches Noodle Toss's own `Weapon.color` (`#FFE9A8`) so the strands
- * flung by Soup Dump read as the same pasta the Noodle weapon throws. */
-const NOODLE_PALE = '#FFE9A8';
+/** Noodle body — Noodle Toss's own `Weapon.color`, so the strands flung by Soup Dump
+ * read as the same pasta the Noodle weapon throws. It was typed here as `#FFE9A8` and
+ * that happened to be right; now it cannot drift. */
+const NOODLE_PALE = soupWeaponColor('Noodle');
+
+/**
+ * The derived ramp, exported ONLY so it can be measured.
+ *
+ * `docs/AGENT-BRIEF.md` §3: *"an UNNAMED mesh is invisible to every diagnostic here …
+ * if you build geometry you may later need to measure, name it."* A colour computed at
+ * module scope is the same problem in a different costume — before this, the only way
+ * to find out what `BROTH_HOT` had become was to read the source and do the arithmetic
+ * by hand, which is exactly how a derivation goes wrong without anyone noticing.
+ * `tools/tmp/lq_hue.mjs` bundles this module and reads this object, so the assertion
+ * that the refactor is a no-op runs against the REAL code path rather than against a
+ * second implementation of it in the tool.
+ *
+ * ⚠️ It is a plain frozen object with no side effects. `AGENT-BRIEF` §3 records three
+ * tools here whose CLI path ran on import because something was made exportable —
+ * there is nothing to run in this one.
+ */
+export const __brothPalette = Object.freeze({
+  body: BROTH_BODY, hot: BROTH_HOT, deep: BROTH_DEEP, noodle: NOODLE_PALE, steam: STEAM_COLOR,
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Scale — all anchored to the character, never to a camera framing
@@ -293,7 +422,7 @@ const flatLiquid = (color: string, opacity: number): THREE.MeshBasicMaterial =>
 const nextRimMat = materialPool(10, () => flatLiquid(BROTH_DEEP, 0.9));
 const nextCoreMat = materialPool(10, () => flatLiquid(BROTH_HOT, 0.9));
 /** Airborne broth: body and hot highlight. */
-const nextBrothMat = materialPool(28, () => flatLiquid('#E8792A', 0.95));
+const nextBrothMat = materialPool(28, () => flatLiquid(BROTH_BODY, 0.95));
 const nextHotMat = materialPool(14, () => flatLiquid(BROTH_HOT, 0.95));
 const nextNoodleMat = materialPool(16, () => flatLiquid(NOODLE_PALE, 1));
 /**
@@ -305,7 +434,7 @@ const nextNoodleMat = materialPool(16, () => flatLiquid(NOODLE_PALE, 1));
  * mid-flight the instant that droplet faded out. Three pellets shedding a drip every
  * ~0.06 s wrap a 28-slot pool in well under a second, so this was not a rare race.
  */
-const nextBodyBrothMat = materialPool(6, () => flatLiquid('#E8792A', 1));
+const nextBodyBrothMat = materialPool(6, () => flatLiquid(BROTH_BODY, 1));
 const nextBodyHotMat = materialPool(6, () => flatLiquid(BROTH_HOT, 1));
 const nextBodyNoodleMat = materialPool(12, () => flatLiquid(NOODLE_PALE, 1));
 /**
@@ -335,6 +464,24 @@ const nextBodyNoodleMat = materialPool(12, () => flatLiquid(NOODLE_PALE, 1));
  * upward — the same two-tone construction `game/vfx.ts` uses for the footprint
  * itself. ⚠️ It is explicitly NOT a desaturation, which is falsified four times in
  * this project; both ends stay saturated and only the lightness moves.
+ *
+ * ── ⚠️ RE-DERIVED FOR THE GOLD BROTH, BECAUSE THIS CONSTRAINT IS ON THE *FILL* ────
+ * The constraint is a value gap between `BROTH_DEEP` and `mixSRGB(Dump.color, WHITE,
+ * 0.22)`, and BOTH sides move when `Dump.color` moves. Recomputed:
+ *
+ *     Dump.color   footprint fill   BROTH_DEEP   gap (luma)
+ *     #E8792A      #ED9659 L 0.645  #B4400C 0.333   0.312   ← what shipped
+ *     #CC9F0D      #D7B442 L 0.703  #966404 0.407   0.296
+ *
+ * The gap SURVIVES: 0.296 against the 0.312 that was judged sufficient on a rendered
+ * PNG, a 5% narrowing — and the fill also gains saturation contrast, dropping from 88%
+ * to 65% while the deep end holds 95%. Since `BROTH_DEEP` is derived from the weapon
+ * colour rather than typed, this relationship is now maintained by construction at any
+ * body colour instead of being re-checked by hand at each one.
+ * ⚠️ What does NOT survive is the phrase "the same warm family" taken literally at the
+ * shipped constant: `#B4400C` is hue 18.6°, which sat 6° off an orange body and would
+ * sit **27° off a gold one** — a rust rim under a gold bowl. The −6.4° offset keeps the
+ * family; the frozen hex did not. That is the whole argument for deriving it.
  */
 const nextTeleBrothMat = materialPool(3, () => flatLiquid(BROTH_DEEP, 0.92));
 const nextTeleLipMat = materialPool(3, () => flatLiquid(BROTH_HOT, 0.9));

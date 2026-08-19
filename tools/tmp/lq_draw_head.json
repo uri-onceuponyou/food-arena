@@ -1,0 +1,105 @@
+{
+  "base": "http://localhost:50244",
+  "packed": true,
+  "out": [
+    {
+      "seats": 1,
+      "hideLiquid": false,
+      "shipped": {
+        "min": 371,
+        "max": 371,
+        "stable": true
+      },
+      "forced": {
+        "min": 556,
+        "max": 556,
+        "stable": true
+      },
+      "last": {
+        "noShadowPass": {
+          "calls": 371,
+          "triangles": 1347440
+        },
+        "withShadowPass": {
+          "calls": 556,
+          "triangles": 1745524
+        },
+        "sceneMeshes": 783,
+        "liquidGroups": 1,
+        "liquidMeshes": [
+          26
+        ],
+        "soupBowls": 1
+      },
+      "errors": []
+    },
+    {
+      "seats": 2,
+      "hideLiquid": false,
+      "shipped": {
+        "min": 372,
+        "max": 372,
+        "stable": true
+      },
+      "forced": {
+        "min": 557,
+        "max": 557,
+        "stable": true
+      },
+      "last": {
+        "noShadowPass": {
+          "calls": 372,
+          "triangles": 1347442
+        },
+        "withShadowPass": {
+          "calls": 557,
+          "triangles": 1745526
+        },
+        "sceneMeshes": 844,
+        "liquidGroups": 2,
+        "liquidMeshes": [
+          26,
+          26
+        ],
+        "soupBowls": 2
+      },
+      "errors": []
+    },
+    {
+      "seats": 6,
+      "hideLiquid": false,
+      "shipped": {
+        "min": 1698,
+        "max": 1698,
+        "stable": true
+      },
+      "forced": {
+        "min": 2126,
+        "max": 2126,
+        "stable": true
+      },
+      "last": {
+        "noShadowPass": {
+          "calls": 1698,
+          "triangles": 1604498
+        },
+        "withShadowPass": {
+          "calls": 2126,
+          "triangles": 2073318
+        },
+        "sceneMeshes": 1718,
+        "liquidGroups": 6,
+        "liquidMeshes": [
+          26,
+          26,
+          26,
+          26,
+          26,
+          26
+        ],
+        "soupBowls": 6
+      },
+      "errors": []
+    }
+  ]
+}

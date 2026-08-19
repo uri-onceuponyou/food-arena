@@ -1,0 +1,93 @@
+{
+  "base": "http://localhost:50078",
+  "packed": true,
+  "out": [
+    {
+      "seats": 1,
+      "hideLiquid": false,
+      "shipped": {
+        "min": 353,
+        "max": 353,
+        "stable": true
+      },
+      "forced": {
+        "min": 531,
+        "max": 531,
+        "stable": true
+      },
+      "last": {
+        "noShadowPass": {
+          "calls": 353,
+          "triangles": 1341460
+        },
+        "withShadowPass": {
+          "calls": 531,
+          "triangles": 1736856
+        },
+        "sceneMeshes": 763,
+        "liquidGroups": 0,
+        "liquidMeshes": [],
+        "soupBowls": 1
+      },
+      "errors": []
+    },
+    {
+      "seats": 2,
+      "hideLiquid": false,
+      "shipped": {
+        "min": 350,
+        "max": 350,
+        "stable": true
+      },
+      "forced": {
+        "min": 528,
+        "max": 528,
+        "stable": true
+      },
+      "last": {
+        "noShadowPass": {
+          "calls": 350,
+          "triangles": 1341454
+        },
+        "withShadowPass": {
+          "calls": 528,
+          "triangles": 1736850
+        },
+        "sceneMeshes": 804,
+        "liquidGroups": 0,
+        "liquidMeshes": [],
+        "soupBowls": 2
+      },
+      "errors": []
+    },
+    {
+      "seats": 6,
+      "hideLiquid": false,
+      "shipped": {
+        "min": 1584,
+        "max": 1584,
+        "stable": true
+      },
+      "forced": {
+        "min": 1970,
+        "max": 1970,
+        "stable": true
+      },
+      "last": {
+        "noShadowPass": {
+          "calls": 1584,
+          "triangles": 1569058
+        },
+        "withShadowPass": {
+          "calls": 1970,
+          "triangles": 2021750
+        },
+        "sceneMeshes": 1600,
+        "liquidGroups": 0,
+        "liquidMeshes": [],
+        "soupBowls": 6
+      },
+      "errors": []
+    }
+  ]
+}
