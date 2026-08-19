@@ -95,6 +95,7 @@
  * against every opponent in the arc, so the single-target half of that sentence is gone
  * and only the scale disagreement remains.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -527,6 +528,27 @@ if (IS_MAIN) {
 
   if (has('--selftest')) process.exit((await selftest(vocab, decls, env)) ? 0 : 1);
 
+
+/** HEAD's sha, or a throw. See `--write-ledger`: an unattributable ledger is worse than none. */
+function gitSha() {
+  let out;
+  try {
+    out = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  } catch (e) {
+    throw new Error(`wm_gate --write-ledger: cannot resolve HEAD (${e.message}). ` +
+      'Pass WM_SHA=<sha> explicitly. Refusing to write a ledger that names no tree.');
+  }
+  if (!/^[0-9a-f]{40}$/.test(out)) throw new Error(`wm_gate: git rev-parse returned ${JSON.stringify(out)}`);
+  return out;
+}
+
+/** True if anything tracked differs from HEAD — the ledger's two live-sim arms measure a TREE. */
+function gitDirty() {
+  try {
+    return execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' }).trim() !== '';
+  } catch { return true; }   // unknown provenance is reported as dirty, never as clean
+}
+
   const res = analyse({ decls, vocab });
   render(res, { verbose: has('-v'), compact: has('--table') });
 
@@ -542,8 +564,15 @@ if (IS_MAIN) {
     // Say which tree the numbers came from, in the file that carries them.
     writeFileSync(LEDGER_PATH, JSON.stringify({
       _: 'Faults ACCEPTED as of the recorded SHA. --ratchet fails on any DIFFERENCE, in either direction: a new fault is a regression, and a fault that no longer reproduces means this ledger is stale and must be re-recorded WITH the fix.',
-      sha: process.env.WM_SHA ?? null,
-      measuredOn: process.env.WM_MEASURED_ON ?? null,
+      // 🚨 NOT `?? null`. THIS FILE'S FIRST LINE SAYS "faults ACCEPTED as of the recorded
+      // SHA" — a ledger with `sha: null` is that sentence with its subject deleted, and
+      // it wrote one silently the first time it was re-recorded by someone who did not
+      // know `WM_SHA` existed (2026-08-19, on a detached worktree, `sha: null` +
+      // `measuredOn: null`, exit 0). Derive it, and REFUSE rather than record an
+      // unattributable verdict. `git rev-parse` is correct inside a worktree; the throw
+      // is what makes this different from the default it replaces.
+      sha: process.env.WM_SHA ?? gitSha(),
+      measuredOn: process.env.WM_MEASURED_ON ?? (gitDirty() ? 'WORKING TREE (dirty)' : 'committed tree'),
       faults: prints,
     }, null, 2) + '\n');
     console.log(`\nwrote ${LEDGER_PATH} (${prints.length} accepted faults)`);

@@ -70,7 +70,13 @@ const ANIMATED_RARITIES = new Set(['Neon', 'Cyber']);
  */
 function reachLabel(range: number | undefined): string | null {
   if (range === undefined) return null;
-  if (range >= REACH.ultimateSlam) return 'Whole map';
+  // WAS `'Whole map'`. It is not: `REACH.ultimateSlam` is 400 wu against a 3440.93 wu
+  // arena diagonal — 14% of the width. `e570dfb` stopped `lollipop.Giant`'s CARD making
+  // that claim ("hits the whole map" -> "slams the widest area in the game", and
+  // `wm_gate` now asserts the relative claim); this label is the SAME false claim in a
+  // second place, which is this project's most-repeated defect shape. Relative, so it
+  // stays true if §80's lever 1 shrinks the radius, and it matches the card's wording.
+  if (range >= REACH.ultimateSlam) return 'Widest';
   if (range > REACH.rangedLong) return 'Max range';
   if (range > REACH.rangedMid) return 'Long';
   if (range > REACH.rangedClose) return 'Mid';
