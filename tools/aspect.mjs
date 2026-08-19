@@ -24,7 +24,6 @@ import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { settleScreen, captureSettled, describe } from './tmp/settle.mjs';
 
-const BASE = process.env.PREVIEW_BASE ?? 'http://localhost:5173';
 
 const LAUNCH_ARGS = [
   '--use-gl=angle',
@@ -59,6 +58,23 @@ function parseArgs(argv) {
 }
 
 const args = parseArgs(process.argv);
+// 🚨 NO DEFAULT, DELIBERATELY. This used to be `?? 'http://localhost:5173'` — the SHARED dev
+// server that CLAUDE.md rule 2 forbids measuring on, wired as the silent default of a MANDATORY
+// pre-commit gate. Every agent running this bare was measuring the forbidden target: a peer's
+// half-saved edit contaminates the frame, and the observed symptom is `Execution context was
+// destroyed` (a save mid-run) or, worse, a clean-looking PASS on somebody else's tree. Refusing is
+// strictly better than the old silent path — when :5173 was down you already got an error here,
+// just an unhelpful one. Set PREVIEW_BASE, or pass --base to opt in on purpose.
+const BASE = process.env.PREVIEW_BASE ?? args.base ?? null;
+if (!BASE) {
+  console.error(
+    'aspect: refusing to run without PREVIEW_BASE.\n' +
+    '  Rule 2 — measure on a frozen snapshot, never the shared dev server (:5173).\n' +
+    '    node tools/tmp/with_snapshot.mjs -- node tools/aspect.mjs --base {URL}\n' +
+    '  To measure a specific origin on purpose:  node tools/aspect.mjs --base http://localhost:PORT'
+  );
+  process.exit(2);
+}
 const url = `${BASE}/?player=${args.player ?? 'hamburger'}&enemy=${args.enemy ?? 'donut'}`;
 const outDir = typeof args['out-dir'] === 'string' ? args['out-dir'] : null;
 if (outDir) await mkdir(resolve(outDir), { recursive: true });
