@@ -324,6 +324,7 @@ const OFFLINE = [
   { key: 'tools/tmp/lu2_offscreen.mjs --selftest', probes: [pr(['tools/tmp/lu2_offscreen.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/kx_seatfair.mjs --selftest', probes: [pr(['tools/tmp/kx_seatfair.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/kx_fogcover.mjs --selftest', probes: [pr(['tools/tmp/kx_fogcover.mjs', '--selftest'], S)] },
+  { key: 'tools/tmp/wm_gate.mjs --selftest', probes: [pr(['tools/tmp/wm_gate.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/rc_prose.mjs', probes: [pr(['tools/tmp/rc_prose.mjs'], /(\d+)\/\d+ checks passed/)] },
   { key: 'tools/tmp/nk_neckgate.mjs --selftest', probes: [pr(['tools/tmp/nk_neckgate.mjs', '--selftest'], /(\d+) pass, \d+ fail/)] },
   { key: 'tools/tmp/xr_repro.mjs --selftest', probes: [pr(['tools/tmp/xr_repro.mjs', '--selftest'], /selftest (\d+) pass \/ \d+ fail/)] },
@@ -527,6 +528,9 @@ const SKIP = [
   ['npx tsc --noEmit',                     'non-numeric', 'verdict is "clean" — no count to compare'],
   ['tools/verify-head.mjs',                'non-numeric', 'verdict is OK/FAIL; also builds the whole committed tree'],
   ['tools/aspect.mjs',                     'browser',     'needs a snapshot URL and a GL context'],
+  // The weapon-promise pair. `--selftest` is OFFLINE above (24 arms); these two are not.
+  ['tools/tmp/wm_gate.mjs --ratchet',      'non-numeric', "verdict is 'fault set unchanged' vs NEW/FIXED lines — the COUNT is in wm_ledger.json, whose sha field is the thing that must match, not an integer here"],
+  ['tools/tmp/wi_guard.mjs',               'browser',     'renders 27 bespoke impacts at two pitches; PREVIEW_BASE required, ~3.5 min'],
   ['tools/tmp/menu_accept.mjs',            'browser',     '5 viewports through a real page'],
   ['tools/tmp/menu_accept_portrait.mjs',   'browser',     'portrait viewports through a real page'],
   ['tools/tmp/input_accept.mjs',           'browser',     'real CDP key/mouse events'],
