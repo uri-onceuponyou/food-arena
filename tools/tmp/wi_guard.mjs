@@ -26,12 +26,15 @@
  *                 0.25 is not a guess: `tools/tmp/wi_derive.mjs` measured the anchor at
  *                 0.323-0.423 of the generic burst at pitch 58 and 0.352-0.501 at
  *                 pitch 20, over all sixteen short rows.
- *   C. SUBORDINATE the same ratio must stay <= 0.55. `impactAnchor`'s derivation is
+ *   C. SUBORDINATE the same ratio must stay <= 0.60. `impactAnchor`'s derivation is
  *                 two-sided — the anchor is bounded BELOW by the 300 px floor and
  *                 ABOVE by "subordinate has to mean minority", and k = 0.60 already
  *                 puts 10 of 16 rows over half. Without C, the cheapest way to make A
  *                 and B green forever is to raise `IMPACT_ANCHOR_K` until the anchor
  *                 IS the hit, which is the defect the bespoke system exists to avoid.
+ *                 See `ANCHOR_MAX_RATIO` for why the bar is 0.60 and not the 0.55 it
+ *                 was first set to — a damage-0 weapon's ratio has a floor that no `k`
+ *                 can move, because `burst()`'s own clamps bind in both arms.
  *
  * ── THE KNOWN-BAD (CLAUDE.md #6: a guard not shown to FAIL is not a guard) ───────
  *
@@ -130,10 +133,31 @@ const ONLY = args.only ? String(args.only).split(',') : null;
 const SLICES = (args.slices ? String(args.slices).split(',').map(Number) : [16, 80, 160, 260, 400]);
 /** `vfx.ts:castMuzzle`'s floor, derived there. Not invented here. */
 const FLOOR_PX = Number(args.floor ?? 300);
-/** Measured band for anchor/generic — `wi_derive.mjs`: 0.323-0.423 at pitch 58,
- * 0.352-0.501 at pitch 20. The bars sit outside both, on either side. */
+/**
+ * Measured band for anchor/generic — `wi_derive.mjs` over the sixteen short rows:
+ * 0.323-0.423 at pitch 58, 0.352-0.501 at pitch 20. The bars sit outside both.
+ *
+ * ⚠️ **0.60 AND NOT 0.55, AND THE ROW THAT MOVED IT IS A MECHANISM, NOT AN EXCEPTION.**
+ * The bar was 0.55 — comfortably outside the sixteen-row band at both pitches — and
+ * `taco.Double` went red on it at pitch 20 (0.572; 0.462 at pitch 58), with the next
+ * highest row at 0.501. `taco.Double` is the roster's only **damage-0** weapon, and at
+ * `amount = 0` three of `burst()`'s five elements are IDENTICAL in the two arms no
+ * matter what `k` is, because the recipe's own clamps bind in both:
+ *
+ *     sizeFactor  clamp(0.42 + 0.075*0, 0.42, 2.0) = 0.42 — at its FLOOR
+ *     decal       clamp(0.65*sf, 0.55, 1.5): generic 0.55, anchor 0.55  ← identical
+ *     shards      clamp(1 + 0.4*0, 2, 8) = 2, and max(2, round(2*k)) = 2 ← identical
+ *     ring        0.6*sf + 0.35: generic 0.602, anchor 0.476 — 79%, AFFINE not scaled
+ *     flash       0.5*sf -> 1.15*sf — the only term that scales as k²
+ *
+ * So a/g has a hard floor near 0.57 for a chip-damage weapon and lowering `k` cannot
+ * move it. Raising the bar is the honest response; exempting the row would have hidden
+ * the one place the recipe's floors are visible. 0.60 still catches the failure C
+ * exists for by a wide margin: the `--knownbad loud` band is 0.662-0.702 at pitch 58
+ * and `wi_derive` measured k=0.75 at 0.621-0.753 at pitch 20.
+ */
 const ANCHOR_MIN_RATIO = Number(args.anchorMin ?? 0.25);
-const ANCHOR_MAX_RATIO = Number(args.anchorMax ?? 0.55);
+const ANCHOR_MAX_RATIO = Number(args.anchorMax ?? 0.60);
 
 const log = (...a) => console.log(...a);
 const pad = (s, n) => String(s).padEnd(n);
