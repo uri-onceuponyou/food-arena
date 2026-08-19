@@ -5555,11 +5555,23 @@ other weapon ever out-reaches it. **Reversing costs one constant; the −26.4 pp
 `multi-target` is a MISSING MECHANIC, and **§74/§77 chose BUILD over reword for that class.** Deleting
 the phrase would have retired a roadmap item by editing the sentence that names it. Same reasoning
 kept `sushi.Catch`'s *"the fish grow huge"* and *"pulling enemies"* untouched.
-🚨 **AND IT IS ABOUT TO CLOSE FOR THE MELEE HALF.** Measured 2026-08-19 on a peer's then-uncommitted
-`combat.ts` (a swing resolving against every opponent in its arc rather than the nearest):
-`lollipop.Giant` went **1 victim → 5**. The three RANGED promises — `sushi.Catch`, `burrito.Swarm`,
-`sushi.Seaweed` — stayed at **1** on that same tree. **So one of the three `multi-target` faults is
-closing and two are not**, and the gate's `KB9c` arm carries the instructions.
+🚨 **AND IT CLOSED FOR THE MELEE HALF, THREE HOURS AFTER THE CARD WAS WRITTEN.** `3483d23` made a
+swing resolve against every opponent in its arc rather than the nearest, and the census went
+`lollipop.Giant` **1 victim → 5**. **The card is now TRUE, end to end, and Lollipop's Giant Lollipop
+is one of the 21→23 blurbs that PASS.** Had the phrase been reworded away when the reach claim beside
+it was fixed, the roadmap item would have been retired hours before it landed.
+
+**But only the melee half.** The three RANGED promises — `sushi.Catch`, `burrito.Swarm`,
+`sushi.Seaweed` — measured **1 victim** on the same tree: one projectile still resolves against one
+victim. So the vocabulary now carries **`multi-target-melee`** (exists, measured) and keeps
+**`multi-target`** absent (still the roadmap, **2 cards**, both ranged). Collapsing them into one
+term would have turned two MISSING verdicts green on a mechanic nobody built.
+
+🚨 **AND THIS IS THE ONE THING THE RATCHET STRUCTURALLY CANNOT SEE.** `--ratchet` reported *"fault
+set unchanged"* across `3483d23`, at exit 0, and it was right to: a MISSING verdict is a property of
+the **vocabulary**, not of the sim, so a mechanic being **BUILT** is invisible to it by construction.
+Only the measured grounding arm caught it. **A ratchet notices things breaking; it cannot notice
+things being fixed.**
 
 **(c) 🆕 `sushi.Catch`'s card says *"seaweed"* and the weapon is three homing fish pellets. That is
 probably the exact thing you saw.** Sushi's **4th** ability is Big Catch. Its `desc` opens *"throws

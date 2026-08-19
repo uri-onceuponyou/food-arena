@@ -89,8 +89,11 @@
  * ── SCOPE. THIS IS THE TECHNICAL AXIS ONLY. ─────────────────────────────────
  *
  * It answers "does the sim do what the card says". It says NOTHING about what is drawn —
- * `lollipop.Giant` carries a map-scale VFX (`giantSlam`) over a 400 wu single-target
- * melee, so the visual and the sim disagree in a way only a rendered-pixel pass can see.
+ * `lollipop.Giant` carries a map-scale VFX (`giantSlam`) over a 400 wu melee, so the
+ * visual and the sim disagree about SCALE in a way only a rendered-pixel pass can see.
+ * ⚠️ WAS *"over a 400 wu SINGLE-TARGET melee"*: `3483d23` made the melee branch resolve
+ * against every opponent in the arc, so the single-target half of that sentence is gone
+ * and only the scale disagreement remains.
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -460,26 +463,34 @@ async function selftest(vocab, decls, env) {
       declaring.length === 1 && red.length === 1, `(${red.length}/${declaring.length} declaring)`);
   }
 
-  // KB9b — the MISSING verdict for `multi-target` is the largest single class in the
-  // matrix (3 blurbs), and it rests on a term being ABSENT from the vocabulary. An
-  // absence is the easiest thing in this repo to be wrong about, so it is MEASURED:
-  // one press, five bystanders parked inside reach, distinct victims counted — with a
-  // two-press positive control proving the census can report 2 at all.
+  // KB9b/c/d — `multi-target` was the largest single class in the matrix (3 blurbs) and
+  // it rested on a term being ABSENT from the vocabulary. An absence is the easiest thing
+  // in this repo to be wrong about, so it is MEASURED: one press, five bystanders parked
+  // inside reach, distinct victims counted.
+  //
+  // 🚨 IT WAS RIGHT TO MEASURE IT. `3483d23` made a melee swing resolve against every
+  // opponent in its arc and `lollipop.Giant` went 1 victim -> 5. **`--ratchet` reported
+  // "fault set unchanged" across that commit at exit 0**, correctly and uselessly: a
+  // MISSING verdict is a property of the VOCABULARY, so a mechanic being BUILT is
+  // invisible to the ratchet by construction. These three arms are the only thing in the
+  // battery that can see it, and the old single arm — `maxVictims <= 1` — is preserved in
+  // `wm_vocab.mjs`'s selftest with the reason it had to become two.
   {
-    const mt = vocabMod.measureMultiTarget();
+    const mt = env.multi;
     arm('KB9b GROUND  the census CAN see two fighters (positive control)', mt.canSeeTwo, `(control victims=${mt.control.victims})`);
-    // 🚨 WHEN THIS ARM GOES RED IT IS NOT A BROKEN TEST — IT IS THE SIM GROWING THE
-    // MECHANIC, WHICH IS THE ONE THING IT WAS BUILT TO ANNOUNCE. It fired on 2026-08-19
-    // against a peer's then-uncommitted `combat.ts` (melee swings resolving against every
-    // opponent in the arc instead of the nearest): `lollipop.Giant` went 1 -> 5 victims.
-    // The fix is NOT to relax the arm. It is, in one commit:
-    //   1. add `multi-target` to `wm_vocab.mjs` — `melee` weapons only until a RANGED one
-    //      does it too, because `sushi.Catch`/`burrito.Swarm`/`sushi.Seaweed` are ranged
-    //      and stayed at 1 victim on that same tree;
-    //   2. the three ranged rows here must STILL report 1, or the term is wider than the
-    //      sim and three MISSING verdicts silently turn green on a lie;
-    //   3. re-record `wm_ledger.json` in the SAME commit (`--write-ledger`).
-    arm('KB9c GROUND  no single press damages >1 fighter, so `multi-target` is rightly ABSENT', mt.maxVictims <= 1, `(${mt.rows.map((r) => r.tag + '=' + r.victims).join(' ')})${mt.maxVictims > 1 ? '  <- THE SIM GREW THE MECHANIC: add `multi-target` to wm_vocab, see the comment on this arm' : ''}`);
+    arm('KB9c GROUND  a MELEE press damages MORE THAN ONE — `multi-target-melee` is grounded', mt.meleeReachesMany, `(${mt.meleeVictims})`);
+    // The BOUNDARY, and it is the load-bearing half: without it `multi-target-melee` could
+    // widen to cover the two RANGED cards that promise the same thing, turning two MISSING
+    // verdicts green on a mechanic nobody built.
+    arm('KB9d BOUNDARY a RANGED press still damages exactly ONE — so `multi-target` is rightly ABSENT', mt.rangedReachesOne, `(${mt.rangedVictims})`);
+    // KB9e — the term driven from the OTHER side. If the census ever reports melee at 1,
+    // every `multi-target-melee` claim must go WRONG-VALUE rather than quietly passing.
+    const declaring = Object.keys(decls).filter((k) => decls[k].c.some(([t]) => t === 'multi-target-melee'));
+    const v = vocabMod.buildVocab({ ...env, multi: { ...mt, meleeReachesMany: false } });
+    const r = run(decls, CHARACTERS, v);
+    const red = declaring.filter((k) => r.faults.some((f) => f.cls === 'WRONG-VALUE' && f.key === k));
+    arm('KB9e MULTI   a census reporting ONE melee victim -> every "everyone" claim goes WRONG-VALUE',
+      declaring.length > 0 && red.length === declaring.length, `(${red.length}/${declaring.length} declaring)`);
   }
 
   // KB10 — the RATCHET itself, in both directions. A ratchet that only ever reports
@@ -510,7 +521,7 @@ if (IS_MAIN) {
     console.error('INSTRUMENT INVALID — the splat-slow positive control failed (the human seat did not slow). Not reporting.');
     process.exit(2);
   }
-  const env = { splatSlow };
+  const env = { splatSlow, multi: vocabMod.measureMultiTarget() };
   const vocab = buildVocab(env);
   const decls = JSON.parse(readFileSync(CLAIMS_PATH, 'utf8')).claims;
 

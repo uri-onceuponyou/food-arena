@@ -3969,10 +3969,14 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // largest `range` in the roster by 2.86x (next is `REACH.rangedMax` 140), and
       // *"the widest area in the game"* survives §80's lever 1 being taken later while
       // still going red the moment some other weapon out-reaches this one.
-      // ⚠️ *"making everyone dizzy"* is UNCHANGED and is STILL FALSE — `multi-target` is a
-      // MISSING MECHANIC (measured: one press damages exactly 1 fighter) and §74/§77 chose
-      // BUILD over reword for that class. Rewording it away here would have retired a
-      // roadmap item by deleting the sentence that names it.
+      // ⚠️ WAS, and it was true for about an hour: *"making everyone dizzy" is UNCHANGED and
+      // is STILL FALSE — `multi-target` is a MISSING MECHANIC (measured: one press damages
+      // exactly 1 fighter)"*. **`3483d23` BUILT IT** — a melee swing now resolves against
+      // every opponent inside `cone`/`range` instead of `nearestLivingOpponent` — and the
+      // census went **1 victim -> 5**. So the whole card is TRUE today.
+      // 🚨 That is exactly why the phrase was not reworded away when the reach claim beside
+      // it was fixed: §74/§77 chose BUILD over reword for the MISSING class, and deleting
+      // the sentence would have retired the roadmap item three hours before it landed.
       { emoji: '💫', name: 'Giant Lollipop', desc: 'Grows huge and slams the widest area in the game, making everyone dizzy', weapon: 'Giant' },
     ],
   }),

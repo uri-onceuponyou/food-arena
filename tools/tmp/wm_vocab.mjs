@@ -313,12 +313,40 @@ export function measureMultiTarget() {
   // The three weapons whose cards promise more than one victim, plus the melee ultimate.
   const rows = [
     ['lollipop', 'Giant'], ['sushi', 'Catch'], ['burrito', 'Swarm'], ['sushi', 'Seaweed'],
-  ].map(([c, k]) => ({ tag: `${c}.${k}`, ...multiTargetRun(c, k) }));
+  ].map(([c, k]) => ({ tag: `${c}.${k}`, ...multiTargetRun(c, k), type: CHARACTERS[c].weapons.find((w) => w.key === k).type }));
   // POSITIVE CONTROL — the census must be ABLE to report 2. Two presses, two different
   // nearest targets. Without this arm every "1" above is indistinguishable from a rig
   // that is simply blind to the other five fighters.
   const control = multiTargetRun('lollipop', 'Smash', { presses: [0, 2], durationMs: 6000 });
-  return { rows, control, canSeeTwo: control.victims >= 2, maxVictims: Math.max(...rows.map((r) => r.victims)) };
+  // ── 2026-08-19: THE SIM GREW HALF OF THIS MECHANIC AND THE RATCHET COULD NOT SEE IT ──
+  //
+  // `3483d23` made `combat.ts:deliverWeapon`'s melee branch resolve against EVERY opponent
+  // in the arc instead of `nearestLivingOpponent`. `lollipop.Giant` went 1 victim -> 5.
+  // 🚨 `--ratchet` reported "fault set unchanged" across that commit, at exit 0, and it was
+  // RIGHT to: a MISSING verdict is a property of THIS VOCABULARY, not of the sim, so a
+  // mechanic being BUILT is invisible to it by construction. The arm below is the only
+  // thing in the battery that can see it, which is why it is measured and not asserted.
+  //
+  // ⚠️ AND ONLY HALF. The three RANGED promises measured 1 victim on the same tree — one
+  // projectile still resolves against one victim — so the two halves get two terms:
+  // `multi-target-melee` (exists, MEASURED below) and `multi-target` (still absent, still
+  // the roadmap). Collapsing them into one term would turn two MISSING verdicts green on
+  // a lie, which is the wider-than-the-sim failure this file exists to refuse.
+  const melee = rows.filter((r) => r.type === 'melee');
+  const ranged = rows.filter((r) => r.type === 'ranged');
+  if (melee.length === 0 || ranged.length === 0) throw new Error('wm_vocab: the multi-target census lost one of its two arms — a NON-EMPTY check before the quantifiers below');
+  return {
+    rows, control, canSeeTwo: control.victims >= 2,
+    maxVictims: Math.max(...rows.map((r) => r.victims)),
+    // A melee press really does damage more than one fighter…
+    meleeReachesMany: melee.every((r) => r.victims > 1),
+    // …and a ranged press really does not. Both are needed: the first alone would let the
+    // term be true while the census was simply blind, the second alone would let a term
+    // wider than the sim pass.
+    rangedReachesOne: ranged.every((r) => r.victims === 1),
+    meleeVictims: melee.map((r) => `${r.tag}=${r.victims}`).join(' '),
+    rangedVictims: ranged.map((r) => `${r.tag}=${r.victims}`).join(' '),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -349,6 +377,16 @@ export function buildVocab(env) {
   // roster and read exactly like a real regression.
   const stunMs = env.stunMs ?? STUN_DURATION_MS;
   if (!Number.isFinite(stunMs) || stunMs < 0) throw new Error(`wm_vocab: stunMs is ${stunMs}, which is not a duration`);
+  // Same shape as `splatSlow`: a MEASURED input, asserted present rather than optional.
+  // An absent `env.multi` would make `multi-target-melee` throw here instead of quietly
+  // reading `undefined` and going false for all 9 melee weapons — a FICTION verdict that
+  // would look like the sim having lost the mechanic.
+  if (!env.multi || typeof env.multi.meleeReachesMany !== 'boolean' || typeof env.multi.rangedReachesOne !== 'boolean') {
+    throw new Error('wm_vocab: buildVocab needs env.multi from measureMultiTarget() — `multi-target-melee` is measured, not read off a field');
+  }
+  if (!env.splatSlow || typeof env.splatSlow.reachesBot !== 'boolean') {
+    throw new Error('wm_vocab: buildVocab needs env.splatSlow from measureSplatSlow()');
+  }
 
   // ── structure ──────────────────────────────────────────────────────────────
   T('melee', 'discriminating', "delivered by `combat.ts:deliverWeapon`'s melee branch", (c) => c.w?.type === 'melee');
@@ -376,6 +414,13 @@ export function buildVocab(env) {
   T('repeat-hits', 'discriminating', '`peckHits`/`peckInterval` — arrives, then strikes repeatedly', (c) => (c.w?.peckHits ?? 1) > 1);
   T('splatter', 'discriminating', `\`splatter\` — leaves a ground splat, r=${SPLAT_RADIUS}, ${SPLAT_DURATION_MS}ms. Slows. Deals NO damage.`, (c) => c.w?.splatter === true);
   T('splat-slows-anyone', 'none-today', 'a splat that slows BOTS as well as the human seat — MEASURED each run', (c) => c.w?.splatter === true && env.splatSlow.reachesBot);
+  // ONE press, MORE THAN ONE victim — and only on the melee side. `3483d23` made a swing
+  // resolve against every opponent inside `cone`/`range` rather than against
+  // `nearestLivingOpponent`; a ranged press still resolves one projectile against one
+  // victim, so `multi-target` stays ABSENT from this vocabulary and the two ranged cards
+  // that promise it stay MISSING. MEASURED, not read off a field, with both boundaries
+  // asserted: melee must exceed 1 AND ranged must equal 1, or the term is not grounded.
+  T('multi-target-melee', 'discriminating', "one press damages EVERY opponent inside `cone`/`range`, not the nearest — `combat.ts:deliverWeapon`'s melee branch since 3483d23. MEASURED each run, both boundaries", (c) => c.w?.type === 'melee' && env.multi.meleeReachesMany && env.multi.rangedReachesOne);
   T('trail-boost', 'discriminating', `\`trailBoosted\` — damage x${TRAIL.damageBoost} while on own trail`, (c) => c.w?.trailBoosted === true);
   T('wind-up', 'discriminating', '`castMs` > 0 — the press only OPENS the attack; caster is rooted and its aim frozen', (c) => (c.w?.castMs ?? 0) > 0);
   T('self-heal', 'discriminating', '`healAmount` > 0, scaled by the level HEALTH ladder', (c) => (c.w?.healAmount ?? 0) > 0);
@@ -432,7 +477,8 @@ export function contentWords(text) {
 // ─────────────────────────────────────────────────────────────────────────────
 if (IS_MAIN) {
   const splatSlow = measureSplatSlow();
-  const V = buildVocab({ splatSlow });
+  const multi = measureMultiTarget();
+  const V = buildVocab({ splatSlow, multi });
   const selftest = process.argv.includes('--selftest');
 
   console.log('══ WM_VOCAB ══');
@@ -461,13 +507,23 @@ if (IS_MAIN) {
     console.log(`   ${c2 ? 'PASS' : 'FAIL'}  LEXICON   the stopword list does not swallow a mechanic word ("lures" survives)`);
     const c3 = contentWords('for the of and is').length === 0;
     console.log(`   ${c3 ? 'PASS' : 'FAIL'}  LEXICON   pure function words yield NO content words`);
-    const mt = measureMultiTarget();
+    const mt = multi;
     const c4 = mt.canSeeTwo;
     console.log(`   ${c4 ? 'PASS' : 'FAIL'}  POSITIVE  the victim census CAN report 2 (two presses, two nearest targets: victims=${mt.control.victims}, fires=${mt.control.fires})`);
-    const c5 = mt.maxVictims <= 1;
-    console.log(`   ${c5 ? 'PASS' : 'FAIL'}  GROUNDING no single press damages more than ONE fighter — so \`multi-target\` is rightly ABSENT from the vocabulary`);
+    // ── WAS, and it was TRUE until 3483d23 ──────────────────────────────────
+    //   `const c5 = mt.maxVictims <= 1;`
+    //   "GROUNDING no single press damages more than ONE fighter — so `multi-target`
+    //    is rightly ABSENT from the vocabulary"
+    // `3483d23` made a melee swing resolve against every opponent in its arc, so that
+    // sentence became false on the melee side and stayed true on the ranged side. The
+    // ONE arm therefore became TWO, and keeping only the old one would have failed
+    // forever on a mechanic that had been correctly built.
+    const c5 = mt.meleeReachesMany;
+    console.log(`   ${c5 ? 'PASS' : 'FAIL'}  GROUNDING a MELEE press damages MORE THAN ONE fighter — so \`multi-target-melee\` is grounded (${mt.meleeVictims})`);
+    const c6 = mt.rangedReachesOne;
+    console.log(`   ${c6 ? 'PASS' : 'FAIL'}  BOUNDARY  a RANGED press still damages exactly ONE — so \`multi-target\` is rightly ABSENT (${mt.rangedVictims})`);
     for (const r of mt.rows) console.log(`             ${r.tag.padEnd(18)} victims=${r.victims} fires=${r.fires}`);
-    if (!c1 || !c2 || !c3 || !c4 || !c5) bad++;
+    if (!c1 || !c2 || !c3 || !c4 || !c5 || !c6) bad++;
   }
 
   if (bad > 0) { console.error(`\n${bad} vocabulary fault(s)`); process.exit(1); }
