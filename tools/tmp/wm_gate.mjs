@@ -294,6 +294,15 @@ function render(res, { verbose, compact }) {
   for (const f of res.faults) (byCls[f.cls] ??= []).push(f);
   const clean = res.rows.filter((r) => r.faults === 0);
   console.log('── SUMMARY ──');
+  // ⚠️ THE CLAIM TOTALS ARE PRINTED, NOT REMEMBERED. The first commit of this tool quoted
+  // "COSMETIC 25" from a hand tally of the compact table and the real number was 20 —
+  // every other figure in that message was right, which is exactly how a stale count
+  // survives. Anything a report wants to quote is computed here.
+  const tally = {};
+  for (const r of res.rows) for (const c of r.claims) tally[c.cls] = (tally[c.cls] ?? 0) + 1;
+  const totalClaims = Object.values(tally).reduce((a, b) => a + b, 0);
+  console.log(`   ${totalClaims} claims declared across ${res.rows.length} blurbs: ` +
+    Object.entries(tally).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${v}`).join(' · '));
   console.log(`   ${clean.length} of ${res.rows.length} blurbs PASS the technical axis`);
   const weaponsClean = new Set(clean.filter((r) => !r.key.includes('.~')).map((r) => r.key));
   console.log(`   ${weaponsClean.size} of ${ROSTER.nWeapons} weapons carry a blurb that is technically true`);
