@@ -40,6 +40,22 @@
  * quarters of the screen cannot differ much however different they are. Those rows are
  * printed as SATURATED and excluded from the verdict rather than counted as passes.
  *
+ * ── WHAT IT SAID ON 8ca8f88, BOTH CAMERAS, repeat 3 ────────────────────────────
+ *
+ *   null-arm floor          +/-2.0% at BOTH pitches (14 rows, max deviation 0.00%)
+ *   INVISIBLE  2 · HALVED 20 · MARGINAL 34 · CLEAN 18   of 74 judged rows
+ *   weapons with no invisible and no halved beat          17 of 33
+ *   weapons whose shortfall is NOT explained by a
+ *     designed roster-wide treatment                      16 — EVERY ONE ON IMPACT
+ *
+ * 🔴 **AND THE TWO CAMERAS AGREE ON EVERY ONE OF THEM.** All 22 invisible/halved rows
+ * are short at pitch 58 AND at pitch 20; the 8 cross-camera disagreements are all
+ * MARGINAL rows sitting on the boundary (0.74-1.02x one way, 0.79-1.82x the other).
+ * That is what CLAUDE.md #3 predicts for a real geometric fact rather than a
+ * foreshortening artefact — *"a limb passing through a torso is a 3D fact; it is wrong
+ * at every angle, and the shallow view does not make it wrong, it makes it VISIBLE."*
+ * A shortfall that appeared only at 20 degrees would have been a camera story.
+ *
  *   node tools/tmp/wv_report.mjs                      # reads shots/wv/wv_area.p*.json
  *   node tools/tmp/wv_report.mjs --dir shots/wv
  */
