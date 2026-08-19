@@ -67,7 +67,14 @@ export const HASH_PREFIX = 'tun1-';
 /** localStorage key. Versioned, so a schema change cannot silently mis-read an old set. */
 export const STORAGE_KEY = 'fa.tuning.v1';
 
-/** Env var read in Node: inline JSON, a path to a JSON file, or the literal `off`. */
+/**
+ * Env var read in Node: INLINE JSON, or the literal `off`. **Never a path** — see `loadFromEnv`'s
+ * *"NOT A PATH, DELIBERATELY"*. Use `FA_TUNING="$(cat set.json)"`.
+ *
+ * ⚠️ This doc-comment said *"a path to a JSON file"* for a while, contradicting the implementation
+ * 300 lines below. `cbb8e10` fixed the file header and the mismatch-error string was fixed after —
+ * THREE copies of one rule in one file, and fixing two of them left the file still stating both.
+ */
 export const ENV_KEY = 'FA_TUNING';
 
 /** Where the live set came from. `'none'` means nothing was installed — genuinely stock. */
@@ -258,7 +265,8 @@ export class TuningMismatchError extends Error {
           'written by a tool that does not stamp, and either way nothing records which constants produced it. ' +
           'Re-record it, or stamp it by hand only if you can prove the tree it came from.'
         : 'Re-record the baseline under the current set, or re-run under the recorded one ' +
-          `(FA_TUNING=<set.json>). Comparing them would attribute a CONSTANT change to a CODE change.`),
+          `(FA_TUNING="$(cat set.json)" — the value is the JSON ITSELF, never a path; see loadFromEnv). ` +
+          `Comparing them would attribute a CONSTANT change to a CODE change.`),
     );
     this.name = 'TuningMismatchError';
     this.recorded = recorded ?? null;
