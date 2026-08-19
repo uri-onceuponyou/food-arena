@@ -231,6 +231,22 @@ const LETTUCE_FRILL = '#88C32F';
  *  the charred limbs above spend. */
 const MITT_BUN = '#F7CE86';
 
+/**
+ * ── THE PICK'S THREE TONES. Uri: *"the pin stuck inside him."* ───────────────
+ * The stick was `MITT_BUN`, i.e. the mitts' own colour, so it had nothing to be read
+ * against once a pale flag sat on top of it. A shade down and a shade less saturated
+ * is a wooden cocktail pick rather than a length of the same bun.
+ * `FLAG_CLOTH` is deliberately the LOWEST-CHROMA thing added in this pass. `DECISIONS
+ * §73` records that warm chroma stopped being scarce and arrived INSIDE the cast's own
+ * hue band (`topCellsInCastBand` 0.296 -> 0.648), which is a figure/ground risk nothing
+ * gates — and this element sits on top of an ORANGE dome, where more orange would be
+ * exactly the wrong deposit. A near-white cloth separates on VALUE, which the bun has
+ * no answer to, and the red is confined to a band.
+ */
+const PICK_WOOD = '#D9A863';
+const FLAG_CLOTH = '#FFF3DE';
+const FLAG_BAND = '#E0372B';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Local geometry helpers — chunky rounded discs the shared kit doesn't provide.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -362,6 +378,108 @@ function faceArc(curveRadius: number, tube: number, arcRad: number): THREE.Buffe
 }
 
 /**
+ * ── A DRAWN BROW: A TAPERED CRESCENT, NOT A LENGTH OF PIPE ───────────────────
+ *
+ * The brow used `faceArc` — a **partial torus** — and that is what Uri's *"eyebrows
+ * are not good"* is about. Read the pixels
+ * (`tools/tmp/lk2_shots/before/hb_p20.zoom.png`, lobby pitch 20, and `hb_p58.zoom.png`):
+ *
+ *   · A torus has ONE tube radius, so the stroke is the SAME THICKNESS end to end. No
+ *     drawn brow is. It reads as a bent rod.
+ *   · `TorusGeometry` with `arc < 2PI` has **no end caps**, so each end shows the open
+ *     mouth of the tube — a bright/dark quad you can count the segments of at 6x. Two
+ *     black pipe-ends on a forehead.
+ *   · A `roughness 0.42` tube carries a specular streak ALONG its length, which is the
+ *     single strongest "extruded plastic" cue available.
+ *   · At radius 0.13 over an arc of 0.52PI the sagitta is 0.041 against a 0.225-wide
+ *     stroke: **height/width 0.51**, a rainbow. A drawn brow is nearer 0.3.
+ *
+ * This is the same class as the comma bug the block below records — the brow has never
+ * been a brow-SHAPE, only ever a piece of a circle with a different rotation on it —
+ * and it is fixed the way the MOUTH in this same file was fixed: with an explicit
+ * silhouette bounded by two curves, so the shape is authored rather than inherited.
+ *
+ * Two quadratic arcs from (-halfW, 0) to (+halfW, 0): the upper through
+ * (0, `rise` + `thick`), the lower through (0, `rise`). They share their endpoints, so
+ * the stroke **tapers to a point at BOTH ends** and is `thick` at its crown — which is
+ * a brow. A Bezier from A to B with control C passes through (A + 2C + B)/4 at t=0.5,
+ * so a control at 2x the wanted mid-height puts the curve exactly through it; this is
+ * the same identity `grinCrescent` below is built on and the reason both take real
+ * mid-heights rather than control-point coordinates.
+ *
+ * ⚠️ IT IS FLAT, AND THAT IS CHECKED, NOT ASSUMED. A plate this wide sags below its
+ * own tangent plane, so it can clip through the dome (`docs/LESSONS.md` §1 in its
+ * "buried inside the target" costume — the mouth's `embed` comment). At the shipped
+ * numbers the horizontal sag is `halfW^2 / (2 * r)` = 0.125^2/(2*0.562) = **0.0139 m**
+ * against a stand-off of `faceSideG`'s 0.010 embed plus the 0.0097 the tangent plane
+ * has already risen at the brow's offset — 0.0197 before `browG.z` adds any — so the
+ * corners clear with margin and `browG.z` is spent on margin, not on rescue.
+ * ⚠️ AND FLAT IS ONLY SAFE BECAUSE THE FACE PLANE FACES BOTH CAMERAS. The crown normal
+ * at hFrac 0.62 sits 32.3 deg above horizontal, which is 22 deg off the lobby camera's
+ * view axis and 29 deg off the match camera's. A flat stroke loses cos(22)=0.93 of its
+ * thickness at the lobby and 0.87 at the match — not the near-edge-on collapse a plate
+ * mounted lower on the dome would suffer.
+ */
+function browStroke(halfW: number, rise: number, thick: number): THREE.Shape {
+  const s = new THREE.Shape();
+  s.moveTo(-halfW, 0);
+  s.quadraticCurveTo(0, 2 * (rise + thick), halfW, 0);   // upper edge
+  s.quadraticCurveTo(0, 2 * rise, -halfW, 0);            // lower edge
+  return s;
+}
+
+/**
+ * ── 🚨 A FLAT INK PLATE ON THIS FACE IS A MIRROR AIMED AT THE MATCH CAMERA. ──
+ *
+ * The first cut of the new brow was a bare `ShapeGeometry` of `browStroke`, and it
+ * rendered **cool grey on one side and ink on the other at pitch 58** while both sides
+ * were ink at pitch 20 (`tools/tmp/lk2_shots/after/hb_p58.zoom.png`, first cut). Same
+ * mesh, same material, same frame — so the term had to be VIEW-DEPENDENT, i.e.
+ * specular, and the arithmetic says exactly which light:
+ *
+ *   `lighting.ts`'s FRONT FILL is `DirectionalLight(0xeef4ff, 2.2)` at **8 deg**
+ *   elevation on the camera azimuth, and its own comment states the design intent:
+ *   *"a character's camera-facing surfaces sit at about 32 deg of elevation (the normal
+ *   that faces a 58 deg camera) and collect 0.91."*
+ *   The crown normal at the face's hFrac 0.62 is (dH, -dR) normalised = (0.845, 0.535),
+ *   i.e. **32.3 deg of elevation** — the same number, because the face is built to face
+ *   the camera. The half-vector between an 8 deg light and a 58 deg eye sits at
+ *   (8+58)/2 = **33 deg**. The plate's normal is 0.7 deg off the mirror direction.
+ *
+ * **A single-normal plate there is a mirror aligned on the match camera**, so at
+ * roughness 0.42 the WHOLE stroke lifts to `#eef4ff` grey at once. At pitch 20 the
+ * half-vector is at (8+20)/2 = 14 deg, 18 deg off, and the same plate stays ink — which
+ * is why the lobby camera cannot see this and the match camera can. The torus this
+ * replaced never showed it because its normals sweep every direction, so only a narrow
+ * band ever satisfied the condition; that band is the specular streak visible along the
+ * old brow in `before/hb_p58.zoom.png`, and it is the SAME defect at 1/20th the area.
+ *
+ * ⚠️ IT IS NOT A BROW PROBLEM. It is a property of any large flat ink decal mounted on
+ * this crown, and the mouth's `lipUp` is one (`ShapeGeometry`, `faceMat`, roughness
+ * 0.42) — it escapes today only because it sits at hFrac 0.25, where the normal is far
+ * from 32 deg. Anything flat, dark and moved UP the dome inherits this.
+ *
+ * Two fixes, both physical, both applied, because either alone only halves it:
+ *   BEND      the stroke over the crown's own horizontal radius, so only a band of it
+ *             can satisfy the mirror condition instead of all of it. `bendR` is read
+ *             back off `crownSurface` rather than typed, so it tracks the dome.
+ *   ROUGHNESS 0.42 -> 0.90 on the brow's own material. An ink stroke wants no lobe at
+ *             all; the lash keeps 0.42 and its sheen, which also stops the two reading
+ *             as the same object.
+ */
+function browGeometry(halfW: number, rise: number, thick: number, bendR: number): THREE.BufferGeometry {
+  const geo = new THREE.ShapeGeometry(browStroke(halfW, rise, thick), 18);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    pos.setZ(i, pos.getZ(i) - (x * x) / (2 * bendR));
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/**
  * A crescent bounded by two quadratic arcs that both hang DOWN from the same two
  * corners at (±`halfW`, 0) — the upper one through (0, -`upper`), the lower through
  * (0, -`lower`). The corners are therefore the HIGHEST points, which is the whole
@@ -387,6 +505,44 @@ function grinCrescent(halfW: number, upper: number, lower: number): THREE.Shape 
  * apron bib — a cloth panel that hugs the dressed torso's own curvature rather
  * than floating in front of it as a flat card.
  */
+/**
+ * ── A COCKTAIL FLAG: CLOTH IN THE XY PLANE, POLE EDGE AT x = 0 ──────────────
+ *
+ * Pole edge at `x = 0`, free edge at `x = w`, centred on `y = 0`, normal +Z.
+ *
+ * `amp` waves it through z as a function of x ALONE, and `waveW` is the phase
+ * reference rather than the mesh's own width — so a narrower stripe laid over the
+ * cloth uses the SAME `waveW` and comes out exactly parallel to it, and a constant
+ * `position.z` is then enough to separate the two surfaces at every x. Two panels
+ * that each waved on their own width would cross.
+ * The wave is zero at `x = 0` by construction (`sin 0`), so the cloth stays welded to
+ * the pole however hard it is waved.
+ *
+ * `notch` cuts a swallow-tail into the free edge, deepest at `y = 0` and zero at the
+ * corners. It is the cheapest available "this is a FLAG" cue and it survives
+ * foreshortening: at the match camera the cloth is a few dozen pixels and the notch is
+ * the only interior shape event a viewer can still resolve.
+ */
+function flagCloth(w: number, h: number, amp: number, waveW: number, notch: number): THREE.BufferGeometry {
+  const geo = new THREE.PlaneGeometry(w, h, 12, 4);
+  geo.translate(w / 2, 0, 0);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const free = x > w - 1e-6;
+    const nx = free && notch > 0 ? x - notch * Math.max(0, 1 - Math.abs(y) / (h * 0.5)) : x;
+    // ⚠️ THE WAVE IS SAMPLED AT THE UN-NOTCHED x, ON PURPOSE. Sampling it at `nx` gave
+    // the free-edge column five different z values (the notch is deepest at y = 0), so
+    // the last quad TWISTED and rendered as a torn shard at 6x — visible in the first
+    // cut of `tools/tmp/lk2_shots/after/hb_pick_p20.zoom.png`. Sampling at `x` keeps
+    // that column on one z and the notch stays a clean cut in a flat-lying edge.
+    pos.setXYZ(i, nx, y, amp * Math.sin((x / waveW) * 2.3 * Math.PI));
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
 function curvedPanel(radius: number, arcRad: number, height: number, segX = 14, segY = 6): THREE.BufferGeometry {
   const geo = new THREE.PlaneGeometry(arcRad, height, segX, segY);
   const pos = geo.attributes.position as THREE.BufferAttribute;
@@ -649,6 +805,11 @@ export class HamburgerCharacter extends BaseCharacter {
     const lettuceMatB = toonMat({ color: LETTUCE_FRILL, ramp: RAMP_CHARACTER(), roughness: 0.6 });
     const seedMat = toonMat({ color: PALETTE.cream, ramp: RAMP_CHARACTER(), roughness: 0.75 }); // dry toasted sesame
     const faceMat = toonMat({ color: PALETTE.ink, ramp: RAMP_CHARACTER(), roughness: 0.42 });
+    /** The brow's own ink. `roughness` 0.90 and `rim: false` — see `browGeometry`'s
+     *  header for the mirror-alignment measurement that forced the first and
+     *  `toon.ts`'s own advice (*"set false for flat decals and eyes"*) for the second.
+     *  One material for both sides, hoisted out of the per-side loop. */
+    const browMat = toonMat({ color: PALETTE.ink, ramp: RAMP_CHARACTER(), roughness: 0.90, rim: false });
     // ── THE FACE'S OWN VALUE LADDER ───────────────────────────────────────────
     // The measurement behind Uri's *"drawn lines and not an actual face"*
     // (DECISIONS §37/§42): **0% of our eye pixels are above 0.85 luma, against the
@@ -1049,6 +1210,12 @@ export class HamburgerCharacter extends BaseCharacter {
     // an earlier pass. Eye and brow are children offset along that SAME local Y
     // axis, so they are guaranteed coplanar and a fixed distance apart at every
     // crown rotation and yaw.
+    // The crown's own HORIZONTAL radius at roughly the brow's projected height, read
+    // back off `crownSurface` (at theta 0 the surface point's z IS that radius) so the
+    // brow's curvature tracks the dome if `CROWN_PROFILE` is ever retuned. Typed as a
+    // literal it would be the next stale coordinate in a file that already carries a
+    // paragraph about those.
+    const browBendR = crownSurface(CROWN, 0, 0.72).pos.z;
     const face = this.rig.joints.face;
     face.position.set(0, crownBaseY, 0);
     face.rotation.set(0, 0, 0);
@@ -1143,8 +1310,34 @@ export class HamburgerCharacter extends BaseCharacter {
       // Raised from 0.13 to 0.20 because the eye below it is now a 0.24 m ball
       // rather than a 0.03 m stroke, and a brow resting ON the lash reads as a
       // second lash line rather than as a brow.
+      // ── 🚨 AND IT WAS ON THE TOP OF HIS HEAD. MEASURED, AT BOTH CAMERAS. ──────
+      // Uri, playing the deployed build: *"Hamburger — eyebrows are not good."*
+      // `tools/tmp/bw_brow.mjs` (6/6 known-bads on this character, and its
+      // hidden-brow arm reports 0 px and REFUSES a gap rather than printing
+      // `gapPx = 0`), column-wise brow-bottom to eye-top over the shipped path:
+      //
+      //   camera            gapPx L/R      gapFrac L/R        spanFrac L/R
+      //   lobby pitch 20     47 / 50      0.4017 / 0.4348     0.839 / 0.830
+      //   match pitch 58     53 / 55      0.5248 / 0.5189     0.878 / 0.860
+      //
+      // **Four tenths to half an EYE-HEIGHT of bare bun between a brow and the eye it
+      // belongs to, and a brow NARROWER than that eye.** Follow the geometry and it is
+      // worse than the fraction: `browG` sat 0.112 up the tangent plane and the torus
+      // added another 0.160 to its apex, so the stroke's top projected to **hFrac 0.99
+      // of the crown — the apex.** The brows were not high on the forehead; they were
+      // on top of his head, up among the sesame seeds, which is why the eye reads the
+      // LASH as the eyebrow and these as two stray marks.
+      //
+      // ⚠️ THE 0.112 IS NOT REDUCED MUCH — 0.112 -> 0.092 — AND THAT IS THE POINT.
+      // Most of the closure comes from the SHAPE, not from the offset: a torus of
+      // radius 0.13 puts its lower edge 0.100 above its own group origin, a crescent
+      // of `rise` 0.028 puts it 0.028 above. Moving the old stroke down far enough to
+      // seat it would have buried its ENDS in the lash while its middle still floated,
+      // because the two curves disagree. Fixing the curve fixes the gap.
+      // `z` 0.012 -> 0.006: the stand-off no longer has to cover a tube's own radius,
+      // and 0.006 is margin over the 0.0139 m sag computed in `browStroke`'s header.
       const browG = new THREE.Group();
-      browG.position.set(0, 0.112 * faceScale, 0.012 * faceScale);
+      browG.position.set(0, 0.092 * faceScale, 0.006 * faceScale);
       faceSideG.add(browG);
       // ── ⚠️ THE BROW WAS NEVER ARCHED. IT WAS A COMMA. ─────────────────────────
       // `faceArc()` centres its arc on local +X (see its own doc comment) and the
@@ -1160,9 +1353,52 @@ export class HamburgerCharacter extends BaseCharacter {
       // Also 1.9x wider (0.09 -> 0.13 curve radius, arc 0.36PI -> 0.52PI): the eye
       // below it went from a 0.03 m stroke to a 0.23 m ball, and a brow narrower than
       // a third of its eye reads as a speck.
-      const brow = new THREE.Mesh(faceArc(0.13 * faceScale, 0.030 * faceScale, Math.PI * 0.52), faceMat);
+      // ── AND THE ARCH THAT REPLACED THE COMMA WAS STILL A PIECE OF TORUS. ──────
+      // Kept above because it is the same lesson twice: that round changed which way
+      // the arc bulged and could not change what the arc WAS. `browStroke` (see its
+      // header) is the shape; `faceArc` stays for the lash, where a tube tucked onto a
+      // sphere is exactly right and reads as a lash line.
+      //   halfW 0.125  -> spanFrac 1.01 against the eye assembly, up from 0.83. A brow
+      //                  should reach at least as wide as its eye; this one now clears
+      //                  its outer corner, which is where a brow's tail belongs.
+      //   thick 0.052  -> a shade over the lash's 0.060 tube diameter, so the pair read
+      //                  as brow-over-lash and not as two lash lines.
+      //   rise  0.028  -> height/width 0.31, down from the torus's 0.51 rainbow.
+      // ⚠️ THE ROTATION IS HALVED, NOT REMOVED, AND THE SIGNS STAY THE SAME.
+      // `addCrownDecal` builds both sides with `setFromUnitVectors`, which takes the
+      // MINIMAL rotation — so the two local +X axes are NOT mirror images and a
+      // matching pair of tilts needs the same SIGN with different magnitudes. That is
+      // why the original wrote 0.32/0.05 rather than +-0.32, and it is preserved.
+      // 0.32 -> 0.16 because a tilt that read as personality on a symmetric tube reads
+      // as a DIFFERENT OBJECT on a tapered stroke: at pitch 58 the sx>0 brow rendered
+      // as a check mark while its partner rendered as an arch (`hb_p58.zoom.png`).
+      // ── ⚠️ AND THE FIRST FLAT BROW RENDERED **GREY ON ONE SIDE ONLY**. ────────
+      // Rendered at pitch 58 (`tools/tmp/lk2_shots/after/hb_p58.zoom.png`, first cut):
+      // the sx<0 brow came out a cool grey while its partner stayed ink. Same mesh,
+      // same material, same frame. The cause is `applyRimLight`'s Fresnel term, and the
+      // COLOUR is the evidence — the lift is `#bfe4ff` blue-grey at strength 0.28,
+      // which is the rim's own default and nothing else in the frame's palette.
+      // A torus never showed it because its normals sweep every direction, so only a
+      // narrow band of it is ever near-grazing; a flat plate has ONE normal, so when
+      // the head's own yaw turns one side toward grazing the WHOLE stroke lifts at
+      // once. The rim exists to separate a FORM from the BACKGROUND at a silhouette
+      // edge (`toon.ts`: switching it off costs 40% of the cast's edge figure/ground),
+      // and a brow is an ink decal lying on a bun — it has no silhouette against the
+      // background at any camera, so the term can only ever pollute it. `rim: false`,
+      // the same reasoning the catchlight uses to opt out of the ink outline.
+      // ⚠️ IT IS ALSO NO LONGER `faceMat`. That is a deliberate second effect: `faceMat`
+      // is shared by `brow` x2, `eye_lash` x2 and the upper lip, and `cf_ablate --mode
+      // paint` MUTATES a material in place — so `--names brow` and `--names eye_lash`
+      // returned the IDENTICAL 10,638 px / 9,249 px on this character, each under the
+      // name the caller typed. Giving the brow its own material makes at least the brow
+      // separable there. (`bw_brow.mjs` was never affected: it assigns a fresh material
+      // per mesh, and its own number for the brow alone is 4,179 px.)
+      const brow = new THREE.Mesh(
+        browGeometry(0.125 * faceScale, 0.028 * faceScale, 0.052 * faceScale, browBendR),
+        browMat,
+      );
       brow.name = 'brow';
-      brow.rotation.z = Math.PI / 2 + (sx > 0 ? 0.32 : 0.05);
+      brow.rotation.z = sx > 0 ? 0.16 : 0.03;
       brow.castShadow = true;
       brow.receiveShadow = true;
       browG.add(brow);
@@ -2052,20 +2288,118 @@ export class HamburgerCharacter extends BaseCharacter {
     }
 
     // ── The pick ──────────────────────────────────────────────────────────────
+    // ── 🚨 IT WAS BUILT AS A COCKTAIL PICK AND IT SHIPPED AS A PIN. ───────────
+    // Uri, playing the deployed build: *"the pin stuck inside him should be a toothpick
+    // instead, or a flag with something."* The meshes were already NAMED
+    // `hamburger_pick` / `pick_rod` / `pick_olive`, so nothing here was mis-built — the
+    // object READ as the wrong thing, which is `DECISIONS §71`'s defect shape exactly
+    // (*"change the SUBJECT, not the drawing"*). Look at
+    // `tools/tmp/lk2_shots/before/hb_pick_p20.zoom.png` and the reading is not
+    // ambiguous: **a smooth pale shaft with a glossy red ball on the end IS a pin.** It
+    // was `MITT_BUN` (the mitts' own colour) barely tapered — 0.045 to 0.038, a 16%
+    // taper over its whole length, i.e. a shaft — under a `PALETTE.tomato` sphere.
+    // Nothing about it said olive; everything about it said pinhead.
+    //
+    // ── WHY A FLAG AND NOT A TOOTHPICK. IT IS DELIVERED PIXELS, NOT TASTE. ────
+    // Uri offered both. Measured first, `cf_ablate --mode paint` through the shipped
+    // path (900x1400, subjectFill 0.60 — an upper bound, and gameplay framing is far
+    // smaller):
+    //
+    //   part          pitch 20        pitch 58
+    //   pick_rod      2238 px         1341 px      <- the STICK
+    //   pick_olive    3025 px         3846 px      <- the BALL
+    //
+    // **At the match camera the ball already delivers 2.9x the stick**, and the stick is
+    // a near-vertical element that earns only cos 58 = 0.53 of a screen-metre. A
+    // toothpick is that stick with the ball DELETED and the shaft made THINNER: it
+    // answers Uri's note by removing the only part of the object that currently reaches
+    // the screen. At gameplay scale — where a character is a fraction of this frame and
+    // pixel area falls with the SQUARE — 1341 px here is order tens of pixels there.
+    // `§71`'s lesson is that a redraw which keeps an unreadable silhouette class buys
+    // nothing, and a bare toothpick is a smaller member of the same class.
+    // A flag is a different class: it is AREA rather than length, it is the one shape
+    // that cannot be read as a pin (a pin's head is round; a flag's is not), and it is
+    // somewhere to put a motif. So: a wooden pick with a waved cocktail flag on it.
     const pick = new THREE.Group();
     pick.name = 'hamburger_pick';
     const { at } = massAnchor(head, box, { azimuth: -Math.PI * 0.35, height01: 0.93, inset: 0.62 });
     aim(pick, at, new THREE.Vector3(0.20, 1, 0.10).normalize());
     head.add(pick);
-    const pickRod = rod(toonMat({ color: MITT_BUN, roughness: 0.55 }), {
-      len: rStack * 0.52, rBase: rStack * 0.045, rTip: rStack * 0.038,
+    // 0.52 -> 0.62 R so there is visible stick BELOW the cloth as well as above the
+    // crown — a flag whose pole starts at its own hem reads as a sign, not as a pick —
+    // and the taper goes 0.045/0.038 (16%) to 0.040/0.019 (53%), which is a whittled
+    // stick rather than a shaft.
+    const ROD_LEN = rStack * 0.62;
+    const pickRod = rod(toonMat({ color: PICK_WOOD, roughness: 0.62 }), {
+      len: ROD_LEN, rBase: rStack * 0.040, rTip: rStack * 0.010,
     });
     pickRod.name = 'pick_rod';
     pick.add(pickRod);
-    const olive = knob(toonMat({ color: PALETTE.tomato, roughness: 0.34 }), rStack * 0.11);
-    olive.name = 'pick_olive';
-    olive.position.y = rStack * 0.52;
-    pick.add(olive);
+
+    // ── The cloth has to face the CHARACTER'S front, and that roll is DERIVED. ──
+    // `aim()` builds its basis from `ref x dir` with `ref` = world up, so the pick's
+    // local +X lands wherever that cross product happens to point — for this lean,
+    // (0.449, 0, -0.894), i.e. right AND backwards, putting the cloth's normal 64 deg
+    // off the camera axis and the flag nearly edge-on at yaw 0. Typing the correcting
+    // roll as a literal would silently rot the moment the lean is retuned, so it is
+    // read back off the quaternion `aim` just wrote: express the character's own
+    // forward in pick-local space and rotate the mount about the pick's axis by that
+    // bearing. Change the lean and the flag still faces front.
+    const flagG = new THREE.Group();
+    flagG.name = 'pick_flag_mount';
+    const fwdLocal = new THREE.Vector3(0, 0, 1).applyQuaternion(pick.quaternion.clone().invert());
+    flagG.rotation.y = Math.atan2(fwdLocal.x, fwdLocal.z);
+    flagG.position.y = ROD_LEN * 0.62;
+    pick.add(flagG);
+
+    const FW = rStack * 0.38;
+    const FH = rStack * 0.24;
+    const cloth = new THREE.Mesh(
+      flagCloth(FW, FH, FW * 0.11, FW, FW * 0.24),
+      toonMat({ color: FLAG_CLOTH, roughness: 0.66, doubleSide: true }),
+    );
+    cloth.name = 'pick_flag';
+    // ── 🚨 THE CLOTH HANGS IN FRONT OF THE POLE, AND THAT IS AN ISLAND FIX. ───
+    // With the cloth's hem on the rod's own AXIS, the rod crossed it diagonally at the
+    // lobby camera and cut a corner of cream off the rest of the flag:
+    // `ch_hamburger_sil.mjs` at pitch 20 yaw 0 reported **2 islands, the second a 67 px
+    // `pick_flag` blob**. That is the FOURTH floating component on this character —
+    // `lettuce_frill` did it at 877 px and again at 197 px, and this file carries both
+    // — and no lit render showed it, because 67 px of cream on an orange bun with an
+    // ink outline around it looks like a fold. Only the geometry raster can see it.
+    // The offset is 0.030 R against a rod that is ~0.021 R in radius where the cloth
+    // meets it, so the cloth is ALWAYS in front of the pole and the pole can never
+    // divide it. It is also what a flag on a stick actually does.
+    cloth.position.z = rStack * 0.030;
+    cloth.castShadow = true;
+    cloth.receiveShadow = true;
+    cloth.userData.silhouetteEvent = true;
+    flagG.add(cloth);
+
+    // The motif — *"a flag with something"*. A band rather than an emblem, because at
+    // the match camera the whole cloth is a few dozen pixels and an emblem inside it is
+    // sub-pixel: the largest interior mark that can still resolve is a stripe. It
+    // shares the cloth's `waveW`, so the two surfaces are parallel at every x and a
+    // constant z offset separates them without crossing.
+    // ⚠️ 0.74 AND NOT 0.84, AND THE BOUND IS ARITHMETIC. The band's TOP edge sits at
+    // y = -0.11 FH, where the notch has already eaten `0.24 * (1 - 0.11/0.5) = 0.187` of
+    // the cloth's width — so a 0.84 band projects PAST the cloth there and its own ink
+    // hull renders as a dark wedge hanging off the flag. It did, at 6x, in the first cut.
+    const band = new THREE.Mesh(
+      flagCloth(FW * 0.74, FH * 0.28, FW * 0.11, FW, 0),
+      toonMat({ color: FLAG_BAND, roughness: 0.58, doubleSide: true }),
+    );
+    band.name = 'pick_flag_band';
+    // ⚠️ -0.20 AND NOT -0.26 FH. At -0.26 the band's lower edge left only 0.09 FH of
+    // cloth beneath it, and an inverted-hull outline is pushed along its OWN normals —
+    // which at that edge point down — so the hull ate the hem and the flag rendered
+    // with a black line along its bottom (`hb_pick_p58.zoom.png`, second cut). 0.16 FH
+    // of cream now sits below the band.
+    band.position.set(0, -FH * 0.20, rStack * 0.030 + FW * 0.010);
+    band.castShadow = false;
+    band.receiveShadow = true;
+    band.userData.silhouetteEvent = true;
+    flagG.add(band);
   }
 
   protected onUpdate(ctx: AnimContext): void {
