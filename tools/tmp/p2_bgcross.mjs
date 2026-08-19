@@ -124,10 +124,18 @@ const log = (...a) => console.log(...a);
 const pad = (s, n) => String(s).padEnd(n);
 
 /** `rules.ts` parsed, not imported — same reason `pj_probe` gives: it is TypeScript. */
+const SELF = new URL(import.meta.url).pathname.split('/').pop();
+
 async function rangedWeapons() {
   const src = await readFile(resolve(REPO, 'src/game/rules.ts'), 'utf8');
   const out = new Map();
-  const charRe = /^ {2}(\w+): \{$/gm;
+  // 🚨 `defineCharacter(` IS NOT OPTIONAL SUGAR HERE — IT IS WHY THIS TOOL MEASURED
+  // NOTHING FOR A WEEK. On 2026-08-12 (`9cb34ab`) the roster changed from `soup: {` to
+  // `soup: defineCharacter({`. The old pattern `/^ {2}(\w+): \{$/gm` then matched SIX
+  // blocks, none of them a character and none carrying `weapons: [`, so the table came
+  // back EMPTY and every per-character loop below iterated zero times — silently, at
+  // exit 0. Accept both spellings, because the next refactor will invent a third.
+  const charRe = /^ {2}(\w+): (?:\w+\()?\{$/gm;
   const chars = [];
   let m;
   while ((m = charRe.exec(src))) chars.push({ id: m[1], at: m.index });
@@ -146,6 +154,31 @@ async function rangedWeapons() {
       if (weapons.length >= 4) break;
     }
     if (weapons.length) out.set(chars[i].id, weapons);
+  }
+  // ── 🚨 A PARSE THAT FINDS NOTHING MUST THROW, NOT RETURN EMPTY ────────────────
+  // The comment at the top of this function guards against a STALE weapon table —
+  // "exactly how a probe measures a game that no longer exists". It had no guard
+  // against an ABSENT one, which is the same failure with none of the symptoms:
+  // `for (const x of [])` runs zero times and `[].every()` returns TRUE, so an empty
+  // table reads as a clean pass in every consumer. That is `CLAUDE.md` rule 6's
+  // vacuity class, and it took out THREE tools at once (`pj_probe`, `p2_bgcross`,
+  // `hl_sweep`) because they share this parser by copy.
+  //
+  // The cross-check is INDEPENDENT of the regex above on purpose: `weapons: [` is
+  // counted straight out of the source, so a regex that silently stops matching
+  // cannot also silently move the expectation. Assert NON-EMPTY first, then equal —
+  // an equality check alone would pass 0 === 0 if the file were ever unreadable.
+  const expected = (src.match(/weapons: \[/g) ?? []).length;
+  if (out.size === 0) {
+    throw new Error(
+      `${SELF}: parsed ZERO characters out of src/game/rules.ts (expected ${expected}). ` +
+      'The roster spelling has changed under this regex. Refusing to run: an empty table ' +
+      'makes every check below pass vacuously. Fix `charRe`, do not delete this guard.');
+  }
+  if (out.size !== expected) {
+    throw new Error(
+      `${SELF}: parsed ${out.size} characters but rules.ts has ${expected} \`weapons: [\` ` +
+      'blocks. A character is being silently dropped.');
   }
   return out;
 }
