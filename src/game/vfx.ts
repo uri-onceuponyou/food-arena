@@ -226,6 +226,19 @@ const TRAIL_Y = GROUND_CLEAR_Y + 0.01;
  * character rather than at their feet. */
 const IMPACT_HEIGHT = 1.15;
 const CAST_HEIGHT = 1.25;
+/**
+ * Linear scale of the SUBORDINATE impact burst anchor — the one that sits under a
+ * bespoke `impact()` hook. `impactAnchor`'s header carries the whole derivation and
+ * the measured `area(k)/area(1)` table; the short version is that it is bounded below
+ * by the 300 px floor (0.30 delivers 288 px on the weakest row) and above by
+ * "subordinate must stay a MINORITY of the burst it sits under" (0.60 is a majority on
+ * 10 of 16 rows), and those two bounds close on 0.50.
+ *
+ * 🚨 **It is deliberately NOT `castMuzzle`'s 0.75.** That number is `area ∝ scale²` on
+ * a single radial sprite; `burst()` has a clamped decal and two rings whose area goes
+ * as radius¹, so 0.75 here delivers 0.60-0.70 of the generic burst rather than 0.5625.
+ */
+const IMPACT_ANCHOR_K = 0.5;
 /** Above splats/trail marks so melee sweeps and impact rings always render on top. */
 const GROUND_VFX_Y = GROUND_CLEAR_Y + 0.02;
 const STATUS_RING_Y = GROUND_CLEAR_Y + 0.04;
@@ -2211,7 +2224,37 @@ export class VfxLayer {
       const qaWeapon = weaponKey ? CHARACTERS[qaId]?.weapons?.find((w: Weapon) => w.key === weaponKey) : undefined;
 
       if (kind === 'impact') {
-        this.spawnImpactBurst(xWU, yWU, color, amount, qaWeapon ? { weapon: qaWeapon, characterId: qaId } : undefined);
+        /**
+         * 🚨 THE ATTACKER POSITION, WHICH THIS HOOK USED TO OMIT — AND FOUR INSTRUMENTS
+         *    READ THE STATE THAT OMISSION PRODUCED.
+         *
+         * `match.ts:handleEvents` fires
+         *   `spawnImpactBurst(ev.x, ev.y, colorForDamageSource(...), ev.amount,
+         *                     { weapon, characterId, fromXWU, fromYWU })`
+         * and `fromXWU`/`fromYWU` are populated UNCONDITIONALLY inside
+         * `if (ev.source.kind === 'weapon')` — so for a weapon hit, which is the only
+         * kind that ever reaches a bespoke hook, `ctx.direction` is always a real unit
+         * vector. This hook passed neither, so every QA-spawned impact handed the hook
+         * `direction === (0,0,0)`: **a state the shipped game never produces.**
+         *
+         * `tools/tmp/wv_area.mjs`'s DIRECTION control measured what that is worth, on
+         * every weapon carrying a bespoke `impact()`, both directions, same seed:
+         * eleven of twenty-seven differ by more than 5% of delivered area, up to 34%
+         * (`hotdog.Ketchup` 1246 -> 824 px, `sushi.Seaweed` 1554 -> 1078 px). Every
+         * per-weapon VFX number `vfx_wcov`, `vfx_ablate`, `vfx_hue` and `vfx_coverage`
+         * ever produced went through here, so those tools' impact columns MOVE with
+         * this fix. That is a correction, not a regression.
+         *
+         * 60 wu west of the hit is the same convention every other kind in this hook
+         * already uses (`{ x: 1, y: 0 }` facing for `meleeArc`, `castTelegraph` and
+         * `weaponFired`) and the same one `wv_area.mjs` fires the shipped call with, so
+         * one probe reads one direction across all five beats. A probe that genuinely
+         * wants the degenerate zero-direction state calls `spawnImpactBurst` directly
+         * off `window.__vfxLayer` and omits the fields — `wv_area --dirFrom 0` does.
+         */
+        this.spawnImpactBurst(xWU, yWU, color, amount, qaWeapon
+          ? { weapon: qaWeapon, characterId: qaId, fromXWU: xWU - 60, fromYWU: yWU }
+          : undefined);
       }
       else if (kind === 'death') this.spawnDeathBurst(xWU, yWU, color);
       else if (kind === 'heal') this.spawnHealPulse(xWU, yWU);
@@ -3140,8 +3183,16 @@ export class VfxLayer {
    * The muzzle beat, and why every weapon now gets one.
    *
    * `'primary'` is the generic cast flash, byte-for-byte what shipped before the
-   * bespoke system existed. `'subordinate'` is the same sprite at 62% linear size and
-   * a shorter life, spawned UNDER a bespoke `cast()`.
+   * bespoke system existed. `'subordinate'` is the same sprite at **75%** linear size
+   * and a shorter life, spawned UNDER a bespoke `cast()`.
+   *
+   * ⚠️ **This line said "62% linear size" and the code has always been 0.75.** Kept
+   * above the correction per house style, because the way it went wrong is the useful
+   * part: 0.62 is a REJECTED CANDIDATE from the derivation nine lines below — *"inside
+   * measurement noise of the floor — no"* — so the summary at the top of the block was
+   * quoting an option the block itself had already thrown out. Found by `209e270`'s
+   * census, which had to read this function to reproduce the 0.5625 area ratio it was
+   * measuring in the cast column and could not make 0.62² fit.
    *
    * ── The measurement that made this unconditional ───────────────────────────────
    *
@@ -3290,11 +3341,22 @@ export class VfxLayer {
    * `source`, when provided, identifies the weapon that caused this hit
    * (`combat.ts`'s `DamageSource.kind === 'weapon'` — trail/hazard/fog hits have no
    * weapon and so never look up bespoke VFX, exactly like they never had a `cast`
-   * either). When that weapon has a bespoke `impact()` hook (`vfx/weapons/`), it
-   * fully replaces the generic burst below; otherwise this falls back to the exact
-   * generic burst that ran here before this system existed. `fromXWU`/`fromYWU`
-   * (the attacker's position) are optional and only used to give the bespoke hook a
-   * meaningful `ctx.direction` (attacker → hit); omit them and it's just zero. */
+   * either). When that weapon has a bespoke `impact()` hook (`vfx/weapons/`), the hook
+   * adds this weapon's identity ON TOP OF a subordinate burst anchor — see
+   * `impactAnchor` for the measurement that made the anchor unconditional; otherwise
+   * this falls back to the exact generic burst that ran here before this system
+   * existed. `fromXWU`/`fromYWU` (the attacker's position) are optional and only used
+   * to give the bespoke hook a meaningful `ctx.direction` (attacker → hit); omit them
+   * and it's just zero.
+   *
+   * ⚠️ **THE OLD WORDING HERE SAID THE BESPOKE HOOK *"fully replaces the generic burst
+   * below"*, AND IT STATED THE BUG AS THE DESIGN.** It was accurate — the branch
+   * returned early and left NO anchor under the sculpt — and `209e270` measured what
+   * that cost: sixteen of thirty-three weapons short on this beat and every one of them
+   * short on THIS beat, `burrito.Swarm` at 139 px against its own generic control's
+   * 1367. Kept above the correction per house style, because the sentence is the reason
+   * nobody looked: a doc-comment that describes a defect as intent makes the defect
+   * invisible to every reader who trusts the file. */
   spawnImpactBurst(
     xWU: number,
     yWU: number,
@@ -3319,6 +3381,14 @@ export class VfxLayer {
     }
 
     const bespoke = source && getWeaponVfx(source.characterId, source.weapon.key)?.impact;
+
+    // ── THE ANCHOR, UNCONDITIONAL, UNDER THE BESPOKE HOOK ───────────────────────
+    // Same position in the function, and for the same reason, as `castMuzzle` in
+    // `spawnCastFlash`: the beat every weapon shares is drawn for every weapon, and a
+    // bespoke `impact()` adds this weapon's identity ON TOP of it instead of replacing
+    // it. `'primary'` is byte-for-byte the generic burst that used to live below.
+    this.impactAnchor(origin, color, amount, bespoke ? 'subordinate' : 'primary');
+
     if (bespoke && source) {
       let dirX = 0;
       let dirY = 0;
@@ -3337,10 +3407,111 @@ export class VfxLayer {
         spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
       };
       bespoke(ctx);
-      return;
     }
+  }
 
-    // ── Generic path ────────────────────────────────────────────────────────────
+  /**
+   * The impact beat's anchor, and why every weapon now gets one.
+   *
+   * `'primary'` is the generic impact burst, byte-for-byte what shipped before the
+   * bespoke system existed. `'subordinate'` is the same burst with `sizeFactor` AND
+   * `shardCount` both scaled by `IMPACT_ANCHOR_K`, spawned UNDER a bespoke `impact()`.
+   *
+   * ── The measurement that made this unconditional ───────────────────────────────
+   *
+   * A bespoke `impact()` used to REPLACE the burst entirely — it took the branch and
+   * RETURNED, leaving nothing underneath. `tools/tmp/wv_area.mjs` (`209e270`) measured
+   * all 33 weapons x 3 beats x both paths at both cameras, with the control arm being
+   * the SHIPPED generic fallback provoked by deleting the hook off the registry, and
+   * the impact column has one shape: **sixteen weapons deliver under half of the burst
+   * they replaced, and every weapon that falls short falls short on THIS beat** —
+   *
+   *     burrito.Swarm      139 px vs 1367   0.10x     lollipop.Smash 1042 vs 4835  0.22x
+   *     soup.Splash        292 px vs 1194   0.24x     egg.Shards      328 vs 1394  0.23x
+   *     pizza.Tomato       422 px vs 2059   0.21x     soup.Noodle     502 vs 1604  0.31x
+   *     pizza.Dough        368 px vs 1604   0.23x     taco.Filling   1203 vs 3315  0.36x
+   *     waterbottle.Glass  494 px vs 2064   0.24x     egg.Hatch       574 vs 1399  0.41x
+   *     hamburger.Tomato   754 px vs 2300   0.33x     soup.Dump      2059 vs 4833  0.43x
+   *     sushi.Rice         395 px vs 1042   0.38x     egg.Tackle     2096 vs 4861  0.43x
+   *     pizza.Cheese       584 px vs 1399   0.42x     lollipop.Giant 2659 vs 5704  0.47x
+   *
+   * `dce15bb` re-ran the whole matrix at the lobby-analogue camera (pitch 20) and every
+   * one of those rows is short at BOTH pitches, so this is geometry and not
+   * foreshortening (CLAUDE.md #3).
+   *
+   * This is the CAST beat's bug, in the same file, on the beat next door: fifteen of
+   * twenty-two bespoke casts measured under 300 px for exactly the same reason, and
+   * `castMuzzle` fixed it by making the shared beat unconditional and subordinate
+   * rather than by asking eleven weapon files to scale their detail up. Read that
+   * function's header for the argument; it is not repeated here.
+   *
+   * ── Why 0.50, AND WHY IT IS NOT castMuzzle's 0.75 ──────────────────────────────
+   *
+   * 🚨 **THE CAST NUMBER IS NOT TRANSFERABLE AND REUSING IT WOULD HAVE OVERSHOT BY
+   * HALF.** `castMuzzle`'s derivation is `area ∝ scale²` against a measured 735 px
+   * primary — correct for ONE radial sprite, and wrong here in three of five terms,
+   * because `burst()` is not one sprite:
+   *
+   *     · the flash is `0.5*sf -> 1.15*sf`                   — area goes as sf²  ✓
+   *     · the star decal radius is `clamp(0.65*sf, 0.55, 1.5)` — CLAMPED, so at chip
+   *       damage it does not shrink with k at all
+   *     · a ring is a RIM: delivered area goes as its PERIMETER, i.e. as radius¹, and
+   *       that radius is `0.6*sf + 0.35` — AFFINE, so halving sf does not halve it
+   *     · streaks and shards are COUNTS — area goes as count¹
+   *
+   * So `tools/tmp/wi_derive.mjs` measured it instead of modelling it: the shipped
+   * `burst()` fired on all sixteen short rows, at k = 0.30/0.40/0.50/0.60/0.75/1.00,
+   * seeded and paired, at both cameras. `k = 1` reproduces the generic arm to within
+   * 1% of `209e270`'s independently recorded numbers on all sixteen rows.
+   *
+   *     k       area(k)/area(1), pitch 58        min px (worst row: sushi.Rice)
+   *     0.30    0.164 - 0.277  (median 0.235)    288 px   ← UNDER the 300 px floor
+   *     0.40    0.237 - 0.348  (median 0.307)    361 px   = 1.20x the floor
+   *     0.50    0.323 - 0.423  (median 0.400)    439 px   = 1.46x the floor
+   *     0.60    0.425 - 0.530  (median 0.517)    549 px   — but a MAJORITY on 10/16
+   *     0.75    0.602 - 0.701  (median 0.677)    728 px   — a majority on 16/16
+   *
+   * Two bounds, and they close on one value:
+   *
+   *   LOWER — the anchor has to clear the floor ON ITS OWN, because the weakest
+   *   bespoke impact contributes 139 px and cannot be relied on for any of it (this is
+   *   `castMuzzle`'s argument verbatim, and the 300 px bar is the one it derives:
+   *   282 px is *"inside measurement noise of the floor"*). That rules out 0.30 at
+   *   288 px and leaves 0.40 thin at 1.20x.
+   *
+   *   UPPER — subordinate has to MEAN something, and on this beat it has to mean more
+   *   than it does on the cast beat. A muzzle flash is the same event for every weapon
+   *   — *"the generic flash was never the generic weapon's flavour, it was the MUZZLE"*
+   *   — so an anchor carrying 56% of that beat costs nothing. An IMPACT is where the
+   *   weapon's flavour actually lives (the splash, the shards, the spray), and it is
+   *   the beat every bespoke author invested in. So the anchor must stay a MINORITY of
+   *   the burst it sits under, or the composite is just a slightly smaller generic hit
+   *   with a garnish. 0.60 is a majority on 10 of 16 rows and 0.75 on all 16.
+   *
+   * **0.50: 0.323-0.423 of the generic burst at pitch 58 and 0.352-0.501 at pitch 20 —
+   * a minority on every row at the match camera and on fifteen of sixteen at the lobby
+   * camera (sushi.Rice, 0.501) — with 439 px on the weakest row, 1.46x the floor.**
+   * `castMuzzle`'s own chosen margin was 413/300 = 1.38x, so this is not a looser bar,
+   * it is the same bar re-derived on a different object.
+   *
+   * ⚠️ **Life is NOT shortened, and that is a departure from `castMuzzle` on purpose.**
+   * The cast anchor drops 0.16 s -> 0.13 s because a muzzle flash is a pop and the
+   * bespoke detail is what should linger. Here the longest-lived element is the star
+   * ground decal, which `burst()` deliberately makes outlive the flash *"so it reads as
+   * a mark LEFT BEHIND"* — that mark IS the anchor's job on this beat, so cutting its
+   * dwell would remove the half of the effect worth keeping.
+   *
+   * ⚠️ **The 2.0 `sizeFactor` ceiling is untouched and stays load-bearing.** The anchor
+   * only ever scales DOWN (k < 1), so the hardest possible subordinate anchor is 1.0
+   * and `spawnDeathBurst`'s 2.6 > 2.0 ordering is unaffected.
+   */
+  private impactAnchor(
+    origin: { x: number; z: number },
+    color: string,
+    amount: number,
+    role: 'primary' | 'subordinate',
+  ): void {
+    const k = role === 'primary' ? 1 : IMPACT_ANCHOR_K;
     // `sizeFactor` is the ONE knob every element of `burst()` is multiplied by, so
     // it is also the one number that decides whether a hit is readable. It has been
     // wrong in both directions:
@@ -3388,11 +3559,17 @@ export class VfxLayer {
     // The 2.0 CEILING is unchanged and is load-bearing: `spawnDeathBurst` uses 2.6 and
     // its doc says that number is "a bit more than the hardest possible hit", so the
     // ordering only survives while this cap stays where it is.
-    const sizeFactor = THREE.MathUtils.clamp(0.42 + amount * 0.075, 0.42, 2.0);
+    const sizeFactor = THREE.MathUtils.clamp(0.42 + amount * 0.075, 0.42, 2.0) * k;
     // Shard count widened on the same argument: 3->6 (2.0x) becomes 2->8 (4.0x). Two
     // chunks off a 2-damage chip and eight off an 18-damage smash is a difference a
     // player can see without counting; three against six is not.
-    this.burst(origin, color, sizeFactor, Math.round(THREE.MathUtils.clamp(1 + amount * 0.4, 2, 8)));
+    //
+    // `k` scales this too, not just `sizeFactor` — a subordinate anchor that kept the
+    // full shard count would be a SMALLER burst with the SAME amount of debris in it,
+    // which is denser, not quieter. The 2 floor is the generic recipe's own and is not
+    // scaled: two chunks is what makes a hit read as a hit at all.
+    const shards = Math.max(2, Math.round(THREE.MathUtils.clamp(1 + amount * 0.4, 2, 8) * k));
+    this.burst(origin, color, sizeFactor, shards);
   }
 
   /**
