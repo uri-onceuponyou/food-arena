@@ -312,9 +312,35 @@ const main = async () => {
     log(`\n  hue-contract RULE 2 — "may not repaint more than ~1/3 of the cast's own pixels`);
     log(`  unless it is a death or an ultimate" (src/game/vfx.ts). Bar ${ultimate ? 'EXEMPT (ultimate)' : '33.3%'}:`);
     log(`    ${pad('victim', 14)}${rp('before%', 10)}${rp('after%', 10)}${rp('delta', 10)}${rp('bar', 10)}`);
+    /**
+     * 🚨 A MATTE TOO SMALL TO EXPRESS THE RULE IS NOT A PASSING ROW — IT IS AN
+     *    UNJUDGEABLE ONE, AND THIS FILE PRINTED IT AS GREEN.
+     *
+     * At the pitch-20 close detector `burrito` sits at the edge of frame with an
+     * **8 px** intersection matte. `vg_frame` does not flag it — it is non-empty, so it
+     * clears the emptiness guard — and the row came back `0.00 / 0.00 · inside floor`.
+     * But on an 8 px matte ONE painted pixel is **12.5 percentage points**, which is
+     * coarser than every measured floor in this run (1-12 pp) and a third of the way to
+     * the 33.3% bar on its own. That row could not have gone red whatever the code did:
+     * CLAUDE.md #6's "a known-bad planted where the bug CANNOT EXPRESS ITSELF", arriving
+     * as a green tick rather than as an error.
+     *
+     * The bar is stated rather than felt: to resolve 1 pp the matte needs >= 100 px, and
+     * 200 px gives 0.5 pp — comfortably finer than the floors this run measures. Rows
+     * under it are printed UNJUDGEABLE with their size, never dropped, because a missing
+     * row reads as a passing row too.
+     */
+    const MIN_MATTE = 200;
     for (const v of Object.keys(fa.victimPct ?? {})) {
       const va = fa.victimPct[v], vb = fb.victimPct?.[v];
       if (!vb) { log(`    ${pad(v, 14)} 🔴 missing in the after arm`); continue; }
+      const mA = A.controls?.mattes?.[v]?.matteN ?? null;
+      const mB = B.controls?.mattes?.[v]?.matteN ?? null;
+      if (mA !== null && mB !== null && Math.min(mA, mB) < MIN_MATTE) {
+        log(`    ${pad(v, 14)} UNJUDGEABLE — matte is ${Math.min(mA, mB)} px (< ${MIN_MATTE}); one pixel is `
+          + `${(100 / Math.min(mA, mB)).toFixed(1)} pp, coarser than every floor here`);
+        continue;
+      }
       const bar = va.range + vb.range;
       const d = vb.mean - va.mean;
       const outside = Math.abs(d) > bar;
