@@ -456,6 +456,27 @@ class MenuCharacterStage implements CharacterStage {
         targetHeight: CHARACTER_HEIGHT * 0.52,
         followLerp: 1,
       },
+      // ── THE MENU IS NOT A MATCH, AND IT WAS PAYING A MATCH'S PIXEL BUDGET ────
+      // `quality.ts`'s `pixelRatioCap` (1.25 on `low`) was derived entirely from the
+      // match frame — six fighters, the arena, hazards, the full post chain, ~5.7x
+      // measured overdraw. THIS Stage draws one character, a cove and a podium into a
+      // panel. None of that reasoning describes it, so it now asks for the tier's MENU
+      // ceiling instead. Measured on an emulated iPhone 15 Pro (393x852 CSS,
+      // deviceScaleFactor 3, `tools/tmp/mdpr_probe.mjs`):
+      //
+      //   character portrait   458x202 -> 734x324   into a 1101x487 device box
+      //   home portrait        452x823 -> 724x1318  into a 1085x1977 device box
+      //     i.e. 0.416x linear and 17.3% of native  ->  0.666x and 44.4%
+      //
+      // ⚠️ **NOT A REGRESSION FIX.** 1.25 is bit-identical in every bundle Uri has ever
+      // loaded, including the one he called smooth. A constant cannot regress. It is
+      // the largest measured defect in the frame he named, which is a different claim.
+      //
+      // `maxPixelRatio: 2` below STAYS, and with this line it becomes the BINDING term
+      // of `Stage.effectivePixelRatio`'s `min` on a DPR-3 phone — exactly what
+      // `StageOptions.maxPixelRatio` documents itself as being for. Deleting it would
+      // not "unlock" DPR 3; it would remove the only ceiling scoped to this panel.
+      budget: 'menu',
       maxPixelRatio: 2,
     });
     this.stage.canvas.style.cssText = 'display:block;width:100%;height:100%;';

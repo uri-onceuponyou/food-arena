@@ -8,13 +8,15 @@ Answer any subset. Unanswered items stay on the stated assumption.
 
 ---
 
-## 🔴 OPEN RIGHT NOW — five questions, five one-line answers
+## 🔴 OPEN RIGHT NOW — six questions, six one-line answers
 
-**As of `63407e8`, 2026-08-12; §81 added 2026-08-19.** Everything else on this page is history;
-these are the live ones. **Nothing is blocking** — every one has a default in force and running.
+**As of `63407e8`, 2026-08-12; §81 added 2026-08-19; §82 added 2026-08-20.** Everything else on this
+page is history; these are the live ones. **Nothing is blocking** — every one has a default in force
+and running.
 
 | # | question | in force | what I'd do | cost to reverse |
 |---|---|---|---|---|
+| **§82** | 🆕 **Your menus were drawing 17.3% of the pixels your phone has.** Fixed — the character portrait goes 458x202 -> **734x324** and the 2.40x upscale becomes 1.50x, for **zero extra draw calls**. ⚠️ **It is NOT the regression you reported** — that constant is byte-identical in all five deployed builds, including the one you praised. The cost is **+83.5 MB of GPU memory on home**, and whether an iPhone minds that **cannot be measured in this repo** | **menu cap 2** | **look at the character screen for one minute.** Sharper and stable -> done. Hot, stuttering, or a black screen -> drop `low`'s menu cap 2 -> 1.75 (one number) | one line — `budget: 'menu'` |
 | **§81** | 🆕 **Lollipop's super reaches 400 wu and cannot be dodged.** Your §80 lever 1 says shrink it. The four LYING weapon cards are already fixed; this is the one number behind them that nobody may move unasked | **400 wu** | **shrink it — but it costs Lollipop −26.4 pp paired, and §77 forbids paying that back by re-tuning five other characters.** So it needs your call, not mine | one constant + the 26.4 pp |
 | **§66** | 🔴 **Six-player has NO way in.** Where does the button live? How are the other five chosen? What level are five bots? | QA URL only | **Answer (1) and I'll wire it — ~15 lines.** A "Brawl" tile on home, five bots at your own level, is the smallest coherent version | it is new UI; nothing existing changes |
 | **§58** | ✅ **ANSWERED 2026-08-12 — and by PLAYING it, not by reading this page.** Uri hit the defect in a live match and specified the replacement schedule. **→ §72.** The recommendation on this row was *"keep 30 s"* and it was **WRONG**: it treated the trigger as a tuning choice when the 30 s trigger was **truncating the ring schedule**, which is a bug | — | — | landed in §72 |
@@ -5586,3 +5588,114 @@ a number fix. **One line if you want it.**
 `range >= REACH.ultimateSlam`. That is `lollipop.Giant`, and it is the same false claim the card just
 stopped making, in a second place. **One word.** Reported rather than edited: a peer owns that file.
 
+
+---
+
+## 82. 🆕 Your menus render at **17.3% of the pixels your phone has**. That is now fixed — and the fix costs GPU memory, which is the part you decide.
+
+**Landed 2026-08-20.** `src/render/quality.ts` · `src/render/stage.ts` · `src/ui/screens/charStage.ts`.
+
+### 🔴 FIRST, THE PART THAT IS NOT TRUE, because it was the thing you reported
+
+You said: *"It feels like there is a slight regression is VFX quality. home screen, and more
+specifically character screen seems like the resolution is slightly lower, or something else
+changed."*
+
+**There is no resolution regression.** An 11-agent probe read the code your phone actually
+downloaded, on **all five** deployed bundles, and `pixelRatioCap: 2 / 1.5 / 1.25` is **byte-identical
+in every one — including the build you called *"feels ALOT better than before."*** A constant cannot
+regress. Whatever changed between those two sessions, it was not this.
+
+**But the number it names is real, and it is the largest measured defect in the frame you singled
+out.** That is why you named the menus and not the match: the menus were paying a pixel budget that
+was priced on the *match* frame.
+
+### What was actually happening, measured on an emulated iPhone 15 Pro (393x852 CSS, deviceScaleFactor 3)
+
+| screen | drawing buffer | device-pixel box it is scaled into | drawn | upscale to the glass |
+|---|---|---|---|---|
+| character select | **458x202** | 1101x487 | **17.3%** | **2.40x** |
+| home | **452x1065** | 1085x2556 | **17.4%** | **2.40x** |
+
+Your phone was drawing roughly **one pixel in six** and letting the browser stretch it 2.4x. The 1.25
+cap that produced that was derived entirely from a **match**: six fighters, the whole arena, hazards,
+the full post chain, ~5.7x measured overdraw. **The lobby is one character on a plinth in a small
+panel.** None of that reasoning describes it.
+
+### What it does now
+
+The tier keeps two ceilings instead of one, and a Stage says which workload it is. Same screens, same
+device, same tier:
+
+| screen | before | after | pixels drawn | upscale |
+|---|---|---|---|---|
+| character select | 458x202 | **734x324** | 17.3% -> **44.4%** | 2.40x -> **1.50x** |
+| home | 452x1065 | **724x1704** | 17.4% -> **44.5%** | 2.40x -> **1.50x** |
+| home (landscape) | 452x491 | **724x786** | 17.4% -> **44.5%** | 2.40x -> **1.50x** |
+| **the match** | 491x368 | **491x368 — UNCHANGED** | 17.3% | 2.40x |
+| the roster thumbnails | 416x496 @ ratio 1 | **unchanged** | — | — |
+
+**Draw calls did not move: 347 on home and 329 on character select, before and after, exactly.** Draw
+counts are an EXACT metric here, so "exactly" is the literal claim. Triangles and shader programs are
+unchanged too. This buys resolution without buying geometry.
+
+### 🔴 THE DECISION: it costs GPU memory, and I cannot tell you what that costs on *your* phone
+
+Same measurement, GPU bytes handed to the driver:
+
+| screen | before | after | delta |
+|---|---|---|---|
+| home | 65.31 MB | **148.85 MB** | **+83.5 MB** |
+| character select | 73.96 MB | **122.76 MB** | **+48.8 MB** |
+
+**~89% of home's is one thing: 4x MSAA on a buffer that is now 2.56x bigger.** With MSAA off at the
+same new resolution, home's total is **31.06 MB — cheaper than it is today**, at 2.56x the pixels.
+
+**What I cannot tell you:** whether 148 MB is fine or whether iOS Safari drops the WebGL context.
+Frame time and memory pressure **cannot be measured in this repo** — SwiftShader is not an A17, and
+every number above is a buffer integer or a byte count, which are engine-independent, rather than a
+timing, which is not. ⚠️ And those MB are **cumulative allocations, not resident**: the instrument
+hooks `renderbufferStorage` and has no delete hook, so they are an upper bound.
+
+**Three options, in the order I would try them:**
+
+1. **Ship it as landed and play the menus for one minute.** If the character screen looks sharper and
+   nothing goes black or stutters, you are done. This is the default in force.
+2. **If it feels hot or the screen ever goes black:** drop `low`'s `menuPixelRatioCap` from **2 to
+   1.75**. One number, `quality.ts`. Pixels fall from 2.56x to 1.96x of today.
+3. **If you want the sharpness AND the memory back:** turn MSAA off for menu Stages. That is
+   **−117 MB** on home and it removes the menus' only edge antialiasing — at 2.56x the pixel density,
+   which is exactly the trade that stops being obvious. **A look call, so it is yours, and it needs
+   the `Math.max` bug below fixed first.**
+
+**Cost to reverse any of it: one line.** `budget: 'menu'` in `charStage.ts`.
+
+### 🐞 And a knob that was documented and is NOT CONNECTED
+
+`quality.ts` promised: *"Dropping `msaaSamples` to 2 would halve that renderbuffer and is the obvious
+next knob if a phone turns out to be memory-bound."* **It is not.** `stage.ts:buildPost` reads it as
+`Math.max(4, tier.msaaSamples)` — **a floor**. Every value below 4, including 0, produces 4 samples.
+The knob can only go up.
+
+Found the way these are always found here: a control tree with `msaaSamples: 0` came back
+**byte-identical**, which reads exactly like *"MSAA is free"*, and was **re-derived instead of
+believed**. The false sentence has been struck in `quality.ts` with the measurement that killed it,
+and the floor is now documented at its site. **The floor was NOT removed** — every shipped tier is
+already >= 4 or uses SMAA instead, so removing it changes nothing today and would silently take *all*
+antialiasing off any future tier that wrote 0. Option 3 above is the reason to touch it.
+
+### What was checked, and one thing that was refused
+
+* Verified at **both cameras** — the lobby's `charStage.ts` `pitchDeg: 20`, where you look at a
+  character, and the match's `CameraRig` default 58. The match is measured unchanged, not assumed.
+* Verified in **both orientations**, and `menu_accept` (507/507) and `menu_accept_portrait` (315/315)
+  do not move.
+* **A `minPixelRatio` floor was refused.** A ceiling that becomes a floor would hand a 4x pixel bill
+  to the cheapest phone in the market — the exact device the tier ladder protects. A guard drives a
+  touch phone at DPR 1 and requires it to render at 1.00; it was shown RED against a tree carrying
+  that defect (it reported **400.5% of native** — a 4x bill on a device that asked for 1x).
+* ⛔ **A peer's claim that the roster tiles are a softness source is FALSE on your phone** and was
+  deliberately not "fixed". `thumbs.ts` bakes a fixed 416x496 PNG; DPR never enters. At 393 CSS px
+  wide a tile is ~85 CSS px ~ 255 device px, so 416 > 255 and the tile is **downsampled, not
+  upscaled**. It is a real defect on desktop and tablet, where the tile clamps to 180 CSS px. Not
+  your bug.

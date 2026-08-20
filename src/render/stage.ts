@@ -483,11 +483,38 @@ export interface StageOptions {
    * Cap the device pixel ratio. Screenshots use 2 for crisp critic review.
    *
    * This is a caller's ADDITIONAL ceiling, never a floor: the effective ratio is
-   * `min(devicePixelRatio, this, tier.pixelRatioCap)`. A review harness asking for 2
-   * on a phone still gets the phone's tier cap, because the alternative is a harness
-   * that renders at a resolution the game never uses.
+   * `min(devicePixelRatio, this, tier's cap for this Stage's `budget`)`. A review
+   * harness asking for 2 on a phone still gets the phone's tier cap, because the
+   * alternative is a harness that renders at a resolution the game never uses.
+   *
+   * ⚠️ The middle term of that `min` used to read `tier.pixelRatioCap` unconditionally.
+   * It now reads whichever of the tier's two caps `budget` selects — see below. The
+   * sentence above is otherwise unchanged and still true: this is a CEILING.
    */
   maxPixelRatio?: number;
+  /**
+   * **Which of the tier's two pixel-ratio ceilings this Stage is priced against.**
+   * Default `'match'`, i.e. exactly what every existing caller already got.
+   *
+   * ── The whole argument, in one paragraph ────────────────────────────────────
+   * `quality.ts`'s `pixelRatioCap` was derived from the MATCH frame: six fighters, the
+   * arena, hazards, the full post chain, ~5.7x measured overdraw. `low` pays 1.25 for
+   * that. **A menu Stage draws one character on a plinth into a small panel**, and none
+   * of the reasoning that produced 1.25 describes it — yet the lobby was paying it, so
+   * on an iPhone 15 Pro the character portrait was drawn at 458x202 into a 1101x487
+   * device-pixel box: **0.416x linear, 17.3% of native, upscaled 2.40x to the glass**.
+   * That is the largest measured defect in the frame Uri singled out, and it is the
+   * only thing that explains why he named *"home screen, and more specifically
+   * character screen"* rather than the match.
+   *
+   * ⚠️ **It is NOT a regression.** The 1.25 constant is bit-identical in all five
+   * deployed bundles, including the one he praised. A constant cannot regress.
+   *
+   * 🚨 **This changes WHICH cap is in the `min`. It must never introduce a FLOOR.**
+   * See `effectivePixelRatio` — the invariant is that no Stage can ever draw at more
+   * than `min(devicePixelRatio, maxPixelRatio)`, whatever any tier says.
+   */
+  budget?: 'match' | 'menu';
 }
 
 /**
@@ -713,6 +740,8 @@ export class Stage {
   private profile: TierProfile = tierProfile();
   /** The caller's own pixel-ratio ceiling, if it gave one. Never a floor — see `StageOptions`. */
   private readonly maxPixelRatio: number;
+  /** Which of the tier's two pixel-ratio ceilings applies. See `StageOptions.budget`. */
+  private readonly budget: 'match' | 'menu';
   /** `postFx === 'grade'` — remembered so the chain can be rebuilt on a tier change. */
   private gradeOnly = false;
   /** A caller's explicit `shadowMapSize`. Pinned means pinned — a tier change must not move it. */
@@ -747,6 +776,9 @@ export class Stage {
     this.container = opts.container ?? document.body;
     this.canvas = opts.canvas ?? document.createElement('canvas');
     this.maxPixelRatio = opts.maxPixelRatio ?? Infinity;
+    // 'match' by default: every Stage that existed before this option keeps the exact
+    // ceiling it had. Only a caller that opts in is repriced.
+    this.budget = opts.budget ?? 'match';
     this.pinnedShadowMapSize = opts.shadowMapSize ?? null;
     // `postFx: false` needs no flag of its own: it leaves `composer` null, and
     // `applyQuality` only ever rebuilds a chain that already exists.
@@ -1039,10 +1071,32 @@ export class Stage {
    *
    * `maxPixelRatio` stays a caller ceiling and never a floor: a review harness that
    * pins 2 still gets the tier cap on a phone. `min` of everything, always.
+   *
+   * ── AND THE TIER'S CAP IS NOW SCOPED TO THE WORKLOAD ────────────────────────
+   * The third term used to be `this.profile.pixelRatioCap` unconditionally. That
+   * number was priced on a MATCH frame and the menus were paying it, so the lobby
+   * portrait rendered at 17.3% of the device pixels it was scaled into (458x202 into
+   * 1101x487 on an iPhone 15 Pro). `budget` selects which of the tier's two ceilings
+   * applies; `'match'` is the default and reproduces the old value exactly.
+   *
+   * 🚨 **THE INVARIANT, and it is the reason this is a `min` and not a lookup:**
+   * whatever `budget` selects, this function can never return more than
+   * `min(devicePixelRatio, this.maxPixelRatio)`. A `minPixelRatio` option was proposed
+   * for this same defect and correctly REFUSED, because a floor hands a 4x pixel bill
+   * to exactly the device the tier ladder had just protected. **If a future edit makes
+   * this able to exceed that bound, the edit is wrong** — asserted end to end by
+   * `tools/tmp/mdpr_probe.mjs --floorguard`, which drives a touch phone at
+   * `deviceScaleFactor 1` (below every cap in the system) and requires the live
+   * renderer to report 1.00. That arm was shown RED against a worktree carrying the
+   * `Math.max(menuCap, Math.min(...))` defect; a guard never shown to fail is not a
+   * guard.
    */
   private effectivePixelRatio(): number {
     const dpr = typeof window === 'undefined' ? 1 : (window.devicePixelRatio || 1);
-    return Math.min(dpr, this.maxPixelRatio, this.profile.pixelRatioCap);
+    const tierCap = this.budget === 'menu'
+      ? this.profile.menuPixelRatioCap
+      : this.profile.pixelRatioCap;
+    return Math.min(dpr, this.maxPixelRatio, tierCap);
   }
 
   /**
@@ -1154,6 +1208,25 @@ export class Stage {
     // resolves on-chip on every tile-based mobile GPU and costs no pass, no program
     // and no texture.
     const smaa = !gradeOnly && tier.smaa;
+    // 🚨 `Math.max(4, …)` IS A FLOOR, SO `msaaSamples` IS A KNOB THAT ONLY GOES UP.
+    // Every value below 4 written in `quality.ts` — including 0 — produces 4 samples.
+    // That is not obvious from the tier table, and `quality.ts` carried a documented
+    // mitigation ("drop `msaaSamples` to 2 if a phone turns out to be memory-bound")
+    // that this line silently made impossible; the claim has been struck there with the
+    // measurement that killed it.
+    //
+    // Found 2026-08-20 by the menu-pixel-ratio pass: a control tree with
+    // `low.msaaSamples: 0` returned BYTE-IDENTICAL GPU memory, i.e. a known-bad planted
+    // where the bug cannot express itself. With this floor removed on the same tree and
+    // the same 724x1704 menu buffer, home's renderbuffers went 131.60 MB in 8 ->
+    // 13.82 MB in 4 — so MSAA is ~89% of them and the knob simply was not connected.
+    //
+    // KEPT, not fixed, and deliberately: every shipped tier is either SMAA-gated or
+    // already >= 4, so removing it changes no behaviour today, while a future tier that
+    // wrote 0 would lose ALL antialiasing (the renderer's own `antialias: true` does
+    // nothing once a composer exists — see the paragraph above). Whether the menu should
+    // trade MSAA for resolution is a LOOK question and is parked in
+    // `docs/DECISIONS-FOR-URI.md`, not decided here.
     const msaa = smaa ? 0 : Math.max(4, tier.msaaSamples);
     const composer = new EffectComposer(this.renderer, {
       frameBufferType: tier.halfFloatBuffers ? THREE.HalfFloatType : THREE.UnsignedByteType,

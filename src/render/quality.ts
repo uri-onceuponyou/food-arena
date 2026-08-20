@@ -54,6 +54,48 @@ export interface TierProfile {
    * pixels is shaded ~6 times.
    */
   readonly pixelRatioCap: number;
+  /**
+   * The same ceiling for a **menu** Stage — one character on a plinth in a small
+   * panel — rather than a match.
+   *
+   * ── Why a second number, and not just a bigger `pixelRatioCap` ───────────────
+   * `pixelRatioCap` above was priced entirely on the MATCH: six fighters, the arena,
+   * hazards, the full post chain, and this project's measured ~5.7x post-chain
+   * overdraw. Every sentence justifying 1.25 is a sentence about that frame. **None of
+   * it transfers to the lobby**, which draws one character, a cyclorama and a podium
+   * into a panel that is a fraction of the screen — and which is exactly where Uri
+   * looks at a character and where every one of his reject sheets came from.
+   *
+   * ⚠️ **This is NOT a regression fix and must not be described as one.** `1.25` is
+   * bit-identical in all five deployed bundles, read off the code his phone actually
+   * downloaded, INCLUDING the build he praised as *"feels ALOT better than before"*.
+   * **A constant cannot regress.** What it is: the largest measured defect in the menu
+   * frame — the character portrait drawn at **0.416x linear, 17.3% of the device
+   * pixels it is scaled into**, upscaled 2.40x to the glass on an iPhone 15 Pro
+   * (`tools/tmp/mdpr_probe.mjs`, emulated 393x852 @ deviceScaleFactor 3).
+   *
+   * ── Why 2 on EVERY tier, including `low` ────────────────────────────────────
+   * The tier ladder exists to protect a phone from a match frame. A menu frame is a
+   * different workload and gets a ceiling scoped to it. 2 rather than 3 because
+   * `charStage.ts` already passes `maxPixelRatio: 2` — the caller's own ceiling, and
+   * with this change it becomes the BINDING term, which is precisely what
+   * `StageOptions.maxPixelRatio` says it is for. Raising this above 2 therefore does
+   * nothing on the lobby today; it is written per tier so a future menu Stage without
+   * a caller cap still has one.
+   *
+   * 🚨 **THIS IS A CEILING AND NEVER A FLOOR.** `Stage.effectivePixelRatio` is `min` of
+   * everything, always. A `minPixelRatio` was proposed and correctly refused: a floor
+   * would hand a 4x pixel bill to a device the tier system had just protected. A phone
+   * reporting DPR 1 must still render at 1.00 — asserted by
+   * `mdpr_probe.mjs --floorguard`, which was shown RED against a worktree carrying the
+   * `Math.max` defect.
+   *
+   * ⚠️ **The ship/no-ship on the `low` value is Uri's, not this file's** — see
+   * `docs/DECISIONS-FOR-URI.md`. Frame time cannot be measured in this repo
+   * (SwiftShader is not an A17), so the pixel arithmetic below is quotable and the
+   * thermal answer is not. A conservative variant is `low: 1.75`.
+   */
+  readonly menuPixelRatioCap: number;
   /** Scale on the shadow map's edge. 1 = 2048 in a match, i.e. exactly what shipped. */
   readonly shadowMapScale: number;
   /** Shadows at all. True on every shipped tier — see the note in `TIERS`. */
@@ -113,8 +155,41 @@ export interface TierProfile {
  * DESKTOP table `medium` totals 99.14 MB against `high`'s 95.13 — the 4x multisampled
  * renderbuffer (59.71 MB vs 19.00) costs more than the SMAA passes' render targets
  * save. It only comes out ahead once the DPR cap shrinks the buffer under it, which is
- * exactly the device it is for. Dropping `msaaSamples` to 2 would halve that
- * renderbuffer and is the obvious next knob if a phone turns out to be memory-bound.
+ * exactly the device it is for.
+ *
+ * 🚨 **THE SENTENCE THAT USED TO CLOSE THAT PARAGRAPH IS FALSE, AND IT IS KEPT HERE
+ * WITH THE MEASUREMENT THAT KILLED IT.** It read, verbatim:
+ *
+ *     "Dropping `msaaSamples` to 2 would halve that renderbuffer and is the obvious
+ *      next knob if a phone turns out to be memory-bound."
+ *
+ * **`msaaSamples` CANNOT BE DROPPED BELOW 4.** `stage.ts:buildPost` reads it as
+ * `const msaa = smaa ? 0 : Math.max(4, tier.msaaSamples)` — a FLOOR of 4. Every value
+ * below 4 written here, including 0, produces exactly 4 samples. This knob can only
+ * go up.
+ *
+ * Found 2026-08-20 by the menu-pixel-ratio pass, and found the way rule 6 says these
+ * are always found: a control returned a NULL result and was re-derived instead of
+ * believed. A worktree with `low.msaaSamples: 0` measured **byte-identical** GPU
+ * memory to one with 4 — which reads exactly like "MSAA costs nothing here" and is
+ * instead a **known-bad planted where the bug cannot express itself**. Removing the
+ * `Math.max` floor as well, on the same tree, at the same 724x1704 menu buffer:
+ *
+ *   home        renderbuffers 131.60 MB in 8  ->  13.82 MB in 4   (total 148.85 -> 31.06)
+ *   characters  renderbuffers 105.68 MB in 15 ->  24.04 MB in 9   (total 122.76 -> 41.12)
+ *
+ * So MSAA is ~89% / ~78% of the menu's renderbuffer bytes, the knob that was supposed
+ * to reach it does not, and `perf.mjs`'s renderbuffer accounting is valid (that run is
+ * its known-bad — an instrument blind to MSAA would have printed the same number).
+ * ⚠️ Those MB are CUMULATIVE ALLOCATIONS, not resident: `perf.mjs` hooks
+ * `renderbufferStorage`/`…Multisample` and has no `deleteRenderbuffer` hook, so the
+ * counts (8, 15) include reallocation across resizes. The RATIO is sound; the absolute
+ * figure is an upper bound.
+ *
+ * The floor is left in place deliberately — every shipped value is >= 4 or SMAA-gated,
+ * so removing it changes nothing today and would silently take ALL antialiasing off any
+ * future tier that wrote 0. It is now DOCUMENTED at its site instead. Parked for Uri in
+ * `docs/DECISIONS-FOR-URI.md` with the numbers above.
  *
  * ── AND WHAT NO TIER COSTS: COLOUR ──────────────────────────────────────────
  * `docs/LESSONS.md` §7 — cumulative desaturation is a live concern on this project and
@@ -187,6 +262,7 @@ export const TIERS: Readonly<Record<RenderTier, TierProfile>> = {
     label: 'High',
     blurb: 'Everything on. Full resolution, bloom and smooth edges.',
     pixelRatioCap: 2,
+    menuPixelRatioCap: 2,
     shadowMapScale: 1,
     shadows: true,
     bloom: true,
@@ -200,6 +276,7 @@ export const TIERS: Readonly<Record<RenderTier, TierProfile>> = {
     label: 'Balanced',
     blurb: 'Lower resolution with hardware edge smoothing. Keeps bloom.',
     pixelRatioCap: 1.5,
+    menuPixelRatioCap: 2,
     shadowMapScale: 0.75,
     shadows: true,
     bloom: true,
@@ -213,6 +290,7 @@ export const TIERS: Readonly<Record<RenderTier, TierProfile>> = {
     label: 'Battery saver',
     blurb: 'Lower resolution, no bloom, softer shadows. Best for phones.',
     pixelRatioCap: 1.25,
+    menuPixelRatioCap: 2,
     shadowMapScale: 0.5,
     shadows: true,
     bloom: false,
