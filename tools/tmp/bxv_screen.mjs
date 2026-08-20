@@ -1,0 +1,17 @@
+import { chromium } from 'playwright';
+const a=process.argv, get=(k,d)=>a.includes(k)?a[a.indexOf(k)+1]:d;
+const BASE=process.env.PREVIEW_BASE??get('--url',null);
+const OUT=get('--out','tools/tmp/bxv_shots/screen.png');
+const L=['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader','--enable-webgl','--ignore-gpu-blocklist','--disable-gpu-sandbox'];
+const b=await chromium.launch({args:L});
+const page=await b.newPage({viewport:{width:393,height:852},deviceScaleFactor:3});
+await page.route('**/@vite/client',(r)=>r.fulfill({status:200,contentType:'application/javascript',body:'export const createHotContext=()=>({accept(){},dispose(){},on(){},off(){},send(){},invalidate(){},prune(){},acceptExports(){},data:{}});export const injectQuery=(u)=>u;export const updateStyle=()=>{};export const removeStyle=()=>{};export const ErrorOverlay=class{};export default {};'}));
+await page.goto(`${BASE}/?screen=characters`,{waitUntil:'load',timeout:120000});
+await page.waitForFunction('window.__screen==="characters" && window.__screenReady===true',null,{timeout:180000});
+await page.click('[data-char="hamburger"]');
+await page.waitForFunction('window.__charStage && window.__charStage().id==="hamburger"',null,{timeout:60000});
+await page.waitForTimeout(2000);
+await page.screenshot({path:OUT});
+const box=await page.evaluate(()=>{const c=document.querySelector('canvas');const r=c.getBoundingClientRect();return {css:[r.width,r.height],buf:[c.width,c.height],top:r.top,left:r.left};});
+console.log(JSON.stringify(box));
+await b.close();
