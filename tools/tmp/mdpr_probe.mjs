@@ -142,6 +142,15 @@ const PROFILES = {
     screen: { width: 393, height: 852 },
     deviceScaleFactor: 1, isMobile: true, hasTouch: true, userAgent: IPHONE_UA,
   },
+  // A TABLET. `detectTier` resolves `medium` here (touch-primary, short edge 768 > 500),
+  // and `medium`'s MATCH cap is 1.5 against a menu cap of 2 — so this is the one device
+  // class other than the phone where `budget: 'menu'` changes anything, and it is
+  // measured rather than derived from the arithmetic.
+  tablet: {
+    viewport: { width: 1024, height: 768 },
+    screen: { width: 768, height: 1024 },
+    deviceScaleFactor: 2, isMobile: true, hasTouch: true,
+  },
   // A genuine desktop: no touch, no isMobile, DPR 1. Must resolve `high`.
   desktop: {
     viewport: { width: 1280, height: 800 },
