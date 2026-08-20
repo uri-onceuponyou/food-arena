@@ -37,6 +37,35 @@
  *  §C NON-EMPTY BEFORE ASSERTING. `[].every()` is true and that vacuity has fired at
  *     least seven times in this repo. Every filtered set is asserted non-empty first.
  *
+ * ── ⚠️ SUPERSEDED AS THE HEADLINE BY `tools/tmp/bw_brow.mjs`, WHICH ALREADY EXISTED ──
+ * This tool works off a rendered crop, so its gap is in crop pixels and needs a ratio to
+ * mean anything. `bw_brow.mjs` measures the SAME quantity off named meshes in
+ * EYE-HEIGHT units (`gapFrac`) and is already validated 6/6 on this character, with a
+ * hidden-brow arm that REFUSES to print a gap rather than printing 0. Run on the two
+ * shipped bundles (static-served dist-deploy, `--id hamburger --brow brow --lid eye_lash
+ * --eye eye`), it gives the numbers this file's ratio was groping at:
+ *
+ *   camera          arm                gapFrac L / R      brow px    spanFrac L / R
+ *   lobby p20       062513c^ (liked)   0.4017 / 0.4348      4179     0.839 / 0.830
+ *   lobby p20       062513c  (LIVE)    0.0855 / 0.0783      2962     0.907 / 0.883
+ *   match p58       062513c^           0.5248 / 0.5189      5589     0.878 / 0.860
+ *   match p58       062513c  (LIVE)    0.2079 / 0.1981      3217     0.919 / 0.900
+ *
+ * The `062513c^` lobby row reproduces the 47/50 and 0.4017/0.4348 that
+ * `hamburger.ts`'s own comment records for the pre-fix state, TO THE DIGIT — which is
+ * how I know the instrument is pointed at the right tree and the right meshes. That
+ * cross-check is worth more than any selftest in this file.
+ *
+ * WHAT IT SHOWS: `062513c` was a real fix for a real defect Uri himself reported
+ * (*"Hamburger — eyebrows are not good"*; the brows projected to hFrac 0.99 of the
+ * crown, i.e. on TOP of his head). It over-closed, and it over-closed ASYMMETRICALLY
+ * BETWEEN THE TWO CAMERAS: at the match camera it lands at gapFrac ~0.20, at the LOBBY
+ * camera ~0.08 — 2.4x tighter, at the pitch where Uri actually looks at his character.
+ * `hamburger.ts:1310` warns in its own words that "a brow resting ON the lash reads as a
+ * second lash line rather than as a brow", and 0.08 of an eye-height IS resting on it.
+ * The commit message even says the new brow "was a mirror aimed at the match camera" —
+ * CLAUDE.md rule 3's cheat, called out by its own author and shipped anyway.
+ *
  * Read-only. Owns nothing but its own output.
  *
  * Usage:
