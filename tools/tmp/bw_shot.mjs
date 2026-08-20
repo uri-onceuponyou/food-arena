@@ -26,8 +26,13 @@
  * not have, because it classified a LIT frame by hue.
  *
  * ── TWO CAMERAS, AND THE PITCH IS A FLAG ─────────────────────────────────────
- *   `src/ui/screens/charStage.ts:451`  pitchDeg 20, subjectFill 0.60 — the LOBBY
- *   `src/render/camera.ts:265`         pitchDeg 58                   — the MATCH
+ *   `src/ui/screens/charStage.ts:451`      pitchDeg 20, subjectFill 0.60 — the LOBBY
+ *   `src/render/camera.ts` `CameraRig`'s constructor, `opts.pitchDeg ?? 58` — the MATCH
+ * ⚠️ That second line used to read `src/render/camera.ts:265`, and `:265` is `fairSolveAt`,
+ * a distance helper that takes `pitchDeg` as an ARGUMENT and defaults nothing. The same
+ * wrong line number sat in `CLAUDE.md` for a session and was fixed in `67d58d8` by an
+ * agent re-deriving it. CITE THE SYMBOL: line numbers rot, and a rotted one sends the
+ * next reader to a function that looks like it could plausibly be the one.
  * `preview.html?piece=character` builds a real `frameMode:'subject'` rig, so pitch 20
  * frames a character rather than the empty frame a bare `pitchDeg=20` on a `fair` rig
  * produces. The pitch is printed on every line and written into the sidecar, so a

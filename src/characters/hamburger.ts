@@ -1336,8 +1336,65 @@ export class HamburgerCharacter extends BaseCharacter {
       // because the two curves disagree. Fixing the curve fixes the gap.
       // `z` 0.012 -> 0.006: the stand-off no longer has to cover a tube's own radius,
       // and 0.006 is margin over the 0.0139 m sag computed in `browStroke`'s header.
+      //
+      // ── 🚨 THAT FIX OVERSHOT: 0.092 MERGED THE BROW INTO THE LASH. 0.092 -> 0.120 ──
+      // Kept above rather than rewritten, because both halves of it are still true and
+      // the correction is to the AMOUNT, not to the reasoning.
+      //
+      // ⚠️ AND THE TABLE ABOVE IS MEASURED AGAINST THE WRONG DENOMINATOR — read it as
+      // history, not as a number to compare against. `bw_brow.mjs` matches parts by
+      // SUBSTRING, this character's sclera is named exactly `eye`, and `eye_lash`
+      // CONTAINS `eye` — so `--eye eye` claimed the lash as well, painted it last, and
+      // the tool reported `lid = 0 px` on four runs (its `meshes.lid` was 2 the whole
+      // time and was never printed outside `--selftest`). Two consequences, both silent:
+      // its `gapPx` was a brow-to-LASH gap under a brow-to-sclera label, and `gapFrac`
+      // divided it by the height of the merged brow+lash+sclera mass. A mesh claimed by
+      // two specs is now FATAL there, `=exact` specs exist for this face, and a
+      // three-term `bandFrac` is REFUSED when a term is missing (11/11 known-bads).
+      //
+      // Re-measured with the fixed tool, `--brow =brow --lid =eye_lash --eye =eye`, on
+      // DETACHED WORKTREES. `lidGap` is brow-bottom to LASH-top column-wise, over the
+      // sclera's own height — the merge statistic, because what a viewer calls "the brow
+      // has merged into the eye" is the brow touching the LASH, not the white:
+      //
+      //   browG.y   camera   lidGap px L/R   lidGapFrac L/R     reads as
+      //   0.112*    p20        47 / 50       0.5341 / 0.5814    on top of his head
+      //    (torus)  p58        53 / 55       0.7067 / 0.5670
+      //   0.092     p20        10 /  9       0.1136 / 0.1047    MERGED with the lash
+      //             p58        21 / 21       0.2800 / 0.2165    (p58 alone read fine)
+      //   0.120     p20        22 / 20       0.2500 / 0.2326    a brow over a lash
+      //             p58        33 / 34       0.4400 / 0.3505
+      //   0.135     p20        28 / 27       0.3182 / 0.3140    drifting back up
+      //             p58        39 / 40       0.5200 / 0.4124
+      //
+      // 🚨 THE TWO CAMERAS DISAGREE HERE, AND IT IS NOT A 3D INTERSECTION. The brow's
+      // world z is 0.5398..0.5700 and the lash's is 0.5861..0.6809 — they do not
+      // overlap in z at all, so nothing passes through anything. The brow sits HIGHER on
+      // the dome and therefore FURTHER BACK, so pitch 20 projects it DOWN onto the lash
+      // while pitch 58 pulls it clear. p58 was already reading correctly at 0.092; the
+      // lobby was not. So this is a genuine two-camera trade and it was settled on the
+      // lobby, which is where Uri looks at a character and where he reported it.
+      // 0.120 was chosen off the PICTURES, not off the arithmetic: at 0.135 the p20 band
+      // is wide and the p58 brows start drifting back toward the sesame seeds.
+      //
+      // ⚠️ AND THE SPECULAR DEFECT `browGeometry` DOCUMENTS IS **NOT** RE-OPENED — which
+      // was the one real risk in moving this, and it is checked rather than assumed.
+      // `tools/tmp/bx_specular.mjs` (4/4; its MIRROR arm forces roughness 0.05 on the
+      // live material and reproduces the reported symptom exactly — ONE side only,
+      // greyFrac 0.137 and max luma 1.000 on L while R stays 0.000), pitch 58, yaws
+      // 0/20/40/60/90, brow luma over its own rendered mask:
+      //
+      //   yaw            0        20        40        60        90
+      //   0.092  L max  0.1642  0.1639   0.1667   0.1832   0.1986   greyFrac 0.000 all
+      //   0.120  L max  0.1639  0.1639   0.1667   0.1832   0.1986   greyFrac 0.000 all
+      //
+      // Unchanged to four decimals, and it is unchanged BY CONSTRUCTION: `browG` is a
+      // child of `faceSideG`, whose orientation is the tangent frame at hFrac 0.62 and
+      // is fixed. Translating along that plane does not rotate the plate, so the plate's
+      // normals — the whole of the mirror condition — are invariant under this edit.
+      // The thing that WOULD re-open it is changing `addCrownDecal`'s hFrac. Don't.
       const browG = new THREE.Group();
-      browG.position.set(0, 0.092 * faceScale, 0.006 * faceScale);
+      browG.position.set(0, 0.120 * faceScale, 0.006 * faceScale);
       faceSideG.add(browG);
       // ── ⚠️ THE BROW WAS NEVER ARCHED. IT WAS A COMMA. ─────────────────────────
       // `faceArc()` centres its arc on local +X (see its own doc comment) and the
