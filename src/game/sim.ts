@@ -98,10 +98,13 @@ import {
 } from './rules.ts';
 import type { ArenaDefinition } from '../arena/types.ts';
 import type {
-  Controller, Fighter, FighterId, GameEvent, MatchInput, MatchInputs, MatchState, Sighting, Splat,
-  TrailMark, Vec2,
+  Controller, Fighter, FighterId, GameEvent, MatchInput, MatchInputs, MatchState, Projectile,
+  Sighting, Splat, TrailMark, Vec2,
 } from './state.ts';
-import { createFighter, fighterBit, isCasting, MAX_FIGHTERS, MIN_FIGHTERS, movementLocked, sightingIndex } from './state.ts';
+import {
+  createFighter, fighterBit, isCasting, isLivingOpponentOf, MAX_FIGHTERS, MIN_FIGHTERS,
+  movementLocked, sightingIndex,
+} from './state.ts';
 import { applyDamage, attemptAttack, isOnOwnTrail, resolveDueCast } from './combat.ts';
 import { boxesOverlap, isHidden, isVisibleFrom, terrainSlowAt, tryMove } from './movement.ts';
 import { stepAI } from './ai.ts';
@@ -1260,6 +1263,67 @@ function spawnSplat(state: MatchState, x: number, y: number, events: GameEvent[]
   events.push({ type: 'splat-created', x, y });
 }
 
+/**
+ * ── 🚨 THE FIGHTER THIS PROJECTILE STRIKES — WHOEVER IT IS, NOT WHO IT WAS AIMED AT ──
+ *
+ * `stepProjectiles` used to ask one question, and it is kept here because the rule it
+ * stated is not so much reversed as **narrowed to what it was always really about**:
+ *
+ *   > `if (target.hp > 0 && Math.hypot(p.x - target.x, p.y - target.y) < hitRadius)`
+ *
+ * where `target` was `state.fighters[p.targetId]` and nobody else. **AT TWO SEATS "HITS
+ * ITS TARGET" AND "HITS WHOEVER IT STRIKES" ARE THE SAME SENTENCE** — the only living
+ * opponent is the target — so the defect could not express itself and every one of this
+ * file's two-seat assertions passed throughout. `MAX_FIGHTERS` is 6 and Uri plays
+ * six-player: above two seats they come apart, and what came apart was **body-blocking**.
+ * Standing between a shooter and their target did nothing; a stray shot could not hit a
+ * bystander; a homing volley curved through four bodies to reach the one it was aimed at.
+ * Sixth instance of this repo's six-seat class (the result card, corpse input, shake
+ * proximity, seat order, and the melee half of this very mechanic at `3483d23`).
+ *
+ * ⚠️ **THE VICTIM SET GREW; THE GEOMETRY DID NOT.** The same comparison, against the same
+ * `Fighter.hitRadius` — it is just asked of every living opponent of the OWNER rather than
+ * of one slot. That is what makes the two-seat stream bit-identical rather than merely
+ * equivalent (`sim.test.mjs` §36(g), `tools/tmp/bb_block.mjs --bitid` over real matches).
+ *
+ * ⚠️ **NEAREST, NOT SLOT-FIRST — AND UNLIKE THE MELEE BRANCH IT IS *ONE* VICTIM.**
+ * `combat.ts:deliverWeapon` hits EVERY opponent in its arc because a swing is an AREA and
+ * one instant. A projectile is a single body that the impact consumes, so it strikes the
+ * fighter it is most inside and stops; hitting two at once would be a piercing shot, which
+ * is a design change and not this fix. Ties (an exact float tie between two distances, not
+ * merely two bodies overlapping) fall to the lowest slot, because the scan keeps a strict
+ * `<` over `state.fighters` — the sim's one iteration order, and no `Array.prototype.sort`
+ * anywhere near a determinism-critical decision.
+ *
+ * ⚠️ **THE OWNER IS EXCLUDED BY `isLivingOpponentOf`, WHICH IS THE SHARED PREDICATE.** The
+ * melee loop and `nearestLivingOpponent` already use it; a private copy here — "not me,
+ * alive, hp above zero" — is `ai.ts`'s oldest and most expensive shape, one rule with two
+ * implementations, and the version that would hurt is specific: a shot that hit its own
+ * shooter, or one that swept up a corpse. ⚠️ Note it tests `alive` where the old line
+ * tested `hp > 0`; `combat.ts:applyDamage` is the only writer of `alive` and sets it false
+ * exactly at `hp === 0`, so the two predicates agree on every state the sim can be in —
+ * §36(g)'s bit-identity arm is what actually establishes that, over real matches.
+ *
+ * ⚠️ **NO VISIBILITY TEST, DELIBERATELY.** Homing STEERING asks `isVisibleFrom` because
+ * aiming is a perception problem; being hit is not. A shot that flew through a fighter
+ * standing in a bush would make concealment a shield against physics, and neither the
+ * melee branch nor the trail asks who can see whom either.
+ */
+function projectileVictim(state: MatchState, p: Projectile, owner: Fighter): Fighter | null {
+  let best: Fighter | null = null;
+  let bestDist = Infinity;
+  for (const f of state.fighters) {
+    if (!isLivingOpponentOf(f, owner)) continue;
+    const d = Math.hypot(p.x - f.x, p.y - f.y);
+    if (d >= f.hitRadius) continue;
+    if (d < bestDist) {
+      bestDist = d;
+      best = f;
+    }
+  }
+  return best;
+}
+
 function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): void {
   for (let i = state.projectiles.length - 1; i >= 0; i--) {
     const p = state.projectiles[i];
@@ -1268,11 +1332,19 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
     // `state[p.targetRole]` plus `p.targetRole === 'player' ? HIT_RADIUS_VS_PLAYER :
     // HIT_RADIUS_VS_ENEMY` — a property of the target expressed as a two-way branch on a
     // seat name, correct at N=2 and meaningless at N=3. See `Fighter.hitRadius`.
+    //
+    // ⚠️ **`target` IS NOW THE AIM, NOT THE VICTIM.** It is read by the homing steer and by
+    // the range budget's frame — the two things that are genuinely about *who this shot is
+    // chasing* — while who it HITS is `projectileVictim` above. The hit radius moved with
+    // the victim, because it is a property of the fighter being struck and there is no
+    // longer one candidate to hoist it from.
     const target = state.fighters[p.targetId];
-    const hitRadius = target.hitRadius;
+    const owner = state.fighters[p.ownerId];
 
     // Egg's Hatch!: once arrived, strikes repeatedly at peckInterval instead of
-    // continuing to travel.
+    // continuing to travel. `target` is the fighter it LATCHED ONTO — see the retarget at
+    // the strike below, which is what keeps a pecking projectile pecking the body it
+    // actually hit rather than the one it was aimed at.
     if (w.peckHits && p.arrived) {
       if (target.hp <= 0) {
         removeProjectile(state, i, 'expired', events);
@@ -1377,8 +1449,30 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
       continue;
     }
 
-    if (target.hp > 0 && Math.hypot(p.x - target.x, p.y - target.y) < hitRadius) {
-      applyDamage(state, target, p.damage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: p.ownerId }, events);
+    const victim = projectileVictim(state, p, owner);
+    if (victim !== null) {
+      // ── THE PROJECTILE'S TARGET BECOMES WHOEVER IT HIT ────────────────────────
+      //
+      // Written here rather than as a new `Projectile` field on purpose. A new field would
+      // be a second statement of "which fighter is this shot resolving against", and it
+      // would also make every bit-identity differ in the repo report a divergence at two
+      // seats where nothing changed (`conceal_lab --bitid` and friends walk state with
+      // `Object.keys`). At N=2 `victim === target` always, so this branch never fires and
+      // the digest is untouched.
+      //
+      // ⚠️ **`targetRole` MOVES WITH IT.** `net/wire.ts` asserts `p.targetRole ===
+      // roleOfSlot(p.targetId)` as a mirror invariant on every synced frame; updating one
+      // and not the other would have produced a `mirror/projectile-target` fault in the
+      // netcode validator and nowhere else, which is the quietest possible place for it.
+      //
+      // Nothing downstream re-reads it for a NON-peck weapon — the projectile is removed
+      // on the next line — so the observable effect is exactly the one that is wanted:
+      // Egg's Hatch! latches onto the body it struck.
+      if (victim !== target) {
+        p.targetId = victim.id;
+        p.targetRole = victim.role;
+      }
+      applyDamage(state, victim, p.damage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: p.ownerId }, events);
       if (w.splatter) spawnSplat(state, p.x, p.y, events);
       if (w.peckHits) {
         p.arrived = true;

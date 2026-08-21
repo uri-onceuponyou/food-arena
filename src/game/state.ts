@@ -561,9 +561,26 @@ export interface Projectile {
   /** Slot of the fighter that fired it. Authoritative; `ownerRole` mirrors it. */
   ownerId: FighterId;
   /**
-   * Slot of the only fighter this projectile can hit. Authoritative; `targetRole` mirrors
-   * it, and `sim.ts:stepProjectiles` resolves the victim through `state.fighters[targetId]`
-   * rather than through a seat name.
+   * Slot of the fighter this projectile is AIMED at — its homing target, and the frame
+   * `traveled` is denominated in.
+   *
+   * ── ⚠️ IT USED TO SAY, AND THE OLD WORDING IS KEPT BECAUSE IT WAS TRUE OF THE SIM IT
+   * DESCRIBED: ──────────────────────────────────────────────────────────────────
+   *
+   *   > *"Slot of the ONLY fighter this projectile can hit. Authoritative; `targetRole`
+   *   > mirrors it, and `sim.ts:stepProjectiles` resolves the victim through
+   *   > `state.fighters[targetId]` rather than through a seat name."*
+   *
+   * It was, literally: a projectile flew through every other body in the arena. **At two
+   * seats that is invisible** — the only living opponent IS the target — and at six it is
+   * the reason you could not body-block a shot. `sim.ts:projectileVictim` now decides who
+   * is struck, from geometry, over every living opponent of the OWNER; this field kept its
+   * name because the two jobs it still does are both about aim, not about damage.
+   *
+   * ⚠️ **AND IT IS NOW WRITABLE MID-FLIGHT.** A projectile that strikes a fighter it was
+   * not aimed at retargets to it (with `targetRole`, which `net/wire.ts` asserts mirrors
+   * `roleOfSlot(targetId)`), so `peckHits` keeps pecking the body it actually hit. That
+   * write is unreachable at two seats, which is what keeps the N=2 state digest identical.
    */
   targetId: FighterId;
   /** @deprecated legacy mirror of `ownerId`. */

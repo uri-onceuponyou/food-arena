@@ -8745,20 +8745,76 @@ console.log('\n35. A melee swing hits EVERY opponent in its arc (six seats)');
       `victims [${victims.join(',')}] (pre-fix: [1])`);
   }
 
-  // ── (f) THE GAP THIS SECTION DOES **NOT** CLOSE, ASSERTED SO IT CANNOT BE READ SHUT ──
+  // ── (f) ⚠️ REVERSED. THE GAP THIS SECTION LEFT OPEN IS NOW CLOSED — SEE §36 ─────
   //
-  // `wm_gate` names three `multi-target` weapons. Two are RANGED and are unaffected:
-  // `sim.ts:stepProjectiles` resolves every projectile against its own `p.targetId` and
-  // passes through any other fighter it flies over, so a four-pellet homing volley damages
-  // one fighter however many bodies are in the way. That is a real, separate mechanic
-  // (projectile-vs-anybody collision) and it is recorded here as an assertion rather than
-  // as prose, so the day somebody lands it this row goes red and gets re-read.
+  // IT USED TO READ, and the wording is kept because it was an accurate description of
+  // the sim it was written against:
+  //
+  //   > *"THE GAP THIS SECTION DOES **NOT** CLOSE, ASSERTED SO IT CANNOT BE READ SHUT.
+  //   > `wm_gate` names three `multi-target` weapons. Two are RANGED and are unaffected:
+  //   > `sim.ts:stepProjectiles` resolves every projectile against its own `p.targetId`
+  //   > and passes through any other fighter it flies over… recorded here as an assertion
+  //   > rather than as prose, so the day somebody lands it this row goes red and gets
+  //   > re-read."*
+  //
+  //   > `check('(f) the two OTHER `multi-target` promises are ranged volleys and are NOT
+  //   >         closed by this change', rangedMulti.length === 2 && …)`
+  //
+  // 🚨 **AND IT COULD NOT HAVE GONE RED, WHICH IS THE POINT WORTH KEEPING.** The row read
+  // `pellets` and `homing` off `rules.ts` and never touched the sim: it was a statement
+  // about the WEAPON TABLE wearing the words *"not closed by this change"*. It stayed
+  // green, unmoved, through the commit that closed exactly the mechanic it names — the
+  // vacuity class `CLAUDE.md` #6 is about, in its "asserted the wrong noun" disguise. A
+  // scope statement has to be measured on the sim or it is a comment with a tick next to
+  // it.
+  //
+  // The rule is reversed and the row now MEASURES it. The fixture half is kept as the
+  // non-vacuity it always was; the claim half fires each of the two weapons past a
+  // bystander that steps into the flight line and requires the BYSTANDER to take it. §36
+  // is where the mechanic is tested properly; this row exists so §35 cannot be read as
+  // "multi-target is still half-open" after it stopped being true.
   {
     const rangedMulti = ['burrito', 'sushi'].flatMap((id) =>
       CHARACTERS[id].weapons.filter((w) => (w.pellets ?? 1) > 1 && w.homing).map((w) => `${id}.${w.key}`));
-    check('(f) the two OTHER `multi-target` promises are ranged volleys and are NOT closed by this change',
+    check('(f) the two OTHER `multi-target` promises are still the same two ranged volleys (non-vacuity)',
       rangedMulti.length === 2 && rangedMulti.includes('burrito.Swarm') && rangedMulti.includes('sushi.Catch'),
-      `[${rangedMulti.join(', ')}] — projectiles still resolve against p.targetId alone`);
+      `[${rangedMulti.join(', ')}]`);
+    const blockedBy = rangedMulti.map((tag) => {
+      const [cid, key] = tag.split('.');
+      const ws = CHARACTERS[cid].weapons;
+      const wi = ws.findIndex((x) => x.key === key);
+      const w = ws[wi];
+      const st = createMatch(arena, [
+        { characterId: cid, spawn: { x: arena.center.x, y: arena.center.y }, controller: 'human' },
+        { characterId: 'hamburger', spawn: { x: arena.center.x + w.range * 0.85, y: arena.center.y }, controller: 'human' },
+        // Parked out of the way at the press, so the shot is aimed at slot 1 and not at it.
+        { characterId: 'hamburger', spawn: { x: arena.center.x - w.range * 4, y: arena.center.y }, controller: 'human' },
+      ]);
+      st.phase = 'playing';
+      for (const f of st.fighters) { f.hp = 1e7; f.maxHp = 1e7; }
+      st.fighters[0].facing = { x: 1, y: 0 };
+      const ev = [];
+      attemptAttack(st, st.fighters[0], wi, ev);
+      const aimedAt = st.projectiles.map((p) => p.targetId);
+      // …and NOW it steps into the line, which is the whole of the mechanic.
+      st.fighters[2].x = arena.center.x + w.range * 0.35;
+      st.fighters[2].y = arena.center.y;
+      const victims = new Set();
+      const idle = st.fighters.map(() => ({ move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false }));
+      for (let t = 0; t < 240 && st.projectiles.length > 0; t++) {
+        for (const e of stepMatch(st, 16.667, idle)) {
+          if (e.type === 'hit-landed' && e.source?.kind === 'weapon') victims.add(e.targetId);
+        }
+      }
+      return { tag, aimedAtSlot1: aimedAt.length > 0 && aimedAt.every((id) => id === st.fighters[1].id),
+        hitBlocker: victims.has(st.fighters[2].id) };
+    });
+    check('(f) …and both volleys really were aimed at slot 1, not at the fighter that steps in (non-vacuity)',
+      blockedBy.length === 2 && blockedBy.every((r) => r.aimedAtSlot1),
+      blockedBy.map((r) => `${r.tag}:aimed=${r.aimedAtSlot1}`).join(' '));
+    check('(f) 🔴 …and a body that steps into the line TAKES the volley — the ranged half is closed too (§36)',
+      blockedBy.every((r) => r.hitBlocker),
+      blockedBy.map((r) => `${r.tag}:blocked=${r.hitBlocker}`).join(' '));
   }
 
   // ── (g) THE TWO-SEAT REDUCTION, WHICH IS WHY THIS WAS SAFE TO LAND ─────────
@@ -8784,6 +8840,349 @@ console.log('\n35. A melee swing hits EVERY opponent in its arc (six seats)');
     check('(g) at TWO seats the same 360-degree slam damages exactly ONE fighter — the reduction holds',
       victims.length === 1 && victims[0] === 1,
       `victims [${victims.join(',')}]`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 36. YOU CAN BODY-BLOCK A SHOT — at SIX seats, because at two the defect cannot
+//     express itself
+//
+// `sim.ts:stepProjectiles` resolved every projectile against `state.fighters[p.targetId]`
+// and flew through everybody else. **At two seats "hits its target" and "hits whoever it
+// strikes" are the SAME SENTENCE** — the only living opponent IS the target — so the
+// defect was unreachable below three fighters and all 638 assertions in this file passed
+// throughout, including §35(f), which asserted the gap and read `rules.ts` fields to do
+// it. `MAX_FIGHTERS` is 6 and Uri plays six-player.
+//
+// What was missing at six: standing between a shooter and their target did nothing, a
+// stray shot could not hit a bystander, and a homing volley curved through four bodies to
+// reach the one it was aimed at. That is the SIXTH instance of this project's six-seat
+// class — the result card, corpse input, shake proximity, seat order, and the MELEE half
+// of this very mechanic at `3483d23`, whose own commit message named this as the
+// remaining half.
+//
+// ── EVERY ROW MARKED 🔴 IS SHOWN RED ON THE PRE-FIX TREE ─────────────────────
+//
+// `node tools/tmp/bb_block.mjs --knownbad` rebuilds the pre-fix sim from the shipped
+// source with one asserted substitution and runs this REAL suite against it. (a), (d) and
+// (g) — the non-vacuity, the over-fix control and the two-seat reduction — pass on BOTH
+// trees deliberately: a section where those moved too would have changed the experiment
+// rather than the sim.
+//
+// ⚠️ EVERY DISTANCE IS A FRACTION OF THE WEAPON'S OWN `range` OR OF A FIGHTER'S OWN
+// `hitRadius`, never a literal. A hardcoded 128 is a legal coordinate on any map and
+// therefore invisible to every legality check — the stale-literal class `al_guard.mjs`
+// exists for — and it would keep passing after `REACH` or `HIT_RADIUS_VS_*` moved.
+console.log('\n36. A projectile hits whoever it strikes — body-blocking, at six seats');
+{
+  const N = MAX_FIGHTERS;
+  const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+  const MUSTARD_IDX = CHARACTERS.hotdog.weapons.findIndex((w) => w.key === 'Mustard');
+  const MUSTARD = CHARACTERS.hotdog.weapons[MUSTARD_IDX];
+  const HATCH_IDX = CHARACTERS.egg.weapons.findIndex((w) => w.key === 'Hatch');
+  const HATCH = CHARACTERS.egg.weapons[HATCH_IDX];
+  const DT = 16.667;
+
+  /**
+   * Six seats. Slot 0 is the shooter at the arena centre facing due east; slot 1 is its
+   * NOMINAL target, on the axis and inside the weapon's own range; slot 2 is the body that
+   * will step in; slots 3+ are parked off the map's business end.
+   *
+   * ⚠️ **THE BLOCKER IS PARKED FAR AWAY AT THE PRESS AND MOVED AFTERWARDS, AND THAT IS A
+   * DELIBERATE CONSTRUCTION RATHER THAN A CONVENIENCE.** `combat.ts:deliverWeapon` aims at
+   * `nearestLivingOpponent`, so a body standing on the line at press time would BE the
+   * target and hitting it would prove nothing. Stepping in after the shot is away is both
+   * the honest experiment and the thing a six-player match does constantly — and it needs
+   * no surgery on `p.targetId`, so nothing here depends on a field the sim might rename.
+   */
+  const line = (charId, weaponIdx) => {
+    const w = CHARACTERS[charId].weapons[weaponIdx];
+    const st = createMatch(arena, [
+      { characterId: charId, spawn: { x: arena.center.x, y: arena.center.y }, controller: 'human' },
+      { characterId: 'hamburger', spawn: { x: arena.center.x + w.range * 0.85, y: arena.center.y }, controller: 'human' },
+      ...Array.from({ length: N - 2 }, (_, i) => ({
+        characterId: 'hamburger',
+        spawn: { x: arena.center.x - w.range * (4 + i), y: arena.center.y + w.range * (1 + i) },
+        controller: 'human',
+      })),
+    ]);
+    st.phase = 'playing';
+    // A pool nothing in this section can empty, so "who was hit" is never confounded with
+    // "who died first" — the same reason `wm_vocab`'s census inflates HP.
+    for (const f of st.fighters) { f.hp = 1e7; f.maxHp = 1e7; }
+    st.fighters[0].facing = { x: 1, y: 0 };
+    return st;
+  };
+  const IDLE = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  /** Fly every live projectile to its conclusion; returns victim id -> hit count. */
+  const flyOut = (st, ticks = 300) => {
+    const idle = st.fighters.map(() => IDLE);
+    const hits = new Map();
+    for (let t = 0; t < ticks && st.projectiles.length > 0; t++) {
+      for (const e of stepMatch(st, DT, idle)) {
+        if (e.type === 'hit-landed' && e.source?.kind === 'weapon') {
+          hits.set(e.targetId, (hits.get(e.targetId) ?? 0) + 1);
+        }
+      }
+    }
+    return hits;
+  };
+
+  // ── (a) THE PRECONDITIONS. NOTHING BELOW MEANS ANYTHING WITHOUT THEM ────────
+  //
+  // 🚨 Every row after this one asks who was in a FILTERED set and then counts it, which
+  // is the vacuity trap this repo has been bitten by at least eight times — `[].every()` is
+  // `true`, and a fixture pointed at the wrong object keeps its count perfectly. So the
+  // victim set is asserted non-empty and the geometry asserted real FIRST.
+  {
+    const st = line('hotdog', MUSTARD_IDX);
+    const ev = [];
+    attemptAttack(st, st.fighters[0], MUSTARD_IDX, ev);
+    const opponents = st.fighters.filter((f) => f !== st.fighters[0]);
+    check('(a) the fixture really seats SIX and five of them are living opponents (non-vacuity)',
+      st.fighters.length === N && N === 6 && opponents.length === 5
+      && opponents.every((f) => f.alive && f.hp > 0),
+      `${st.fighters.length} seats, ${opponents.filter((f) => f.alive).length} living opponents`);
+    check('(a) the press really spawned a projectile, and it is aimed at slot 1 — not at the blocker',
+      st.projectiles.length > 0 && st.projectiles.every((p) => p.targetId === st.fighters[1].id),
+      `${st.projectiles.length} projectiles, targets [${st.projectiles.map((p) => p.targetId).join(',')}]`);
+    st.fighters[2].x = arena.center.x + MUSTARD.range * 0.35;
+    st.fighters[2].y = arena.center.y;
+    const b = st.fighters[2];
+    const tgt = st.fighters[1];
+    check('(a) …and once it steps in, the blocker is ON the segment, inside its OWN hit radius of it',
+      b.x > st.fighters[0].x && b.x < tgt.x && Math.abs(b.y - st.fighters[0].y) < b.hitRadius
+      && Math.hypot(tgt.x - st.fighters[0].x, tgt.y - st.fighters[0].y) <= MUSTARD.range,
+      `blocker at +${(b.x - st.fighters[0].x).toFixed(1)} (r=${b.hitRadius}), target at `
+      + `+${(tgt.x - st.fighters[0].x).toFixed(1)} of range ${MUSTARD.range}`);
+    // ⚠️ EVERY SEAT OF A 3-6 BRAWL CARRIES `HIT_RADIUS_VS_PLAYER`; `HIT_RADIUS_VS_ENEMY` is
+    // the DUEL's slot 1 and nothing else (`sim.ts:seatIsBotOpponent`). Asserted here
+    // because the scan reads a PER-FIGHTER number, and a section that quietly assumed one
+    // shared radius would keep passing after the two constants diverged. (g) reads the
+    // other side of the same fact on the two-seat fixture.
+    check('(a) …and every seat of the brawl carries its OWN hit radius, the roster\'s player one',
+      HIT_RADIUS_VS_PLAYER !== HIT_RADIUS_VS_ENEMY
+      && st.fighters.every((f) => f.hitRadius === HIT_RADIUS_VS_PLAYER),
+      `${st.fighters.map((f) => f.hitRadius).join('/')} vs player ${HIT_RADIUS_VS_PLAYER} / enemy ${HIT_RADIUS_VS_ENEMY}`);
+  }
+
+  // ── (b) 🔴 THE FIX: THE BODY IN THE WAY TAKES THE SHOT ─────────────────────
+  //
+  // Pre-fix the blocker takes NOTHING and slot 1 takes the hit, because the projectile
+  // flies straight through a fighter standing squarely in front of it.
+  {
+    const st = line('hotdog', MUSTARD_IDX);
+    attemptAttack(st, st.fighters[0], MUSTARD_IDX, []);
+    st.fighters[2].x = arena.center.x + MUSTARD.range * 0.35;
+    st.fighters[2].y = arena.center.y;
+    const hits = flyOut(st);
+    check('(b) 🔴 a body that steps into the line TAKES the shot — you can body-block',
+      hits.get(st.fighters[2].id) === 1,
+      `blocker took ${hits.get(st.fighters[2].id) ?? 0}, hits [${[...hits].map(([k, v]) => `${k}x${v}`).join(' ')}] (pre-fix: blocker 0)`);
+    check('(b) …and the fighter it was AIMED at takes nothing — the shot was consumed',
+      !hits.has(st.fighters[1].id) && st.fighters[1].hp === st.fighters[1].maxHp,
+      `target took ${hits.get(st.fighters[1].id) ?? 0}`);
+    check('(b) …and it is the weapon\'s own damage, once — not a second resolution',
+      st.fighters[2].maxHp - st.fighters[2].hp === MUSTARD.damage,
+      `${st.fighters[2].maxHp - st.fighters[2].hp} vs ${MUSTARD.damage}`);
+  }
+
+  // ── (c) 🔴 A STRAY SHOT CAN HIT A BYSTANDER ────────────────────────────────
+  //
+  // The other half of the same sentence, and the one a player feels: the shooter aims at
+  // nobody in particular (facing east) while its NOMINAL target — `nearestLivingOpponent`
+  // — stands to the north. Pre-fix the shot expires having damaged nobody, which is the
+  // whole reason a six-seat brawl felt like six private duels.
+  {
+    const st = line('hotdog', MUSTARD_IDX);
+    // Slot 3 to the north, nearest, so it becomes the aim; slot 2 due east, in the path.
+    st.fighters[3].x = arena.center.x;
+    st.fighters[3].y = arena.center.y - MUSTARD.range * 0.4;
+    st.fighters[1].x = arena.center.x - MUSTARD.range * 4;   // out of the way entirely
+    st.fighters[2].x = arena.center.x + MUSTARD.range * 0.6;
+    st.fighters[2].y = arena.center.y;
+    const ev = [];
+    attemptAttack(st, st.fighters[0], MUSTARD_IDX, ev);
+    check('(c) the shot really is aimed NORTH at slot 3, and slot 3 really is the nearest (non-vacuity)',
+      st.projectiles.length > 0 && st.projectiles.every((p) => p.targetId === st.fighters[3].id)
+      && Math.hypot(st.fighters[3].x - st.fighters[0].x, st.fighters[3].y - st.fighters[0].y)
+         < Math.hypot(st.fighters[2].x - st.fighters[0].x, st.fighters[2].y - st.fighters[0].y),
+      `aimed at [${st.projectiles.map((p) => p.targetId).join(',')}]`);
+    const hits = flyOut(st);
+    check('(c) 🔴 a shot fired past its target strikes the bystander it flies into',
+      hits.get(st.fighters[2].id) === 1 && !hits.has(st.fighters[3].id),
+      `hits [${[...hits].map(([k, v]) => `${k}x${v}`).join(' ')}] (pre-fix: none)`);
+  }
+
+  // ── (d) THE OVER-FIX CONTROL: THE HIT RADIUS STILL DISCRIMINATES ───────────
+  //
+  // "Hits whoever it strikes" is one edit away from "hits whoever it passes", and that
+  // edit would leave (b) and (c) green. So the identical press is run with the blocker
+  // stepped to a LATERAL offset of 1.5x its own hit radius: it must be missed, and the
+  // fighter the shot was aimed at must still be hit. Passes on BOTH trees, deliberately.
+  {
+    const st = line('hotdog', MUSTARD_IDX);
+    attemptAttack(st, st.fighters[0], MUSTARD_IDX, []);
+    const b = st.fighters[2];
+    b.x = arena.center.x + MUSTARD.range * 0.35;
+    b.y = arena.center.y + b.hitRadius * 1.5;
+    check('(d) the near-miss fixture really does sit OUTSIDE the blocker\'s own hit radius (non-vacuity)',
+      Math.abs(b.y - arena.center.y) > b.hitRadius,
+      `lateral ${(b.y - arena.center.y).toFixed(2)} vs hitRadius ${b.hitRadius}`);
+    const hits = flyOut(st);
+    check('(d) a body 1.5x its hit radius off the line is MISSED, and the aimed-at target is hit',
+      !hits.has(b.id) && hits.get(st.fighters[1].id) === 1,
+      `hits [${[...hits].map(([k, v]) => `${k}x${v}`).join(' ')}]`);
+  }
+
+  // ── (e) 🔴 A CORPSE DOES NOT BLOCK — AND THE SAME BODY ALIVE DOES ──────────
+  //
+  // The victim predicate is `state.ts:isLivingOpponentOf`, shared with the melee loop and
+  // with `nearestLivingOpponent` so the three cannot drift apart. A corpse that stopped
+  // bullets would be free cover, and it is the one clause a private copy of "not me,
+  // alive, above zero" would most plausibly forget.
+  //
+  // ⚠️ **BOTH ARMS IN ONE ROW, BECAUSE THE CORPSE ARM ALONE CANNOT FAIL.** A pre-fix sim
+  // also flies straight past the corpse — for the wrong reason, since it flies past
+  // everybody — so "the corpse does not block" is green on a sim with no blocking at all.
+  // The row is the DIFFERENCE between the two arms: same position, same tick, alive vs
+  // dead. That is what makes it a claim about the rule rather than about one outcome.
+  {
+    const runWith = (kill) => {
+      const st = line('hotdog', MUSTARD_IDX);
+      attemptAttack(st, st.fighters[0], MUSTARD_IDX, []);
+      st.fighters[2].x = arena.center.x + MUSTARD.range * 0.35;
+      st.fighters[2].y = arena.center.y;
+      if (kill) applyDamage(st, st.fighters[2], st.fighters[2].maxHp * 10, null, { kind: 'hazard' }, []);
+      return { st, hits: flyOut(st) };
+    };
+    const dead = runWith(true);
+    const live = runWith(false);
+    check('(e) the two arms differ ONLY in whether the body on the line is alive (non-vacuity)',
+      dead.st.fighters[2].alive === false && live.st.fighters[2].alive === true
+      && dead.st.fighters[2].x === live.st.fighters[2].x && dead.st.phase === 'playing'
+      && dead.st.fighters.slice(1).filter((f) => f.alive).length === 4,
+      `dead arm alive=${dead.st.fighters[2].alive}, live arm alive=${live.st.fighters[2].alive}`);
+    check('(e) 🔴 the corpse is passed THROUGH and the identical living body BLOCKS',
+      !dead.hits.has(dead.st.fighters[2].id) && dead.hits.get(dead.st.fighters[1].id) === 1
+      && live.hits.get(live.st.fighters[2].id) === 1 && !live.hits.has(live.st.fighters[1].id),
+      `dead [${[...dead.hits].map(([k, v]) => `${k}x${v}`).join(' ')}] · live [${[...live.hits].map(([k, v]) => `${k}x${v}`).join(' ')}]`);
+  }
+
+  // ── (f) 🔴 ONE PROJECTILE, ONE VICTIM — THE NEARER OF TWO, NOT THE LOWER SLOT ──
+  //
+  // ⚠️ **A MELEE SWING HITS EVERYONE IN ITS ARC (§35); A PROJECTILE DOES NOT.** A swing is
+  // an area and one instant; a projectile is a single body the impact consumes. Hitting
+  // two overlapping fighters at once would be a PIERCING shot, which is a design change.
+  //
+  // The projectile is PARKED at a chosen point rather than flown, and that is what makes
+  // the tie reachable at all: at 256 wu/s a shot advances ~4.3 wu per tick, so which of
+  // two overlapping bodies happens to be in radius first is a fact about tick granularity,
+  // not about the rule. Parking it states the geometry exactly.
+  //
+  // ⚠️ **THE FARTHER BODY IS THE LOWER SLOT, ON PURPOSE.** `state.fighters` order is the
+  // sim's one iteration order and the scan breaks exact ties on it; putting the near body
+  // in the HIGHER slot is what makes this a test of "nearest" rather than a test that
+  // agrees with slot order by construction.
+  {
+    const st = line('hotdog', MUSTARD_IDX);
+    attemptAttack(st, st.fighters[0], MUSTARD_IDX, []);
+    const p = st.projectiles[0];
+    const PX = arena.center.x + MUSTARD.range * 0.3;
+    const PY = arena.center.y;
+    p.x = PX; p.y = PY; p.vx = 0; p.vy = 0;
+    const far = st.fighters[1];    // LOWER slot, FARTHER
+    const near = st.fighters[2];   // higher slot, nearer
+    far.x = PX; far.y = PY + far.hitRadius * 0.70;
+    near.x = PX; near.y = PY - near.hitRadius * 0.30;
+    check('(f) BOTH bodies really are inside their own hit radius of the parked shot (non-vacuity)',
+      Math.hypot(p.x - far.x, p.y - far.y) < far.hitRadius
+      && Math.hypot(p.x - near.x, p.y - near.y) < near.hitRadius
+      && far.id < near.id,
+      `far slot ${far.id} at ${Math.hypot(p.x - far.x, p.y - far.y).toFixed(2)}/${far.hitRadius}, `
+      + `near slot ${near.id} at ${Math.hypot(p.x - near.x, p.y - near.y).toFixed(2)}/${near.hitRadius}`);
+    const hits = flyOut(st, 2);
+    check('(f) 🔴 exactly ONE fighter is damaged, and it is the NEARER one — not the lower slot',
+      hits.size === 1 && hits.get(near.id) === 1,
+      `hits [${[...hits].map(([k, v]) => `${k}x${v}`).join(' ')}], near=${near.id} far=${far.id}`);
+  }
+
+  // ── (f2) A SHOT NEVER HITS ITS OWN SHOOTER ────────────────────────────────
+  //
+  // `isLivingOpponentOf(victim, owner)` is what excludes it, and `owner` is resolved from
+  // `p.ownerId` rather than from a seat name. Parked ON the shooter with every other
+  // fighter far away, so the only candidate in range is the one that must be refused.
+  {
+    const st = line('hotdog', MUSTARD_IDX);
+    attemptAttack(st, st.fighters[0], MUSTARD_IDX, []);
+    const p = st.projectiles[0];
+    const me = st.fighters[0];
+    for (const f of st.fighters.slice(1)) { f.x = arena.center.x - MUSTARD.range * 8; f.y = arena.center.y; }
+    p.x = me.x; p.y = me.y; p.vx = 0; p.vy = 0;
+    check('(f2) the shooter really is inside its OWN hit radius of the parked shot (non-vacuity)',
+      Math.hypot(p.x - me.x, p.y - me.y) < me.hitRadius
+      && st.fighters.slice(1).every((f) => Math.hypot(p.x - f.x, p.y - f.y) > f.hitRadius),
+      `owner at ${Math.hypot(p.x - me.x, p.y - me.y).toFixed(2)} of ${me.hitRadius}`);
+    const hits = flyOut(st, 2);
+    check('(f2) …and it damages nobody — a projectile does not strike the fighter that fired it',
+      hits.size === 0 && me.hp === me.maxHp,
+      `hits [${[...hits].map(([k, v]) => `${k}x${v}`).join(' ')}]`);
+  }
+
+  // ── (h) 🔴 A PECKING PROJECTILE LATCHES ONTO THE BODY IT STRUCK ────────────
+  //
+  // Egg's Hatch! is the roster's only `peckHits` weapon and it is HOMING, so pre-fix it
+  // curved past the blocker and pecked the fighter it was aimed at. `sim.ts` retargets
+  // `p.targetId`/`p.targetRole` at the strike for exactly this: the chick pecks the body
+  // it is standing on. All `peckHits` land on the blocker and none on the aim.
+  {
+    const st = line('egg', HATCH_IDX);
+    attemptAttack(st, st.fighters[0], HATCH_IDX, []);
+    st.fighters[2].x = arena.center.x + HATCH.range * 0.35;
+    st.fighters[2].y = arena.center.y;
+    check('(h) the weapon really is the pecking one, and it really was aimed at slot 1 (non-vacuity)',
+      HATCH.peckHits > 1 && HATCH.homing === true
+      && st.projectiles.length > 0 && st.projectiles.every((p) => p.targetId === st.fighters[1].id),
+      `peckHits ${HATCH.peckHits} homing ${HATCH.homing} aimed [${st.projectiles.map((p) => p.targetId).join(',')}]`);
+    const hits = flyOut(st);
+    check('(h) 🔴 every peck lands on the body it struck, and none on the fighter it was aimed at',
+      hits.get(st.fighters[2].id) === HATCH.peckHits && !hits.has(st.fighters[1].id),
+      `hits [${[...hits].map(([k, v]) => `${k}x${v}`).join(' ')}] vs peckHits ${HATCH.peckHits}`);
+  }
+
+  // ── (g) THE TWO-SEAT REDUCTION, WHICH IS WHY THIS WAS SAFE TO LAND ─────────
+  //
+  // At N=2 there is exactly one living opponent of the shooter, so the scan visits it and
+  // nothing else: same comparison, same `hitRadius`, same `applyDamage`, same event, and
+  // the retarget branch is unreachable because the victim IS the target. That is the
+  // property the 110-matchup balance corpus rests on, and `tools/tmp/bb_block.mjs --bitid`
+  // measures it over REAL matches against a pre-fix tree; this row is its unit-scale form.
+  {
+    const two = createMatch(arena, [
+      { characterId: 'hotdog', spawn: { x: arena.center.x, y: arena.center.y }, controller: 'human' },
+      { characterId: 'hamburger', spawn: { x: arena.center.x + MUSTARD.range * 0.5, y: arena.center.y }, controller: 'human' },
+    ]);
+    two.phase = 'playing';
+    for (const f of two.fighters) { f.hp = 1e7; f.maxHp = 1e7; }
+    two.fighters[0].facing = { x: 1, y: 0 };
+    check('(g) the two-seat fixture has exactly one living opponent, carrying the DUEL hit radius (non-vacuity)',
+      two.fighters.length === 2 && two.fighters[1].alive
+      && two.fighters[1].hitRadius === HIT_RADIUS_VS_ENEMY && two.fighters[0].hitRadius === HIT_RADIUS_VS_PLAYER,
+      `${two.fighters.length} seats, radii ${two.fighters.map((f) => f.hitRadius).join('/')}`);
+    attemptAttack(two, two.fighters[0], MUSTARD_IDX, []);
+    const before = two.projectiles.map((p) => `${p.targetId}/${p.targetRole}`).join(',');
+    const idle = two.fighters.map(() => IDLE);
+    const hits = new Map();
+    let retargeted = false;
+    for (let t = 0; t < 300 && two.projectiles.length > 0; t++) {
+      for (const e of stepMatch(two, DT, idle)) {
+        if (e.type === 'hit-landed' && e.source?.kind === 'weapon') hits.set(e.targetId, (hits.get(e.targetId) ?? 0) + 1);
+      }
+      if (two.projectiles.some((p) => `${p.targetId}/${p.targetRole}` !== before)) retargeted = true;
+    }
+    check('(g) at TWO seats the shot damages exactly ONE fighter, and nothing was retargeted',
+      hits.size === 1 && hits.get(two.fighters[1].id) === 1 && retargeted === false,
+      `hits [${[...hits].map(([k, v]) => `${k}x${v}`).join(' ')}], retargeted=${retargeted}`);
   }
 }
 
