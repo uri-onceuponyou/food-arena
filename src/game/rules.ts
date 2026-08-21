@@ -3000,7 +3000,7 @@ export interface Weapon {
   /**
    * ── DISPLACEMENT: THE THREE WEAPONS-CAN-MOVE-YOU FIELDS ────────────────────
    *
-   * All three are world-unit DISTANCES, all three are **absent on 28 of the roster's 33
+   * All three are world-unit DISTANCES, all three are **absent on 29 of the roster's 33
    * weapons**, and absent means the sim is bit-identical to the one before they existed —
    * exactly the property `castMs` has and for exactly the same reason. `sim.test.mjs`
    * §39(g) asserts that inertness on a real match rather than reasoning about it.
@@ -3026,6 +3026,36 @@ export interface Weapon {
    * pending displacement accumulates into — is exactly one of them. Writing `21` instead of
    * `BODY_LENGTH / 2` would be a literal that stops meaning "half a body" the moment
    * `PLAYER_SIZE` moves, which is the drift `REACH`'s own header exists to refuse.
+   *
+   * ── THE PRICE, MEASURED — `roster_lab --seeds 16`, 1,760 matches per policy ─
+   *
+   * Paired on identical seeds against `0c98cae`, so each column is EXACT for those matches.
+   * ⚠️ Aggregate player win moved **-0.6 pp (smart2) / +1.0 pp (chase)** — inside the ~9 pp
+   * aggregate floor — while **40 of 110 matchups moved, mean |Δ| 8.2 pp**. Those are two
+   * different quantities and this table never adds them.
+   *
+   *     Δ character strength      smart2    chase      kept?
+   *     hotdog   (knockback)       -2.5     -9.4       KEPT — the policies disagree in sign
+   *     egg      (selfLaunch)      +3.4     -6.6       KEPT — same, and inside the floor
+   *     sushi    (lure)            +1.6     +0.6       KEPT — and see the caveat below
+   *     waterbottle (selfLaunch)   -9.0    -11.2       🚨 REVERTED. Both policies, both
+   *                                                    outside the floor, on the character
+   *                                                    §77 calls the roster's weakest.
+   *
+   * 🚨 **AND THE SUSHI ROW IS NOT WHAT IT LOOKS LIKE: `lure` IS BIT-IDENTICAL AT TWO SEATS,
+   * SO NO 110-CELL INSTRUMENT IN THIS REPO CAN PRICE IT AT ALL.** The anchor is the victim's
+   * own position, and at N=2 the victim IS the only opponent — so `displaceFighter` is handed
+   * a zero separation and returns without writing anything. Verified rather than reasoned:
+   * all **20 sushi matchups ran BIT-IDENTICAL** (full state digest + event stream, 3,000
+   * ticks) against a lure-ablated tree, while **3 of 11 six-seat rosters diverged** — the
+   * control that stops "inert" meaning "the instrument is blind". The lure's price lives in
+   * `nf_ffa` at N=6 and nowhere else.
+   *
+   * ⚠️ **AND BOTH KEPT LOSSES POINT THE SAME WAY: A DISPLACEMENT COSTS ITS OWNER.** A
+   * knockback pushes the target out of your own melee reach (`6ea35f5`'s refusal, at 0.42x
+   * instead of 1.66x) and a self-launch carries you PAST the fighter you just hit. Neither is
+   * a bug; both are what the cards promise. Clamping a launch to the separation to the
+   * nearest opponent — the clamp `lure` already has — is the obvious next experiment.
    *
    * ⚠️ **AND `DECISIONS §80` BOUNDS EVERY NUMBER AUTHORED HERE.** A super must be
    * DODGEABLE. Displacement is spent at `PLAYER_SPEED`, the roster CAP, so a fighter
@@ -3073,8 +3103,16 @@ export interface Weapon {
   /**
    * How far the CASTER is displaced along its own frozen facing when this weapon goes off.
    *
-   * `egg.Tackle` — *"Launches herself at the enemy"* — and `waterbottle.Mega` — *"launches
-   * himself up"*. Applied in `combat.ts:resolveWeapon`, after the weapon has been delivered.
+   * **`egg.Tackle` is the only weapon that authors one** — *"Launches herself at the enemy"*.
+   * Applied in `combat.ts:resolveWeapon`, after the weapon has been delivered.
+   *
+   * 🚨 **`waterbottle.Mega` — *"launches himself up"* — AUTHORED ONE ON 2026-08-21 AND IT WAS
+   * REVERTED THE SAME DAY, MEASURED.** It cost that character **-9.0 pp (smart2) / -11.2 pp
+   * (chase)** in a single-variable ablation, halving the distance did not rescue it, and it
+   * landed on the roster's weakest character while `DECISIONS §79`/`§80` are an in-flight
+   * programme to fix exactly that. Its `wm_gate` `self-launch` claim therefore stays MISSING
+   * ON PURPOSE — the weapon record carries the whole measurement, and re-adding it needs the
+   * clamp described there, not a smaller number.
    *
    * 🔴 **A SELF-LAUNCH NEVER EXTENDS THE REACH OF ITS OWN WEAPON**, which is what keeps it out
    * of `DECISIONS §80` — Uri's answer that a super must be dodgeable, whose lever 1 is to
@@ -3093,11 +3131,12 @@ export interface Weapon {
    * cast weapon would be burned entirely by its own root and the field would be decoration.
    * One site, at the going-off, is the same rule for a castless tackle and a 1,400 ms slam.
    *
-   * ⚠️ **THE SIM HAS NO VERTICAL AXIS, SO "UP" IS EXPRESSED AS THE DISPLACEMENT IT
-   * RESOLVES TO** — the caster ends up on the enemy it dumps water on. Flagged rather than
-   * hidden: `giantSlam` sets the same precedent in the other direction (a term whose sim
-   * half is deliberately partial), and the vocabulary entry says what the sim does, not what
-   * the card imagines.
+   * ⚠️ **AND THE SIM HAS NO VERTICAL AXIS, WHICH IS WHY *"launches himself UP"* WAS ALWAYS
+   * THE WEAKEST OF THE FIVE FITS.** A 2D top-down sim can only express a launch as a ground
+   * displacement, so that card was being read as *"he ends up on the enemy he dumps water
+   * on"* — defensible, and flagged as a judgement call before it was measured rather than
+   * after. `giantSlam` is the precedent for a term whose sim half is deliberately partial.
+   * The measurement then refused it independently, which is the more interesting reason.
    */
   selfLaunch?: number;
 }
@@ -4708,13 +4747,37 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // finding, and the direction Uri asked for), which is right for a super and expensive
       // for Water Bottle. `§77` withholds permission to re-tune five other characters to
       // hide it. The price is in the commit that landed it.
-      // `selfLaunch` — *"launches himself up"*. 🔴 SPENT AFTER DELIVERY, WHICH IS WHAT KEEPS
-      // IT OUT OF THE REACH. This is the one weapon in the roster whose dodgeability is an
-      // acceptance test (`lk_dodge`, `kt_bearing`, `DECISIONS §79`/`§80`), and a launch
-      // resolved before the swing would add 42 wu to `REACH.meleeHeavy` in a field nobody
-      // reads as a reach. 42 / 3.5 s = 12.00 wu/s, the smallest displacement rate in the
-      // roster. `sim.test.mjs` §39(h) asserts the reach is unchanged.
-      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', castMs: 1400, selfLaunch: BODY_LENGTH, emoji: '🌊' },
+      // 🚨 **`selfLaunch: BODY_LENGTH` WAS AUTHORED HERE ON 2026-08-21, MEASURED, AND
+      // REVERTED THE SAME DAY. THE FIELD IS RIGHT; THIS WEAPON IS THE WRONG PLACE FOR IT.**
+      // The card says *"launches himself up"*, so `wm_gate`'s `self-launch` claim is STILL
+      // MISSING for `waterbottle.Mega` and that is deliberate — see `Weapon.selfLaunch`.
+      //
+      // Single-variable ablation, `roster_lab --seeds 16` (1,760 matches per policy), paired
+      // on identical seeds against `0c98cae`, with the other four displacement numbers held:
+      //
+      //     waterbottle strength      smart2    chase
+      //     with    selfLaunch 42      24.1%    27.2%
+      //     with    selfLaunch 21      23.4%    28.4%   <- HALVING DOES NOT RESCUE IT
+      //     WITHOUT selfLaunch         33.1%    38.4%
+      //     cost of the field         -9.0pp  -11.2pp   BOTH policies, same sign
+      //
+      // It is the only one of the five authored numbers where both driver policies agree in
+      // sign AND the magnitude reaches the ~9 pp aggregate floor — and it lands on the
+      // character `DECISIONS §77` records as **already 37 pp below its nearest neighbour**,
+      // while `§79`/`§80` are an in-flight programme to fix exactly that. Adding a mobility
+      // field to the one weapon whose dodgeability is a standing acceptance test
+      // (`lk_dodge`, `kt_bearing`) would also have changed that fixture underneath them.
+      // §77 forbids paying a price like this back by re-tuning other characters, so the
+      // choice was ship-and-report or revert; the measurement chose.
+      //
+      // ⚠️ **AND THE LIKELY MECHANISM IS WORTH MORE THAN THE NUMBER.** A launch spent along
+      // a frozen facing carries the caster PAST a target it has just hit, and the bot then
+      // spends the next second turning around. `egg.Tackle` shows the same sign on `chase`
+      // (-4.7 pp) with the opposite sign on `smart2` (+5.3), which is why it was kept. If
+      // this is re-attempted, clamp the launch to the separation to the nearest opponent —
+      // the same clamp `Weapon.lure` already applies — so a tackle CLOSES instead of
+      // overshooting. That is a design change, it is measurable, and it is not this pass.
+      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', castMs: 1400, emoji: '🌊' },
     ],
     abilities: [
       { emoji: '💦', name: 'Water Spray', desc: 'Sprays water that slows enemies down a lot', weapon: 'Spray' },

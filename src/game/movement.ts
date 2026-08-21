@@ -430,7 +430,7 @@ export function terrainSlowAt(
 //
 // **The scale was never the problem. The SURFACE was.** So there is no damage-derived
 // magnitude in this file: the distance is AUTHORED PER WEAPON in `rules.ts` and ABSENT BY
-// DEFAULT, exactly like `castMs`, and 28 of the roster's 33 weapons author nothing and are
+// DEFAULT, exactly like `castMs`, and 29 of the roster's 33 weapons author nothing and are
 // bit-identical to the sim before this existed. `sim.test.mjs` §39(f) re-runs the refusal's
 // own arithmetic as a standing ROSTER GUARD so no future authored number can reach it.
 // ─────────────────────────────────────────────────────────────────────────────

@@ -353,8 +353,8 @@ export function applyDamage(
   // anchors on three literal lines there (see `target.deaths++`). Nothing is inserted
   // between them.
   //
-  // ⚠️ INERT FOR 28 OF THE ROSTER'S 33 WEAPONS. `knockback`/`lure`/`selfLaunch` are absent
-  // on all but five, absence is `?? 0`, and `displaceFighter` refuses a non-positive
+  // ⚠️ INERT FOR 29 OF THE ROSTER'S 33 WEAPONS. `knockback`/`lure`/`selfLaunch` are absent
+  // on all but four, absence is `?? 0`, and `displaceFighter` refuses a non-positive
   // distance — so `Fighter.push` is never written and the sim is bit-identical to the one
   // before this existed. §39(g) proves that on a real match instead of asserting it here.
   if (attacker != null && source.kind === 'weapon') {
