@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * WI_GUARD — the impact beat's anchor, guarded. Three assertions, each with a
+ * WI_GUARD — the impact beat's anchor, guarded. FIVE assertions, each with a
  * known-bad that makes it go RED.
  *
  * ── WHAT IT GUARDS ──────────────────────────────────────────────────────────────
@@ -36,6 +36,35 @@
  *                 was first set to — a damage-0 weapon's ratio has a floor that no `k`
  *                 can move, because `burst()`'s own clamps bind in both arms.
  *
+ *                 🚨 **C IS KEPT WORD FOR WORD AND IT WAS MEASURING THE WRONG THING.**
+ *                 Its denominator is the GENERIC burst — the one the anchor replaced,
+ *                 which is not on screen. `a42224c`'s rule is about dominance of the
+ *                 hit that SHIPS. Those are different quantities and C cannot see the
+ *                 difference: at `a494f98` C ran 0.32-0.50 against a 0.60 bar, green on
+ *                 every row at both pitches, while the anchor covered up to **88% of
+ *                 the composite** and 18 of 27 weapons had it as a MAJORITY. A guard
+ *                 measuring a different quantity than the rule it is named after is
+ *                 worse than no guard, because it certifies the thing it cannot see.
+ *                 Kept, with its old wording, per house style — the way it went wrong
+ *                 is the useful part, and it still guards the upper bound it names.
+ *   E. DOMINANCE  **the assertion C was supposed to be.** With the anchor suppressed,
+ *                 the bespoke sculpt alone delivers `sculptPx`; with the sculpt
+ *                 suppressed, the anchor alone delivers `anchorPx`. On every weapon
+ *                 whose sculpt clears the floor BY ITSELF, `anchorPx <= sculptPx` —
+ *                 the hand-authored effect must be at least as much of the hit as the
+ *                 shared one under it. Weapons whose sculpt is under the floor alone
+ *                 are RESCUE rows, and for them the anchor being the majority is
+ *                 forced rather than chosen. The union bound makes that exact: the
+ *                 composite is at most `sculpt + anchor`, so under `anchor <= sculpt`
+ *                 it is at most `2 * sculpt`. `burrito.Swarm`'s sculpt is **128 px**,
+ *                 which caps its composite at 256 — **under the 300 px floor with the
+ *                 overlap already counted as zero**, and the two are drawn on the same
+ *                 point so the real overlap is large. Subordination and the floor are
+ *                 mutually exclusive on that weapon; no `k`, no recipe and no adaptive
+ *                 rule can have both. Rescue rows are NAMED in the output and their
+ *                 COUNT is ratcheted, so the exemption cannot quietly grow to cover
+ *                 the roster — which is the only way this arm could be defeated.
+ *
  * ── THE KNOWN-BAD (CLAUDE.md #6: a guard not shown to FAIL is not a guard) ───────
  *
  * Two independent ones, because they fail for different reasons:
@@ -51,12 +80,30 @@
  *   `--knownbad loud`  the OTHER direction, because arms have to be shown to fail
  *                 SEPARATELY. The bug above cannot make C red — C guards the upper
  *                 bound, and an arm with no known-bad of its own is a comment with a
- *                 tick next to it. This mode scales the subordinate anchor's arguments
- *                 by 1.5, i.e. it reproduces `IMPACT_ANCHOR_K = 0.75` — the exact
- *                 mistake `impactAnchor`'s header exists to prevent, which is copying
- *                 `castMuzzle`'s factor across. **C must go RED and A/B must stay
- *                 GREEN**, which is also the check that C is not just a restatement
- *                 of B.
+ *                 tick next to it. This mode draws the subordinate anchor as the FULL
+ *                 generic burst at `k = 0.75` — the exact mistake `impactAnchor`'s
+ *                 header exists to prevent, which is copying `castMuzzle`'s factor
+ *                 across. **C must go RED and A/B must stay GREEN**, which is also the
+ *                 check that C is not just a restatement of B.
+ *                 ⚠️ This line read *"scales the subordinate anchor's arguments by
+ *                 1.5"* and that is how it was implemented; see `genericAt` for why a
+ *                 known-bad expressed as a DELTA on the thing under test silently
+ *                 follows it, and what `x 1.5` came to mean once the anchor stopped
+ *                 being a scaled `burst()`.
+ *
+ *   `--knownbad share`  **the defect that shipped**, re-installed in-page: the
+ *                 `a42224c` anchor recipe verbatim — full `burst()`, `k = 0.50`, the
+ *                 decal at the generic recipe's own 0.55 lower clamp. **E must go RED
+ *                 and A, B AND C must all stay GREEN.** That last clause is the whole
+ *                 argument for E existing: this state ran green through C on every row
+ *                 at both pitches for the life of the anchor, so an arm that cannot
+ *                 stay green here would just be C again under a new letter. The
+ *                 re-implementation is not eyeballed. `tools/tmp/an_probe.mjs`'s
+ *                 SELF-PAIR fired it against the real shipped anchor on `4232ab7`,
+ *                 whose `src/game/vfx.ts` is byte-identical to `a494f98`'s (nothing
+ *                 touched that file between them), and got **27/27 EXACT**. And on
+ *                 the five-victim frame it reproduces the real `a494f98` WORKTREE to
+ *                 the pixel on all three columns (16178 / 14997 / 7230 at pitch 20).
  *
  *   a pre-fix WORKTREE, which is the real thing rather than a reproduction:
  *     git worktree add --detach /tmp/fa-wi <sha-before>
@@ -78,7 +125,9 @@
  *   NULL         frozen frame vs itself                 -> 0 px, not "small"
  *   FORCED       a garish oversized generic impact       -> >> 0, or the counter is blind
  *   REACH        the planted no-op hook must be CALLED   -> otherwise arm B measures the
- *                REAL sculpt and passes for the wrong reason
+ *                REAL sculpt and passes for the wrong reason; and the suppressed anchor
+ *                must have been ENTERED -> otherwise arm E's sculpt column is the
+ *                COMPOSITE, which would make every dominance ratio look wonderful
  *   RESTORE      hook set read back after every case
  *   NON-VACUITY  every filtered set is checked NON-EMPTY before anything is asserted
  *                over it — `[].every()` returns true, and that vacuity has fired at
@@ -88,7 +137,9 @@
  *
  *   node tools/tmp/sx_snap.mjs --root /tmp/fa-clean -- node tools/tmp/wi_guard.mjs --url '{URL}'
  *   ... --pitch 20        the lobby-analogue detector (CLAUDE.md #3 — verify at BOTH)
- *   ... --knownbad        must exit 1
+ *   ... --knownbad        must exit 1  (A, B, D red)
+ *   ... --knownbad loud   must exit 1  (C red, A/B green)
+ *   ... --knownbad share  must exit 1  (E red, A/B/C green) — the defect that SHIPPED
  */
 import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -156,8 +207,80 @@ const FLOOR_PX = Number(args.floor ?? 300);
  * exists for by a wide margin: the `--knownbad loud` band is 0.662-0.702 at pitch 58
  * and `wi_derive` measured k=0.75 at 0.621-0.753 at pitch 20.
  */
-const ANCHOR_MIN_RATIO = Number(args.anchorMin ?? 0.25);
+/**
+ * ⚠️ **THIS WAS 0.25 AND IT WAS A BAR ON A RECIPE, NOT ON A PROPERTY.** Old wording,
+ * kept per house style because the way it goes stale is the useful part:
+ *
+ * > *"0.25 is not a guess: `wi_derive.mjs` measured the anchor at 0.323-0.423 of the
+ * > generic burst at pitch 58 and 0.352-0.501 at pitch 20, over all sixteen short
+ * > rows."*
+ *
+ * True, and it pinned B to the SHIPPED ANCHOR'S SIZE rather than to what B asserts,
+ * which is *"an anchor is running under this hook at all"*. The moment the subordinate
+ * anchor stopped being a scaled `burst()` — ground half only, `k = 0.25`, decal clamp
+ * released — the measured band moved to **0.128-0.256 at pitch 58**, and B went red on
+ * 26 of 27 rows while the anchor was running perfectly on every one of them. A bar
+ * calibrated to a recipe fires on the next recipe.
+ *
+ * 0.10 is the same bar restated: the old one sat at 0.774 of its own measured minimum
+ * (0.25 / 0.323); 0.774 of the new minimum (0.128) is 0.099. The bug B exists for —
+ * `impactAnchor` returning before it draws — delivers **exactly 0**, so the distance to
+ * the failure it guards is unchanged and only the distance to the healthy tree moved.
+ */
+const ANCHOR_MIN_RATIO = Number(args.anchorMin ?? 0.10);
 const ANCHOR_MAX_RATIO = Number(args.anchorMax ?? 0.60);
+/**
+ * ── ARM E's TWO NUMBERS ─────────────────────────────────────────────────────────
+ *
+ * `DOMINANCE_MAX` is the bar on `anchorPx / sculptPx`, and **1.00 is not a tuned
+ * threshold, it is the design rule written as an inequality**: *"the hand-authored
+ * sculpt was to remain the dominant read."* Anything above 1 says the shared anchor
+ * covers more of the frame than the weapon's own effect does. It is deliberately NOT
+ * expressed against the composite: the anchor and the sculpt are drawn on the same
+ * point, so `anchor / composite` is inflated by their OVERLAP and two effects of
+ * equal footprint both score ~0.8 of a union they share. Measured on `a494f98`,
+ * `pizza.Dough` reads 0.88 of its composite with a sculpt that is 0.57 of it — the two
+ * fractions sum past 1 precisely because they overlap. `anchor <= sculpt` is a
+ * comparison of two independently measured arms and has no such artefact.
+ *
+ * `RESCUE_MAX` ratchets how many weapons may take the exemption. It is a COUNT, not a
+ * list, so a weapon can move in and out as the sculpts are authored, but the exemption
+ * cannot grow — which is the only way arm E could be defeated without touching E.
+ */
+/**
+ * 1.15, and the 0.15 is a MEASURED RESOLUTION FLOOR, not a tolerance for taste
+ * (CLAUDE.md #10: state the floor before acting on a change in the metric).
+ *
+ * `anchorPx` and `sculptPx` are two single instances of two randomised effects. Fired
+ * on four seeds at pitch 20 (`an_probe --seed 777/1234/20260820/55`, five weapons):
+ *
+ *     column   spread (max-min over the mean, worst weapon)
+ *     anchor   **0.0%** — identical on every seed, on every weapon
+ *     sculpt   **23.8%** (`burrito.Swarm` 173/179/140; `egg.Shards` 415/502/439;
+ *              `pizza.Tomato` 388/393/471; `pizza.Cheese` 303/303/303)
+ *
+ * The anchor is seed-invariant because the recipe this guard now guards has no random
+ * area-bearing element left — no shards, no streaks, and a star decal whose only
+ * randomness is a rotation. **All of arm E's noise lives in the denominator**, and it
+ * reaches a quarter of the value. A bar at exactly 1.00 would be reading a difference
+ * the instrument cannot resolve, which is this repo's most-repeated mistake.
+ *
+ * 🚨 **BUT A ROW BETWEEN 1.00 AND 1.15 IS NOT A PASS, IT IS A STANDING ITEM.** Every
+ * such row is printed BY NAME as `NEAR` on every run. Today there is exactly one:
+ * `pizza.Cheese` at pitch 20, 312 px against 303 px — and that row's sculpt is
+ * **seed-INVARIANT** (303 on all four seeds), so for it the 1.03 is real and not
+ * noise. Its cause is out of this file: `pizza.Cheese`'s own hook delivers 584 px at
+ * pitch 58 and 303 px at pitch 20, losing 48% at the lobby camera, which is the class
+ * CLAUDE.md #3 says that camera exists to expose.
+ */
+const DOMINANCE_MAX = Number(args.dominanceMax ?? 1.15);
+/**
+ * The rescue ratchet. Measured 2 at pitch 58 (`burrito.Swarm` 128 px, `soup.Splash`
+ * 277 px) and 1 at pitch 20 (`burrito.Swarm` 173 px) on BOTH the pre-fix `a494f98`
+ * tree and the fixed one — the set is a property of the eleven weapon files, not of
+ * the anchor, so it does not move when the anchor does.
+ */
+const RESCUE_MAX = Number(args.rescueMax ?? 2);
 
 const log = (...a) => console.log(...a);
 const pad = (s, n) => String(s).padEnd(n);
@@ -273,23 +396,54 @@ async function installKnownBad(page, kind) {
     }
     const realAnchor = proto.impactAnchor;
 
+    /**
+     * The generic recipe, written out once, so a known-bad can name a `k` instead of a
+     * multiplier. `sizeFactor` and the shard count are `vfx.ts:impactAnchor`'s own two
+     * expressions with `k` substituted; the decal clamp is `burst()`'s own 0.55.
+     *
+     * ⚠️ **THIS REPLACED A `burst()` WRAPPER THAT SCALED THE LIVE ANCHOR'S ARGUMENTS
+     * BY 1.5**, whose comment read *"`IMPACT_ANCHOR_K = 0.75` reproduced from outside:
+     * scale the two arguments the anchor scales by 0.75/0.50 = 1.5"*. Kept above the
+     * correction per house style, because it stopped being true the moment the
+     * subordinate anchor stopped being a scaled `burst()`: after `an_*`, the anchor
+     * passes `shardCount = 0` and its own `skipFlash`/`skipStreaks`/`decalMinRadius`,
+     * so `× 1.5` reproduced neither 0.75 nor anything else — `Math.max(2, round(0 *
+     * 1.5))` would have ADDED two gold shards the shipped recipe does not draw, and
+     * `sf * 1.5` would have meant `k = 0.525`. A known-bad expressed as a DELTA on the
+     * thing under test silently follows it; one expressed as an absolute recipe does
+     * not.
+     */
+    const genericAt = (self, o, c, amount, kk) => {
+      const sf = Math.min(2.0, Math.max(0.42, 0.42 + amount * 0.075)) * kk;
+      const shards = Math.max(2, Math.round(Math.min(8, Math.max(2, 1 + amount * 0.4)) * kk));
+      return self.burst(o, c, sf, shards);
+    };
+
     if (k === 'loud') {
-      // `IMPACT_ANCHOR_K = 0.75` reproduced from outside: scale the two arguments the
-      // anchor scales by 0.75/0.50 = 1.5, and ONLY while a subordinate anchor is being
-      // drawn, so the primary path and the bespoke sculpt are untouched.
-      // ⚠️ Not exact at the bottom of the shard range — a 2-shard chip comes out at 3
-      // here and at 2 on a real k=0.75 tree, because `Math.max(2, ...)` is applied
-      // twice. Stated rather than hidden: it makes this known-bad marginally LOUDER
-      // than the tree it imitates, never quieter, so a green C here would still be a
-      // real failure of C.
+      // `castMuzzle`'s 0.75 copied across, which is the exact mistake `impactAnchor`'s
+      // header exists to prevent. `wi_derive` measured k = 0.75 at 0.602-0.701 of the
+      // generic burst at pitch 58 and 0.621-0.753 at pitch 20 — over C's 0.60 bar on
+      // every row, and comfortably inside A and B.
       proto.impactAnchor = function (origin, color, amount, role) {
         if (role !== 'subordinate') return realAnchor.call(this, origin, color, amount, role);
-        const realBurst = proto.burst;
-        proto.burst = function (o, c, sf, sc, opts) {
-          return realBurst.call(this, o, c, sf * 1.5, Math.max(2, Math.round(sc * 1.5)), opts);
-        };
-        try { return realAnchor.call(this, origin, color, amount, role); }
-        finally { proto.burst = realBurst; }
+        return genericAt(this, origin, color, amount, 0.75);
+      };
+      return { ok: true, kind: k };
+    }
+
+    if (k === 'share') {
+      // 🚨 THE DEFECT THAT SHIPPED, not a caricature of it: `a42224c`'s `impactAnchor`
+      // verbatim — the whole generic `burst()` at k = 0.50, decal on the generic
+      // recipe's own 0.55 lower clamp. `an_probe --cands cur`'s SELF-PAIR fired this
+      // same expression against the real shipped anchor on the `a494f98` tree and got
+      // the identical pixel count on every row, so this is a reproduction rather than
+      // a second implementation.
+      //
+      // E must go RED and **A, B and C must all stay GREEN** — C ran green on this
+      // exact state, at both pitches, for the whole life of the anchor.
+      proto.impactAnchor = function (origin, color, amount, role) {
+        if (role !== 'subordinate') return realAnchor.call(this, origin, color, amount, role);
+        return genericAt(this, origin, color, amount, 0.50);
       };
       return { ok: true, kind: k };
     }
@@ -308,16 +462,21 @@ async function installKnownBad(page, kind) {
 }
 
 /**
- * ONE ROW: three arms of the same weapon on the same seed.
+ * ONE ROW: FOUR arms of the same weapon on the same seed.
  *
  *   shipped  registry untouched                       -> the composite that ships
  *   anchor   `impact()` replaced by a hook that draws NOTHING, but IS CALLED
  *            -> whatever is left underneath it
+ *   sculpt   `impactAnchor` returns for role 'subordinate' -> the hand-authored hook
+ *            ALONE. Literally `a42224c`'s pre-fix control flow, re-installed in-page.
+ *            **This arm is new and it is the one arm E needs**: without it there is no
+ *            way to ask whether the shared anchor is bigger than the weapon's own
+ *            effect, only whether it is bigger than a burst that is not on screen.
  *   generic  `impact()` deleted off the registry object -> the shipped fallback,
  *            provoked rather than re-implemented (`wv_area.mjs`'s ablation)
  *
- * The hook set is read back after every arm and returned, so each row carries its own
- * proof that the ablation did not leak.
+ * The hook set AND the prototype are read back after every arm and returned, so each
+ * row carries its own proof that the ablation did not leak.
  */
 async function fireRow(page, { id, key, arm, at, seed, slices }) {
   return page.evaluate(async ([w, sl]) => {
@@ -332,6 +491,22 @@ async function fireRow(page, { id, key, arm, at, seed, slices }) {
     let noopCalls = 0;
     if (w.arm === 'generic' && real) delete v.impact;
     if (w.arm === 'anchor' && real) v.impact = () => { noopCalls++; };
+
+    // The sculpt arm suppresses the ANCHOR instead of the hook. `realAnchor` is
+    // captured HERE, not at setup, so under `--knownbad` this arm suppresses whatever
+    // that mode installed rather than silently reverting it.
+    const proto = Object.getPrototypeOf(window.__vfxLayer);
+    const realAnchor = proto.impactAnchor;
+    let suppressed = 0;
+    if (w.arm === 'sculpt') {
+      if (typeof realAnchor !== 'function') {
+        return { err: 'impactAnchor is not on the prototype — the sculpt arm cannot suppress it, and a silent no-suppression would report the COMPOSITE as the sculpt' };
+      }
+      proto.impactAnchor = function (o, c, a, role) {
+        if (role === 'subordinate') { suppressed++; return; }
+        return realAnchor.call(this, o, c, a, role);
+      };
+    }
 
     window.__wi.reset();
     window.__wi.step(0);
@@ -349,10 +524,12 @@ async function fireRow(page, { id, key, arm, at, seed, slices }) {
     window.__wi.reset();
 
     if (real) v.impact = real;
+    proto.impactAnchor = realAnchor;
     const after = v ? Object.keys(v).filter((k) => typeof v[k] === 'function').sort() : [];
     return {
-      series, noopCalls, damage: weapon.damage,
-      restored: before.join(',') === after.join(',') && (!real || v.impact === real),
+      series, noopCalls, suppressed, damage: weapon.damage,
+      restored: before.join(',') === after.join(',') && (!real || v.impact === real)
+        && proto.impactAnchor === realAnchor,
     };
   }, [{ id, key, arm, x: at.x, y: at.y, seed }, slices]);
 }
@@ -384,11 +561,15 @@ async function main() {
     }
     if (KNOWNBAD) {
       const kb = await installKnownBad(page, KB_KIND);
-      log(`\n🧪 KNOWN-BAD MODE '${KB_KIND}': ${KB_KIND === 'loud'
-        ? 'the subordinate anchor re-scaled to castMuzzle\'s 0.75'
-        : 'the pre-fix early return + the pre-fix QA hook'} re-installed in-page (${kb.ok ? 'ok' : kb.why}).`);
+      const KB_WHAT = {
+        loud: "the subordinate anchor re-drawn as the FULL generic burst at castMuzzle's 0.75",
+        share: "a42224c's anchor verbatim — the full generic burst at k=0.50 on the generic 0.55 decal clamp",
+      }[KB_KIND] ?? 'the pre-fix early return + the pre-fix QA hook';
+      const KB_WANT = { loud: 'C only (A and B must stay GREEN, or C is just a restatement of B)',
+        share: 'E only (A, B AND C must stay GREEN — C ran green on this exact state for the whole life of the anchor, which is why E exists)' }[KB_KIND] ?? 'A, B and D';
+      log(`\n🧪 KNOWN-BAD MODE '${KB_KIND}': ${KB_WHAT} re-installed in-page (${kb.ok ? 'ok' : kb.why}).`);
       log(`   This run MUST go red. A green run here means the assertions below cannot see the bug.`);
-      log(`   expected red: ${KB_KIND === 'loud' ? 'C only (A and B must stay GREEN, or C is just a restatement of B)' : 'A, B and D'}`);
+      log(`   expected red: ${KB_WANT}`);
       if (!kb.ok) bad(`known-bad could not be installed: ${kb.why}`);
     }
     log(`\nviewport ${W}x${H}  readback ${RW}x${RH}  delta>=${DELTA}  pitch ${PITCH}  seed ${SEED}  slices ${SLICES.join(',')}`);
@@ -473,39 +654,97 @@ async function main() {
       if (dir && !dir.restored) bad('D: the recorder did not restore the real hook');
     }
 
-    // ══ A / B / C ══════════════════════════════════════════════════════════════
-    log(`\n══ A/B/C. per weapon: composite, anchor-only, generic control ═════════`);
-    log(`${pad('weapon', 22)}${rpad('dmg', 4)}${rpad('shipped', 9)}${rpad('anchor', 8)}${rpad('generic', 9)}${rpad('a/g', 7)}  verdict`);
+    // ══ A / B / C / E ══════════════════════════════════════════════════════════
+    log(`\n══ A/B/C/E. per weapon: composite, anchor-only, sculpt-only, generic ══`);
+    log(`${pad('weapon', 22)}${rpad('dmg', 4)}${rpad('shipped', 9)}${rpad('anchor', 8)}${rpad('sculpt', 8)}${rpad('generic', 9)}${rpad('a/g', 7)}${rpad('a/sc', 7)}  verdict`);
     const rows = [];
     for (const w of bespoke) {
       const shipped = await fireRow(page, { ...w, arm: 'shipped', at, seed: SEED, slices: SLICES });
       const anchor = await fireRow(page, { ...w, arm: 'anchor', at, seed: SEED, slices: SLICES });
+      const sculpt = await fireRow(page, { ...w, arm: 'sculpt', at, seed: SEED, slices: SLICES });
       const generic = await fireRow(page, { ...w, arm: 'generic', at, seed: SEED, slices: SLICES });
-      if (shipped.err || anchor.err || generic.err) { bad(`${w.id}.${w.key}: ${shipped.err ?? anchor.err ?? generic.err}`); continue; }
-      if (!shipped.restored || !anchor.restored || !generic.restored) bad(`${w.id}.${w.key}: RESTORE failed — a later row is measuring a leaked ablation`);
-      // REACH: the no-op arm's hook must actually have been entered, or arm B is
-      // measuring the real sculpt and passes for entirely the wrong reason.
+      const anyErr = shipped.err ?? anchor.err ?? sculpt.err ?? generic.err;
+      if (anyErr) { bad(`${w.id}.${w.key}: ${anyErr}`); continue; }
+      if (!shipped.restored || !anchor.restored || !sculpt.restored || !generic.restored) bad(`${w.id}.${w.key}: RESTORE failed — a later row is measuring a leaked ablation`);
+      // REACH, per arm and specific to what that arm ablates. A zero that was never
+      // reached describes nothing, and both of these have a way of passing for the
+      // wrong reason: arm B would measure the REAL sculpt, arm E would measure the
+      // COMPOSITE and call it the sculpt.
       if (!anchor.noopCalls) bad(`${w.id}.${w.key}: REACH — the planted no-op hook was never called, so the anchor arm is not measuring the anchor`);
+      if (!sculpt.suppressed) bad(`${w.id}.${w.key}: E REACH — impactAnchor was never entered with role 'subordinate', so NOTHING was suppressed and the sculpt column is the composite`);
       const s = Math.max(...shipped.series);
       const a = Math.max(...anchor.series);
+      const sc = Math.max(...sculpt.series);
       const g = Math.max(...generic.series);
       const ratio = g ? a / g : 0;
+      const dom = sc ? a / sc : Infinity;
       const notes = [];
       if (s < FLOOR_PX) { notes.push(`A: ${s} px < ${FLOOR_PX}`); bad(`A ${w.id}.${w.key}: composite ${s} px is under the ${FLOOR_PX} px floor (generic control ${g} px)`); }
       if (ratio < ANCHOR_MIN_RATIO) { notes.push(`B: a/g ${ratio.toFixed(3)} < ${ANCHOR_MIN_RATIO}`); bad(`B ${w.id}.${w.key}: with the hook drawing nothing the frame moved ${a} px against a ${g} px generic burst (${ratio.toFixed(3)}) — there is no anchor under this hook`); }
       if (ratio > ANCHOR_MAX_RATIO) { notes.push(`C: a/g ${ratio.toFixed(3)} > ${ANCHOR_MAX_RATIO}`); bad(`C ${w.id}.${w.key}: the anchor alone is ${ratio.toFixed(3)} of the generic burst — it has stopped being subordinate and the bespoke sculpt is a garnish on it`); }
-      rows.push({ id: w.id, key: w.key, damage: w.damage, shipped: s, anchor: a, generic: g, ratio: +ratio.toFixed(3), notes });
-      log(`${pad(`${w.id}.${w.key}`, 22)}${rpad(w.damage, 4)}${rpad(s, 9)}${rpad(a, 8)}${rpad(g, 9)}${rpad(ratio.toFixed(3), 7)}  ${notes.length ? `🔴 ${notes.join('; ')}` : 'ok'}`);
+      rows.push({
+        id: w.id, key: w.key, damage: w.damage, shipped: s, anchor: a, sculpt: sc, generic: g,
+        ratio: +ratio.toFixed(3), dominance: +dom.toFixed(3), share: +(s ? a / s : 0).toFixed(3), notes,
+      });
+      log(`${pad(`${w.id}.${w.key}`, 22)}${rpad(w.damage, 4)}${rpad(s, 9)}${rpad(a, 8)}${rpad(sc, 8)}${rpad(g, 9)}${rpad(ratio.toFixed(3), 7)}${rpad(dom.toFixed(2), 7)}  ${notes.length ? `🔴 ${notes.join('; ')}` : 'ok'}`);
     }
 
     // A last non-vacuity check on the MEASURED set, not the intended one: a run where
     // every row errored out would print no 🔴 above and would otherwise exit 0.
-    if (!rows.length) bad('no row was measured — the table above is empty, so A/B/C asserted over nothing');
+    if (!rows.length) bad('no row was measured — the table above is empty, so A/B/C/E asserted over nothing');
     else if (rows.length !== bespoke.length) bad(`${rows.length} rows measured of ${bespoke.length} intended — the missing ones were never asserted over`);
+
+    // ══ E. DOMINANCE — the anchor against the SCULPT, not against the generic ══
+    //
+    // Split first, assert second, and check the set you are about to assert over is
+    // NON-EMPTY before you assert over it: `[].every()` returns true, and the way this
+    // arm goes vacuous is specific and reachable — if every sculpt fell under the
+    // floor, `carries` would be empty and E would report a clean sweep while the
+    // anchor was the whole hit on all 27 weapons.
+    const rescue = rows.filter((r) => r.sculpt < FLOOR_PX);
+    const carries = rows.filter((r) => r.sculpt >= FLOOR_PX);
+    log(`\n══ E. DOMINANCE: anchor vs the weapon's OWN sculpt ════════════════════`);
+    log(`${carries.length} weapon(s) whose sculpt clears the ${FLOOR_PX} px floor alone · ${rescue.length} RESCUE row(s) (sculpt under it, so the anchor MUST carry them)`);
+    if (rows.length && !carries.length) {
+      bad(`E: NOT ONE sculpt clears the ${FLOOR_PX} px floor on its own, so E's assertion set is EMPTY and would be vacuously green while the anchor is the entire hit on every weapon`);
+    }
+    for (const r of carries) {
+      if (r.dominance > 1 && r.dominance <= DOMINANCE_MAX) {
+        // Inside the floor, so not a failure — but named every run, because a row
+        // sitting in the resolution gap is the row the next regression walks through.
+        log(`  NEAR    ${pad(`${r.id}.${r.key}`, 20)} anchor ${rpad(r.anchor, 5)} px vs its own sculpt ${rpad(r.sculpt, 5)} px `
+          + `(${r.dominance.toFixed(2)}x) — over 1.00, inside the ${DOMINANCE_MAX} resolution floor`);
+      }
+      if (r.dominance > DOMINANCE_MAX) {
+        bad(`E ${r.id}.${r.key}: the anchor alone delivers ${r.anchor} px against this weapon's OWN sculpt at ${r.sculpt} px (${r.dominance.toFixed(2)}x) — the shared anchor is a bigger part of the hit than the hand-authored effect it sits under, and the composite share is ${(r.share * 100).toFixed(0)}%. Arm C reads ${r.ratio.toFixed(3)} on this row and cannot see it`);
+      }
+    }
+    for (const r of rescue) {
+      log(`  RESCUE  ${pad(`${r.id}.${r.key}`, 20)} sculpt ${rpad(r.sculpt, 5)} px alone (< ${FLOOR_PX}) · anchor ${rpad(r.anchor, 5)} px · composite ${rpad(r.shipped, 5)} px · share ${(r.share * 100).toFixed(0)}%`);
+    }
+    // REPORTED, NOT ASSERTED: anchor/composite is the number the defect was stated in,
+    // so the guard prints it — but it is not the bar, because the anchor and the sculpt
+    // are drawn on the same point and this ratio is inflated by their OVERLAP (two
+    // effects of equal footprint both score ~0.8 of the union they share). The
+    // assertion is `anchor <= sculpt` above, which compares two independently measured
+    // arms and has no such artefact. Printing both is deliberate: a reader who quotes
+    // the share is quoting the thing Uri's report is about, and a reader who wants the
+    // rule gets the arm that encodes it.
+    if (rows.length) {
+      const shares = rows.map((r) => r.share).sort((a, b) => a - b);
+      const maj = shares.filter((x) => x > 0.5).length;
+      log(`anchor / COMPOSITE (reported, not asserted): ${shares[0].toFixed(3)}-${shares[shares.length - 1].toFixed(3)}`
+        + ` median ${shares[Math.floor(shares.length / 2)].toFixed(3)} · majority on ${maj}/${rows.length}`);
+    }
+    if (rescue.length > RESCUE_MAX) {
+      bad(`E RESCUE: ${rescue.length} weapons take the exemption and the ratchet is ${RESCUE_MAX}. The exemption is the only way past E, so it does not get to grow: either a sculpt regressed, or a weapon was added whose impact() cannot carry its own hit`);
+    }
 
     await writeFile(`${OUT}/wi_guard.p${PITCH}${KNOWNBAD ? '.knownbad' : ''}.json`, JSON.stringify({
       pitch: PITCH, seed: SEED, slices: SLICES, delta: DELTA, knownbad: KNOWNBAD,
       floorPx: FLOOR_PX, anchorMinRatio: ANCHOR_MIN_RATIO, anchorMaxRatio: ANCHOR_MAX_RATIO,
+      dominanceMax: DOMINANCE_MAX, rescueMax: RESCUE_MAX,
+      rescue: rescue.map((r) => `${r.id}.${r.key}`), carries: carries.length,
       direction: dir, rows, failures: failMsg,
     }, null, 1));
 
@@ -518,9 +757,13 @@ async function main() {
       // "D: __vfxSpawnTest..."), and a classifier that missed one would have reported
       // the direction arm as unproven while it was going red on every run.
       const armCount = (a) => failMsg.filter((m) => new RegExp(`^${a}[ :]`).test(m)).length;
-      const want = KB_KIND === 'loud' ? ['C'] : ['A', 'B', 'D'];
-      const quiet = KB_KIND === 'loud' ? ['A', 'B'] : [];
-      log(`arms red: A ${armCount('A')} · B ${armCount('B')} · C ${armCount('C')} · D ${armCount('D')}`);
+      const want = { loud: ['C'], share: ['E'] }[KB_KIND] ?? ['A', 'B', 'D'];
+      // 🚨 `share` puts C in `quiet` ON PURPOSE and that is the point of the mode.
+      // The state it re-installs is the one that SHIPPED, and arm C was green on it at
+      // both pitches on every one of the 27 rows. If C cannot stay green here, E is
+      // just C under another letter and neither of them is telling you anything new.
+      const quiet = { loud: ['A', 'B'], share: ['A', 'B', 'C'] }[KB_KIND] ?? [];
+      log(`arms red: A ${armCount('A')} · B ${armCount('B')} · C ${armCount('C')} · D ${armCount('D')} · E ${armCount('E')}`);
       const missing = want.filter((a) => armCount(a) === 0);
       const noisy = quiet.filter((a) => armCount(a) > 0);
       if (!fail) {
@@ -541,7 +784,7 @@ async function main() {
         process.exitCode = 0;
       }
     } else {
-      log(`${fail ? `🔴 wi_guard: ${fail} FAILURE(S)` : `✅ wi_guard: ${rows.length} bespoke impacts, all >= ${FLOOR_PX} px, anchor ${ANCHOR_MIN_RATIO}-${ANCHOR_MAX_RATIO} of generic`}  (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+      log(`${fail ? `🔴 wi_guard: ${fail} FAILURE(S)` : `✅ wi_guard: ${rows.length} bespoke impacts, all >= ${FLOOR_PX} px, anchor ${ANCHOR_MIN_RATIO}-${ANCHOR_MAX_RATIO} of generic, anchor <= sculpt on ${carries.length} of ${rows.length} (${rescue.length} rescue)`}  (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
       process.exitCode = fail ? 1 : 0;
     }
   } finally {

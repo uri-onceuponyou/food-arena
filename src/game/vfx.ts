@@ -228,17 +228,61 @@ const IMPACT_HEIGHT = 1.15;
 const CAST_HEIGHT = 1.25;
 /**
  * Linear scale of the SUBORDINATE impact burst anchor — the one that sits under a
- * bespoke `impact()` hook. `impactAnchor`'s header carries the whole derivation and
- * the measured `area(k)/area(1)` table; the short version is that it is bounded below
- * by the 300 px floor (0.30 delivers 288 px on the weakest row) and above by
- * "subordinate must stay a MINORITY of the burst it sits under" (0.60 is a majority on
- * 10 of 16 rows), and those two bounds close on 0.50.
+ * bespoke `impact()` hook. `impactAnchor`'s header carries the whole derivation.
  *
- * 🚨 **It is deliberately NOT `castMuzzle`'s 0.75.** That number is `area ∝ scale²` on
- * a single radial sprite; `burst()` has a clamped decal and two rings whose area goes
- * as radius¹, so 0.75 here delivers 0.60-0.70 of the generic burst rather than 0.5625.
+ * ⚠️ **THIS WAS 0.50 AND BOTH OF THE BOUNDS THAT PRODUCED IT WERE MEASURED AGAINST
+ * THE WRONG QUANTITY.** The old wording is kept below, because the way it went wrong
+ * is the useful part:
+ *
+ * > *"bounded below by the 300 px floor (0.30 delivers 288 px on the weakest row) and
+ * > above by 'subordinate must stay a MINORITY of the burst it sits under' (0.60 is a
+ * > majority on 10 of 16 rows), and those two bounds close on 0.50."*
+ *
+ * **LOWER.** *"0.30 delivers 288 px"* is the ANCHOR ALONE. The 300 px floor is on the
+ * hit the player sees, which is the anchor **plus the sculpt it sits under**, and
+ * `wi_guard` arm A has always measured it that way. Requiring the anchor to clear the
+ * floor unaided is strictly stronger than the rule, and it is what forced `k` up.
+ *
+ * **UPPER.** *"the burst it sits under"* is the GENERIC burst — the one the anchor
+ * replaced, which is not on screen. Measured on `a494f98`: that ratio ran 0.32-0.50,
+ * green on every row against a 0.60 bar, while the anchor covered up to **88% of the
+ * composite** and was the majority of it on 18 of 27 weapons at pitch 58.
+ *
+ * 0.25 is derived against both quantities restated, measured by `tools/tmp/an_probe.mjs`
+ * over all 27 bespoke weapons with the sculpt held bit-identical across arms:
+ *
+ *     k      min COMPOSITE (worst row)     anchor > that weapon's own sculpt
+ *     0.50   589 px  (soup.Splash)         7 of 25 non-rescue rows, up to 1.99x
+ *     0.35   432 px  (burrito.Swarm)       2 of 25, up to 1.17x
+ *     0.25   340 px  (burrito.Swarm)       0 of 25, worst row 0.88x
+ *
+ * 0.30 was the tempting middle and is rejected: it buys ~45 px of floor margin and
+ * puts `pizza.Tomato` at ~1.02x, i.e. it lands the design rule exactly ON its
+ * threshold, which is how the next change crosses it without anyone noticing.
+ * See `impactAnchor`.
+ *
+ * 🚨 **It is still deliberately NOT `castMuzzle`'s 0.75.** That number is
+ * `area ∝ scale²` on a single radial sprite; `burst()` has a clamped decal and two
+ * rings whose area goes as radius¹.
  */
-const IMPACT_ANCHOR_K = 0.5;
+const IMPACT_ANCHOR_K = 0.25;
+/**
+ * Lower clamp on the SUBORDINATE anchor's ground-mark radius, in metres, replacing
+ * `burst()`'s generic 0.55 for this role only.
+ *
+ * **It is ZERO on purpose: the clamp is REMOVED here, not retuned.** 0.55 is a floor
+ * on a shape every weapon shares, and at any `k` below ~0.85 it binds on the whole
+ * roster — twenty-six of the twenty-seven bespoke impacts drew an identically sized
+ * mark and no value of `k` could move one of them. A named zero rather than a bare
+ * one, so the removal is greppable and has somewhere to hang its reason.
+ *
+ * Nothing degenerates at 0: `sizeFactor` has its own floor of 0.42, so the radius
+ * bottoms out at `0.65 * 0.42 * k` = 0.068 m on the roster's one damage-0 weapon
+ * (`taco.Double`, whose sculpt delivers 660 px unaided and needs no mark at all).
+ * With the clamp gone the mark spans 0.068 m to 0.288 m across the damage range — a
+ * 4.2x spread where the shipped anchor had none.
+ */
+const IMPACT_ANCHOR_DECAL_MIN = 0;
 /** Above splats/trail marks so melee sweeps and impact rings always render on top. */
 const GROUND_VFX_Y = GROUND_CLEAR_Y + 0.02;
 const STATUS_RING_Y = GROUND_CLEAR_Y + 0.04;
@@ -3504,6 +3548,87 @@ export class VfxLayer {
    * ⚠️ **The 2.0 `sizeFactor` ceiling is untouched and stays load-bearing.** The anchor
    * only ever scales DOWN (k < 1), so the hardest possible subordinate anchor is 1.0
    * and `spawnDeathBurst`'s 2.6 > 2.0 ordering is unaffected.
+   *
+   * ═══════════════════════════════════════════════════════════════════════════════
+   * ── THE DERIVATION ABOVE IS KEPT WHOLE, AND BOTH OF ITS BOUNDS WERE MEASURED
+   *    AGAINST A QUANTITY THAT IS NOT THE RULE ──────────────────────────────────
+   * ═══════════════════════════════════════════════════════════════════════════════
+   *
+   * It shipped, it worked — minimum composite went 128 px to 557 px — and it produced
+   * an anchor that is **the majority of the hit on 18 of the 27 weapons at pitch 58
+   * and 13 of 27 at pitch 20**, up to 88% on `pizza.Dough`. The design intent written
+   * three paragraphs up is that the sculpt stays the dominant read. It does not.
+   *
+   * Neither bound above is measured on the composite:
+   *
+   *   LOWER, *"the anchor has to clear the floor ON ITS OWN"*. The 300 px floor is on
+   *   the hit that reaches the player, and `wi_guard` arm A has always measured it on
+   *   the composite. Making the anchor carry it unaided is a strictly stronger
+   *   requirement than the rule states, and it is what pushed `k` up to 0.50.
+   *
+   *   UPPER, *"a MINORITY of the burst it sits under"*. "The burst it sits under" was
+   *   read as the GENERIC burst — the effect the anchor replaced, which no player ever
+   *   sees. Measured on `a494f98` by `wi_guard` itself: anchor/generic ran 0.32-0.50
+   *   against a 0.60 bar, **green on all 27 rows at both pitches**, while
+   *   anchor/composite ran 0.27-0.88. Arm C was structurally unable to see the defect
+   *   it is named after, which is why `wi_guard` now carries arm E as well.
+   *
+   * ── WHAT `k` CANNOT DO, AND IT IS NOT A TUNING PROBLEM ────────────────────────
+   *
+   * The table above says `k` controls area. It does, weakly, and it does NOT control
+   * the read at all, because the two elements that dominate each are the two `k`
+   * reaches last:
+   *
+   *   THE RINGS carry the area, and their radius is `0.6 * sf * k + 0.35` — AFFINE.
+   *   Halving `k` takes a chip's rim to 72% of its radius, not 50%.
+   *
+   *   THE DECAL carries the READ, and its radius is `clamp(0.65 * sf * k, 0.55, 1.5)`
+   *   — at `k = 0.50` that clamp binds for every weapon under 17 damage, i.e. 26 of
+   *   27. **They all drew the same mark as each other.** It is worth about 33 px of
+   *   marginal area, so no area column in this file or in `wi_derive` could show it,
+   *   and it is the plainly visible shared elliptical disc under every weak-sculpt
+   *   weapon in `wi_shot`'s judgement PNGs at BOTH cameras.
+   *
+   * So the fix is not a smaller copy of the same thing. It is a different thing (the
+   * GROUND HALF of `burst()`, see the body) with the shared-shape clamp released, at
+   * the `k` the restated bounds actually give.
+   *
+   * ── AND WHY THERE IS NO ADAPTIVE `k`, WHICH IS THE SHAPE THE PROBLEM HAS ──────
+   *
+   * The honest form of this fix is "big under a thin sculpt, small under a strong
+   * one". It was priced and refused, on three findings rather than on taste:
+   *
+   *   1. **`vfx.ts` cannot see the sculpt.** `WeaponVfxCtx` gives a hook exactly one
+   *      output channel, `spawnTransient(object, life, onUpdate)`. The only signals
+   *      available at the instant the anchor must be spawned are how many objects
+   *      arrived and how big they are BEFORE their first `onUpdate` — and most hooks
+   *      animate scale from ~0 in `onUpdate`, so that transform is not the effect.
+   *   2. **The available proxy ANTI-correlates.** `an_probe` recorded the count for
+   *      every weapon: `burrito.Swarm` spawns 16 objects and delivers 128 px;
+   *      `pizza.Cheese` spawns 9 and delivers 584. More objects, less effect.
+   *   3. **Even a perfect area proxy would steer on the wrong quantity.** `209e270`
+   *      measured delivered area's rank correlation with legibility at 0.230 against
+   *      the weapon's own lightness at -0.738. An anchor sized by predicted area is
+   *      sized by the thing that does not predict the read.
+   *
+   * The reachable version is a measured per-weapon table. That is refused too, and not
+   * on effort: it would put 27 numbers in this file describing the contents of eleven
+   * files this file does not own, invisible to every check in the repo (no legality
+   * test can tell a stale entry from a fresh one — CLAUDE.md's stale-literal class),
+   * and re-validating one costs a browser render. `wi_guard` arm E gets the same
+   * guarantee out of the tree instead of out of a constant.
+   *
+   * ── WHY TWO REGIMES ARE FORCED, NOT CHOSEN ───────────────────────────────────
+   *
+   * `burrito.Swarm`'s sculpt delivers **128 px on its own**. The composite is at most
+   * `sculpt + anchor`, so if the anchor is to stay no larger than the sculpt the
+   * composite cannot exceed 256 px — **under the floor with the overlap counted as
+   * zero**, and the two are drawn on the same point. Subordination and the 300 px
+   * floor are mutually exclusive on that weapon; no `k`, no recipe and no adaptive
+   * rule can deliver both. So a small, NAMED, ratcheted set of weapons is rescued by
+   * an anchor that is deliberately the majority of their hit, and everything else is
+   * held to the rule. `wi_guard` arm E splits exactly on that line and prints the
+   * rescue list every run.
    */
   private impactAnchor(
     origin: { x: number; z: number },
@@ -3569,7 +3694,66 @@ export class VfxLayer {
     // which is denser, not quieter. The 2 floor is the generic recipe's own and is not
     // scaled: two chunks is what makes a hit read as a hit at all.
     const shards = Math.max(2, Math.round(THREE.MathUtils.clamp(1 + amount * 0.4, 2, 8) * k));
-    this.burst(origin, color, sizeFactor, shards);
+    if (role === 'primary') {
+      this.burst(origin, color, sizeFactor, shards);
+      return;
+    }
+
+    // ── THE SUBORDINATE ANCHOR IS THE GROUND HALF OF `burst()`, NOT A SMALL COPY ──
+    //
+    // `burst()` is five elements and they split cleanly in two:
+    //
+    //   GROUND   the weapon-coloured star decal and the two weapon-coloured rings.
+    //            Where the hit LANDED. Tinted per weapon, drawn on the floor, and
+    //            between them they carry essentially all of the delivered-pixel area.
+    //   POP      the additive flash, the gold spark streaks and the gold crystal
+    //            shards. What the hit FELT like. `burst()`'s own comments call the
+    //            gold *"a distinct bright layer"* chosen so it does NOT take the
+    //            weapon's hue — which is exactly what makes it the same on all
+    //            twenty-seven weapons.
+    //
+    // The anchor keeps the ground half and gives the pop half back to the sculpt.
+    // Two measurements say that is close to free and worth a great deal:
+    //
+    //   FREE ON THE FLOOR. At the shipped k = 0.50, dropping the flash and both gold
+    //   layers moved `burrito.Swarm`'s anchor from 534 px to 533 px — ONE pixel —
+    //   because every one of them lands inside the rings' own footprint.
+    //
+    //   NOT FREE ON THE READ, WHICH IS THE POINT. `209e270` measured delivered
+    //   area's rank correlation with legibility at **0.230**. Gold streaks on a
+    //   purple floor are the cheapest pixels in this effect and among the loudest, so
+    //   an element can be 1 px of area and most of what the eye resolves. Judging
+    //   this by area alone is exactly the trap CLAUDE.md #3 exists for.
+    //
+    // Shard count is 0 rather than `shards`, and `Math.max(2, ...)`'s floor is
+    // deliberately not honoured here: two gold chunks is what makes a GENERIC hit
+    // read as a hit, and this hit is not generic — the sculpt above it is.
+    this.burst(origin, color, sizeFactor, 0, {
+      skipFlash: true,
+      skipStreaks: true,
+      // 🚨 THE CLAMP THIS RELEASES IS WHY EVERY BESPOKE IMPACT LOOKED ALIKE.
+      // `burst()` sizes the decal `clamp(0.65 * sizeFactor, 0.55, 1.5)`. Subordinate
+      // `sizeFactor` carries `k`, so `0.65 * (0.42 + 0.075*d) * k` reaches 0.55 only
+      // at `d >= 17` when k = 0.50 — `lollipop.Giant` and nothing else. **Twenty-six
+      // of twenty-seven weapons drew the SAME 0.55-radius mark**, a 2-damage chip and
+      // a 16-damage smash identical, and no value of `k` could move any of them
+      // because the clamp binds first. It is the shared elliptical disc visible under
+      // every weak-sculpt weapon in the judgement PNGs, and it is worth only ~33 px
+      // of marginal area — which is why the area columns never showed it.
+      //
+      // The replacement is ZERO — the clamp is removed rather than retuned, because
+      // `sizeFactor`'s own 0.42 floor already bounds the radius at 0.068 m. The mark
+      // then scales with damage on all 27 weapons instead of on one, spanning
+      // 0.068 m to 0.288 m. **The count of weapons the clamp binds on goes 26 -> 0.**
+      //
+      // ⚠️ `spawnImpactStarDecal` caches its star geometry keyed on the radius to
+      // 1 mm, so releasing the clamp turns one cached entry into one per (weapon,
+      // level) pair. That bound is the one the PRIMARY path already lives under —
+      // `amount` is `Weapon.damage * damageMul` either way — and each entry is an
+      // eight-point polygon, so this widens an existing set rather than creating a
+      // class of allocation that did not exist.
+      decalMinRadius: IMPACT_ANCHOR_DECAL_MIN,
+    });
   }
 
   /**
@@ -3958,7 +4142,17 @@ export class VfxLayer {
     color: string,
     sizeFactor: number,
     shardCount: number,
-    opts?: { life?: number; speedMult?: number; skipFlash?: boolean; skipRing?: boolean; skipStreaks?: boolean; skipDecal?: boolean },
+    opts?: {
+      life?: number; speedMult?: number;
+      skipFlash?: boolean; skipRing?: boolean; skipStreaks?: boolean; skipDecal?: boolean;
+      /**
+       * Lower clamp on the star decal's radius. Defaults to the generic recipe's own
+       * **0.55**, which is a FLOOR ON A SHARED SHAPE and belongs only to the generic
+       * path — see `impactAnchor` for the measurement that showed 26 of 27 bespoke
+       * weapons drawing an identically-sized mark because of it.
+       */
+      decalMinRadius?: number;
+    },
   ): void {
     const life = opts?.life ?? 1;
     const speedMult = opts?.speedMult ?? 1;
@@ -3981,7 +4175,18 @@ export class VfxLayer {
       // typical weapon damage. See `spawnImpactBurst`'s note for why every
       // multiplier in this function is now expressed against the character rather
       // than against a reference plate's framing.
-      this.spawnImpactStarDecal(origin, color, THREE.MathUtils.clamp(0.65 * sizeFactor, 0.55, 1.5), (0.55 + sizeFactor * 0.08) * life);
+      //
+      // ⚠️ **THE 0.55 LOWER CLAMP IS A DEFAULT NOW, NOT A CONSTANT, AND THE REASON IS
+      // THE WHOLE OF `impactAnchor`'s SECOND DERIVATION.** `0.65 * sizeFactor` reaches
+      // 0.55 only at `sizeFactor >= 0.846`; a SUBORDINATE anchor multiplies
+      // `sizeFactor` by `k`, so at `k = 0.50` it clears the clamp only at `damage >=
+      // 17` — one weapon of twenty-seven. The other twenty-six drew *the same
+      // 0.55-radius mark as each other*, on a 2-damage chip and a 16-damage smash
+      // alike, and `k` could not move any of them. That mark is what the judgement
+      // PNGs show as the shared elliptical disc under every hit.
+      this.spawnImpactStarDecal(origin, color,
+        THREE.MathUtils.clamp(0.65 * sizeFactor, opts?.decalMinRadius ?? 0.55, 1.5),
+        (0.55 + sizeFactor * 0.08) * life);
     }
 
     if (!opts?.skipFlash) {
