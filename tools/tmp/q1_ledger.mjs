@@ -188,6 +188,13 @@ else if (argv[0] === '--record') {
   }
   rec.at = new Date().toISOString();
   writeFileSync(LEDGER, JSON.stringify(rec) + '\n', { flag: 'a' });
-  const valid = rec.reference >= 7 && rec.reference <= 9;
-  console.log(`recorded ${rec.id}  ours ${rec.ours}  ref ${rec.reference}  ${valid ? 'VALID' : '🔴 REF OUTSIDE 7–9 — DISCARD THIS ROUND'}`);
+  // ⚠️ A SKIP IS NOT A DISCARD. `null >= 7` is false, so this printed the loudest failure
+  // string in the round — "🔴 REF OUTSIDE 7–9 — DISCARD THIS ROUND" — on a perfectly
+  // healthy skipped row, five times. `main()` reads `skipped` correctly and excludes it
+  // from `k`; only the banner was wrong. A cosmetic bug that cries wolf is still a bug:
+  // an operator who learns to ignore that string will ignore it on a real discard.
+  const valid = rec.skipped === true || (rec.reference >= 7 && rec.reference <= 9);
+  const verdict = rec.skipped === true ? 'SKIPPED (not scored, excluded from k)'
+    : valid ? 'VALID' : '🔴 REF OUTSIDE 7–9 — DISCARD THIS ROUND';
+  console.log(`recorded ${rec.id}  ours ${rec.ours}  ref ${rec.reference}  ${verdict}`);
 } else main();

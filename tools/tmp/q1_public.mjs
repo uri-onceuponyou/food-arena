@@ -145,7 +145,17 @@ export function foreignProperNouns(text, ok) {
 }
 
 /** The fields that may be published. `referenceNote` is absent BY CONSTRUCTION, not filtered. */
-const PUBLIC_FIELDS = ['id', 'arm', 'element', 'at', 'ours', 'reference', 'panelOurs', 'oursNote', 'note'];
+// 🚨 `skipped` IS LOAD-BEARING AND WAS BEING DROPPED. `q1_ledger` derives each cell's `k`
+// — and therefore its FLOOR — by excluding skipped rows, but `skipped` lived ONLY in the
+// gitignored raw ledger. So the committed projection carried five rows with `ours: null`
+// and no flag, and a clean checkout could not tell a deliberate skip from a failed score.
+// Counting those five toward `k` prints floors **tighter than the evidence** — the exact
+// direction every floor error in this round has gone, and the reason `q1_ledger` already
+// carries a comment about counting SKIPPED rows toward `k` as a bug it once had.
+//
+// The whole point of the projection is that the round survives a clean checkout. A record
+// that cannot reproduce its own floors does not.
+const PUBLIC_FIELDS = ['id', 'arm', 'element', 'at', 'ours', 'reference', 'panelOurs', 'oursNote', 'note', 'skipped'];
 
 /**
  * Elements whose **OURS** panel is itself a third-party plate.
@@ -327,6 +337,15 @@ if (argv.includes('--selftest')) {
     project([{ id: 'n', ours: 4, reference: 8, oursNote: 'x' }]).faults.some((f) => /has no .?element/.test(f)));
   t('L2 …and a row WITH an element is not refused for that reason',
     !project([{ id: 'o', element: 'arena', ours: 4, reference: 8, oursNote: 'x' }]).faults.some((f) => /has no .?element/.test(f)));
+  // M. `skipped` must SURVIVE the projection — it is what `k` and every floor derive from.
+  //    Both directions, because a field that is always present and a field that is always
+  //    absent look identical to a one-sided check.
+  const sk = project([
+    { id: 'p', element: 'ctl_high', ours: null, reference: null, skipped: true },
+    { id: 'q', element: 'arena', ours: 4, reference: 8 },
+  ]).out;
+  t('M a skipped row keeps its flag', sk[0].skipped === true);
+  t('M2 …and a scored row does not acquire one', !('skipped' in sk[1]));
   t('K2 KNOWN-BAD a MID-SENTENCE proper noun is still caught', foreignProperNouns('the Zarblax plate is brighter', ok).length === 1);
   t('K3 …and the exemption is REAL, not vacuous (same word, two positions)',
     foreignProperNouns('Zarblax is bright', ok).length === 0 && foreignProperNouns('a Zarblax is bright', ok).length === 1);
