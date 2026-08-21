@@ -114,8 +114,34 @@ function allowed() {
 /** Capitalised tokens in `text` that are not in `ok`. Mid-sentence only is NOT assumed. */
 export function foreignProperNouns(text, ok) {
   if (!text) return [];
-  const toks = String(text).match(/\b[A-Z][A-Za-z'’-]{1,}\b/g) ?? [];
-  return [...new Set(toks.filter((t) => !isShout(t) && !ok.has(t.toLowerCase())))];
+  // 🚨 SENTENCE-INITIAL TOKENS ARE EXEMPT, AND UNTIL 2026-08-21 THEY WERE NOT — while
+  // arm C was NAMED "sentence-start words are allowed". The name described behaviour the
+  // code never had; it passed only because `The` and `Both` happened to sit in NEUTRAL.
+  //
+  // The cost of that mismatch was measured, not guessed: agents were refused on `Slots`,
+  // `Scale`, `Ground`, `Flatly-lit`, `Also`, `So`, `Earlier`, `My`, `What`, `One`, `If`,
+  // `Filenames` — every one an ordinary English sentence opening, every one a FALSE
+  // POSITIVE. Four refusals in a single round. That is the rate `gatecount` rejected the
+  // adjacent idea at (16 FP : 1 TP), and a guard that cries wolf gets switched off — which
+  // would cost more than the class it catches.
+  //
+  // ⚠️ THE LIMIT, STATED: a proper noun that OPENS a sentence now passes. Accepted, because
+  // the disclosure this hunts reads "the <Name> plate is brighter" — mid-sentence, where a
+  // scan still sees it — and because a live guard with a stated hole beats a dead one with
+  // none. `AGENT-BRIEF`'s rule (describe the ROLE, never the artwork) remains the actual
+  // protection; this only stops a name riding along unnoticed.
+  const src = String(text);
+  const out = new Set();
+  const re = /\b[A-Z][A-Za-z'’-]{1,}\b/g;
+  let m;
+  while ((m = re.exec(src))) {
+    const before = src.slice(0, m.index);
+    // Start of string, or after a terminator / newline / opening bracket + space.
+    if (/(^|[.!?;:—\n(\[«"'])\s*$/.test(before)) continue;
+    if (isShout(m[0]) || ok.has(m[0].toLowerCase())) continue;
+    out.add(m[0]);
+  }
+  return [...out];
 }
 
 /** The fields that may be published. `referenceNote` is absent BY CONSTRUCTION, not filtered. */
@@ -161,6 +187,18 @@ function project(rows) {
     for (const field of ['oursNote', 'note']) {
       const bad = foreignProperNouns(r[field], ok);
       if (bad.length) faults.push(`${r.id}.${field}: unrecognised capitalised token(s) ${JSON.stringify(bad)}`);
+      // 🚨 A PLATE FILENAME IS LOWERCASE WITH DIGITS, SO THE TITLECASE SCAN ABOVE IS BLIND
+      // TO IT. The committed projection carried a reference plate's filename in an operator
+      // note for four rounds — opaque, disclosing no title, character or artwork, but a
+      // reference-side FILENAME in a public file, and the guard that exists to stop exactly
+      // that could not see it.
+      //
+      // Matched on SHAPE, not on a list of names — writing the names here is the denylist
+      // mistake this file was built to avoid. A note should DESCRIBE, never cite a file:
+      // the id, arm and element already say which panel it is, so a filename in prose adds
+      // nothing a reader needs and carries provenance a public repo should not.
+      const files = [...new Set(String(r[field] ?? '').match(/\b[\w-]+\.(?:png|jpe?g|webp|gif|bmp|tiff?)\b/gi) ?? [])];
+      if (files.length) faults.push(`${r.id}.${field}: cites image file(s) ${JSON.stringify(files)} — describe the panel, do not name the file`);
     }
     const p = {};
     for (const f of PUBLIC_FIELDS) if (r[f] !== undefined) p[f] = r[f];
@@ -254,6 +292,22 @@ if (argv.includes('--selftest')) {
   // I. The vacuity must INVERT: unknown provenance withholds everything, never nothing.
   //    Proved by pointing the resolver at a repo with no manifest rather than by reading it.
   t('I no-manifest is null (unknown), not an empty set (none)', plateOursElements.toString().includes('return null'));
+  // J. The Titlecase scan is blind to a lowercase-with-digits filename — the shape a
+  //    reference plate's name actually has. Both directions, because a filter asserted
+  //    one way cannot be told from a hole.
+  const jf = project([{ id: 'j', element: 'arena', ours: 4, reference: 8, note: 'ours vs bs_02.png' }]).faults;
+  t('J KNOWN-BAD a cited image file is REFUSED', jf.length === 1 && /cites image file/.test(jf[0]));
+  t('J2 …and ordinary prose with a dot is not', project([{ id: 'k', element: 'arena', ours: 4, reference: 8, note: 'the floor reads flat. the litter is dispersed.' }]).faults.length === 0);
+  // K. The positional exemption, BOTH directions — the arm C name finally made true.
+  // ⚠️ This fixture read `'Filenames removed. If it helps, Also fine.'` and FAILED — because
+  // `Also` sits after a COMMA, which is mid-sentence, so the code was right and the test was
+  // wrong. Kept as a note because it is the arm's real boundary: only a terminator, newline
+  // or opening bracket starts a sentence here, never a comma.
+  t('K sentence-initial ordinary words pass', foreignProperNouns('Filenames removed. If it helps, all fine.', ok).length === 0);
+  t('K4 …and a comma is NOT a sentence start', foreignProperNouns('it helps, Also fine', ok).length === 1);
+  t('K2 KNOWN-BAD a MID-SENTENCE proper noun is still caught', foreignProperNouns('the Zarblax plate is brighter', ok).length === 1);
+  t('K3 …and the exemption is REAL, not vacuous (same word, two positions)',
+    foreignProperNouns('Zarblax is bright', ok).length === 0 && foreignProperNouns('a Zarblax is bright', ok).length === 1);
 
   console.log(`\n  ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
