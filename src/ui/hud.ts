@@ -85,6 +85,33 @@ export interface HudFrameInfo {
   /** The weapon slot the player currently has selected (for the highlight ring). */
   selectedWeapon: number;
   /**
+   * WHOSE EYES THE HUD IS LOOKING THROUGH — the slot `render/camera.ts:resolveViewSubject`
+   * picked, which is the local seat while it lives and a spectated fighter after it dies.
+   *
+   * 🚨 THIS EXISTS BECAUSE `30e3360` MOVED ONE HALF OF ONE RULE AND LEFT THE OTHER HALF
+   * BEHIND. That commit gave a dead player a camera that follows somebody still fighting,
+   * and moved the CONCEALMENT observer (`match.ts`, the 3D models and the floating pills)
+   * to the same fighter. The radar's blips were still resolved against `localFighter`, so
+   * a spectator could see a fighter in 3D that their own radar was hiding — **one rule
+   * implemented twice, disagreeing**, which is what `fighterVisibleTo` below calls this
+   * project's oldest defect shape and what `ai.ts` has now produced seven instances of.
+   *
+   * ⚠️ **IT IS A SOCKET, SAME DISCIPLINE AS `place` / `order` / `payout` BELOW, AND THE
+   * DEFAULT HAS TO BE RIGHT ON ITS OWN.** The HUD cannot derive it: the ladder needs the
+   * clock, the rig and the kill chain, none of which are on a `MatchState`. Absent or
+   * null it falls back to `LOCAL_SLOT` — which is what every frame of this HUD has always
+   * used, so a caller that never supplies it renders exactly as it did.
+   * ⚠️ And an out-of-range slot falls back to `localFighter` rather than throwing, for the
+   * reason `match.ts:viewObserver()` gives: a six-seat match followed by a two-seat one
+   * can carry a stale subject for one call ordering, and the failure it would otherwise
+   * produce is a black screen.
+   *
+   * ⚠️ **IT IS NOT "AM I DEAD".** Three readouts in this file are about whether YOU can
+   * act — the fog alarm, the chevron and the weapon tray — and they read `localFighter`
+   * deliberately and must keep doing so. See `renderZone` and the tray in `update`.
+   */
+  observerSlot?: number | null;
+  /**
    * Where to draw the "run this way" chevron while the player is outside the safe
    * zone, and which way it points — both in SCREEN space, because the direction to
    * safety depends on the camera and only `match.ts` can project it. Null (or absent)
@@ -259,11 +286,24 @@ export interface Hud {
  * fighter that can ever be hidden* — with slots 2..5 drawn, blipped and pilled through
  * their cover. Generalised, the rule is:
  *
- *   * the OBSERVER is always `roster.ts:LOCAL_SLOT` — the seat this screen belongs to;
+ *   * the OBSERVER is `roster.ts:LOCAL_SLOT` — the seat this screen belongs to;
  *   * the TARGET is any OTHER fighter, asked one at a time;
  *   * **the observer is never hidden from itself.** Nothing in this file or in `match.ts`
  *     ever hides the local fighter, and `match.ts` skips `LOCAL_SLOT` explicitly rather
  *     than relying on this predicate returning `true` for a fighter asked about itself.
+ *
+ * ⚠️ **AND THE FIRST BULLET WENT STALE A THIRD TIME — IT SAID "ALWAYS `LOCAL_SLOT`", AND
+ * `30e3360` MADE THAT FALSE FOR TWO OF THE THREE SURFACES.** A dead player's camera now
+ * follows somebody still fighting, and `match.ts` moved the 3D model and the floating
+ * pill onto that fighter — while this file's radar kept asking `localFighter`, which is
+ * precisely the "three surfaces, three chances" failure the paragraph above warns about,
+ * arriving through a doc line that read like a guarantee. The rule as it now stands:
+ *
+ *   * the OBSERVER is **the fighter the camera is watching** — `LOCAL_SLOT` for as long
+ *     as that seat is alive (`resolveViewSubject` rung 1, so a living player's HUD is
+ *     unchanged by construction), a spectated fighter afterwards. It arrives on
+ *     `HudFrameInfo.observerSlot` and this file resolves it in exactly one place,
+ *     `hudObserver` — never re-derived per surface.
  *
  * The argument order is still the trap and is still stated once: observer first, target
  * second, both as whole `Fighter` objects rather than as coordinate pairs, so a
@@ -320,6 +360,49 @@ export function fighterVisibleTo(state: MatchState, observer: Fighter, target: F
  */
 export function enemyVisibleToPlayer(state: MatchState): boolean {
   return fighterVisibleTo(state, localFighter(state), state.enemy);
+}
+
+/**
+ * THE FIGHTER THIS HUD IS LOOKING THROUGH. See `HudFrameInfo.observerSlot`.
+ *
+ * The one place the HUD answers "who is the observer", so the radar cannot disagree with
+ * the 3D models the way it did between `30e3360` and this change. `match.ts:viewObserver()`
+ * is the same expression on the other side of the boundary; they resolve to the same
+ * fighter because the slot travels between them rather than being re-derived.
+ *
+ * ⚠️ **BYTE-IDENTICAL WHILE THE LOCAL SEAT LIVES, BY CONSTRUCTION AND NOT BY A TOLERANCE.**
+ * `resolveViewSubject` rung 1 can only return `localSlot` while that seat is alive, so for
+ * every frame any existing HUD probe has ever scored this returns exactly `localFighter`.
+ * With the field absent — which is what runs until `match.ts` supplies it — it returns
+ * `localFighter` in every phase, alive or dead.
+ */
+function hudObserver(state: MatchState, frame: HudFrameInfo): Fighter {
+  return fightersOf(state)[frame.observerSlot ?? LOCAL_SLOT] ?? localFighter(state);
+}
+
+/**
+ * THE LOCAL SEAT IS DEAD AND THE MATCH IS STILL BEING PLAYED — i.e. every readout that
+ * addresses the player in the second person is now addressing a corpse.
+ *
+ * 🚨 Uri played six seats, lost, and the screen kept telling him things that were not
+ * true of him: **`HAMBURGER 0/70` with the full weapon tray lit and slot 1 selected**, and
+ * **`ZONE CLOSES / REACHES YOU 0:28`** measured from a body that cannot move. `7a32f3d`
+ * made the corpse genuinely inert (`sim.ts` `continue`s past the whole controller branch)
+ * and `30e3360` took the camera somewhere worth watching; this is the HUD catching up
+ * with both.
+ *
+ * ⚠️ **DELIBERATELY NOT `observerSlot !== LOCAL_SLOT`.** Those are different questions and
+ * the difference is reachable: `resolveViewSubject` rung 5 HOLDS the current subject when
+ * nobody is alive, so the subject can legitimately still be the local seat while the local
+ * seat is a corpse. Keying the inert states off "am I dead" means they are right in that
+ * case too, and — the part that matters today — right BEFORE `match.ts` supplies the slot
+ * at all. Only the caption needs to know who is being watched, and it asks separately.
+ *
+ * `phase === 'playing'` rather than `!== 'ended'`: during the countdown nobody is dead, and
+ * once the result card is up it is drawn over this HUD and owns the screen.
+ */
+function localIsSpectating(state: MatchState): boolean {
+  return state.phase === 'playing' && !localFighter(state).alive;
 }
 
 const STYLE_ID = 'hud-styles';
@@ -442,6 +525,20 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       </div>
 
       <div class="hud-weapons" data-el="weapons"></div>
+
+      <!-- ── "You are dead, and this is why the screen changed" ──────────────
+           🚨 THE MISSING AFFORDANCE. Uri's six-seat loss left a HUD that was
+           internally consistent and unexplained: the health plate read 0/70, the
+           camera had walked off to a fight two thousand world units away, and
+           NOTHING on screen said the two facts were connected. Every other inert
+           state this pass adds (the grey tray, the de-personalised zone pill) is a
+           thing that stopped happening; this is the one element that says what is
+           happening instead, and without it they read as breakage.
+
+           Declared AFTER the tray, so it paints over it if a viewport ever brings
+           them together, and before the countdown/result overlays, which own the
+           screen outright when they are up. -->
+      <div class="hud-spectate" data-el="spectate"></div>
 
       <div class="hud-countdown" data-el="countdown"></div>
 
@@ -570,6 +667,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
   const timerEl = q<HTMLDivElement>('timer');
   const weaponsEl = q<HTMLDivElement>('weapons');
+  const spectateEl = q<HTMLDivElement>('spectate');
   const countdownEl = q<HTMLDivElement>('countdown');
   const gameoverEl = q<HTMLDivElement>('gameover');
   const gameoverTitleEl = q<HTMLDivElement>('gameover-title');
@@ -1092,6 +1190,17 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     /** The ring's floor is outside the player: the edge will never reach them. */
     holds: boolean;
     /**
+     * THE RING HAS FINISHED CLOSING — a fact about the SCHEDULE with no person in it,
+     * unlike `holds`/`outside`/`msUntilEdge` above, which are all relative to a body.
+     *
+     * That is the whole reason it exists: while the local seat is dead every one of those
+     * three describes a corpse, and `renderZone` needs a true sentence to print instead.
+     * EXACT rather than toleranced — `rules.ts:fogRadiusAt` returns `floorRadius` itself
+     * once `playMs >= FOG_CLOSE_MS`, and `sim.ts` hands it the same `minSafeRadiusFor`
+     * (the SEATED count, which `state.fighters.length` also is) that this line does.
+     */
+    ringAtFloor: boolean;
+    /**
      * `DECISIONS §2` sudden death is running: the safe radius is ZERO, so there is no
      * inside, nobody can get to safety, and the match resolves on HP.
      *
@@ -1136,6 +1245,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     return {
       outside,
       holds,
+      ringAtFloor: state.safeRadius <= seatFloor,
       sudden: suddenDeathActive(state.timeRemaining),
       radius01: maxR > 0 ? Math.max(0, Math.min(1, state.safeRadius / maxR)) : 0,
       // ⚠️ THE OLD LINE, KEPT SO THE SHAPE OF THE BUG IS LEGIBLE NEXT TO ITS FIX:
@@ -1235,9 +1345,81 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
    *  see the clamp in renderZone. 0 = not measured yet. */
   let arrowLabelHalfW = 0;
 
+  /**
+   * SAY THAT YOU ARE DEAD, AND SAY WHO YOU ARE WATCHING.
+   *
+   * ── The defect this answers ──────────────────────────────────────────────────
+   * `7a32f3d` made a corpse inert and `30e3360` sent the camera to a fighter still in
+   * the match. Both are right and together they produce a screen that has never been
+   * explained to the player: the character under the camera is not yours, your inputs do
+   * nothing, and the only evidence of any of it is a `0 / 70` in a corner nameplate you
+   * are not looking at. Every other change in this pass REMOVES a false signal; this is
+   * the only one that adds a true one, and without it the removals read as breakage.
+   *
+   * ── What it says, and the two states ────────────────────────────────────────
+   *   `SPECTATING <NAME>` — the ordinary case: the ladder handed the camera to somebody
+   *                         else and the caption names them, so the player can connect
+   *                         the character on screen to the plate in the top bar.
+   *   `ELIMINATED`        — the observer IS the local seat while the local seat is dead.
+   *                         Two ways to reach it and both are real: `resolveViewSubject`
+   *                         rung 5 holds the subject when nobody is left alive, and —
+   *                         the case that runs TODAY — `match.ts` has not yet been wired
+   *                         to send `observerSlot` at all, so the socket is empty and
+   *                         `hudObserver` correctly falls back to the local seat. **The
+   *                         fallback state has to be true on its own, and this one is:
+   *                         it claims only what the HUD can actually see.**
+   *
+   * ── What was rejected ───────────────────────────────────────────────────────
+   *   * A CENTRE-SCREEN BANNER ("YOU WERE ELIMINATED"). It is the loudest option and it
+   *     sits exactly where the fight you have been handed is happening. The camera work
+   *     in `30e3360` exists to put that fight on screen; covering it with the news would
+   *     undo it.
+   *   * PUTTING IT ON THE LOCAL NAMEPLATE. The plate is 196px in a top bar that already
+   *     wraps to a chip rail above four seats (`hud-topbar--chips`), and it is the one
+   *     region `hud_accept` asserts nothing may be drawn over.
+   *   * A DEATH-CAM COUNTDOWN ("RESPAWN 0:05"). There is no respawn — `sim.ts` never
+   *     revives a fighter — so it would be the same class of lie this pass is removing.
+   *   * SAYING NOTHING AND LETTING THE GREY TRAY CARRY IT. Tested against the capture:
+   *     the tray is 58px in the corner of a frame with a firefight in it, and "dimmed"
+   *     is a comparison a player cannot make against a state they cannot see.
+   *
+   * Bottom-centre, above the tray, because the tray is the surface whose change most
+   * needs explaining and cause should sit next to effect. In touch LANDSCAPE the tray
+   * moves to the bottom-right corner and this stays centred — it is a caption about the
+   * match, not a label on the tray.
+   */
+  function renderSpectate(state: MatchState, frame: HudFrameInfo): void {
+    const on = localIsSpectating(state);
+    spectateEl.classList.toggle('is-on', on);
+    if (!on) {
+      // Cleared rather than left standing: `update()` is idempotent and a restart hands
+      // this a fresh countdown-phase state, so a stale name must not survive into it.
+      if (spectateEl.textContent !== '') spectateEl.textContent = '';
+      return;
+    }
+    const observer = hudObserver(state, frame);
+    const watchingSomebodyElse = observer !== localFighter(state);
+    const text = watchingSomebodyElse
+      ? `Spectating ${CHARACTERS[observer.characterId].name}`
+      : 'Eliminated';
+    // Guarded because this runs every frame and the string changes at most a handful of
+    // times per match; the same reason the level badge above caches `levelValue`.
+    if (spectateEl.textContent !== text) spectateEl.textContent = text;
+  }
+
   function renderZone(state: MatchState, frame: HudFrameInfo): void {
     const live = state.phase === 'playing';
     const info = zoneInfo(state);
+    // 🚨 EVERY PERSON-RELATIVE FIELD OF `info` DESCRIBES A CORPSE ONCE THIS IS TRUE, so
+    // nothing below may put one of them on screen. See `localIsSpectating`.
+    const spectating = localIsSpectating(state);
+    // ⚠️ `localFighter(state).alive`, NOT the observer, AND THAT IS NOT AN OVERSIGHT —
+    // it is the line that already keeps the fog alarm off a spectator, and moving it to
+    // `hudObserver` would be a bug. `is-danger` is a violet plate, a 0.6 s pulse, a
+    // full-screen edge vignette and a 140px chevron, and all four are an INSTRUCTION:
+    // *run*. A dead player cannot run, and the fighter they are watching does not take
+    // orders from their HUD. "Am I in the fog" and "who is on screen" are two questions
+    // and this file now has a separate expression for each.
     const danger = live && info.outside && localFighter(state).alive;
     // Gated on `live` for the same reason `danger` is: `timeRemaining` stays inside the
     // sudden-death window after the match ends, and the result card is drawn over this
@@ -1264,7 +1446,12 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     // edge takes to cross `FAIR_PLAY.radiusUnits`, and on the `6d5c4d6` schedule that
     // depends on how far the ring has to travel — which is the SEATED floor, exactly the
     // argument `sim.ts` hands `fogRadiusAt`. It cannot be derived from `maxR` alone any more.
-    zoneEl.classList.toggle('is-imminent', !danger && info.msUntilEdge !== null
+    // `!spectating` is new and it is the same defect as the copy below, one class further
+    // on: `is-imminent` is a 15px white value on a lifted plate meaning "the edge is about
+    // to arrive WHERE YOU ARE STANDING", and `msUntilEdge` for a corpse is the arrival time
+    // at a place its owner left. Unlike `danger` this was never gated on `alive` at all, so
+    // a dead player's pill pulsed an alarm about a spot they no longer occupy.
+    zoneEl.classList.toggle('is-imminent', !danger && !spectating && info.msUntilEdge !== null
       && info.msUntilEdge < imminentMs(maxR, minSafeRadiusFor(state.fighters.length)));
     zoneBarEl.style.width = `${(info.radius01 * 100).toFixed(1)}%`;
 
@@ -1342,11 +1529,40 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // It reports where they are standing relative to the SCHEDULE and still makes
       // no claim about the ground — a hazard can sit in the final ring, and one does
       // (the pot is on the arena centre).
-      zoneValueEl.textContent = info.msUntilEdge !== null
-        ? `REACHES YOU ${formatTime(info.msUntilEdge)}`
-        : info.holds
-          ? 'FINAL RING'
-          : 'CLOSING';
+      // ── 🚨 …AND WHILE YOU ARE DEAD THE PILL STOPS ADDRESSING ANYBODY ──────────
+      // Uri's six-seat loss photographed **`ZONE CLOSES / REACHES YOU 0:28`** on a
+      // screen whose player had been dead for seconds: a countdown to the edge arriving
+      // at a corpse's coordinates, addressed in the second person to somebody who cannot
+      // move. `FINAL RING` is the same sentence in its other mood — *the edge will never
+      // reach you* — and it is equally about a body that has stopped mattering.
+      //
+      // WHAT WAS CHOSEN: the two statements the pill can still make truthfully are about
+      // the RING, so it makes those. `ringAtFloor` is `safeRadius <= minSafeRadiusFor(N)`
+      // — the schedule, exactly, no person — and `CLOSING` is what the calm pill already
+      // says when it cannot produce a countdown. Both runs SHIP TODAY and are inside the
+      // pill's measured width budget by construction (`CLOSING` at 8 glyphs and
+      // `FINAL RING` at 10, against `REACHES YOU 0:06`'s 16 at the same 15px size, in a
+      // plate whose documented binding constraint is that 16-glyph run). So this cannot
+      // become the new width constraint and needs no re-measurement.
+      //
+      // WHAT WAS REJECTED, and both would have been more informative:
+      //   * `REACHES <NAME> 0:28`, the spectated fighter's own countdown. It is the more
+      //     useful number and it is what a broadcast would show — but the longest name in
+      //     `rules.ts` is HAMBURGER, which makes `REACHES HAMBURGER 0:28` 21 glyphs into
+      //     a plate that already stacked its two rows to fit 16. Buying that would cost a
+      //     third row or a re-measure of the pill at five viewports, for a readout on
+      //     screen only after you have lost.
+      //   * keeping `REACHES YOU` and letting "you" mean the fighter you are watching.
+      //     The blind-critic round that produced this wording rejected `closes on you`
+      //     for having two readings; deliberately giving `YOU` two referents spends that
+      //     finding.
+      zoneValueEl.textContent = spectating
+        ? (info.ringAtFloor ? 'FINAL RING' : 'CLOSING')
+        : info.msUntilEdge !== null
+          ? `REACHES YOU ${formatTime(info.msUntilEdge)}`
+          : info.holds
+            ? 'FINAL RING'
+            : 'CLOSING';
     }
 
     // ── Radar ────────────────────────────────────────────────────────────────
@@ -1467,7 +1683,16 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     // file's header. The predicate would in fact answer `true` for a fighter asked about
     // itself, but relying on that would make "you can always see yourself" an emergent
     // property of `isVisibleFrom`'s distance test rather than a stated rule.
-    const observer = localFighter(state);
+    // ⚠️ WAS `localFighter(state)`, AND THE OLD WORDING IS KEPT BECAUSE THE RULE DID NOT
+    // CHANGE — ONLY WHOSE. The rule is still "resolve concealment against the observer";
+    // `30e3360` moved that observer for the 3D models and the floating pills and did not
+    // move it here, so between that commit and this one **a dead player could see a
+    // fighter in 3D that their own radar was hiding.** One rule read two ways by two
+    // surfaces of the same screen — the shape this file's own `fighterVisibleTo` header
+    // calls this project's oldest defect, and the shape `ai.ts` has produced seven times.
+    // The slot arrives from `match.ts` (it owns the ladder, the clock and the rig); this
+    // file does not re-derive it. See `HudFrameInfo.observerSlot`.
+    const observer = hudObserver(state, frame);
     // Indexed by POSITION in the list, not by `f.id`: a duck-typed instrument state has
     // fighters with no `id` on them at all (see `roster.ts`), and `fightersOf` returns
     // them in slot order either way.
@@ -1632,6 +1857,27 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         s.bar.classList.toggle('is-low', f.alive && frac <= LOW_HP_FRACTION);
       });
 
+      // ── 🚨 THE TRAY WAS TELLING A CORPSE IT HAD FOUR WEAPONS READY ─────────────
+      // Photographed in the six-seat capture that produced this pass: **all four slots
+      // lit `is-ready`, slot 1 ringed `is-selected`, above a plate reading `0 / 70`.**
+      // Every one of those signals is authored to mean *press this now*, and since
+      // `7a32f3d` a corpse's input never reaches the controller branch at all — the
+      // cooldowns even keep "finishing", because `state.elapsed` runs on and `lastUsed`
+      // is frozen, so a dead player's tray is not merely stale, it is maximally green.
+      //
+      // ⚠️ `localIsSpectating`, NOT `hudObserver`, AND THE TRAY MUST NEVER FOLLOW THE
+      // OBSERVER. `buildWeaponSlots` is called ONCE with `CHARACTERS[playerCharId].weapons`
+      // (see `setRoster` above — "the LOCAL seat's, and only the local seat's"), so the
+      // four icons on screen are your character's. Feeding them the spectated fighter's
+      // `lastUsed` would print somebody else's cooldowns under your own artwork, which is
+      // a worse lie than the one being fixed: it would look like information.
+      //
+      // The class goes on the CONTAINER rather than per slot so the CSS can dim the whole
+      // cluster once, and so `html.fa-touch` can drop `pointer-events` for the group — a
+      // dead player tapping a slot currently gets the full press animation and a moved
+      // selection ring for a weapon that cannot fire.
+      const trayInert = localIsSpectating(state);
+      weaponsEl.classList.toggle('is-inert', trayInert);
       if (playerCharId) {
         const weapons = CHARACTERS[playerCharId].weapons;
         const lastUsed = localFighter(state).lastUsed;
@@ -1641,25 +1887,37 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           const remaining = Math.max(0, w.cooldown - (state.elapsed - lastUsed[i]));
           const frac = w.cooldown > 0 ? Math.min(1, remaining / w.cooldown) : 0;
           slot.cooldown.style.setProperty('--p', frac.toFixed(3));
-          const ready = frac <= 0;
+          // `readyNow` is kept separate from the class below so `wasReady` still latches
+          // on the REAL cooldown edge. Collapsing the two would arm the one-shot flash to
+          // fire on whatever the next transition happened to be.
+          const readyNow = frac <= 0;
+          const ready = readyNow && !trayInert;
           slot.root.classList.toggle('is-ready', ready);
-          slot.root.classList.toggle('is-selected', i === frame.selectedWeapon);
+          slot.root.classList.toggle('is-selected', !trayInert && i === frame.selectedWeapon);
           // Numeric countdown on top of the radial wipe — a lone dark wedge reads as
           // "slightly dimmed icon" at a glance, especially in a screenshot/still frame.
           // A literal "0.4" leaves zero ambiguity about whether a weapon is usable.
-          slot.timer.textContent = ready ? '' : (remaining / 1000).toFixed(1);
+          // ⚠️ `readyNow`, not `ready`. A corpse's cooldowns have all elapsed, so
+          // `remaining` is 0 and the `ready ? '' : …` form would print a literal `0.0`
+          // under every icon — a countdown to nothing, louder than the state it replaced.
+          slot.timer.textContent = readyNow ? '' : (remaining / 1000).toFixed(1);
           // One-shot "just became ready" flash on the rising edge only, never while
           // idle-ready — re-triggering the CSS animation the same reflow-forcing way
           // the pooled damage numbers do above.
-          if (ready && !slot.wasReady) {
+          // ⚠️ The EDGE is `readyNow`'s and the latch stores `readyNow`, so the tray going
+          // inert cannot manufacture a rising edge, and coming back from one (no shipped
+          // path today — nothing revives — but the next respawn mode is one) cannot flash
+          // four slots at once for cooldowns that finished while the player was dead.
+          if (readyNow && !slot.wasReady && !trayInert) {
             slot.root.classList.remove('is-flash');
             void slot.root.offsetWidth;
             slot.root.classList.add('is-flash');
           }
-          slot.wasReady = ready;
+          slot.wasReady = readyNow;
         });
       }
 
+      renderSpectate(state, frame);
       renderZone(state, frame);
       renderAim(frame);
 
@@ -2996,6 +3254,96 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 /* Collapses to nothing while ready (empty textContent) — never an empty badge
    floating over a usable, full-colour icon. */
 .hud-weapon-timer:empty { display: none; }
+
+/* ── 🚨 THE TRAY, ONCE THE PLAYER IT BELONGS TO IS DEAD ─────────────────────
+   See update(). Three signals in this cluster say "press this now" — the light
+   plate, the amber is-selected ring and the one-shot ready flash — and after
+   7a32f3d a corpse's press reaches nothing at all. update() withholds the two
+   classes; this rule is what makes the withholding LEGIBLE rather than merely
+   accurate, because a tray with no ring on it is only distinguishable from a normal
+   one by a comparison the player cannot make.
+
+   grayscale + opacity rather than display: none, and that is the whole design
+   choice here: removing the tray would change the shape of the HUD mid-match and
+   read as a glitch, while a greyed one reads as "yours, disabled" — the convention
+   every disabled control on every platform already uses. It also keeps the four
+   icons on screen, which is what makes the spectated fighter's DIFFERENT abilities
+   legible as somebody else's.
+
+   0.42 rather than something fainter: the plate has to stay above the arena behind
+   it. EFEAF7 at 0.42 over this game's darkest floor is still a light mark, and
+   hud_accept's non-text-mark rule (3.0) is asserted on the LIT tray, which this
+   state is not — a disabled control is exempt from WCAG 1.4.11 by the same clause
+   that exempts it from 1.4.3, and the caption below carries the meaning at full
+   contrast regardless. */
+.hud-weapons.is-inert {
+  filter: grayscale(1);
+  opacity: 0.42;
+}
+/* The press affordance goes with it. Without this a dead player taps a slot, gets the
+   full :active depress and moves a selection ring for a weapon that cannot fire —
+   the most convincing possible statement that the control works. pointer-events is
+   only ever auto here under html.fa-touch (see that rule's header: .hud-root is
+   none and this is the ONE opt-in in the HUD), so this is the exact counterpart. */
+.hud-weapons.is-inert .hud-weapon-slot { pointer-events: none; }
+
+/* ── "SPECTATING <NAME>" ───────────────────────────────────────────────────────
+   The one element this pass ADDS a signal with rather than removing one. See
+   renderSpectate for what it says, what it rejected, and why it is not a banner.
+
+   ── Position ────────────────────────────────────────────────────────────────
+   Bottom-centre, and the offset is spelled as a SUM of the terms it clears rather
+   than as one tuned number, exactly as floatFloorY's bottom + 36 is:
+
+       18px  .hud-weapons' own bottom offset, above
+       58px  a slot, at the size it is at every viewport that keeps the tray
+             centred (the <=720 rule takes it to 46, which only makes this clearance
+             larger; the 2-column touch-landscape tray is not under this element at
+             all — it moves to the bottom-right corner)
+       10px  clearance, so the caption is a caption and not a fifth row of the tray
+
+   NOT anchored to --fa-topbar-b like the radar and the damage layer, and that is
+   deliberate: that band belongs to the floating HP pills, which floatFloorY clamps
+   to topbar.bottom + 36 and which sit at their fighters' x — i.e. anywhere across
+   the width, including the middle. A caption there would collide with a pill roughly
+   whenever a fighter was near the centre of the frame.
+
+   ── Contrast ────────────────────────────────────────────────────────────────
+   An opaque plate, not text on the arena. It is drawn over live 3D at whatever hue
+   the floor happens to be, and this HUD has one measured precedent for the mistake:
+   the zone pill was translucent, the pot's hazard ring read straight through it, and
+   a readout meaning "safe" ended up superimposed on one meaning "lethal". #241a30
+   is the HUD's own darkest card and #FFF3DE its cream — the same pair the mute
+   chip and the clock use, so it inherits their measured contrast rather than
+   inventing a new one. */
+.hud-spectate {
+  position: absolute;
+  left: 50%;
+  bottom: calc(var(--fa-safe-b, 0px) + 18px + 58px + 10px);
+  transform: translateX(-50%);
+  display: none;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #241a30;
+  border: 2px solid #120c1c;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: #FFF3DE;
+  white-space: nowrap;
+  /* Never a hit target, never a scroll anchor. .hud-root is already
+     pointer-events: none and this restates it locally so a future fa-touch rule
+     scoped at the root cannot accidentally hand a caption a tap. */
+  pointer-events: none;
+}
+/* Toggled by renderSpectate, never by a phase check in CSS. display rather than
+   opacity, so the element has no box at all in the 99% of match time it is off and
+   cannot enter any collision measurement hud_accept takes on a living HUD. */
+.hud-spectate.is-on { display: block; }
 
 /* ── Countdown overlay ────────────────────────────────────────────────────── */
 .hud-countdown {

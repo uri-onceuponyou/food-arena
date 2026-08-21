@@ -196,6 +196,12 @@ export interface MatchAudioOptions {
   /** Which fighter is the local listener. Always `player` in the shipped game;
    * parameterised because a spectator or replay view would move it.
    *
+   * 🚨 **THAT VIEW NOW EXISTS — see `setListener` — AND THIS OPTION IS STILL THE WRONG
+   * PLACE TO MOVE IT FROM.** It is read once, in the constructor, so it can only say
+   * where the ear starts. Sets BOTH the ear and the identity (see the two fields), which
+   * is what it has always meant and what `tools/audio-probe.mjs --listener enemy` relies
+   * on: a probe sitting in seat 1 is that seat, it is not spectating it.
+   *
    * ⚠️ A SEAT NAME, and therefore only able to name slots 0 and 1. Kept because it is
    * the published option and `tools/audio-probe.mjs` constructs directors with it; use
    * `listenerId` to name any other slot. Ignored when `listenerId` is given. */
@@ -206,7 +212,36 @@ export interface MatchAudioOptions {
 }
 
 export class MatchAudio {
-  private readonly listenerSlot: number;
+  /**
+   * WHERE THE EAR IS — the origin `place()` measures pan and distance gain from.
+   *
+   * 🚨 THIS WAS ONE FIELD DOING TWO JOBS, AND SPLITTING IT IS THE FIX, NOT A REFACTOR.
+   * `30e3360` gave a dead player a camera that follows somebody still fighting; the ear
+   * stayed on the corpse, so every voice panned around a body while the frame showed a
+   * firefight up to 2 000 wu away. `8ca8f88` makes that actively wrong rather than merely
+   * unhelpful: since the flat 0.32 floor was replaced by `proximityGain`, distance is what
+   * decides whether you hear something at all, so a listener in the wrong place attenuates
+   * the fight on screen *as distant* (0.000 at and beyond `SFX_FADE_WU` = 900 wu) while
+   * playing nothing at all near the corpse — nothing is happening there.
+   *
+   * MUTABLE, and the only writers are the constructor, `setListener` and `reset`.
+   */
+  private listenerSlot: number;
+  /**
+   * WHO THE PLAYER IS. Never moves after construction.
+   *
+   * 🚨 THE THREE USES BELOW ARE NOT SPATIAL AND MUST NOT FOLLOW THE CAMERA, which is the
+   * entire reason this is a second field instead of a second reading of the first:
+   *   * `match-end` — "did I win". A spectator watching the winner has still lost.
+   *   * `death` full gain — "this death is MINE". Your own elimination is the loudest
+   *     thing that can happen to you and does not get quieter because the camera left.
+   *   * the `hurt` layer — "I am being hit", the audio counterpart of `match.ts`'s
+   *     `targetBias` on shake.
+   * Read against the observable: had `setListener` moved all four together, a spectated
+   * fighter's death would have played at full gain **as if it were yours**, and the win
+   * sting would have flipped to the victory cue for a match you lost.
+   */
+  private readonly localSlot: number;
   private lastFogSoundAt = -Infinity;
   private lastHealSoundAt = -Infinity;
   /** One-shot latch for the ring reaching `MIN_SAFE_RADIUS`. See `watchZone`. */
@@ -240,7 +275,43 @@ export class MatchAudio {
     private readonly engine: AudioEngine,
     opts: MatchAudioOptions = {},
   ) {
-    this.listenerSlot = opts.listenerId ?? (opts.listener === 'enemy' ? 1 : LOCAL_SLOT);
+    this.localSlot = opts.listenerId ?? (opts.listener === 'enemy' ? 1 : LOCAL_SLOT);
+    // Starts on the local seat, which is where every match starts — `resolveViewSubject`
+    // rung 1 returns `localSlot` for as long as that seat is alive.
+    this.listenerSlot = this.localSlot;
+  }
+
+  /**
+   * MOVE THE EAR TO THE FIGHTER THE CAMERA IS WATCHING.
+   *
+   * ── Why this method exists ───────────────────────────────────────────────────
+   * The field comment two lines above this class's constructor said, before any of this
+   * shipped, that the listener was *"parameterised because a spectator or replay view
+   * would move it"*. `30e3360` built that view — a five-rung ladder in
+   * `render/camera.ts:resolveViewSubject`, local alive → sticky subject → killer chain →
+   * nearest living → hold — and nothing moved the ear, so a dead player watched a fight
+   * they could not hear while listening to an empty patch of floor.
+   *
+   * ⚠️ **IT MOVES THE EAR AND NOTHING ELSE.** `localSlot` is a separate, readonly field
+   * for the three identity questions this class also asks; see its comment. That split is
+   * the whole content of this change — the one-line version, assigning the slot straight
+   * onto the single field this class used to have, would have made a spectated fighter's
+   * death play at full gain as if it were the player's and flipped the match-end sting to
+   * the wrong cue. `tools/tmp/spv_spec.mjs` §B7/§B9 build exactly that collapsed director
+   * out of the shipped `listenerId` option and require both rows to flip on it.
+   *
+   * ── Contract ────────────────────────────────────────────────────────────────
+   * Idempotent and free to call every frame; the caller is `game/match.ts`, which owns
+   * `viewSubject`. An out-of-range slot is not rejected here — `place()` already falls
+   * back to `state.player` for a slot the roster does not carry, which is the same
+   * belt-and-braces `match.ts:viewObserver()` uses for the same reachable case (a subject
+   * surviving from a six-seat match into a two-seat one).
+   *
+   * ⚠️ NOT a `MatchAudioOptions` field: options are read once, in the constructor, and
+   * "where the ear is" changes several times during a match a player loses.
+   */
+  setListener(slot: number): void {
+    this.listenerSlot = slot;
   }
 
   /**
@@ -287,6 +358,15 @@ export class MatchAudio {
    * per hour as it used to, so a latch that failed to clear would now be four times as
    * visible — it would silence the final-ring cue for every match after the first. */
   reset(): void {
+    // 🚨 THE EAR GOES HOME, and this line is the reason `setListener` did not simply
+    // leave the field to whoever last wrote it. `match.ts:spawnMatch` calls `reset()`
+    // and, four lines away, sets `this.viewSubject = LOCAL_SLOT` for exactly this
+    // reason — its own comment: a stale subject would "open this match" pointed at the
+    // LAST match's killer. Per-match state that survives a match is the class of bug the
+    // rest of this method exists for; leaving the listener behind would pan match two
+    // around a fighter from match one, and at a different seat COUNT it would fall
+    // through `place()`'s `?? state.player` and be silently right by accident.
+    this.listenerSlot = this.localSlot;
     this.lastFogSoundAt = -Infinity;
     this.lastHealSoundAt = -Infinity;
     this.ringFloored = false;
@@ -587,7 +667,16 @@ export class MatchAudio {
         // KNOCKOUT path rather than silently reclassifying every ending.
         const roster = fightersOf(state);
         const timeout = roster.length > 0 && roster.every((f) => f.alive === true);
-        const won = slotOf(ev.winnerId, ev.winner) === this.listenerSlot;
+        // ⚠️ `localSlot`, NOT `listenerSlot`, AND THE OLD SPELLING IS KEPT HERE BECAUSE
+        // IT WAS THE SAME FIELD UNTIL THE EAR LEARNED TO MOVE:
+        //
+        //   > `const won = slotOf(ev.winnerId, ev.winner) === this.listenerSlot;`
+        //
+        // The rule is unchanged — "did the seat I am sitting in win" — and it was only
+        // ever spelled with the listener because one field answered both questions. A
+        // player who dies and spectates the eventual winner has still LOST, and this is
+        // the sting that tells them so.
+        const won = slotOf(ev.winnerId, ev.winner) === this.localSlot;
         this.engine.play(timeout ? S.matchEndTimeout(won) : S.matchEnd(won), {
           priority: Priority.Critical,
         });
@@ -619,12 +708,40 @@ export class MatchAudio {
 
       case 'death': {
         const f = fighterOf(state, ev.fighterId, ev.fighterRole);
+        const at = this.place(f.x, f.y, state);
         this.engine.play(S.death(), {
-          ...this.place(f.x, f.y, state),
+          ...at,
           priority: Priority.Critical,
           // A death is the loudest thing that can happen to you; give the local
           // player's own death full level regardless of where they are standing.
-          gain: slotOf(ev.fighterId, ev.fighterRole) === this.listenerSlot ? 1 : undefined,
+          // ⚠️ `localSlot`, NOT `listenerSlot` — was `listenerSlot` while one field
+          // answered both questions. "Regardless of where they are standing" now has to
+          // survive the ear MOVING as well, and it is the same rule: it is your death
+          // that is loud, not whichever death the camera happens to be pointed at. With
+          // the listener here, every spectated elimination would have arrived at the
+          // same full gain as your own.
+          //
+          // 🚨 …AND `: undefined` WAS SILENTLY DISCARDING THE FALLOFF FOR EVERY OTHER
+          // DEATH. Found while building this pass's audio arm; it is a separate,
+          // pre-existing defect and the one-word fix is `at.gain`:
+          //
+          //   > `gain: slotOf(…) === this.listenerSlot ? 1 : undefined,`
+          //
+          // An explicit `gain: undefined` after `...at` OVERWRITES the spread — object
+          // literals do not skip undefined values — and `engine.ts:playInner` reads
+          // `opts.gain ?? 1`. So the branch that was supposed to mean *"leave this one
+          // where `place` put it"* meant **"play it at full level"**, and every death on
+          // a 2 800 × 2 000 map arrived as loud as one at your feet: the exact complaint
+          // `8ca8f88` was written to answer (*"I shouldn't hear loudly or at all
+          // something very far"*), still live on the one event that fires six times a
+          // six-seat match. Measured with the shipped curve — a death at the map
+          // diagonal now arrives at **0.000** where it arrived at **1.000**, and a death
+          // at 470 wu (the camera's worst-case ground reach) at **0.668**.
+          //
+          // The stated rule is unchanged and is now what the code does: YOUR death is
+          // full level regardless of where you were standing; everybody else's is where
+          // they were standing.
+          gain: slotOf(ev.fighterId, ev.fighterRole) === this.localSlot ? 1 : at.gain,
         });
         break;
       }
@@ -722,7 +839,13 @@ export class MatchAudio {
 
     // The extra "you are being hit" layer, local player only. See `sounds.ts` ->
     // `hurt()`: this is the audio counterpart of `match.ts`'s `targetBias` on shake.
-    if (targetSlot === this.listenerSlot) {
+    // ⚠️ `localSlot`, NOT `listenerSlot` — was `listenerSlot` while one field answered
+    // both questions. "You are being hit" is an identity claim; the fighter you are
+    // watching being hit is not you being hit, and giving their incoming fire your
+    // 0.9-gain hurt layer would be the loudest wrong statement this class can make.
+    // Unreachable today (nothing hits a corpse) and stated structurally anyway, because
+    // "inert today" is not "cannot be wrong tomorrow".
+    if (targetSlot === this.localSlot) {
       const target = fighterOf(state, ev.targetId, ev.targetRole);
       this.engine.play(S.hurt(target.hp / target.maxHp), {
         gain: 0.9,
@@ -796,6 +919,13 @@ export class MatchAudio {
     // Shares ONE curve with the camera shake (`d0a42ea`) rather than restating it —
     // Uri asked for "the same behavior as the shake", and one rule in two places is this
     // repo's most repeated defect.
+    // ⚠️ **BOTH RETURNED NUMBERS ARE MEASURED FROM `me`, AND `me` IS THE LISTENER — SO
+    // MOVING THE LISTENER MOVES THE WHOLE SPATIALISATION AND NOTHING ELSE.** That is the
+    // property `setListener` depends on and it is asserted rather than asserted-about:
+    // `tools/tmp/spv_spec.mjs` §B3 walks a voice out from the listener and requires the
+    // recorded gain to equal `proximityGain(d, SFX_FULL_WU, SFX_FADE_WU)` EXACTLY at
+    // every station, with the listener at two different seats. There is no second
+    // distance term anywhere in this class.
     const gain = proximityGain(dist, SFX_FULL_WU, SFX_FADE_WU);
     return { pan, gain };
   }
