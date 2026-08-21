@@ -141,9 +141,36 @@ function main() {
     const idTag = shas.size === 1 ? `ours ${[...shas][0]}` : `🔴 ${shas.size} DIFFERENT ours sources — NOT a repeated read`;
     console.log(`  ${key.padEnd(26)} k=${st.n}  ${JSON.stringify(vals).padEnd(14)} `
       + `mean ${f3(st.mean)}  sd ${st.n >= 2 ? f3(st.sd) : '  —  '}   ${idTag}`);
-    if (shas.size === 1 && st.n >= 2) oursGroups.push(st);
+    // `key` attached: `stats()` returns only the numbers, so a warning about WHICH group
+    // is degenerate had nothing to name — it printed an empty string, which is a warning
+    // that cannot be acted on.
+    if (shas.size === 1 && st.n >= 2) oursGroups.push({ ...st, key });
   }
   report('§A pooled σ_ours', pool(oursGroups));
+
+  // 🚨 §A IS VOLATILE AND MUST SAY SO ON EVERY RUN, BECAUSE IT IS QUOTED EVERY ROUND.
+  //
+  // 2026-08-21: a single new read flipped §A's CI from [0.461, 1.024] — containing 0.50,
+  // excluding 1.1 — to [0.562, 1.211], which EXCLUDES 0.50 and CONTAINS 1.1. The opposite
+  // conclusion, from one score. The mechanism is arithmetic, not evidence: `new/cast` sat
+  // at [5,5,5], **sd exactly 0.000**, and a zero-variance group drags a pooled estimate
+  // down until the moment it stops being zero.
+  //
+  // A group with sd 0 is not a measurement that σ is small — it is k reads that happened
+  // to agree, and at k=3 that is unremarkable. So §A must not be cited as independent
+  // agreement with §C while one is in the pool.
+  //
+  // ⚠️ §C is untouched by any of this (it pools the 2026-08-05 fan-outs the published
+  // σ = 0.50 came from) and still reads ~0.501 on df 26. **Rule 7's ±1.4 floor rests on
+  // §C, not on §A.** This warning exists so a reader cannot mistake §A's number for a
+  // second, agreeing witness.
+  const zeroVar = oursGroups.filter((g) => g.sd === 0);
+  if (oursGroups.length === 0) throw new Error('q1_sigma: §A has ZERO groups — refusing to report a pool over nothing.');
+  if (zeroVar.length) {
+    console.log(`  ⚠️  ${zeroVar.length} of ${oursGroups.length} §A group(s) have sd EXACTLY 0.000 — ${zeroVar.map((g) => g.key).join(', ')}.`);
+    console.log('      A zero-variance group drags the pool DOWN and flips it the moment it ends.');
+    console.log('      Do NOT cite §A as independent agreement with §C while one is present.');
+  }
 
   // ── §B REFERENCE SIDE. Same plate, many cells, many fresh critics.
   console.log('\n══ §B REFERENCE-SIDE — same PLATE across cells (k is much larger here) ══');
