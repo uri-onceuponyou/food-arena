@@ -202,6 +202,22 @@ function project(rows) {
     }
     const p = {};
     for (const f of PUBLIC_FIELDS) if (r[f] !== undefined) p[f] = r[f];
+    // 🚨 A ROW WITH NO `element` USED TO SAIL THROUGH. `q1_ledger --record` makes the field
+    // OPTIONAL, so a row could arrive without one; `Set.has(undefined)` is `false`, and the
+    // withholding guard read that as "not a plate-ours element" and PUBLISHED. A panel agent
+    // hit it on 2026-08-21 — its row happened to be an ordinary frame, so the outcome was
+    // right BY LUCK. Had it been a control row, whose OURS panel is a shipped third-party
+    // plate, the critic's description of that plate would have published: **the exact breach
+    // `17d013b` rewrote this file to prevent, reached by omitting a field rather than by
+    // defeating the check.**
+    //
+    // Same family as `plateOursElements()` returning `null` for unknown rather than an empty
+    // set: **an absent input must fail CLOSED.** A guard whose bypass is "leave a field out"
+    // is not a guard.
+    if (r.element === undefined || r.element === null || r.element === '') {
+      faults.push(`${r.id ?? '(no id)'}: row has no \`element\`, so plate-ours provenance cannot be `
+        + 'determined. Refusing — re-record the row with arm/element/panelOurs.');
+    }
     // `ours` is a SLOT, not a provenance — see `plateOursElements`.
     if (plateOurs === null || plateOurs.has(r.element)) {
       delete p.oursNote;
@@ -305,6 +321,12 @@ if (argv.includes('--selftest')) {
   // or opening bracket starts a sentence here, never a comma.
   t('K sentence-initial ordinary words pass', foreignProperNouns('Filenames removed. If it helps, all fine.', ok).length === 0);
   t('K4 …and a comma is NOT a sentence start', foreignProperNouns('it helps, Also fine', ok).length === 1);
+  // L. The withholding guard must FAIL CLOSED on a row with no element. Both directions:
+  //    the bypass is refused, and an ordinary row with an element still passes.
+  t('L KNOWN-BAD a row with NO element is REFUSED',
+    project([{ id: 'n', ours: 4, reference: 8, oursNote: 'x' }]).faults.some((f) => /has no .?element/.test(f)));
+  t('L2 …and a row WITH an element is not refused for that reason',
+    !project([{ id: 'o', element: 'arena', ours: 4, reference: 8, oursNote: 'x' }]).faults.some((f) => /has no .?element/.test(f)));
   t('K2 KNOWN-BAD a MID-SENTENCE proper noun is still caught', foreignProperNouns('the Zarblax plate is brighter', ok).length === 1);
   t('K3 …and the exemption is REAL, not vacuous (same word, two positions)',
     foreignProperNouns('Zarblax is bright', ok).length === 0 && foreignProperNouns('a Zarblax is bright', ok).length === 1);

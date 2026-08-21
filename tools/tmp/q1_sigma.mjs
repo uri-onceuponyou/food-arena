@@ -86,7 +86,32 @@ function chi2(df) {
  * a σ of ZERO, the most flattering possible answer, from no data at all. That
  * vacuity class has fired at least seven times in this repo.
  */
-export function pool(groups) {
+export 
+/**
+ * A zero-variance group is not evidence that σ is small — it is k reads that happened to
+ * agree — and it drags a pooled estimate DOWN until the moment it stops being zero.
+ *
+ * 🚨 THIS WARNING WAS §A-ONLY, AND THE GROUP IT SHOULD HAVE CAUGHT WAS ON §B. On
+ * 2026-08-21 a panel agent found `q1_sigma` printing NO warning while a reference plate
+ * sat at `[8,8]` sd 0.000 and its own read took it to `[8,8,8]` — still 0.000, with more
+ * weight — quietly moving §B's pool. A warning scoped to one section is a warning that
+ * says "clean" about the other.
+ *
+ * ⚠️ AND ON §B THE DIRECTION IS WORSE. §B is already a STATED LOWER BOUND (plates score
+ * 8-9 against a documented 8-9 ceiling), so a zero-variance group drags a low bound lower
+ * — the flattering direction, which is where every floor error in this round has gone.
+ */
+function warnZeroVariance(section, groups) {
+  // Rule 6: a pool over nothing would print a confident small number. Refuse instead.
+  if (groups.length === 0) throw new Error(`q1_sigma: ${section} has ZERO groups — refusing to report a pool over nothing.`);
+  const zero = groups.filter((g) => g.sd === 0);
+  if (!zero.length) return;
+  console.log(`  ⚠️  ${zero.length} of ${groups.length} ${section} group(s) have sd EXACTLY 0.000 — ${zero.map((g) => g.key ?? '(UNNAMED — a group without a key is a bug)').join(', ')}.`);
+  console.log('      A zero-variance group drags the pool DOWN and flips it the moment it ends.');
+  console.log(`      Do NOT cite ${section} as independent agreement with §C while one is present.`);
+}
+
+function pool(groups) {
   const usable = groups.filter((g) => g.n >= 2);
   if (usable.length === 0) return null;
   const df = usable.reduce((s, g) => s + (g.n - 1), 0);
@@ -164,13 +189,7 @@ function main() {
   // σ = 0.50 came from) and still reads ~0.501 on df 26. **Rule 7's ±1.4 floor rests on
   // §C, not on §A.** This warning exists so a reader cannot mistake §A's number for a
   // second, agreeing witness.
-  const zeroVar = oursGroups.filter((g) => g.sd === 0);
-  if (oursGroups.length === 0) throw new Error('q1_sigma: §A has ZERO groups — refusing to report a pool over nothing.');
-  if (zeroVar.length) {
-    console.log(`  ⚠️  ${zeroVar.length} of ${oursGroups.length} §A group(s) have sd EXACTLY 0.000 — ${zeroVar.map((g) => g.key).join(', ')}.`);
-    console.log('      A zero-variance group drags the pool DOWN and flips it the moment it ends.');
-    console.log('      Do NOT cite §A as independent agreement with §C while one is present.');
-  }
+  warnZeroVariance('§A', oursGroups);
 
   // ── §B REFERENCE SIDE. Same plate, many cells, many fresh critics.
   console.log('\n══ §B REFERENCE-SIDE — same PLATE across cells (k is much larger here) ══');
@@ -188,9 +207,13 @@ function main() {
     const st = stats(vals);
     console.log(`  plate ${plate.padEnd(20)} k=${st.n}  ${JSON.stringify(vals).padEnd(22)} `
       + `mean ${f3(st.mean)}  sd ${st.n >= 2 ? f3(st.sd) : '  —  '}`);
-    if (st.n >= 2) refGroups.push(st);
+    // `key` attached for the same reason §A's is: a degeneracy warning with nothing to
+    // name is a warning that cannot be acted on. §B pushed bare `stats()` and would have
+    // printed an empty string — the exact bug §A's comment records as fixed THERE.
+    if (st.n >= 2) refGroups.push({ ...st, key: `plate ${plate}` });
   }
   report('§B pooled σ_ref ', pool(refGroups));
+  warnZeroVariance('§B', refGroups);
 
   // ── §C HISTORIC, from the manifest's own recorded fan-outs.
   console.log('\n══ §C HISTORIC — the 2026-08-05 fan-outs the published σ = 0.50 came from ══\n');
