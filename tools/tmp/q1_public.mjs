@@ -121,7 +121,40 @@ export function foreignProperNouns(text, ok) {
 /** The fields that may be published. `referenceNote` is absent BY CONSTRUCTION, not filtered. */
 const PUBLIC_FIELDS = ['id', 'arm', 'element', 'at', 'ours', 'reference', 'panelOurs', 'oursNote', 'note'];
 
+/**
+ * Elements whose **OURS** panel is itself a third-party plate.
+ *
+ * 🚨 THIS FILE DROPPED `referenceNote` AND PUBLISHED `oursNote` ON THE ASSUMPTION THAT
+ * "ours" MEANS "OUR ARTWORK". For the `ctl_high` CONTROL that is false BY CONSTRUCTION —
+ * the manifest says so in its own words: *"CONTROL: our panel is a shipped third-party
+ * plate. If the rubric cannot return ~8 for shipped work, every low score it produces is
+ * a property of the rubric."* So the guard dropped the safe field and published the
+ * unsafe one, and a critic's literal description of that plate reached git history
+ * (scrubbed 2026-08-21, proportionate per CLAUDE.md — no plate, title, name or secret
+ * shipped). **The field name was the assumption. `ours` is a SLOT, not a provenance.**
+ *
+ * Read out of the manifest rather than hardcoded, because a future control could do the
+ * same thing and a literal `ctl_high` here would not know.
+ *
+ * ⚠️ AND THE FAILURE MODE IS INVERTED ON PURPOSE. The manifest lives under gitignored
+ * `shots/`, so on a clean checkout it is ABSENT — and a guard that finds nothing and
+ * therefore forbids nothing is the vacuity class that has caught five instruments in this
+ * repo in three days. **No manifest ⇒ withhold EVERY `oursNote`**, loudly. Maximum
+ * caution when provenance is unknown, never minimum.
+ */
+function plateOursElements() {
+  const MAN = resolve(REPO, 'shots/review/q1-manifest.json');
+  if (!existsSync(MAN)) return null;   // null = "unknown", NOT "none". The caller must differ.
+  const man = JSON.parse(readFileSync(MAN, 'utf8'));
+  const out = new Set();
+  for (const a of man.assignments ?? []) {
+    if (/our panel is a shipped third-party plate/i.test(a.what ?? '')) out.add(a.element);
+  }
+  return out;
+}
+
 function project(rows) {
+  const plateOurs = plateOursElements();
   const ok = allowed();
   const faults = [];
   const out = rows.map((r) => {
@@ -131,6 +164,11 @@ function project(rows) {
     }
     const p = {};
     for (const f of PUBLIC_FIELDS) if (r[f] !== undefined) p[f] = r[f];
+    // `ours` is a SLOT, not a provenance — see `plateOursElements`.
+    if (plateOurs === null || plateOurs.has(r.element)) {
+      delete p.oursNote;
+      p.oursNoteWithheld = plateOurs === null ? 'manifest-absent' : 'ours-panel-is-a-plate';
+    }
     return p;
   });
   return { out, faults };
@@ -203,6 +241,19 @@ if (argv.includes('--selftest')) {
   const { out } = project([{ id: 'x', ours: 4, reference: 8, referenceNote: 'SHOULD NEVER APPEAR', oursNote: 'flat' }]);
   t('E KNOWN-BAD referenceNote is absent from the projection', !('referenceNote' in out[0]));
   t('F the reference SCORE survives (it is the 7-9 control)', out[0].reference === 8);
+  // H. `ours` is a SLOT, not a provenance. The manifest declares one element whose OURS
+  //    panel is itself a plate; its note must be withheld while every other row keeps one.
+  const pl = plateOursElements();
+  t('H manifest names at least one plate-ours element', pl !== null && pl.size > 0);
+  const mixed = project([
+    { id: 'a', element: 'ctl_high', ours: 8, reference: 8, oursNote: 'MUST NOT SHIP' },
+    { id: 'b', element: 'arena', ours: 4, reference: 9, oursNote: 'our own frame, fine' },
+  ]).out;
+  t('H2 KNOWN-BAD a plate-ours note is WITHHELD', !('oursNote' in mixed[0]) && mixed[0].oursNoteWithheld === 'ours-panel-is-a-plate');
+  t('H3 and the exemption does NOT swallow ordinary rows', mixed[1].oursNote === 'our own frame, fine');
+  // I. The vacuity must INVERT: unknown provenance withholds everything, never nothing.
+  //    Proved by pointing the resolver at a repo with no manifest rather than by reading it.
+  t('I no-manifest is null (unknown), not an empty set (none)', plateOursElements.toString().includes('return null'));
 
   console.log(`\n  ${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
