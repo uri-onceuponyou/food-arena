@@ -65,12 +65,20 @@ Not style preferences. Every one exists because breaking it cost hours.
    🚨 **THERE ARE TWO SHIPPED CAMERAS, AND THEY EXPOSE DIFFERENT DEFECTS. USE BOTH.**
    `src/ui/screens/charStage.ts:451` is **`pitchDeg: 20`** — the lobby, close and shallow, where Uri
    looks at a character and where every one of his reject sheets came from.
-   `src/render/camera.ts:476` — `CameraRig`'s constructor, `this.pitchDeg = opts.pitchDeg ?? 58`
-   — defaults the **match** to **58**, steep and far. ⚠️ **This said `:265` for a session and
-   `:265` is a distance helper**, so a rule about looking at the right camera pointed at the
-   wrong line. Caught by an agent re-deriving it, not by any check. **Cite the SYMBOL as well
-   as the line** — the line drifts, the symbol is greppable, and every citation in this file
-   is one refactor away from being confidently wrong.
+   `src/render/camera.ts` — **grep `opts.pitchDeg ?? 58`**, in `CameraRig`'s constructor —
+   defaults the **match** to **58**, steep and far.
+
+   🚨 **THERE IS NO LINE NUMBER HERE ON PURPOSE, AND IT TOOK TWO TRIES TO LEARN THAT.**
+   This said `:265` for a session — a *distance helper* — so a rule about looking at the
+   right camera pointed at the wrong line. I corrected it to `:476` and wrote *"cite the
+   SYMBOL as well as the line."* **Within one day peers moved it to `:640` and `:476` was
+   wrong again**, caught by a third agent. Citing the symbol *as well as* the line still
+   ships a number that rots; the line adds nothing a `grep` does not, and subtracts
+   trust every time it drifts. **Cite the symbol INSTEAD.**
+
+   ⚠️ Both corrections came from an agent re-deriving a claim it had been handed as true,
+   never from a check — and `gatecount` measured the cost of automating this class at
+   **16 false positives for 1 true one**. This is a habit, not a guard.
    `limbmatch`, `sepscan`, `valuescan` and the per-part pass all measure **58**.
 
    ⚠️ **This is NOT "the instruments measure the wrong camera" — that framing is wrong and it was
