@@ -31,3 +31,20 @@ reference/prototypes/
 # to exist when it was written — so this ignores the directory, not a file pattern.
 reference/video/
 reference/videos/
+
+# ── The blind-critic raw ledger — REFERENCE-DERIVED PROSE, NEVER COMMITTED ──────
+# Every row carries a `referenceNote`: a critic's description of a third-party
+# reference plate. `CLAUDE.md`'s security block says prose derived from viewing a
+# plate is derived from it, and this repo is PUBLIC — that rule was breached once
+# already by crop tables whose notes named a third-party character's costume.
+#
+# 🚨 THE FILE WAS UNTRACKED BUT NOT IGNORED, WHICH IS NOT THE SAME THING. One
+# `git add tools/tmp` ships it, and agents pathspec-commit that directory
+# constantly. A row was found on 2026-08-21 naming a third-party character
+# verbatim; it was scrubbed in place, but the ACCIDENT PATH is what this line
+# closes. `??` in git status distinguishes untracked from tracked — never safe
+# from unsafe.
+#
+# ⚠️ Durability is handled instead by `tools/tmp/q1_public.mjs`, which commits a
+# role-only projection: every score, floor and sha, and NO referenceNote text.
+tools/tmp/q1_scores.jsonl
