@@ -979,12 +979,26 @@ export const createKitchenArena: ArenaFactory = () => {
   // never see into, **however big the map gets**. So the ~168 wu ceiling is unchanged and
   // the COUNT went 6 -> 20 instead. Same instinct as rule 1: more objects, not bigger ones.
   //
-  // ── WHAT DID SCALE: THE KEEP-OUT, AND IT DOUBLED ────────────────────────────
+  // ── WHAT DID SCALE: THE KEEP-OUT ────────────────────────────────────────────
   // `concealmentKeepoutRadius` is `max(MIN_SAFE_RADIUS, maxSafeRadius x (1 −
   // CONCEAL_ENDGAME_PROGRESS))`, and `maxSafeRadius` is derived from the half-diagonal —
-  // so it went **248.25 -> 496.25 wu**. Every patch below clears it; the tightest sits
-  // 15.4 wu outside. That is also why there is no patch anywhere near the hub: the whole
-  // r < 500 disc is refused by the same rule that refuses one on the map centre.
+  // so it went **248.25 -> 430.12 wu**. Every patch below clears it; the tightest — the
+  // (1215,420) pair — has its NEAREST POINT 534.81 wu out, i.e. it clears by 104.70 wu.
+  // That is also why there is no patch anywhere near the hub: the whole r < 430 disc is
+  // refused by the same rule that refuses one on the map centre.
+  //
+  // 🚨 WAS: *"it went 248.25 -> 496.25 wu ... the tightest sits 15.4 wu outside"*, and BOTH
+  // numbers were wrong in the same direction. **496.25 is 1985 x 0.25, and 1985 is the
+  // RETIRED x4 opening ring** that `tools/tmp/al_guard.mjs` §X hunts in `tools/tmp/` — it
+  // reached a live source file by being derived from rather than written, which is exactly
+  // the shape `al_guard` cannot see. The shipped `maxSafeRadius` is **1720.4650534085254**
+  // (`shared.ts:MAX_SAFE_RADIUS = fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)`, read off the
+  // browser's own `__matchArena` dump, not off this file), and `MIN_SAFE_RADIUS` is 140, so
+  // the keep-out is `max(140, 430.1163) = 430.12`. The 15.4 wu clearance fell out of the
+  // same wrong radius. Kept above the correction because a stale number that is *derived*
+  // from a retired constant is the class this repo keeps re-finding, and the old wording is
+  // the evidence of it. Re-derive with `node tools/tmp/ar2_sweep.mjs`, which prints the
+  // keep-out from the dump and the per-patch clearance beside it.
   //
   // ── AN ODD COUNT IS STILL IMPOSSIBLE ────────────────────────────────────────
   // True 180° point symmetry pairs every patch with its opposite, so an unpaired one would
