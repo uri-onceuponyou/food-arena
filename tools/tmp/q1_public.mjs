@@ -47,6 +47,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const REPO = resolve(new URL('../..', import.meta.url).pathname);
 const RAW = resolve(REPO, 'tools/tmp/q1_scores.jsonl');
@@ -145,6 +146,40 @@ function readRows(path) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * 🚨 IS_MAIN GUARD — MISSING until 2026-08-21, in a file that EXPORTS.
+ *
+ * `foreignProperNouns` is exported so the scan can be reused and tested rather than
+ * copied — the right instinct, and without this line it silently makes the whole CLI
+ * path below run at module scope. Measured, not theorised: `await import()` of this
+ * file from a one-liner PRINTED `wrote 23 rows to q1_public.jsonl` and rewrote the
+ * committed projection. The refusal path is worse — a ledger carrying an unrecognised
+ * capitalised token would `process.exit(1)` inside its importer, which reads as the
+ * IMPORTING tool failing. `AGENT-BRIEF` §3 lists three tools that shipped with this
+ * same defect (importing `snapsweep.mjs` printed a live sweep; `da_census.mjs` fell
+ * through into `runCapture`); this is the fourth, found by an agent that imported the
+ * file to read its allowlist while scoring a blind panel.
+ *
+ * Shown able to FAIL before it was believed — rule 6 — in BOTH directions:
+ *   node -e "await import('<abs>')"                      -> no output, no write
+ *   node -e "process.argv[1]='<abs>'; await import(...)"  -> writes, exactly as the
+ *                                                           unguarded file did
+ * The second arm defeats the guard by construction, so it reproduces the bug and proves
+ * the first arm is measuring the guard rather than measuring nothing.
+ *
+ * ⚠️ NOT registered as a `--selftest` arm. The arm COUNT is published in
+ * `docs/TOOLS.md`'s gate table and `gatecount` enforces it; that table is executable
+ * and outside this agent's owned file set, so adding an arm here would break the gate
+ * it cannot legally update. Routed to the orchestrator instead.
+ *
+ * Block form copied from `bm_ab.mjs`: guarding without re-indenting keeps the diff to
+ * the guard itself instead of burying it in a whitespace change.
+ */
+const IS_MAIN = process.argv[1] !== undefined
+  && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+
+if (!IS_MAIN) { /* imported for `foreignProperNouns` only — the CLI path must not run */ }
+else {
 const argv = process.argv.slice(2);
 
 if (argv.includes('--selftest')) {
@@ -203,3 +238,4 @@ if (argv.includes('--check')) {
 
 writeFileSync(OUT, text);
 console.log(`${SELF}: wrote ${out.length} rows to q1_public.jsonl — scores kept, referenceNote absent by construction.`);
+}
