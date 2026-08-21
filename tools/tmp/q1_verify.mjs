@@ -193,12 +193,31 @@ for (const row of rows) {
 
 }
 
+// 🚨 THE SLOT IS THE ANSWER, AND THIS USED TO PRINT IT ON EVERY ROW, IN BOTH ARMS.
+//
+// An operator must run this BEFORE dispatching a critic — that is the whole point of
+// vouching a sheet. So `ours=slot A` handed the person writing the critic's prompt the
+// very fact rule 7 says the critic must never see. `--known-bad` was worse, not better:
+// it prints the SWAPPED slot, so the true key is one inversion away.
+//
+// Found 2026-08-21 by the sixth panel agent, which noted the round was unaffected — the
+// critic is a separate context and the prompts were written from the sheet path alone.
+// **That is a fact about six careful agents, not a property of the tool.** The seventh
+// reads the slot, frames the prompt a shade differently, and nothing anywhere reports it.
+//
+// So: hidden by default, in BOTH arms. `--show-slots` when you genuinely need it — after
+// scoring, or when debugging a manifest. The vouching VERDICT (ok/FAIL, the diffs, the
+// stdev) is untouched, because none of it discloses which side is ours.
+const SHOW_SLOTS = !!args['show-slots'];
+
 for (const r of results) {
   const tag = `${r.row.arm}/${r.row.element}/c${r.row.critic}`;
-  console.log(`  ${r.ok ? 'ok  ' : 'FAIL'} - ${tag.padEnd(26)} ours=slot ${r.oursSlot ?? '?'}  `
+  const slot = SHOW_SLOTS ? `ours=slot ${r.oursSlot ?? '?'}  ` : 'ours=slot ·  ';
+  console.log(`  ${r.ok ? 'ok  ' : 'FAIL'} - ${tag.padEnd(26)} ${slot}`
     + `stdev ${r.stdev ?? '-'}  oursDiff ${r.mad ?? '-'}  refDiff ${r.refMad ?? '-'}`
     + `${r.problems.length ? `  :: ${r.problems.join('; ')}` : ''}`);
 }
+if (!SHOW_SLOTS) console.log('  (slots withheld — rule 7. `--show-slots` to reveal, AFTER scoring.)');
 
 const nOk = results.filter((r) => r.ok).length;
 const pass = SWAP ? nOk === 0 : nOk === results.length;

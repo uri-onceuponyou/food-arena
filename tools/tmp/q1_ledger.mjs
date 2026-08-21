@@ -86,9 +86,9 @@ function main() {
   const by = {};
   for (const a of man.assignments) {
     const k = `${a.arm}/${a.element}`;
-    by[k] ??= { done: 0, total: 0, skipped: 0 };
+    by[k] ??= { done: 0, total: 0, skipped: 0, rows: [] };
     by[k].total++;
-    if (scored.has(idOf(a))) by[k].done++;
+    if (scored.has(idOf(a))) { by[k].done++; by[k].rows.push(scored.get(idOf(a))); }
     else if (doneIds.has(idOf(a))) by[k].skipped++;
   }
   console.log(`\n══ Q1 LEDGER ══  ${done.length} of ${man.assignments.length} scored\n`);
@@ -101,7 +101,28 @@ function main() {
     // SKIPPED rows toward k. Both times the number was wrong in the flattering direction.
     const floor = d === 0 ? null : (1.96 * Math.SQRT2 * 0.50 / Math.sqrt(d)).toFixed(3);
     const tag = sk ? `  (${sk} skipped)` : '';
-    console.log(`  ${k.padEnd(26)} ${String(d).padStart(2)}/${t}   floor ${d === 0 ? '    —' : floor.padStart(5)}${tag}`);
+    // ⚠️ THE GAP IS THE ANSWER, AND THIS TOOL DID NOT PRINT IT. Every panel agent
+    // recomputed it out of `q1_public.jsonl` by hand — six agents, six chances to slip,
+    // and I told one of them "the gaps as the ledger prints them today" when the ledger
+    // prints no such thing. A number every reader derives themselves is a number that
+    // will eventually be derived wrong.
+    //
+    // 🚨 It is the MEAN OF PAIRED GAPS, not the difference of the two means. They coincide
+    // when every cell has both sides, and they diverge the moment one does not — and cells
+    // legitimately lack a side (a SKIPPED control scores only one). Pairing within the cell
+    // is the quantity rule 10 calls EXACT; a difference of aggregates is the one that hid
+    // 58 of 110 moving matchups behind an 0.8 pp headline.
+    // NOT `?? []`: a missing accumulator would print dashes forever and read as
+    // "nothing scored yet" rather than as a bug. Assert it exists.
+    if (!Array.isArray(by[k].rows)) throw new Error('q1_ledger: row accumulator missing for ' + k);
+    const rows = by[k].rows.filter((r) => typeof r.ours === 'number' && typeof r.reference === 'number');
+    const gapCol = rows.length
+      ? `  ours ${(rows.reduce((a, r) => a + r.ours, 0) / rows.length).toFixed(3)}`
+        + `  ref ${(rows.reduce((a, r) => a + r.reference, 0) / rows.length).toFixed(3)}`
+        + `  GAP ${(rows.reduce((a, r) => a + (r.reference - r.ours), 0) / rows.length).toFixed(3)}`
+        + ` (n=${rows.length})`
+      : '  ours     —  ref     —  GAP     —';
+    console.log(`  ${k.padEnd(26)} ${String(d).padStart(2)}/${t}   floor ${d === 0 ? '    —' : floor.padStart(5)}${gapCol}${tag}`);
   }
   if (!next) { console.log('\n  COMPLETE.\n'); return; }
   console.log(`\n  NEXT: ${idOf(next)}`);
