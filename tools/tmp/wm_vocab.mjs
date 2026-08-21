@@ -430,6 +430,15 @@ export function buildVocab(env) {
   // that promise it stay MISSING. MEASURED, not read off a field, with both boundaries
   // asserted: melee must exceed 1 AND ranged must equal 1, or the term is not grounded.
   T('multi-target-melee', 'discriminating', "one press damages EVERY opponent inside `cone`/`range`, not the nearest — `combat.ts:deliverWeapon`'s melee branch since 3483d23. MEASURED each run, both boundaries", (c) => c.w?.type === 'melee' && env.multi.meleeReachesMany && env.multi.rangedReachesOne);
+  // ── DISPLACEMENT — `a975567`. THREE SURFACES OF ONE PRIMITIVE, and each one is a
+  // world-unit distance AUTHORED PER WEAPON in `rules.ts` and absent on 29 of 33, so every
+  // term below discriminates by construction rather than by luck. `movement.ts:displaceFighter`
+  // writes the impulse and `stepPush` spends it through `tryMove`; nothing here is measured
+  // because nothing here is a behaviour the field can lie about — a weapon that authors a
+  // number displaces, and `sim.test.mjs` §39 is what asserts that it does.
+  T('control-loss', 'discriminating', "`knockback` — a hit DISPLACES its victim directly away from the attacker, in world units it did not ask to travel. `movement.ts:displaceFighter`, spent through `tryMove`", (c) => (c.w?.knockback ?? 0) > 0);
+  T('lure', 'discriminating', "`lure` — a hit pulls EVERY living opponent of the attacker toward the point of impact, clamped to each one's own separation so nothing overshoots the anchor. `combat.ts:applyHitDisplacement`", (c) => (c.w?.lure ?? 0) > 0);
+  T('self-launch', 'discriminating', "`selfLaunch` — the CASTER is displaced along its own frozen facing when the weapon goes off. Spent over later ticks, so it never extends the weapon's own reach (`sim.test.mjs` §39(h))", (c) => (c.w?.selfLaunch ?? 0) > 0);
   T('trail-boost', 'discriminating', `\`trailBoosted\` — damage x${TRAIL.damageBoost} while on own trail`, (c) => c.w?.trailBoosted === true);
   T('wind-up', 'discriminating', '`castMs` > 0 — the press only OPENS the attack; caster is rooted and its aim frozen', (c) => (c.w?.castMs ?? 0) > 0);
   T('self-heal', 'discriminating', '`healAmount` > 0, scaled by the level HEALTH ladder', (c) => (c.w?.healAmount ?? 0) > 0);

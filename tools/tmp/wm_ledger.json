@@ -1,24 +1,20 @@
 {
   "_": "Faults ACCEPTED as of the recorded SHA. --ratchet fails on any DIFFERENCE, in either direction: a new fault is a regression, and a fault that no longer reproduces means this ledger is stale and must be re-recorded WITH the fix.",
-  "sha": "12e72b1747b854bc7b18986a4fa3955af3ec9b37",
-  "measuredOn": "committed tree",
+  "sha": "433a8b59231d4eab51671121be81bb28edb7d5f3",
+  "measuredOn": "HEAD + the routed wm_vocab patch (nothing else)",
   "faults": [
     "MISSING|burrito.Swarm|claims \"multi-target\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"fly everywhere\")",
     "MISSING|burrito.Swarm|claims \"projectile-destructible\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"the flying toppings can be destroyed\")",
-    "MISSING|egg.Tackle|claims \"self-launch\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"Launches herself at the enemy\")",
-    "MISSING|hotdog.Ketchup|claims \"control-loss\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"lose control\")",
     "MISSING|pizza.Cheese|claims \"status-cleared-by-damage\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"until someone hits them\")",
     "MISSING|pizza.Cheese|claims \"vision-block\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"blocks their vision\")",
     "MISSING|pizza.Tomato|claims \"ground-effect-damage\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"damaging\")",
     "MISSING|soup.Dump|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"heavy slow\")",
-    "MISSING|sushi.Catch|claims \"lure\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"pulling enemies\")",
     "MISSING|sushi.Catch|claims \"multi-target\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"enemies everywhere\")",
     "MISSING|sushi.Catch|claims \"projectile-grows\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"the fish grow huge\")",
-    "MISSING|sushi.Seaweed|claims \"lure\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"lures every enemy toward it\")",
     "MISSING|waterbottle.Mega|claims \"merge-entities\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"together they become one giant bottle\")",
-    "MISSING|waterbottle.Mega|claims \"self-launch\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"launches himself up\")",
     "MISSING|waterbottle.Mega|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"heavy slow\")",
     "MISSING|waterbottle.Mega|claims \"summon-entity\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"his cap becomes a second bottle\")",
-    "MISSING|waterbottle.Spray|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"a lot\")"
+    "MISSING|waterbottle.Spray|claims \"status-strength\" — NOT IN THE VOCABULARY: nothing in the sim can express it (\"a lot\")",
+    "WRONG-VALUE|waterbottle.Mega|claims \"self-launch\" (\"launches himself up\") — the record does not satisfy it. `selfLaunch` — the CASTER is displaced along its own frozen facing when the weapon goes off. Spent over later ticks, so it never extends the weapon's own reach (`sim.test.mjs` §39(h))"
   ]
 }
