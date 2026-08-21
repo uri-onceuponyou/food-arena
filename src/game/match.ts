@@ -1725,8 +1725,27 @@ export class GameSession {
           }
 
           if (ev.source.kind === 'weapon') {
-            const attacker = weaponAttackerOf(this.state, ev.source, ev.targetRole);
-            this.applyKnockback(targetSlot, attacker.x, attacker.y, 0.05 + ev.amount * 0.006);
+            const wsrc = ev.source;   // bind the narrowed union, as `:1662` does
+            const attacker = weaponAttackerOf(this.state, wsrc, ev.targetRole);
+            // 🚨 SUPPRESSED WHEN THE SIM ALREADY MOVED THIS FIGHTER. `a975567` gave
+            // `Weapon` an optional `knockback` in WORLD UNITS, and the sim displaces the
+            // victim for real. This nudge moves the THREE.js root ON TOP of the sim
+            // position, so a weapon carrying both shoved TWICE — and worse, sim and render
+            // then disagreed about where a struck fighter stands, which is the one thing a
+            // presentation layer may never do. Today that is `hotdog.Ketchup`; the field is
+            // absent on 29 of 33 weapons, so every other hit is byte-identical to before.
+            //
+            // ⚠️ The nudge is NOT deleted. It is what gives weight to the 29 weapons the sim
+            // does not displace, and the method's own comment — "sim positions are never
+            // touched" — remains true of every caller. What changed is that the claim now
+            // has an exception, so the branch states it rather than the comment implying
+            // it cannot happen.
+            // `DamageSource` carries the KEY, not the weapon — same join as `:1335` and `:1663`.
+            const kbWeapon = CHARACTERS[attacker.characterId].weapons.find((w) => w.key === wsrc.weaponKey);
+            const simDisplaces = (kbWeapon?.knockback ?? 0) > 0;
+            if (!simDisplaces) {
+              this.applyKnockback(targetSlot, attacker.x, attacker.y, 0.05 + ev.amount * 0.006);
+            }
           } else if (ev.source.kind === 'trail') {
             const owner = trailOwnerOf(this.state, ev.source);
             this.applyKnockback(targetSlot, owner.x, owner.y, 0.03);
