@@ -932,6 +932,7 @@ export class GameSession {
       // each is a paused frame that can disagree with a running one. A dead player's
       // chevron was exactly that shape waiting to happen.
       safeArrow: this.hudSafeArrow(),
+      observerSlot: this.viewSubject,
       aim: null,
       ...this.hudResult(),
     });
@@ -1492,6 +1493,7 @@ export class GameSession {
     if (roster[LOCAL_SLOT]?.alive) {
       this.viewSubject = LOCAL_SLOT;
       this.spectateDwellMs = 0;
+      this.audio.setListener(LOCAL_SLOT);
       this.debug.viewSubject = LOCAL_SLOT;
       this.debug.viewReason = 'local';
       return;
@@ -1528,6 +1530,7 @@ export class GameSession {
         }
       }
     }
+    this.audio.setListener(this.viewSubject);
     this.debug.viewSubject = this.viewSubject;
     this.debug.viewReason = next.reason;
   }
@@ -2254,6 +2257,7 @@ export class GameSession {
       // not just 'playing', so the countdown is not five seconds of an invisible
       // cursor with nothing on screen to orient by.
       aim: localFighter(this.state).alive ? this.aimCursor() : null,
+      observerSlot: this.viewSubject,
       // 🔴 THE RESULT CARD COULD NOT SAY WHERE YOU FINISHED, WHO CAME SECOND, OR WHAT IT
       // PAID. Three sockets `hud.ts` deliberately left open rather than deriving answers it
       // has no right to — the rank (`place`), the finishing order the loser list is printed

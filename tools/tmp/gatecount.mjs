@@ -326,6 +326,8 @@ const OFFLINE = [
   { key: 'tools/tmp/kx_fogcover.mjs --selftest', probes: [pr(['tools/tmp/kx_fogcover.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/wm_gate.mjs --selftest', probes: [pr(['tools/tmp/wm_gate.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/q1_sigma.mjs --selftest', probes: [pr(['tools/tmp/q1_sigma.mjs', '--selftest'], /selftest (\d+) pass \/ \d+ fail/)] },
+  { key: 'tools/tmp/sv_subject.mjs --selftest', probes: [pr(['tools/tmp/sv_subject.mjs', '--selftest'], S)] },
+  { key: 'tools/tmp/sv_bitid.mjs --selftest', probes: [pr(['tools/tmp/sv_bitid.mjs', '--selftest'], S)] },
   // The three gates that actually protect the blind run. They were enforced by BRIEF ONLY
   // until 2026-08-21 — an agent noticed while routing `q1_sigma` that the arm checking the
   // instrument was registered while the arms checking the BLIND were not.
@@ -535,6 +537,7 @@ const SKIP = [
   ['npx tsc --noEmit',                     'non-numeric', 'verdict is "clean" — no count to compare'],
   ['tools/verify-head.mjs',                'non-numeric', 'verdict is OK/FAIL; also builds the whole committed tree'],
   ['tools/aspect.mjs',                     'browser',     'needs a snapshot URL and a GL context'],
+  ['tools/tmp/sv_shot.mjs',                'browser',     'drives a real six-seat match to a local death; PREVIEW_BASE required'],
   // The weapon-promise pair. `--selftest` is OFFLINE above (24 arms); these two are not.
   ['tools/tmp/wm_gate.mjs --ratchet',      'non-numeric', "verdict is 'fault set unchanged' vs NEW/FIXED lines — the COUNT is in wm_ledger.json, whose sha field is the thing that must match, not an integer here"],
   ['tools/tmp/wi_guard.mjs',               'browser',     'renders 27 bespoke impacts at two pitches; PREVIEW_BASE required, ~3.5 min'],
