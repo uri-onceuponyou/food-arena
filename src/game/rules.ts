@@ -2996,6 +2996,110 @@ export interface Weapon {
    * table above reddens rows in a file this pass does not own, so none of them ships here.**
    */
   castMs?: number;
+
+  /**
+   * ── DISPLACEMENT: THE THREE WEAPONS-CAN-MOVE-YOU FIELDS ────────────────────
+   *
+   * All three are world-unit DISTANCES, all three are **absent on 28 of the roster's 33
+   * weapons**, and absent means the sim is bit-identical to the one before they existed —
+   * exactly the property `castMs` has and for exactly the same reason. `sim.test.mjs`
+   * §39(g) asserts that inertness on a real match rather than reasoning about it.
+   *
+   * 🚨 **THE SHAPE OF THESE FIELDS IS A MEASUREMENT, NOT A PREFERENCE.** `6ea35f5` built
+   * the same primitive with the magnitude DERIVED — `PLAYER_SIZE * dealt / maxRosterDamage`,
+   * i.e. every weapon in the game pushes, priced off its own damage — precisely to avoid
+   * asking `rules.ts` for a field. Measured end to end through the real `stepMatch`, it
+   * **deleted melee**: a kit firing three pushing weapons stacks three shoves, the sustained
+   * push rate beat the attacker's own chase speed (hamburger **1.66x** on today's
+   * constants), and a passive immortal target was shoved from separation 30 to **90.86 wu
+   * in 1,100 ms by the bot trying to reach it**. The commit's own verdict:
+   *
+   *   > *"The scale is not the problem; the SURFACE is. It has to be authored PER WEAPON
+   *   > and ABSENT BY DEFAULT, exactly like `castMs`."*
+   *
+   * So there is no global dial here and none in `movement.ts`. Reproduce the refusal with
+   * `node tools/tmp/mv_push.mjs --refuse`; §39(f) keeps it as a standing roster guard, so a
+   * future authored number cannot walk back into it unseen.
+   *
+   * ⚠️ **THE UNIT IS A BODY LENGTH, LIKE `REACH`.** `BODY_LENGTH` is `PLAYER_SIZE`, the
+   * reach ladder is denominated in it, and `movement.ts:MAX_PUSH_DISTANCE` — the cap ALL
+   * pending displacement accumulates into — is exactly one of them. Writing `21` instead of
+   * `BODY_LENGTH / 2` would be a literal that stops meaning "half a body" the moment
+   * `PLAYER_SIZE` moves, which is the drift `REACH`'s own header exists to refuse.
+   *
+   * ⚠️ **AND `DECISIONS §80` BOUNDS EVERY NUMBER AUTHORED HERE.** A super must be
+   * DODGEABLE. Displacement is spent at `PLAYER_SPEED`, the roster CAP, so a fighter
+   * walking straight into it is moved at most `PLAYER_SPEED - speedFor(c)` = **5.04 wu over
+   * a maximum displacement, 12% of one body** — against a `STUN_DURATION_MS` that denies
+   * 180 wu. `movement.ts:displaceFighter` carries the derivation and both signs of it.
+   */
+  /**
+   * How far a HIT from this weapon shoves its victim, directly away from the attacker.
+   *
+   * `hotdog.Ketchup`'s card — *"Makes enemies slide and lose control"* — is the only one in
+   * the roster that promises this, and it is the whole of `wm_gate`'s `control-loss` claim.
+   * Applied in `combat.ts:applyDamage`, the single choke point every weapon damage path
+   * already funnels through (melee, and BOTH projectile impact paths), because a rule
+   * applied at two of the three is a silent balance bug in the third.
+   *
+   * ⚠️ Away from the ATTACKER, not from the projectile: a homing shot curves, so "away from
+   * where the bullet came from" is not a well-defined bearing for it, and the shooter's own
+   * position is the one every reader can see on screen.
+   */
+  knockback?: number;
+
+  /**
+   * How far a HIT from this weapon pulls **every living opponent of the attacker** toward
+   * the point of impact.
+   *
+   * ⚠️ **EVERY OPPONENT, NOT THE VICTIM — AND THAT IS THE CLAIM, NOT A GENERALISATION.**
+   * `sushi.Seaweed`'s card is *"Seaweed lures **every enemy** toward it while he shoots
+   * them"*, and `wm_claims.json` puts the whole quantifier inside the `lure` span. A pull
+   * that moved only the fighter the projectile struck would leave that card false while the
+   * gate went green, which is the "term wider than the sim / narrower than the card" failure
+   * `wm_vocab.mjs` exists to refuse. 🚨 **It is therefore UNTESTABLE AT TWO SEATS**, where
+   * "the victim" and "every enemy" name the same fighter — the sixth defect class of that
+   * shape this repo has paid for. §39(c) drives it at **N=6**.
+   *
+   * ⚠️ **THE ANCHOR IS THE VICTIM'S POSITION AT THE MOMENT OF THE HIT** — the bait sticks to
+   * whoever it hit — which is the same `x`/`y` `applyDamage` already publishes on
+   * `hit-landed`, so there is no second answer to "where did this land". The victim itself
+   * is AT the anchor, so it is pulled nowhere: you are not lured toward yourself. And the
+   * pull is CLAMPED to each opponent's own separation, so nobody is dragged through the
+   * bait and out the far side, where a repeat application would yank them back.
+   */
+  lure?: number;
+
+  /**
+   * How far the CASTER is displaced along its own frozen facing when this weapon goes off.
+   *
+   * `egg.Tackle` — *"Launches herself at the enemy"* — and `waterbottle.Mega` — *"launches
+   * himself up"*. Applied in `combat.ts:resolveWeapon`, after the weapon has been delivered.
+   *
+   * 🔴 **A SELF-LAUNCH NEVER EXTENDS THE REACH OF ITS OWN WEAPON**, which is what keeps it out
+   * of `DECISIONS §80` — Uri's answer that a super must be dodgeable, whose lever 1 is to
+   * SHRINK the effect radius. `waterbottle.Mega` is the exact weapon whose dodgeability is a
+   * live acceptance test (`tools/tmp/lk_dodge.mjs`, `kt_bearing.mjs`), so a launch that added
+   * `selfLaunch` to `range` would be a radius increase hidden in a field nobody reads as a
+   * reach. §39(h) bisects the real hit/miss boundary and requires it on `range` exactly.
+   * ⚠️ **The guarantee is the DEFERRAL, not the statement order** — displacement is queued and
+   * spent by `sim.ts`'s loop on LATER ticks, never inside the tick that queued it. An earlier
+   * draft of this paragraph claimed the order was load-bearing and that was false; see
+   * `combat.ts:resolveWeapon`, where the old wording is kept with the correction.
+   *
+   * ⚠️ **NOT AT THE PRESS, EVEN THOUGH `waterbottle.Mega`'s CARD READS THAT WAY** (*"launches
+   * himself up (takes a few seconds)"*). A cast ROOTS its caster, and `movement.ts:stepPush`
+   * refuses to move a fighter that `movementLocked` denies — so a press-time launch on a
+   * cast weapon would be burned entirely by its own root and the field would be decoration.
+   * One site, at the going-off, is the same rule for a castless tackle and a 1,400 ms slam.
+   *
+   * ⚠️ **THE SIM HAS NO VERTICAL AXIS, SO "UP" IS EXPRESSED AS THE DISPLACEMENT IT
+   * RESOLVES TO** — the caster ends up on the enemy it dumps water on. Flagged rather than
+   * hidden: `giantSlam` sets the same precedent in the other direction (a term whose sim
+   * half is deliberately partial), and the vocabulary entry says what the sim does, not what
+   * the card imagines.
+   */
+  selfLaunch?: number;
 }
 
 /**
@@ -3985,7 +4089,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     //   about the face. Kept verbatim so it is obvious what the other ten are being raised to.
     face: 'EYES: open eyes with catchlights — sclera, pupil and highlight built as three separate meshes. ⭐ THIS IS THE CAST REFERENCE; the other ten are being brought up to it, so changes here propagate. What it still needs, and there are two things: (a) the sclera must become the BRIGHTEST VALUE ANYWHERE ON THE CHARACTER — measured, even egg has 0% of its eye pixels above 0.85 luma against the reference plates\' 31.1% and 34.1%, because what it has today is a catchlight where a sclera belongs; and (b) THE PUPIL IS CENTRED. `egg.ts` sets it to x = 0, so egg stares dead ahead and has no gaze — offset it horizontally like every other character in this brief. A centred pupil reads dead even when everything else is right, and it is the one element of the standard the cast reference itself does not meet. MOUTH: straight and deadpan — KEEP THE DEADPAN, it is the whole personality and nothing else in the cast has it — but give it an interior value step behind the lip so it reads as an opening. The worried brow creases are correct: an egg has no hair, so worry reads as a raised shell ridge rather than eyebrows, and the asymmetric inner-end lift is what makes it a raised eyebrow instead of two symmetric worry lines. 🚨 SILHOUETTE — THE THING TO ACTUALLY FIX. A clean uncut TRUE OVOID (fuller at the bottom, tapering) is recorded at `egg.ts:206` as "the one thing Egg had going for it in the silhouette test". The lifted lid broke the crown and the flanking shell shards read as EARS, and both were added to signal "egg" while destroying the shape that signalled it better. Restore the ovoid; move any cracking cue onto the surface as a decal rather than into the outline. PERSONALITY: deadpan, stoic, slightly anxious under it.',
     weapons: [
-      { key: 'Tackle', name: 'Egg Tackle', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 2200, cone: 70, color: '#FFF8EA', effect: null, emoji: '🥚' },
+      // `selfLaunch` — *"Launches herself at the enemy"*, and the leap is spent AFTER the
+      // swing has already resolved, so it adds nothing to the 84 wu reach. Sustained
+      // mobility it buys if Tackle is pressed on cooldown: **42 / 2.2 s = 19.09 wu/s**
+      // against Egg's own 79.20 wu/s walk — a 24% add, and 0.41x its own chase speed.
+      // See `Weapon.selfLaunch`; the roster-wide bound is `sim.test.mjs` §39(f).
+      { key: 'Tackle', name: 'Egg Tackle', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 2200, cone: 70, color: '#FFF8EA', effect: null, selfLaunch: BODY_LENGTH, emoji: '🥚' },
       // ⚠️ WAS `speed: SPEED.maxDrift` (80 wu/s) — DECISIONS §50a, Uri: *"chick is faster
       // than the egg."* That is a derivable constraint rather than a taste call, and
       // `SPEED.maxSlow` is the SMALLEST rung that satisfies both halves of it: 160 wu/s is
@@ -4161,7 +4270,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     face: 'EYES: wide and open — the old line already had the right instinct and is extended, not reversed. Build the three elements: a white sclera as the brightest value on the character, a dark pupil offset for gaze, an explicit catchlight. Rice is near-white, so the sclera needs a dark lid line and a dark pupil to separate from it — the SEPARATION here comes from the pupil and lash, not from the white. ⚠️ BOTH EYES MUST CARRY THE SAME ROLL. `setFromUnitVectors` picks the shortest arc and leaves a different residual roll per side, and that is the recorded cause of this character reading as having a LAZY EYE (LESSONS §12). Use an explicit shared tangent frame or matched quaternions, not per-eye `setFromUnitVectors`. MOUTH: keep the pucker — it is the personality — but a pucker still needs an INTERIOR: a dark opening ringed by a lighter lip, not a painted O. SILHOUETTE: classic salmon nigiri — a rounded rice mound, a near-black nori belt around its lower half, a glossy salmon slice draped over the top, the emoji read exactly. The rice-and-nori motif carried down onto the torso so the whole body reads as made of sushi. Legendary is the premium tier and this is the strongest high-contrast graphic in the cast (near-black on white); it earns the most craft. PERSONALITY: fast, precise, a little haughty.',
     weapons: [
       { key: 'Rice', name: 'Rice Spray', type: 'ranged', range: REACH.rangedClose, damage: 2, cooldown: 700, speed: SPEED.closeFast, color: '#FFFFFF', effect: null, pellets: 5, spreadDeg: 35, emoji: '🍚' },
-      { key: 'Seaweed', name: 'Seaweed Bait', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 1000, speed: SPEED.mid, color: '#7CB518', effect: 'slow', emoji: '🌿' },
+      // `lure` — *"Seaweed lures EVERY enemy toward it"*, so this pulls every living
+      // opponent toward the bait, not the fighter it struck. Half a body per hit on a
+      // 1,000 ms cooldown = **21.00 wu/s** of sustained pull, against the roster's SLOWEST
+      // walk of 79.20 wu/s: a fighter running from the bait still nets 58 wu/s away. That
+      // margin is the `DECISIONS §80` argument for a PULL, whose sign is the opposite of a
+      // knockback's — see `movement.ts:displaceFighter` property 3.
+      { key: 'Seaweed', name: 'Seaweed Bait', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 1000, speed: SPEED.mid, color: '#7CB518', effect: 'slow', lure: BODY_LENGTH / 2, emoji: '🌿' },
       { key: 'Fish', name: 'Fish Pile', type: 'melee', range: REACH.meleeStrong, damage: 6, cooldown: 1200, cone: 150, color: '#F4A261', effect: null, emoji: '🐟' },
       // ── AUTHORISED DEVIATION #12 (2026-08-10): SUSHI — `speed` SPEED.maxSlow -> SPEED.max
       //    (160 -> 280 wu/s). Not a strength tune. At `maxSlow` this homing shot EXPIRED IN
@@ -4184,7 +4299,11 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // `roster_lab --seeds 32`, paired: aggregate -2.0 pp (inside the ~9 pp floor), PAIRED
       // 50/110 moved in both arms, max 96.9 / 90.6 pp, EXACT. Not applied; 6 rows red in
       // `sim.test.mjs`.
-      { key: 'Catch', name: 'Big Catch', type: 'ranged', range: REACH.rangedMax, damage: 9, cooldown: 3200, speed: SPEED.max, color: '#FF8C42', effect: null, pellets: 3, spreadDeg: 40, homing: true, emoji: '🐡' },
+      // `lure` — *"pulling enemies"*. ⚠️ THREE HOMING PELLETS, SO ONE PRESS CAN APPLY THIS
+      // THREE TIMES, and that is exactly why `movement.ts:MAX_PUSH_DISTANCE` caps ACCUMULATED
+      // displacement at one body rather than capping each application: 3 x 42 would be a
+      // launch, and the cap makes it 42 however many pellets connect. 42 / 3.2 s = 13.13 wu/s.
+      { key: 'Catch', name: 'Big Catch', type: 'ranged', range: REACH.rangedMax, damage: 9, cooldown: 3200, speed: SPEED.max, color: '#FF8C42', effect: null, pellets: 3, spreadDeg: 40, homing: true, lure: BODY_LENGTH, emoji: '🐡' },
     ],
     abilities: [
       { emoji: '🍚', name: 'Rice Spray', desc: 'Throws a spray of rice grains - each one chips away a little health', weapon: 'Rice' },
@@ -4589,7 +4708,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // finding, and the direction Uri asked for), which is right for a super and expensive
       // for Water Bottle. `§77` withholds permission to re-tune five other characters to
       // hide it. The price is in the commit that landed it.
-      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', castMs: 1400, emoji: '🌊' },
+      // `selfLaunch` — *"launches himself up"*. 🔴 SPENT AFTER DELIVERY, WHICH IS WHAT KEEPS
+      // IT OUT OF THE REACH. This is the one weapon in the roster whose dodgeability is an
+      // acceptance test (`lk_dodge`, `kt_bearing`, `DECISIONS §79`/`§80`), and a launch
+      // resolved before the swing would add 42 wu to `REACH.meleeHeavy` in a field nobody
+      // reads as a reach. 42 / 3.5 s = 12.00 wu/s, the smallest displacement rate in the
+      // roster. `sim.test.mjs` §39(h) asserts the reach is unchanged.
+      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', castMs: 1400, selfLaunch: BODY_LENGTH, emoji: '🌊' },
     ],
     abilities: [
       { emoji: '💦', name: 'Water Spray', desc: 'Sprays water that slows enemies down a lot', weapon: 'Spray' },
@@ -4624,7 +4749,13 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     face: 'EYES OPEN, NOT SLEEPY. Half-closed is the closed-eye family that Uri ranked bottom without seeing any code, and the current build is "a thick lid stroke over a small peeking pupil" — a stroke, which is what "drawn lines and not an actual face" means. Keep the laid-back personality by DROOPING the upper lid a little over a FULL open eye: RELAXED IS A LID ANGLE, NOT A MISSING EYE. Under that lid, all three elements — a white sclera as the brightest value on the character, a dark pupil offset for gaze (offset DOWN and to the side reads as bored far better than a closed eye does), and a catchlight. The old lid stroke survives as the lash line above the sclera, which is where it belonged all along. MOUTH: a small easy smile with a dark interior behind the lip. SILHOUETTE: a plump sausage nestled in a split bun, long axis along local X so the full length reads broadside at the shipped camera instead of foreshortening down its own length; a bold mustard zigzag along the sausage ridge as the one unmistakable landmark; small emissive Cyber end caps in the exposed sausage tips, gently pulsing — energised food, not a glow stick. PERSONALITY: fast, unbothered, permanently half-awake — and now half-awake with EYES.',
     weapons: [
       { key: 'Mustard', name: 'Mustard Blast', type: 'ranged', range: REACH.rangedLong, damage: 7, cooldown: 900, speed: SPEED.long, color: '#FFC93C', effect: null, emoji: '💛' },
-      { key: 'Ketchup', name: 'Ketchup Slip', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 950, speed: SPEED.mid, color: '#D62839', effect: 'slow', emoji: '🔴' },
+      // `knockback` — *"Makes enemies slide and lose control"*, and it is the ONLY weapon in
+      // the roster that authors one. 🚨 THAT IS THE WHOLE ANSWER TO `6ea35f5`'s REFUSAL: with
+      // knockback derived from damage, all 33 weapons pushed and Hamburger's kit shoved its
+      // victim 1.66x faster than it could chase. Here: half a body on a 950 ms cooldown =
+      // **22.11 wu/s against Hot Dog's own 52.5 wu/s chase, 0.42x** — so Hot Dog's `Slash`
+      // can still close on whatever its Ketchup pushed. §39(f) holds that ratio for the roster.
+      { key: 'Ketchup', name: 'Ketchup Slip', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 950, speed: SPEED.mid, color: '#D62839', effect: 'slow', knockback: BODY_LENGTH / 2, emoji: '🔴' },
       { key: 'Slash', name: 'Bun Slash', type: 'melee', range: REACH.meleeStrong, damage: 11, cooldown: 650, cone: 75, color: '#FFC93C', effect: null, emoji: '⚔️' },
     ],
     abilities: [

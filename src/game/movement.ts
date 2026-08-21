@@ -26,8 +26,16 @@
 
 import type { ArenaDefinition, CoverBox } from '../arena/types.ts';
 import type { Fighter, Splat } from './state.ts';
+// ⚠️ A VALUE import from `state.ts`, and it is not a cycle: `state.ts` reaches back here
+// only through `import type { ConcealBox }`, which TypeScript erases, so at runtime the
+// edge is one-way. `movementLocked` is imported rather than re-derived for this file's
+// standing reason — "stunned or casting" is stated once, in the module that owns the
+// fields, and a copy of `elapsed < stunnedUntil || cast !== null` here would keep passing
+// against a sim that had changed its mind about what a lock is.
+import { movementLocked } from './state.ts';
 import {
-  CONCEAL_REVEAL_RADIUS, concealmentKeepoutRadius, PUDDLE_SLOW_FACTOR, SPLAT_RADIUS,
+  CONCEAL_REVEAL_RADIUS, concealmentKeepoutRadius, PLAYER_SIZE, PLAYER_SPEED,
+  PUDDLE_SLOW_FACTOR, SPLAT_RADIUS,
 } from './rules.ts';
 
 /** True if two centre+full-extent AABBs overlap. */
@@ -398,6 +406,164 @@ export function terrainSlowAt(
     }
   }
   return factor;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DISPLACEMENT — the primitive that moves a fighter it did not ask to move
+//
+// `escapeCover` below has been waiting for this since it was written. Its own header says
+// the "fighter inside a prop" state is *"the worst shape a bug can have — total, silent,
+// and indistinguishable from 'the controls stopped working'"*, that no player can reach it
+// today because *"spawns are clear and knockback is visual-only"*, and that it *"becomes
+// reachable the moment anyone adds sim-side knockback, a dash, or a pull."* **This is that
+// moment**, and the recovery is already built: every displacement is spent through
+// `tryMove`, which runs `escapeCover` first. §39(a) pushes a fighter at a prop on purpose.
+//
+// ── 🚨 THIS WAS BUILT, PROVEN AND REFUSED ONCE (`6ea35f5`), AND THE REFUSAL IS THE DESIGN ─
+//
+// That pass wired a knockback to EVERY weapon hit with the magnitude derived as
+// `PLAYER_SIZE * dealt / maxRosterDamage`. Measured through the real `stepMatch`, it
+// DELETED MELEE: a passive immortal target was shoved from separation 30 to 90.86 wu in
+// 1,100 ms by the Hamburger bot trying to close on it, because a kit that fires three
+// pushing weapons stacks three shoves and the sustained push rate beat its own chase speed
+// (hamburger 1.66x on today's constants; re-derivable from `tools/tmp/mv_push.mjs --refuse`).
+//
+// **The scale was never the problem. The SURFACE was.** So there is no damage-derived
+// magnitude in this file: the distance is AUTHORED PER WEAPON in `rules.ts` and ABSENT BY
+// DEFAULT, exactly like `castMs`, and 28 of the roster's 33 weapons author nothing and are
+// bit-identical to the sim before this existed. `sim.test.mjs` §39(f) re-runs the refusal's
+// own arithmetic as a standing ROSTER GUARD so no future authored number can reach it.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ── THE CEILING ON A SINGLE FIGHTER'S PENDING DISPLACEMENT: ONE BODY WIDTH ──
+ *
+ * `PLAYER_SIZE` is the collision box the sim already moves fighters around with, so "the
+ * biggest displacement in the game moves you exactly one of yourself" is a sentence a
+ * player can read off the screen. It is also what makes chaining safe: impulses ACCUMULATE
+ * into this cap and never past it, so no sequence of hits — three homing pellets from one
+ * press, or a whole kit firing on cooldown — can add up to a launch.
+ */
+export const MAX_PUSH_DISTANCE = PLAYER_SIZE;
+
+/**
+ * Below this magnitude a displacement direction points nowhere — see `displaceFighter`.
+ * A true-degeneracy epsilon, deliberately not a play-scale distance, exactly as
+ * `combat.ts:MELEE_COINCIDENT_EPS` is.
+ */
+const PUSH_COINCIDENT_EPS = 1e-6;
+
+/**
+ * Hand `fighter` a displacement of `distance` world units along `(dirX, dirY)`, which need
+ * not be normalised.
+ *
+ * ⚠️ **A DIRECTION VECTOR RATHER THAN `pushFighter(f, fromX, fromY, d)`, WHICH IS WHAT
+ * `6ea35f5` PREDICTED THIS WOULD BE.** That signature expresses a push away from a point,
+ * and a PULL toward one is then the same call with a negated distance — a sign trick hidden
+ * inside an argument named `distance`, where the reader of a call site cannot see it. The
+ * three shipped surfaces make the vector explicit instead, and each one reads as its own
+ * sentence:
+ *
+ *     knockback   victim.x - attacker.x        away from whoever hit me
+ *     lure        anchor.x - victim.x          toward the bait
+ *     selfLaunch  caster.facing.x              along my own frozen bearing
+ *
+ * ── 🚨 WHY THIS CANNOT BECOME A THIRD LOCK (`DECISIONS §75`, `§80`) ─────────
+ *
+ * `§75` records that slow and stun STACK into a hold — *"you essentially lock him to
+ * place"* — and `§80` is Uri's answer that a super must be DODGEABLE. A displacement that
+ * interrupted movement would be a soft stun and the third member of that family. Four
+ * properties keep it out, and each is a number rather than an intention:
+ *
+ *   1. **CONTROL AUTHORITY IS UNTOUCHED, EXACTLY.** The displacement is spent in its OWN
+ *      `tryMove` call, AFTER the fighter's own movement has already resolved in `sim.ts`'s
+ *      loop. The fighter's input therefore buys it the same ground it would have bought
+ *      with nothing in flight — bit-identically, not approximately. §39(b) asserts it as a
+ *      difference of differences.
+ *   2. **IT CANNOT OUT-RUN A WALK BY MORE THAN A HAIR.** The spend rate is exactly
+ *      `PLAYER_SPEED`, the roster-wide movement CAP (`rules.ts:SPEED_TOP_STAT` is a cap,
+ *      not a centre, so `speedFor` only scales DOWN). A fighter walking straight INTO a
+ *      displacement is therefore moved at `PLAYER_SPEED - speedFor(c)` — 0.0000 wu/ms for
+ *      the characters at the cap, up to 0.0108 for the slowest — for at most
+ *      `MAX_PUSH_DISTANCE / PLAYER_SPEED`. **Worst case over an entire maximum
+ *      displacement: 5.04 wu, 12% of one body.**
+ *      ⚠️ **That 5.04 wu is SCALE-INVARIANT and the 466.7 ms window is NOT.** The distance
+ *      is `MAX_PUSH_DISTANCE * (1 - speedFor(c)/PLAYER_SPEED)`, in which `PLAYER_SPEED`
+ *      cancels — so `DECISIONS §75`'s 25% speed cut left the wu figure at exactly the
+ *      5.04 `6ea35f5` measured while moving the ms figure from 350 to 466.7. Quote the wu.
+ *   3. **A PULL INVERTS PROPERTY 2's SIGN, AND IT WAS RE-DERIVED RATHER THAN INHERITED.**
+ *      A knockback aims AWAY from the attacker, so it strictly HELPS the dodge `§80` asks
+ *      for. A `lure` aims TOWARD an anchor, so a fighter fleeing radially nets
+ *      `PLAYER_SPEED - speedFor(c)` **the wrong way** — the same 0.0000-to-0.0108 wu/ms,
+ *      the same 5.04 wu worst case, but paid against the runner instead of for them. The
+ *      consequence is stated exactly: during a maximum pull the SLOWEST character makes no
+ *      radial progress away and every faster one still retreats. It is a positional tax on
+ *      an escape, never an interruption of one — and 5.04 wu is 12% of a body against a
+ *      `STUN_DURATION_MS` that denies 180 wu. §39(d) is that number, both signs.
+ *   4. **A FIGHTER THAT MAY NOT MOVE ITSELF IS NEVER MOVED BY THIS.** See `stepPush`.
+ *
+ * ⚠️ **NEWEST DIRECTION WINS; DISTANCE ACCUMULATES TO THE CAP.** Blending two directions
+ * can produce the zero vector, which would silently cancel a hit; taking the newest is one
+ * rule, is what "the last blow shoved you" means, and is deterministic because every writer
+ * is reached in slot order from one loop.
+ *
+ * ⚠️ **A ZERO-LENGTH DIRECTION IS NO DISPLACEMENT**, on exactly the reasoning `combat.ts`'s
+ * melee branch already applies to a coincident swing: the vector points nowhere and no
+ * force can be aimed along it. Choosing a direction there would be non-determinism smuggled
+ * into a sim whose determinism underwrites every balance number in the project.
+ */
+export function displaceFighter(fighter: Fighter, dirX: number, dirY: number, distance: number): void {
+  if (!(distance > 0)) return;
+  const mag = Math.hypot(dirX, dirY);
+  if (mag < PUSH_COINCIDENT_EPS) return;
+  const p = fighter.push;
+  p.x = dirX / mag;
+  p.y = dirY / mag;
+  p.remaining = Math.min(MAX_PUSH_DISTANCE, p.remaining + distance);
+}
+
+/**
+ * Spend this tick's share of `fighter`'s pending displacement. Returns whether it moved.
+ *
+ * ⚠️ **THE BUDGET IS CONSUMED WHETHER OR NOT THE STEP CONNECTS.** `tryMove` refuses a step
+ * into cover, so a fighter shoved against a wall would otherwise HOLD its impulse and fire
+ * it off the moment the wall stopped being in the way — a stored shove that goes off later
+ * is exactly the "total, silent" class `escapeCover` exists to prevent, one level up.
+ *
+ * ⚠️ **`tryMove`, NOT A DIRECT WRITE TO `x`/`y`.** That is the whole depenetration
+ * guarantee: `tryMove` runs `escapeCover` before it moves anything, so a fighter that ends
+ * up inside a prop — the state this primitive is what makes reachable at all — walks back
+ * out on its next attempt instead of freezing forever. §39(a) shoves one at `spice_cart`
+ * on purpose and requires both halves: refused at the box face, and freed if forced inside.
+ *
+ * 🚨 **A LOCKED FIGHTER IS NOT DISPLACED, AND ITS BUDGET IS BURNED ANYWAY. THIS IS A
+ * CORRECTNESS REQUIREMENT, NOT A BALANCE CHOICE.** `state.ts:ActiveCast` records that a
+ * cast's origin and bearing are frozen *"BY CONSTRUCTION with no stored copy"*, because
+ * `x`/`y` are written only by `tryMove` and the two paths that reach it are both suppressed
+ * mid-cast — *"a telegraph drawn where the caster stands at the press cannot lie about
+ * where the effect lands."* **`stepPush` is a THIRD path to `tryMove` and it would have
+ * falsified that sentence**: a caster shoved mid-wind-up resolves its slam somewhere the
+ * drawn telegraph is not, which fails `DECISIONS §80`'s *"a telegraph you can dodge"* from
+ * the inside. `movementLocked` also covers a stun, and refusing there is the same rule
+ * read the other way — the sim never moves a fighter it has denied the ability to move —
+ * which is what stops `lure` compounding with a 2,000 ms stun into a drag nobody can
+ * answer. The budget is still spent so the shove cannot be BANKED across the lock and go
+ * off on the far side of it. §39(e) asserts both halves and its known-bad shows the row red.
+ *
+ * ⚠️ **`remaining` IS SNAPPED TO EXACTLY 0**, and the direction with it, so a spent
+ * displacement leaves no float dust in the state digest — see `Fighter.push`.
+ */
+export function stepPush(fighter: Fighter, dt: number, arena: ArenaDefinition, elapsed: number): boolean {
+  const p = fighter.push;
+  if (p.remaining <= 0) return false;
+  const full = PLAYER_SPEED * dt;
+  const step = p.remaining < full ? p.remaining : full;
+  p.remaining -= step;
+  const moved = movementLocked(fighter, elapsed)
+    ? false
+    : tryMove(fighter, p.x * step, p.y * step, arena);
+  if (p.remaining <= 0) { p.remaining = 0; p.x = 0; p.y = 0; }
+  return moved;
 }
 
 /** Bounded so a fighter wedged between boxes cannot spin here forever. */

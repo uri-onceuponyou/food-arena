@@ -416,6 +416,52 @@ export interface Fighter {
    * fields hit. `createFighter` seeds it, and it is the only place any field is seeded.
    */
   cast: ActiveCast | null;
+  /**
+   * SIM-SIDE DISPLACEMENT IN FLIGHT — the primitive that lets the sim move a fighter that
+   * did not ask to move. `rules.ts:Weapon.knockback` / `lure` / `selfLaunch` are its three
+   * authored surfaces; `movement.ts:displaceFighter` writes it and `movement.ts:stepPush`
+   * spends it.
+   *
+   * `x`/`y` are a UNIT direction and `remaining` is the world-unit distance still owed.
+   * `remaining === 0` means nothing is in flight **and the direction is zeroed with it**,
+   * so two behaviourally identical states are also BIT-identical — a lingering direction
+   * would make `conceal_lab --bitid` report a divergence that is not one.
+   *
+   * ── WHY IT IS STATE AND NOT AN IMMEDIATE MOVE ──────────────────────────────
+   *
+   * `movement.ts:escapeCover` carried the sentence *"knockback is visual-only … it becomes
+   * reachable the moment anyone adds sim-side knockback, a dash, or a pull"* for months,
+   * and it was true: `game/match.ts:applyKnockback` nudges a THREE.js model root and never
+   * reaches `Fighter.x/y`. An instantaneous positional jump would be a TELEPORT on screen
+   * (`syncModelTransform` writes the sim position straight through), so the impulse is
+   * spent over ticks at a bounded speed instead. That bound is also the safety argument:
+   * see `movement.ts:MAX_PUSH_DISTANCE`.
+   *
+   * 🚨 **A REAL, OWN, ENUMERABLE DATA PROPERTY SEEDED IN `createFighter` — NOT `undefined`,
+   * NOT A GETTER**, for the reason `cast` and the DR fields above both carry: the bit-id
+   * differs walk `MatchState` with `Object.keys`/spread and an accessor or an
+   * absent-until-first-use key is SILENTLY DROPPED, so a divergence in it compares equal.
+   *
+   * ⚠️ **NOTHING IN THE SIM READS THIS TO DECIDE ANYTHING.** It is written by
+   * `movement.ts:displaceFighter` and consumed by `movement.ts:stepPush`, and it is not an
+   * input to weapon choice, to steering or to the AI's belief — see `terrainSlowFactor`'s
+   * and `concealed`'s notes above for why a published observation must not become a
+   * decision input.
+   */
+  push: PushState;
+}
+
+/**
+ * See `Fighter.push`. A unit direction plus the world-unit distance still owed.
+ *
+ * ⚠️ Three numbers rather than a `Vec2` plus a scalar, because `Vec2` is spread and cloned
+ * in a dozen places and a displacement is not a position: nothing may `{ ...fighter.push }`
+ * into a coordinate slot by accident.
+ */
+export interface PushState {
+  x: number;
+  y: number;
+  remaining: number;
 }
 
 /**
@@ -484,6 +530,10 @@ export function createFighter(spec: FighterSpec): Fighter {
     concealed: false,
     revealedUntil: -Infinity,
     cast: null,
+    // Seeded here and only here — see `Fighter.push`. A fighter that has never been shoved
+    // holds `{0,0,0}`, which is the identity for `stepPush` and is what makes a roster with
+    // no authored displacement bit-identical to the sim before this field existed.
+    push: { x: 0, y: 0, remaining: 0 },
   };
 }
 

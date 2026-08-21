@@ -35,7 +35,7 @@ import {
 } from './rules.ts';
 import type { DamageSource, Fighter, GameEvent, MatchState, Vec2 } from './state.ts';
 import { isLivingOpponentOf, lastFighterStanding, nearestLivingOpponent } from './state.ts';
-import { breakConcealment } from './movement.ts';
+import { breakConcealment, displaceFighter } from './movement.ts';
 
 const RAD2DEG = 180 / Math.PI;
 const DEG2RAD = Math.PI / 180;
@@ -156,6 +156,87 @@ function cancelCast(
 }
 
 /**
+ * ── WHAT A HIT DOES TO WHERE YOU STAND — `rules.ts:Weapon.knockback` / `lure` ──
+ *
+ * Both surfaces of the displacement primitive that are driven by a LANDED HIT. The third,
+ * `selfLaunch`, is driven by the weapon GOING OFF and lives in `resolveWeapon`, because a
+ * leap happens whether or not the swing connected.
+ *
+ * ⚠️ **THE WEAPON RECORD IS LOOKED UP FROM THE ATTACKER'S OWN KIT BY `key`, NOT THREADED
+ * THROUGH `applyDamage`'s SIGNATURE.** Three call sites deliver weapon damage — the melee
+ * loop in this file and BOTH projectile impact paths in `sim.ts` — and every one of them
+ * already builds a `DamageSource` carrying `weaponKey` and `attackerId`. Adding a fourth
+ * parameter would have made the record a thing three callers must remember to pass, which
+ * is this file's most expensive recorded defect shape (*"a rule applied at four of the five
+ * sites is a silent balance bug in the fifth"*, immediately above). The lookup is total:
+ * `defineCharacter` binds the blurb link to the character's own weapon keys, so a key that
+ * is not in the kit cannot be authored — and a `weaponKey` that resolves to nothing (several
+ * `sim.test.mjs` fixtures spam a bare `{ kind: 'weapon', weaponKey: 'T' }`) simply displaces
+ * nobody instead of throwing.
+ *
+ * ⚠️ `attacker != null`, NOT `!== null`, AND THAT IS NOT PEDANTRY. `state.fighters[
+ * source.attackerId]` is `undefined` — not `null` — for a `weapon` source carrying no
+ * `attackerId`, which those same fixtures deliberately construct. The `dealt` line above
+ * already tolerates that through a truthiness test; a strict `!== null` here threw
+ * `Cannot read properties of undefined` on the first run. Measured, not predicted.
+ *
+ * ⚠️ **`kind: 'weapon'` ONLY, AND THE OMISSIONS ARE DELIBERATE.** `fog` and `hazard` have no
+ * attacker at all, so there is no bearing to displace along — the arena is not standing
+ * anywhere. `trail` HAS an owner and is excluded on a design ground rather than a technical
+ * one: a Sticky Trail mark damages on a per-tick cadence, so pushing off it would be a
+ * continuous shove out of a stationary object, and it would make a trail a wall.
+ *
+ * ⚠️ **A CORPSE IS NEVER DISPLACED, AND IT COSTS NO BRANCH.** `sim.ts`'s fighter loop
+ * `continue`s on `!fighter.alive` before `stepPush` is reached, so a displacement handed to
+ * a fighter by its own killing blow is simply never spent. §39(g) asserts that rather than
+ * leaving it to be re-derived from two files.
+ */
+function applyHitDisplacement(state: MatchState, attacker: Fighter, target: Fighter, w: Weapon): void {
+  const knockback = w.knockback ?? 0;
+  if (knockback > 0) {
+    // Away from the attacker. At zero separation the vector points nowhere and
+    // `displaceFighter` refuses it — the same rule the melee cone check applies to a
+    // coincident swing, stated by the primitive so both readers share one answer.
+    displaceFighter(target, target.x - attacker.x, target.y - attacker.y, knockback);
+  }
+
+  const lure = w.lure ?? 0;
+  if (lure > 0) {
+    // ── EVERY LIVING OPPONENT, TOWARD THE POINT OF IMPACT ────────────────────
+    //
+    // 🚨 **NOT THE VICTIM. THE CARD SAYS *"lures EVERY enemy toward it"*, AND AT TWO SEATS
+    // THOSE ARE THE SAME SENTENCE** — `nearestLivingOpponent` returns the only opponent
+    // there is, so a lure that moved only the fighter it struck would be indistinguishable
+    // from this one in every two-seat fixture in the repo. That is the sixth defect of this
+    // shape the project has paid for (the result card, corpse input, shake proximity, seat
+    // order, the melee half of multi-target, the body-block); §39(c) drives it at N=6 and
+    // its N=2 control is marked vacuous ON PURPOSE rather than omitted.
+    //
+    // The anchor is the VICTIM'S POSITION — the bait sticks to whoever it hit — which is the
+    // same `x`/`y` this function publishes on `hit-landed` immediately below, so there is
+    // exactly one answer to "where did this land". The victim is AT the anchor and is
+    // therefore pulled nowhere: you are not lured toward yourself.
+    //
+    // ⚠️ **SLOT ORDER, AND DETERMINISM DEPENDS ON IT** — `state.fighters` is the sim's one
+    // iteration order, exactly as `deliverWeapon`'s multi-victim melee loop argues.
+    //
+    // ⚠️ **CLAMPED TO EACH OPPONENT'S OWN SEPARATION**, so nobody is dragged THROUGH the
+    // bait and out the far side. Un-clamped, a fighter standing 10 wu away would be yanked
+    // 32 wu past it and a second application would yank it back — an oscillation that reads
+    // on screen as the controls fighting the player.
+    const ax = target.x;
+    const ay = target.y;
+    for (const victim of state.fighters) {
+      if (!isLivingOpponentOf(victim, attacker)) continue;
+      const dx = ax - victim.x;
+      const dy = ay - victim.y;
+      const sep = Math.hypot(dx, dy);
+      displaceFighter(victim, dx, dy, lure < sep ? lure : sep);
+    }
+  }
+}
+
+/**
  * Apply `amount` damage to `target`, optionally inflicting a status effect,
  * clamping HP, recording the hit for regen/VFX purposes, and ending the match if
  * this was the killing blow. This is the ONLY place fighter HP is reduced anywhere
@@ -257,6 +338,28 @@ export function applyDamage(
         cancelCast(target, 'stun', events);
       }
     }
+  }
+
+  // ── EVERY AUTHORED HIT CARRIES WEIGHT — see `applyHitDisplacement` above ───
+  //
+  // HERE, because this is the single choke point the level multiplier's block above makes
+  // the same argument for: five damage call sites, three of them weapon hits, and a
+  // displacement applied at two of the three is a silent balance bug in the third.
+  //
+  // ⚠️ ABOVE the `hit-landed` push and ABOVE the death block, and both matter. Above the
+  // event because the anchor a `lure` uses IS the `x`/`y` that event publishes, and the two
+  // must not be able to disagree; above the death block because `combat.ts`'s three
+  // terminators own everything under it and `conceal_lab --selftest`'s event-order known-bad
+  // anchors on three literal lines there (see `target.deaths++`). Nothing is inserted
+  // between them.
+  //
+  // ⚠️ INERT FOR 28 OF THE ROSTER'S 33 WEAPONS. `knockback`/`lure`/`selfLaunch` are absent
+  // on all but five, absence is `?? 0`, and `displaceFighter` refuses a non-positive
+  // distance — so `Fighter.push` is never written and the sim is bit-identical to the one
+  // before this existed. §39(g) proves that on a real match instead of asserting it here.
+  if (attacker != null && source.kind === 'weapon') {
+    const w = CHARACTERS[attacker.characterId].weapons.find((x) => x.key === source.weaponKey);
+    if (w !== undefined) applyHitDisplacement(state, attacker, target, w);
   }
 
   // `amount` on the event is what the target actually LOST, not what the weapon table
@@ -479,7 +582,46 @@ function resolveWeapon(
 
   events.push({ type: 'weapon-fired', fighterRole: attacker.role, fighterId: attacker.id, weaponKey: w.key });
   spendCover(state, attacker, w, events);
-  return deliverWeapon(state, attacker, w, events);
+  const delivered = deliverWeapon(state, attacker, w, events);
+
+  // ── SELF-LAUNCH — `rules.ts:Weapon.selfLaunch` ─────────────────────────────
+  //
+  // 🔴 **A LAUNCH NEVER EXTENDS THE REACH OF ITS OWN WEAPON**, which is what keeps it out of
+  // `DECISIONS §80` — Uri's answer that a super must be dodgeable, whose lever 1 is to SHRINK
+  // the effect radius. `waterbottle.Mega` authors a launch and is the one weapon in the game
+  // whose dodgeability is a standing acceptance test (`tools/tmp/lk_dodge.mjs`,
+  // `kt_bearing.mjs`), so a launch that added 42 wu to `REACH.meleeHeavy` would be a radius
+  // increase hidden in a field nobody reads as a reach. `sim.test.mjs` §39(h) bisects the real
+  // hit/miss boundary and requires it to sit exactly on `range`.
+  //
+  // ⚠️ **AND THE GUARANTEE IS THE DEFERRAL, NOT THE STATEMENT ORDER. THIS COMMENT CLAIMED THE
+  // OPPOSITE AND THE CLAIM WAS FALSE — THE OLD WORDING IS KEPT BECAUSE IT IS THE INSTRUCTIVE
+  // HALF.** It read: *"AFTER `deliverWeapon`, SO a launch can never extend the reach … §39(h)
+  // shows the row red when the order is swapped."* It does not: `displaceFighter` only WRITES
+  // `Fighter.push`, and `deliverWeapon` reads `attacker.x`/`y`, which no queued displacement
+  // has moved yet — **so swapping these two statements is behaviourally a NO-OP and §39(h)
+  // would stay green.** What actually protects the reach is that displacement is spent by
+  // `sim.ts`'s loop on LATER ticks, never inside the tick that queued it. The order is kept as
+  // defence in depth against a future edit that made displacement instantaneous, and because
+  // it is the honest reading of both cards — it is not the thing doing the work. Caught by
+  // asking §39(h) what implementation would fail it, which is `CLAUDE.md` #6 exactly.
+  //
+  // ⚠️ IT FIRES WHETHER OR NOT THE SWING CONNECTED, on the line this function has always
+  // drawn: "too far", "wrong direction" and "target already dead" all still consume the
+  // press. *"Launches herself at the enemy"* is a leap, and a leap that missed still happened.
+  //
+  // ⚠️ ALONG THE CASTER'S OWN `facing`, WHICH FOR A CAST WEAPON IS FROZEN AT THE PRESS
+  // (`state.ts:ActiveCast`). So the launch runs down the bearing the telegraph was drawn on,
+  // and it cannot be steered mid-wind-up to land somewhere the player was not shown.
+  //
+  // ⚠️ ONE SITE, REACHED BY BOTH PATHS — `attemptAttack` for a castless tackle and
+  // `resolveDueCast` for a 1,400 ms slam — for the reason this function exists at all: a
+  // rule stated on the press path and on the resolve path would be two implementations of
+  // one resolution rule.
+  const launch = w.selfLaunch ?? 0;
+  if (launch > 0) displaceFighter(attacker, attacker.facing.x, attacker.facing.y, launch);
+
+  return delivered;
 }
 
 /**

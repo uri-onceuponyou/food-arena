@@ -106,7 +106,7 @@ import {
   movementLocked, sightingIndex,
 } from './state.ts';
 import { applyDamage, attemptAttack, isOnOwnTrail, resolveDueCast } from './combat.ts';
-import { boxesOverlap, isHidden, isVisibleFrom, terrainSlowAt, tryMove } from './movement.ts';
+import { boxesOverlap, isHidden, isVisibleFrom, stepPush, terrainSlowAt, tryMove } from './movement.ts';
 import { stepAI } from './ai.ts';
 
 /**
@@ -701,6 +701,32 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
       } else {
         moved = stepAI(state, fighter, dt, events);
       }
+      // ── DISPLACEMENT: WHAT THE WORLD DOES TO A FIGHTER, FOR BOTH CONTROLLERS ──
+      //
+      // ONE SITE, BELOW THE `controller` BRANCH, for the reason the corpse guard above it is
+      // also above the branch: a rule stated on one side of that branch and not the other is
+      // this file's most expensive recorded defect class — five `ai.ts` bugs, the stun that
+      // silenced only the bot, and the terrain slow that reached only the human. A
+      // displacement handed out by `combat.ts` must be spent identically whoever is holding
+      // the controller.
+      //
+      // ⚠️ **AFTER the fighter's own movement, in its OWN `tryMove`, and that is the property
+      // that stops this becoming a third lock** (`DECISIONS §75`, `§80`). Resolved separately,
+      // the fighter's input buys it exactly the ground it would have bought with nothing in
+      // flight — so being shoved costs POSITION and never CONTROL. Combining the two vectors
+      // into one `tryMove` would have coupled them through the per-axis collision refusal, and
+      // a blocked push would have eaten the fighter's own step. §39(b) asserts the authority
+      // as a difference of differences, which is the only form that can tell the two apart.
+      //
+      // ⚠️ **`moved` IS NOT SET FROM IT, DELIBERATELY.** `moved` becomes `applyWorldTick`'s
+      // `attemptedMove`, which is what drops a Sticky Trail mark — and the trail is a record
+      // of where a fighter WENT, not of where it was thrown. A shoved Donut laying track it
+      // never walked would be a free trail on every hit.
+      //
+      // ⚠️ `state.elapsed` is passed so `stepPush` can ask `movementLocked` rather than
+      // re-derive it: a stunned or mid-cast fighter is not displaced, and its budget is burned
+      // anyway so the shove cannot be banked across the lock. See `stepPush`.
+      stepPush(fighter, dt, state.arena, state.elapsed);
       applyWorldTick(state, fighter, dt, moved, events);
     }
     // The fog is applied OUT OF the fighter loop during sudden death, and only then.

@@ -43,9 +43,15 @@ import { applyDamage, attemptAttack, isOnOwnTrail, resolveDueCast, statusReadyAt
 // against a sim that had stopped calling it. `tryMove`/`moveToward`/`navStats` come in so
 // walk-through can be PROVEN by walking, and the nav grid's passable-cell count compared
 // directly, rather than asserted from the fact that nobody wired concealment into them.
+// Section 39 imports the DISPLACEMENT primitive for the same reason: the section's claim is
+// that ONE cap and ONE spend rule govern knockback, lure and self-launch alike, and a copy
+// of `Math.min(MAX_PUSH_DISTANCE, …)` written here would keep passing against a sim that had
+// grown a second one. `stepPush` comes in so the lock rule can be driven directly, without
+// having to manufacture a whole tick around it.
 import {
   breakConcealment, concealmentInsideRadius, concealmentKeepoutViolations, concealmentOf,
-  isConcealed, isHidden, isVisibleFrom, moveToward, navStats, tryMove,
+  displaceFighter, isConcealed, isHidden, isVisibleFrom, MAX_PUSH_DISTANCE, moveToward,
+  navStats, stepPush, tryMove,
 } from './movement.ts';
 // Section 26(m) reads `src/game/*.ts` back off disk and asserts that every gameplay reader
 // of `isVisibleFrom` passes the two per-match arguments. "Everybody remembered" is a claim
@@ -9654,6 +9660,561 @@ console.log('\n38. The game is 25% slower, with every speed ratio preserved (DEC
       && derivedAt(PLAYER_SPEED) > derivedAt(WAS.player),
       `castMs ${MEGA38.castMs} at ${PLAYER_SPEED}, would be ${derivedAt(WAS.player)} at ${WAS.player} `
       + '— a LONGER wind-up is a more dodgeable one (DECISIONS §80), and a nerf to the roster\'s weakest character');
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 39. WEAPONS CAN MOVE YOU — displacement, authored PER WEAPON and absent by default
+//
+// `movement.ts:escapeCover` has carried this sentence since it was written:
+//
+//   > *"No player can reach that state today — spawns are clear and KNOCKBACK IS
+//   > VISUAL-ONLY. It becomes reachable the moment anyone adds sim-side knockback, a dash,
+//   > or a pull."*
+//
+// This is that moment. `game/match.ts:applyKnockback` nudges a THREE.js model root and
+// never reaches `Fighter.x`/`y`, so until now the sim could not move a fighter it did not
+// ask to move — the missing mechanic behind FIVE `tools/tmp/wm_gate.mjs` claims across four
+// weapons (`hotdog.Ketchup` *"lose control"*, `sushi.Seaweed`/`sushi.Catch` *"lures"* /
+// *"pulling"*, `egg.Tackle`/`waterbottle.Mega` *"launches"*).
+//
+// ── 🚨 THIS WAS BUILT ONCE, PROVEN, AND REFUSED ON A NUMBER (`6ea35f5`) ──────
+//
+// That pass wired a knockback to EVERY weapon hit with the magnitude DERIVED from damage.
+// It deleted melee: every weapon pushed, a kit stacked three shoves per cycle, and a
+// passive immortal target was shoved from separation 30 to 90.86 wu in 1,100 ms by the
+// bot trying to close on it. **The scale was never the problem; the SURFACE was.** So the
+// distance is authored per weapon in `rules.ts` and absent by default — 28 of the roster's
+// 33 weapons author nothing — and (f) below re-runs the refusal's own arithmetic as a
+// STANDING ROSTER GUARD, with the refused derivation itself as its known-bad.
+//
+// ── EVERY ROW MARKED 🔴 IS SHOWN RED BY `node tools/tmp/wpx_knownbad.mjs` ────
+//
+// which rebuilds the sim from the shipped source with one asserted substitution per arm and
+// runs THIS suite against it. The non-vacuity rows are expected to pass on both trees:
+// a section where those moved too would have changed the experiment rather than the sim.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n39. Weapons can move you — displacement, per weapon and absent by default');
+{
+  const DT = 16.667;
+  const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  const idleFor = (st) => st.fighters.map(() => NEUTRAL);
+  const bigArena = () => makeArena({ width: 4000, height: 4000, maxSafeRadius: 50_000 });
+  // The roster's SLOWEST walk, in wu/ms. Derived, never typed: `SPEED_TOP_STAT` maps to
+  // `PLAYER_SPEED` and `speedFor` only scales DOWN, so this is the number a displacement has
+  // to be compared against to know whether anybody can walk out of one.
+  const rosterSlowest = Math.min(...CHARACTER_IDS.map((id) => speedFor(id, PLAYER_SPEED)));
+  const displacementOf = (w) => (w.knockback ?? 0) + (w.lure ?? 0) + (w.selfLaunch ?? 0);
+
+  // ── (a) DEPENETRATION — the invariant `escapeCover` was written in anticipation of ──
+  //
+  // Its header calls the "fighter inside a prop" state *"the worst shape a bug can have —
+  // total, silent, and indistinguishable from 'the controls stopped working'"*. Spending
+  // every displacement through `tryMove` gives something STRONGER than "it recovers": the
+  // primitive cannot create the buried state at all, because `tryMove` refuses a step into
+  // cover. Both halves are asserted, because a rig that only checked the refusal would pass
+  // identically against a push that never moved anything.
+  {
+    const SPICE = { x: 875, y: 500, w: 50, h: 50, kind: 'spice_cart' };
+    const arena = makeArena({ cover: [SPICE], width: 2000, height: 2000, maxSafeRadius: 50_000 });
+    const st = createMatch(arena, [
+      { characterId: 'hamburger', controller: 'human', spawn: { x: SPICE.x - 60, y: SPICE.y } },
+      { characterId: 'hamburger', controller: 'human', spawn: { x: 1900, y: 1900 } },
+    ]);
+    st.phase = 'playing';
+    const me = st.fighters[0];
+    const inside = (f) => Math.abs(f.x - SPICE.x) < (f.size + SPICE.w) / 2
+      && Math.abs(f.y - SPICE.y) < (f.size + SPICE.h) / 2;
+
+    check('(a) the victim starts OUTSIDE the cart — a fighter already inside proves nothing (non-vacuity)',
+      !inside(me), `x=${me.x}, cart face at ${SPICE.x - (me.size + SPICE.w) / 2}`);
+    displaceFighter(me, 1, 0, MAX_PUSH_DISTANCE);   // the largest shove the system can produce, due east
+    check('(a) …and it really is holding a MAXIMUM displacement (non-vacuity)',
+      me.push.remaining === MAX_PUSH_DISTANCE, `${me.push.remaining} wu of ${MAX_PUSH_DISTANCE}`);
+
+    const startX = me.x;
+    let everInside = false;
+    for (let i = 0; i < 40; i++) { stepMatch(st, DT, idleFor(st)); if (inside(me)) everInside = true; }
+    check('(a) 🔴 a maximum shove INTO cover is refused at the box face — the buried state is UNREACHABLE',
+      !everInside && !inside(me), `stopped at x=${me.x.toFixed(3)}`);
+    check('(a) …and it did move: a displacement that went nowhere would satisfy the row above vacuously',
+      me.x > startX + 1e-6, `moved ${(me.x - startX).toFixed(3)} wu of a ${MAX_PUSH_DISTANCE} wu budget`);
+
+    // …and the recovery half, for a fighter FORCED into the state by hand. This is the
+    // documented QA-parking diagnostic, so all three arms are asserted: buried, freed on the
+    // first tick it presses a direction, and STILL buried if it presses nothing.
+    me.x = SPICE.x; me.y = SPICE.y;
+    check('(a) FORCED into the cart by hand, the fighter really is buried (the state under test)', inside(me));
+    let freedAt = null;
+    for (let i = 0; i < 40; i++) {
+      const ins = idleFor(st);
+      ins[0] = { move: { x: 1, y: 0 }, selectedWeapon: 0, attack: false };
+      stepMatch(st, DT, ins);
+      if (freedAt === null && !inside(me)) freedAt = i + 1;
+    }
+    check('(a) …and `escapeCover` frees it on the FIRST tick it presses a direction',
+      freedAt === 1 && !inside(me), `freed on tick ${freedAt}, x=${me.x.toFixed(3)}`);
+    me.x = SPICE.x; me.y = SPICE.y;
+    for (let i = 0; i < 40; i++) stepMatch(st, DT, idleFor(st));
+    check('(a) CONTROL: a buried fighter pressing NOTHING stays put — `escapeCover` is intent-gated BY DESIGN',
+      inside(me), 'the QA-parking diagnostic its header protects, not a fault');
+  }
+
+  // ── (b) BEING SHOVED COSTS POSITION AND NEVER CONTROL (`DECISIONS §75`, `§80`) ──
+  //
+  // `§75` is Uri's report that slow and stun stack into a hold — *"you essentially lock him
+  // to place"* — and `§80` is his answer that a super must be DODGEABLE. A displacement that
+  // ate the fighter's own step would be a soft stun and the third member of that family.
+  //
+  // ⚠️ **A DIFFERENCE OF DIFFERENCES, BECAUSE NOTHING WEAKER CAN TELL THE TWO APART.**
+  // Comparing a pushed run against an unpushed one just measures the push. The quantity that
+  // must be invariant is the GROUND THE INPUT BUYS: (east − west) with a maximum push in
+  // flight, against (east − west) with none. The push is aimed on the OTHER axis so it
+  // cancels out of the x difference by construction — which is the point, since the claim is
+  // that `sim.ts` resolves the two in separate `tryMove` calls.
+  {
+    const mk = (withPush) => {
+      const st = createMatch(bigArena(), [
+        { characterId: 'hamburger', controller: 'human', spawn: { x: 2000, y: 2000 } },
+        { characterId: 'hamburger', controller: 'human', spawn: { x: 3900, y: 3900 } },
+      ]);
+      st.phase = 'playing';
+      if (withPush) displaceFighter(st.fighters[0], 0, 1, MAX_PUSH_DISTANCE);
+      return st;
+    };
+    const run = (st, mv, n) => {
+      for (let i = 0; i < n; i++) {
+        stepMatch(st, DT, [{ move: mv, aim: { x: 1, y: 0 }, selectedWeapon: 0, attack: false }, NEUTRAL]);
+      }
+      return { x: st.fighters[0].x, y: st.fighters[0].y };
+    };
+    const E = { x: 1, y: 0 }, W = { x: -1, y: 0 }, N = 30;
+    const a = run(mk(false), E, N), b = run(mk(false), W, N);
+    const c = run(mk(true), E, N), d = run(mk(true), W, N);
+    check('(b) the fixture MOVES at all — a frozen fighter makes every difference 0 and the test vacuous',
+      Math.abs(a.x - b.x) > 1, `east-west span ${(a.x - b.x).toFixed(3)} wu`);
+    check('(b) …and the push really displaced it, on the other axis, by the whole cap (non-vacuity)',
+      approx(Math.abs(c.y - a.y), MAX_PUSH_DISTANCE, 1e-9), `${(c.y - a.y).toFixed(3)} wu of ${MAX_PUSH_DISTANCE}`);
+    check('(b) 🔴 CONTROL AUTHORITY IS BIT-IDENTICAL under a maximum displacement',
+      (a.x - b.x) === (c.x - d.x),
+      `no push ${(a.x - b.x).toFixed(12)} · pushed ${(c.x - d.x).toFixed(12)}`);
+    const e = run(mk(true), E, N);
+    check('(b) 🔴 DETERMINISM: a re-run is bit-identical — no RNG, no wall clock, no iteration-order dependence',
+      e.x === c.x && e.y === c.y, `${e.x} / ${e.y}`);
+  }
+
+  // ── (c) THE LURE PULLS *EVERY* ENEMY — AND ONLY SIX SEATS CAN SEE IT ────────
+  //
+  // `sushi.Seaweed`'s card is *"Seaweed lures **every enemy** toward it while he shoots
+  // them"*, and `tools/tmp/wm_claims.json` puts the whole quantifier inside the `lure` span.
+  // 🚨 **AT TWO SEATS "the victim" AND "every enemy" NAME THE SAME FIGHTER**, and that
+  // fighter is standing AT the anchor, so a correct lure and a lure that moved nobody are
+  // indistinguishable — the N=2 arm below is run and asserted VACUOUS on purpose rather than
+  // omitted. That is the seventh defect of this shape the project has paid for (the result
+  // card, corpse input, shake proximity, seat order, the melee half of multi-target, the
+  // body-block).
+  {
+    const SEAWEED = CHARACTERS.sushi.weapons.findIndex((w) => w.key === 'Seaweed');
+    const W = CHARACTERS.sushi.weapons[SEAWEED];
+    const AX = 2000, AY = 2000;
+    // The victim is dead ahead of a frozen aim; the four bystanders sit off the flight line
+    // at four bearings and four ranges, so "pulled toward the impact" is a different vector
+    // for each of them and cannot be satisfied by one shared direction.
+    const SPOTS = [
+      { x: AX + 30, y: AY },            // the victim
+      { x: AX, y: AY - 380 },
+      { x: AX - 420, y: AY },
+      { x: AX + 15, y: AY + 400 },      // bearing chosen so "toward the victim" and "toward
+      { x: AX + 620, y: AY + 480 },     // the shooter" are measurably different vectors
+    ];
+    const build = (n) => {
+      const cfg = [{ characterId: 'sushi', controller: 'human', spawn: { x: AX, y: AY }, facing: { x: 1, y: 0 }, maxHp: 1e9 }];
+      for (let i = 0; i < n - 1; i++) cfg.push({ characterId: 'sushi', controller: 'human', spawn: SPOTS[i], maxHp: 1e9 });
+      return cfg;
+    };
+    const fire = (n) => {
+      const st = createMatch(bigArena(), build(n));
+      st.phase = 'playing';
+      const press = idleFor(st);
+      press[0] = { move: { x: 0, y: 0 }, aim: { x: 1, y: 0 }, selectedWeapon: SEAWEED, attack: true };
+      let impact = null;
+      let before = null;
+      for (let i = 0; i < 60 && impact === null; i++) {
+        const evs = stepMatch(st, DT, i === 0 ? press : idleFor(st));
+        for (const ev of evs) {
+          if (ev.type === 'hit-landed' && ev.source?.kind === 'weapon' && ev.source.weaponKey === 'Seaweed' && impact === null) {
+            impact = { x: ev.x, y: ev.y, targetId: ev.targetId };
+            before = st.fighters.map((f) => Math.hypot(f.x - impact.x, f.y - impact.y));
+          }
+        }
+      }
+      // Let the pull be spent. `MAX_PUSH_DISTANCE / (PLAYER_SPEED * DT)` ticks is the whole
+      // budget; 40 is comfortably past it and nobody is pressing anything.
+      if (impact !== null) for (let i = 0; i < 40; i++) stepMatch(st, DT, idleFor(st));
+      const after = impact === null ? null : st.fighters.map((f) => Math.hypot(f.x - impact.x, f.y - impact.y));
+      return { st, impact, before, after };
+    };
+
+    const six = fire(6);
+    check('(c) the N=6 fixture actually LANDED the shot — "nothing was hit" would satisfy every row below',
+      six.impact !== null && six.st.fighters.length === 6,
+      six.impact ? `hit fighter ${six.impact.targetId} at ${six.impact.x.toFixed(1)},${six.impact.y.toFixed(1)}` : 'NO IMPACT');
+    check('(c) …and `sushi.Seaweed` really authors a lure — a 0 here would make the pull rows vacuous',
+      (W.lure ?? 0) > 0, `lure ${W.lure} wu`);
+
+    if (six.impact !== null) {
+      // Everyone except the attacker and the victim. The victim is AT the anchor by
+      // definition of the anchor, so it is the one opponent that must NOT move.
+      const bystanders = six.st.fighters.filter((f) => f.id !== 0 && f.id !== six.impact.targetId);
+      check('(c) the bystander set is NON-EMPTY and is FOUR fighters — the quantifier has something to range over',
+        bystanders.length === 4, `${bystanders.length} bystanders`);
+      const pulled = bystanders.filter((f) => six.after[f.id] < six.before[f.id] - 1e-9);
+      check('(c) 🔴 EVERY living opponent was pulled toward the impact, not just the one that was hit',
+        pulled.length === bystanders.length,
+        bystanders.map((f) => `#${f.id} ${six.before[f.id].toFixed(1)}->${six.after[f.id].toFixed(1)}`).join(' · '));
+      check('(c) 🔴 …and each of them closed by the AUTHORED distance, not by some shared amount',
+        bystanders.every((f) => approx(six.before[f.id] - six.after[f.id], W.lure, 1e-6)),
+        bystanders.map((f) => (six.before[f.id] - six.after[f.id]).toFixed(4)).join(' / ') + ` vs ${W.lure}`);
+      check('(c) the fighter that was HIT is the anchor, so it is pulled nowhere — you are not lured toward yourself',
+        approx(six.before[six.impact.targetId], 0, 1e-9) && approx(six.after[six.impact.targetId], 0, 1e-9),
+        `${six.before[six.impact.targetId]} -> ${six.after[six.impact.targetId]}`);
+      // The anchor is the VICTIM, not the SHOOTER, and one bystander is placed where those
+      // two answers differ measurably. Without this row a lure anchored on the caster would
+      // pass every row above.
+      const far = six.st.fighters[4];
+      const dVictim = Math.hypot(far.x - six.impact.x, far.y - six.impact.y);
+      const dShooter = Math.hypot(far.x - AX, far.y - AY);
+      check('(c) 🔴 the anchor is the POINT OF IMPACT, not the shooter — the two are distinguishable here',
+        dVictim < dShooter - 1e-6 && Math.abs(dShooter - dVictim) > 1e-3,
+        `to impact ${dVictim.toFixed(3)} vs to shooter ${dShooter.toFixed(3)}`);
+    }
+
+    // 🚨 THE VACUOUS CONTROL, RUN RATHER THAN ASSERTED. Same weapon, same press, two seats.
+    const two = fire(2);
+    check('(c) the N=2 control landed the same shot (so the comparison is like for like)',
+      two.impact !== null && two.st.fighters.length === 2);
+    if (two.impact !== null) {
+      const movedAtTwo = two.st.fighters
+        .filter((f) => f.id !== 0)
+        .reduce((s, f) => s + Math.abs(two.before[f.id] - two.after[f.id]), 0);
+      check('(c) 🔴 AT TWO SEATS THE LURE MOVES EXACTLY NOBODY — the only opponent IS the anchor',
+        approx(movedAtTwo, 0, 1e-9),
+        `${movedAtTwo} wu of total opponent displacement at N=2, against ${(4 * W.lure).toFixed(1)} wu at N=6 — `
+        + 'an N=2 test of "lures every enemy" cannot fail, whatever the sim does');
+    }
+
+    // ── THE CLAMP, DRIVEN THROUGH `applyDamage` DIRECTLY ────────────────────
+    //
+    // A pull is clamped to each opponent's own separation, so nobody is dragged THROUGH the
+    // bait and out the far side — un-clamped, a fighter 10 wu away would be yanked 11 wu
+    // past it and the next application would yank it back, which reads on screen as the
+    // controls fighting the player. Driven through `applyDamage` rather than a projectile so
+    // the separation is a stated number instead of whatever the flight step produced.
+    {
+      const st = createMatch(bigArena(), [
+        { characterId: 'sushi', controller: 'human', spawn: { x: AX, y: AY }, facing: { x: 1, y: 0 }, maxHp: 1e9 },
+        { characterId: 'sushi', controller: 'human', spawn: { x: AX + 300, y: AY }, maxHp: 1e9 },
+        { characterId: 'sushi', controller: 'human', spawn: { x: AX + 300 + W.lure / 3, y: AY }, maxHp: 1e9 },
+      ]);
+      st.phase = 'playing';
+      const victim = st.fighters[1], near = st.fighters[2];
+      const gap0 = Math.abs(near.x - victim.x);
+      check('(c) the clamp fixture stands INSIDE the lure distance — outside it the clamp cannot express itself',
+        gap0 > 0 && gap0 < W.lure, `${gap0.toFixed(3)} wu against a ${W.lure} wu pull`);
+      applyDamage(st, victim, W.damage, W.effect,
+        { kind: 'weapon', weaponKey: 'Seaweed', weaponName: W.name, attackerId: 0 }, []);
+      check('(c) …and the near fighter is owed its SEPARATION, not the authored distance (non-vacuity: they differ)',
+        approx(near.push.remaining, gap0, 1e-9) && !approx(gap0, W.lure, 1e-9),
+        `owed ${near.push.remaining.toFixed(4)} wu, separation ${gap0.toFixed(4)}, authored ${W.lure}`);
+      const anchorX = victim.x;
+      for (let i = 0; i < 40; i++) stepMatch(st, DT, idleFor(st));
+      check('(c) 🔴 a pull never overshoots its anchor — it arrives, it does not pass through',
+        Math.abs(near.x - anchorX) < 1e-6 && near.x <= anchorX + 1e-6,
+        `landed at ${near.x.toFixed(6)} against an anchor at ${anchorX.toFixed(6)}`);
+    }
+  }
+
+  // ── (d) IT IS NOT A THIRD LOCK, WITH A NUMBER — AND THE PULL'S SIGN IS RE-DERIVED ──
+  //
+  // `6ea35f5` proved this for a PUSH: it aims AWAY from the attacker, so it strictly HELPS
+  // the dodge `§80` asks for. **A LURE INVERTS THAT ARGUMENT AND IT HAD TO BE REDONE, NOT
+  // INHERITED.** A fighter fleeing a pull pays the difference instead of collecting it. The
+  // magnitude is the same either way and it is the number that matters:
+  //
+  //     MAX_PUSH_DISTANCE x (1 - speedFor(c) / PLAYER_SPEED)
+  //
+  // ⚠️ **THAT EXPRESSION IS SCALE-INVARIANT IN `PLAYER_SPEED` AND THE MS WINDOW IS NOT.**
+  // `speedFor` is linear in its base, so the base cancels — which is why `DECISIONS §75`'s
+  // 25% speed cut left the wu figure at exactly the 5.04 `6ea35f5` published while moving its
+  // 350 ms window to 466.7 ms. Quote the wu, never the ms.
+  {
+    const worstNetAt = (ps) => MAX_PUSH_DISTANCE * (1 - Math.min(...CHARACTER_IDS.map((id) => speedFor(id, ps))) / ps);
+    const worstNet = worstNetAt(PLAYER_SPEED);
+    const windowMs = MAX_PUSH_DISTANCE / PLAYER_SPEED;
+    check('(d) the roster is not flat — a cast where every character sat at the cap would make this vacuous',
+      rosterSlowest < PLAYER_SPEED - 1e-9 && rosterSlowest > 0,
+      `slowest ${(rosterSlowest * 1000).toFixed(2)} wu/s against a ${PLAYER_SPEED * 1000} wu/s cap`);
+    check('(d) 🔴 walking straight INTO a maximum displacement costs less than a FIFTH of a body, worst case',
+      worstNet < PLAYER_SIZE / 5,
+      `${worstNet.toFixed(3)} wu against a ${PLAYER_SIZE} wu body, over ${windowMs.toFixed(1)} ms`);
+    check('(d) 🔴 …and that cost is INVARIANT under a speed change — `PLAYER_SPEED` cancels out of it',
+      approx(worstNet, worstNetAt(0.12), 1e-9),
+      `${worstNet.toFixed(6)} wu now, ${worstNetAt(0.12).toFixed(6)} wu at the pre-§75 speed — the 466.7 ms window is NOT invariant`);
+    check('(d) 🔴 …and a STUN denies 35x more ground than a maximum displacement does',
+      STUN_DURATION_MS * PLAYER_SPEED > 30 * worstNet,
+      `${(STUN_DURATION_MS * PLAYER_SPEED).toFixed(1)} wu of stun against ${worstNet.toFixed(2)} wu — displacement is a positional tax, not a lock`);
+    check('(d) nothing in the roster can be displaced FASTER than it can walk — the spend rate IS the cap',
+      CHARACTER_IDS.every((id) => speedFor(id, PLAYER_SPEED) <= PLAYER_SPEED + 1e-12),
+      "so `render/camera.ts`'s fair-play radius claim is untouched");
+
+    // …and the same number MEASURED through the real `stepMatch`, for a PULL, on both ends of
+    // the speed ladder. A table is a prediction; this is the measurement.
+    const flee = (charId) => {
+      const st = createMatch(bigArena(), [
+        { characterId: charId, controller: 'human', spawn: { x: 2000, y: 2000 } },
+        { characterId: charId, controller: 'human', spawn: { x: 3900, y: 3900 } },
+      ]);
+      st.phase = 'playing';
+      const f = st.fighters[0];
+      const x0 = f.x;
+      displaceFighter(f, -1, 0, MAX_PUSH_DISTANCE);            // pulled WEST, toward a bait
+      for (let i = 0; i < 40; i++) {                            // pressing EAST, straight away
+        stepMatch(st, DT, [{ move: { x: 1, y: 0 }, aim: { x: 1, y: 0 }, selectedWeapon: 0, attack: false }, NEUTRAL]);
+      }
+      return { net: f.x - x0, own: speedFor(charId, PLAYER_SPEED) };
+    };
+    const slowId = CHARACTER_IDS.reduce((a, b) => (speedFor(a, PLAYER_SPEED) <= speedFor(b, PLAYER_SPEED) ? a : b));
+    const fastId = CHARACTER_IDS.reduce((a, b) => (speedFor(a, PLAYER_SPEED) >= speedFor(b, PLAYER_SPEED) ? a : b));
+    const slow = flee(slowId), fast = flee(fastId);
+    check('(d) the fleeing arms really are at OPPOSITE ends of the speed ladder (non-vacuity)',
+      slow.own < fast.own && approx(fast.own, PLAYER_SPEED, 1e-12),
+      `${slowId} ${(slow.own * 1000).toFixed(2)} wu/s vs ${fastId} ${(fast.own * 1000).toFixed(2)} wu/s`);
+    // ⚠️ The whole 40 ticks are run, so the fighter keeps walking after the pull is spent and
+    // ends up NET AHEAD. What (d) is about is the pull WINDOW, so the comparison is against
+    // the same walk with nothing in flight — the ground the pull actually took away.
+    const freeWalk = (id) => 40 * DT * speedFor(id, PLAYER_SPEED);
+    check('(d) 🔴 MEASURED: a maximum PULL takes exactly one body away from a fleeing fighter, and no more',
+      approx(freeWalk(slowId) - slow.net, MAX_PUSH_DISTANCE, 1e-6)
+      && approx(freeWalk(fastId) - fast.net, MAX_PUSH_DISTANCE, 1e-6),
+      `${slowId} lost ${(freeWalk(slowId) - slow.net).toFixed(4)} wu, ${fastId} lost ${(freeWalk(fastId) - fast.net).toFixed(4)} wu`);
+    check('(d) 🔴 …and during the pull itself the SLOWEST character still loses only 5.04 wu of ground',
+      approx(MAX_PUSH_DISTANCE - windowMs * slow.own, worstNet, 1e-9) && worstNet < 6,
+      `${worstNet.toFixed(3)} wu over ${windowMs.toFixed(1)} ms — every faster character loses less, and the cast's fastest loses 0.00`);
+  }
+
+  // ── (e) THE SIM NEVER MOVES A FIGHTER IT HAS DENIED THE ABILITY TO MOVE ─────
+  //
+  // 🚨 **THIS IS A CORRECTNESS REQUIREMENT AND IT WAS NOT IN `6ea35f5`.** `state.ts:ActiveCast`
+  // records that a cast's origin and bearing are frozen *"BY CONSTRUCTION with no stored
+  // copy"*, because `x`/`y` have exactly one writer (`tryMove`) and both paths that reach it
+  // are suppressed mid-cast — *"a telegraph drawn where the caster stands at the press cannot
+  // lie about where the effect lands."* `stepPush` is a THIRD path to `tryMove`, and without
+  // this refusal it would falsify that sentence: a caster shoved mid-wind-up resolves its
+  // slam somewhere the drawn telegraph is not, which fails `DECISIONS §80`'s *"a telegraph you
+  // can dodge"* from the inside. `movementLocked` also covers a stun, and refusing there is
+  // the same rule read the other way — which is what stops a `lure` compounding with a
+  // 2,000 ms stun into a drag nobody can answer.
+  //
+  // ⚠️ **AND THE BUDGET IS BURNED ANYWAY**, so a shove cannot be BANKED across a lock and go
+  // off on the far side of it. That is `stepPush`'s own "no stored shove" rule; both halves
+  // are asserted because a version that merely skipped the spend would pass the first.
+  {
+    const mk = (stun) => {
+      const st = createMatch(bigArena(), [
+        { characterId: 'hamburger', controller: 'human', spawn: { x: 2000, y: 2000 } },
+        { characterId: 'hamburger', controller: 'human', spawn: { x: 3900, y: 3900 } },
+      ]);
+      st.phase = 'playing';
+      const f = st.fighters[0];
+      if (stun) f.status.stunnedUntil = st.elapsed + 10_000;
+      displaceFighter(f, 1, 0, MAX_PUSH_DISTANCE);
+      const x0 = f.x;
+      for (let i = 0; i < 40; i++) stepMatch(st, DT, idleFor(st));
+      return { moved: f.x - x0, owed: f.push.remaining, locked: movementLocked(f, st.elapsed) };
+    };
+    const free = mk(false), held = mk(true);
+    check('(e) the UNLOCKED control travels the whole cap — without it, "the stun stopped it" is unfalsifiable',
+      approx(free.moved, MAX_PUSH_DISTANCE, 1e-9) && !free.locked,
+      `${free.moved.toFixed(4)} wu of ${MAX_PUSH_DISTANCE}`);
+    check('(e) 🔴 a STUNNED fighter is not displaced at all',
+      held.locked && approx(held.moved, 0, 1e-12), `${held.moved} wu moved while stunned`);
+    check('(e) 🔴 …and its budget is BURNED, not banked — no shove goes off on the far side of the lock',
+      held.owed === 0, `${held.owed} wu still owed`);
+
+    // The cast half: the origin a telegraph is drawn at must survive the whole wind-up.
+    const MEGA = CHARACTERS.waterbottle.weapons.findIndex((w) => w.key === 'Mega');
+    const st = createMatch(bigArena(), [
+      { characterId: 'waterbottle', controller: 'human', spawn: { x: 2000, y: 2000 }, facing: { x: 1, y: 0 } },
+      { characterId: 'hamburger', controller: 'human', spawn: { x: 2060, y: 2000 }, maxHp: 1e9 },
+    ]);
+    st.phase = 'playing';
+    const caster = st.fighters[0];
+    attemptAttack(st, caster, MEGA, []);
+    check('(e) the cast fixture really opened a wind-up (non-vacuity: no cast, nothing to freeze)',
+      caster.cast !== null && (CHARACTERS.waterbottle.weapons[MEGA].castMs ?? 0) > 0,
+      `castMs ${CHARACTERS.waterbottle.weapons[MEGA].castMs}`);
+    displaceFighter(caster, 1, 0, MAX_PUSH_DISTANCE);
+    const cx = caster.x, cy = caster.y;
+    let movedDuringCast = 0;
+    for (let i = 0; i < 20; i++) {          // 333 ms, comfortably inside a 1,400 ms wind-up
+      stepMatch(st, DT, idleFor(st));
+      movedDuringCast = Math.max(movedDuringCast, Math.hypot(caster.x - cx, caster.y - cy));
+    }
+    check('(e) 🔴 a CASTER is not displaced mid-wind-up — the telegraph\'s origin is still frozen by construction',
+      caster.cast !== null && movedDuringCast === 0,
+      `${movedDuringCast} wu of drift over 333 ms of a ${CHARACTERS.waterbottle.weapons[MEGA].castMs} ms cast`);
+  }
+
+  // ── (f) THE STANDING ROSTER GUARD — `6ea35f5`'s refusal, kept as an assertion ──
+  //
+  // The refused wiring's number was a RATE: if every weapon in a kit fires on cooldown, how
+  // fast does that kit displace, against how fast it can chase? Hamburger reached 1.66x on
+  // today's constants and could never reach what it was hitting. That comparison is the thing
+  // that must stay true of any number anybody authors later, so it lives here rather than in
+  // a commit message.
+  //
+  // 🚨 **AND THE GUARD IS SHOWN TO FAIL, WITHOUT LEAVING THIS FILE.** The last row rebuilds
+  // `6ea35f5`'s own damage-derived magnitude over the shipped roster and requires it to BREACH
+  // the bound. A guard that has not been shown red is not a guard.
+  {
+    const rows = CHARACTER_IDS.map((id) => ({
+      id,
+      rate: CHARACTERS[id].weapons.reduce((s, w) => s + displacementOf(w) / (w.cooldown / 1000), 0),
+      chase: speedFor(id, AI_CHASE_SPEED) * 1000,
+    }));
+    const authored = rows.filter((r) => r.rate > 0);
+    check('(f) the authored set is NON-EMPTY — an empty filter makes every quantifier below `[].every()` true',
+      authored.length > 0 && rows.length === CHARACTER_IDS.length && rows.every((r) => r.chase > 0),
+      `${authored.length} of ${rows.length} characters author a displacement: `
+      + authored.map((r) => `${r.id} ${r.rate.toFixed(2)} wu/s`).join(' · '));
+    check('(f) 🔴 no kit displaces its victim faster than it can CHASE — the refusal, as a standing bound',
+      rows.every((r) => r.rate < r.chase),
+      `worst ${Math.max(...rows.map((r) => r.rate / r.chase)).toFixed(2)}x, against 1.66x for the refused wiring`);
+    check('(f) 🔴 …nor faster than the roster\'s SLOWEST walk, which is what a fleeing fighter has to answer a PULL with',
+      rows.every((r) => r.rate < rosterSlowest * 1000),
+      `worst ${Math.max(...rows.map((r) => r.rate)).toFixed(2)} wu/s against ${(rosterSlowest * 1000).toFixed(2)} wu/s`);
+    // The known-bad: `PLAYER_SIZE * damage / maxRosterDamage` on every damaging weapon.
+    const maxDmg = Math.max(...CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons.map((w) => w.damage)));
+    const refusedRows = CHARACTER_IDS.map((id) => ({
+      id,
+      rate: CHARACTERS[id].weapons.reduce((s, w) => {
+        if (w.type === 'self' || !(w.damage > 0)) return s;
+        const per = (PLAYER_SIZE * w.damage / maxDmg) * (w.comboParts ? w.comboParts.length : 1);
+        return s + per / (w.cooldown / 1000);
+      }, 0),
+      chase: speedFor(id, AI_CHASE_SPEED) * 1000,
+    }));
+    const breached = refusedRows.filter((r) => r.rate >= r.chase);
+    check('(f) 🔴 KNOWN-BAD: `6ea35f5`\'s damage-derived wiring BREACHES this bound — the guard can fail',
+      breached.length > 0 && maxDmg > 0,
+      breached.map((r) => `${r.id} ${(r.rate / r.chase).toFixed(2)}x`).join(' · ') || 'NOTHING BREACHED — the guard is decoration');
+  }
+
+  // ── (g) ABSENT IS INERT, AND A CORPSE IS NEVER DISPLACED ────────────────────
+  //
+  // The property that made this landable while three agents held three other files, and the
+  // same one `Weapon.castMs` has: a weapon that authors nothing writes nothing, so the
+  // 28 unauthored weapons produce a sim bit-identical to the one before this existed.
+  // Asserted on a REAL match rather than reasoned about from the `?? 0`s.
+  {
+    // ⚠️ **BOTH SEATS ARE `ai` AND THE RING IS SWITCHED OFF, AND THE FIRST DRAFT OF THIS ROW
+    // WAS NEITHER — IT WAS VACUOUS AND `wpx_knownbad.mjs` FOUND IT.** It used the duel form
+    // on the default 545 wu safe radius with spawns 1,131 wu from the centre, so both
+    // fighters simply burned to death in the closing ring: `hit-landed` fired 10 times and
+    // **not one of them was a weapon**, so "the match actually FOUGHT" was green while zero
+    // weapons had gone off. The `global-push` arm — every weapon in the game knocking back —
+    // then read GREEN here, which is what exposed it. Two corrections, and both are the same
+    // lesson: count the events you MEAN (`source.kind === 'weapon'`), and make the fixture do
+    // the thing you are claiming is inert.
+    const st = createMatch(makeArena({ width: 2000, height: 2000, maxSafeRadius: 50_000 }), [
+      { characterId: 'pizza', controller: 'ai', spawn: { x: 900, y: 1000 } },
+      { characterId: 'hamburger', controller: 'ai', spawn: { x: 1100, y: 1000 } },
+    ]);
+    st.phase = 'playing';
+    const authoredHere = ['pizza', 'hamburger']
+      .flatMap((id) => CHARACTERS[id].weapons).filter((w) => displacementOf(w) > 0);
+    check('(g) the inert fixture is a pair that authors NOTHING (or the next row measures the wrong thing)',
+      authoredHere.length === 0, `${authoredHere.length} authored weapons across pizza+hamburger`);
+    let everPushed = false, weaponHits = 0;
+    for (let i = 0; i < 1800 && st.phase !== 'ended'; i++) {
+      for (const ev of stepMatch(st, DT, NEUTRAL)) {
+        if (ev.type === 'hit-landed' && ev.source?.kind === 'weapon') weaponHits++;
+      }
+      for (const f of st.fighters) if (f.push.remaining !== 0 || f.push.x !== 0 || f.push.y !== 0) everPushed = true;
+    }
+    check('(g) the inert match actually TRADED WEAPON HITS — fog and hazard hits would make the next row vacuous',
+      weaponHits > 0, `${weaponHits} WEAPON hits over ${Math.round(st.elapsed)} ms`);
+    check('(g) 🔴 …and `Fighter.push` was never written once — absent authoring is bit-identical inertness',
+      !everPushed, `knockback/lure/selfLaunch absent on all ${CHARACTERS.pizza.weapons.length + CHARACTERS.hamburger.weapons.length} weapons in this match`);
+
+    // A corpse does not spend a displacement: `sim.ts`'s loop `continue`s on `!alive` before
+    // `stepPush` is reached, so a shove handed out by a fighter's own killing blow is simply
+    // never paid. Stated here rather than left to be re-derived from two files.
+    const st2 = createMatch(bigArena(), [
+      { characterId: 'hamburger', controller: 'human', spawn: { x: 2000, y: 2000 } },
+      { characterId: 'hamburger', controller: 'human', spawn: { x: 3900, y: 3900 } },
+    ]);
+    st2.phase = 'playing';
+    const dead = st2.fighters[0];
+    displaceFighter(dead, 1, 0, MAX_PUSH_DISTANCE);
+    dead.alive = false;
+    const dx = dead.x;
+    for (let i = 0; i < 40; i++) stepMatch(st2, DT, idleFor(st2));
+    check('(g) 🔴 a CORPSE is never displaced, and its budget is never spent',
+      dead.x === dx && dead.push.remaining === MAX_PUSH_DISTANCE,
+      `moved ${(dead.x - dx).toFixed(6)} wu, ${dead.push.remaining} wu still owed`);
+  }
+
+  // ── (h) A SELF-LAUNCH NEVER EXTENDS THE REACH OF ITS OWN WEAPON (`DECISIONS §80`) ──
+  //
+  // `§80` lever 1 is to SHRINK a super's effect radius, and `waterbottle.Mega` — which
+  // authors a launch — is the one weapon whose dodgeability is a standing acceptance test
+  // (`tools/tmp/lk_dodge.mjs`, `kt_bearing.mjs`). A launch that added `selfLaunch` to `range`
+  // would be a radius increase hidden in a field nobody reads as a reach.
+  //
+  // ⚠️ **THE BOUNDARY IS BISECTED, NOT ASSERTED AT ONE POINT.** Asking only "does it miss at
+  // range + 1" cannot tell a correct reach from one that grew by less than a body. The sweep
+  // walks past `range + selfLaunch`, which is exactly where a launched reach would land.
+  {
+    const TACKLE = CHARACTERS.egg.weapons.findIndex((w) => w.key === 'Tackle');
+    const W = CHARACTERS.egg.weapons[TACKLE];
+    const press = (sep) => {
+      const st = createMatch(bigArena(), [
+        { characterId: 'egg', controller: 'human', spawn: { x: 2000, y: 2000 }, facing: { x: 1, y: 0 } },
+        { characterId: 'egg', controller: 'human', spawn: { x: 2000 + sep, y: 2000 }, maxHp: 1e9 },
+      ]);
+      st.phase = 'playing';
+      const evs = [];
+      attemptAttack(st, st.fighters[0], TACKLE, evs);
+      return {
+        hit: evs.some((e) => e.type === 'hit-landed' && e.source?.kind === 'weapon' && e.source.weaponKey === 'Tackle'),
+        owed: st.fighters[0].push.remaining,
+        dir: { x: st.fighters[0].push.x, y: st.fighters[0].push.y },
+      };
+    };
+    check('(h) `egg.Tackle` really authors a self-launch, and a reach to compare it against (non-vacuity)',
+      (W.selfLaunch ?? 0) > 0 && (W.range ?? 0) > 0, `selfLaunch ${W.selfLaunch} wu, range ${W.range} wu`);
+    const at = press(W.range / 2);
+    check('(h) …and the press really QUEUES the launch, along the caster\'s own facing',
+      approx(at.owed, W.selfLaunch, 1e-9) && approx(at.dir.x, 1, 1e-9) && approx(at.dir.y, 0, 1e-9),
+      `${at.owed} wu owed along (${at.dir.x}, ${at.dir.y})`);
+
+    const STEP = 0.25;
+    const seps = [];
+    for (let s = W.range - 2; s <= W.range + W.selfLaunch + 2; s += STEP) seps.push(Number(s.toFixed(4)));
+    const results = seps.map((s) => ({ s, hit: press(s).hit }));
+    const hitsSet = results.filter((r) => r.hit), missSet = results.filter((r) => !r.hit);
+    check('(h) the sweep contains BOTH outcomes — an all-hit or all-miss sweep has no boundary to find',
+      hitsSet.length > 0 && missSet.length > 0,
+      `${hitsSet.length} hits / ${missSet.length} misses over ${seps.length} separations`);
+    const boundary = Math.max(...hitsSet.map((r) => r.s));
+    check('(h) 🔴 the hit/miss boundary sits on `range` — a launched reach would put it at range + selfLaunch',
+      boundary <= W.range + 1e-9 && boundary > W.range - STEP - 1e-9,
+      `last hit at ${boundary} wu; range ${W.range}, range + selfLaunch ${W.range + W.selfLaunch}`);
+    check('(h) 🔴 …and nothing beyond `range` connects, all the way past where a launch would have reached',
+      results.every((r) => (r.s > W.range + 1e-9 ? !r.hit : true)),
+      `${results.filter((r) => r.s > W.range && r.hit).length} illegal hits beyond ${W.range} wu`);
   }
 }
 
