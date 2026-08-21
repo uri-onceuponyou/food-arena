@@ -1087,28 +1087,56 @@ function buildGlazeMarkTexture(variant: number): THREE.CanvasTexture {
   // a different bug.
   const radiusAt = (a: number): number =>
     c * (GLAZE_FILL + 0.13 * Math.sin(a * 3 + p1) + 0.06 * Math.sin(a * 5 + p2));
-  const outline = (): void => {
-    ctx.beginPath();
+  // Takes its target context, because the ALPHA PASS below needs the same path on a
+  // second canvas and a closure over one `ctx` cannot give it.
+  const outlineOn = (t: CanvasRenderingContext2D): void => {
+    t.beginPath();
     const steps = 96;
     for (let i = 0; i <= steps; i++) {
       const a = (i / steps) * Math.PI * 2;
       const r = radiusAt(a);
       const x = c + Math.cos(a) * r;
       const y = c + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      if (i === 0) t.moveTo(x, y);
+      else t.lineTo(x, y);
     }
-    ctx.closePath();
+    t.closePath();
   };
+  const outline = (): void => outlineOn(ctx);
 
   // Body: a DARK diagonal ramp. The map is a multiplier and the material colour is the
   // mark's colour, so the body is a deep version of that hue and the SPECKLES below are
   // the only place near-full colour appears.
+  //
+  // ⚠️ WIDENED 104-52 -> 98-35, AND THE MIDPOINT IS DELIBERATELY *LOWER*, 76 -> 67.
+  //
+  // Two separate things are happening and they were measured separately.
+  //
+  //  1. WIDER (52 wide -> 63) buys back the value range the dark rim used to carry. A
+  //     smooth diagonal ramp is the one place it can be bought WITHOUT re-introducing a
+  //     contour: a linear gradient's Sobel magnitude is near zero everywhere, so
+  //     `pl_stack`'s interior-contour term cannot see it while `tr_area`'s `mark L
+  //     stdev` can. That is the whole trade, stated as two instruments.
+  //
+  //  2. DARKER pays back the one measured COST of moving the rim into alpha. The dark
+  //     rim was ~3% of ONE mark but the marks overlap almost completely, so across a
+  //     40-mark pile its bands tile a large share of the interior and they were holding
+  //     the composite down. Removing it lifted the mark's composited luma **0.2871 ->
+  //     0.3163 (n=2 per arm, ranges 0.2753-0.2988 and 0.3119-0.3207, non-overlapping)**
+  //     and closed `|dL| vs CAST` from **0.0866 to 0.0493** against a contract that asks
+  //     0.15 — a contract this effect was ALREADY failing, made worse. The mark's own
+  //     term is ~0.237 of that 0.316 (the rest is the floor showing through at 1-0.78),
+  //     so scaling the body by (0.237-0.029)/0.237 = **0.88** returns it. 112/76/40 x
+  //     0.88 = 98/67/35.
+  //
+  // ⚠️ THE SPECKLE PEAK IS NOT SCALED WITH IT. 255 is the material colour undiluted and
+  // the block below records that a first pass which lowered it "MEASURED FLATTER". Only
+  // the body moves, so the body-to-speckle range gets WIDER, not narrower.
   outline();
   const body = ctx.createLinearGradient(size * 0.18, size * 0.12, size * 0.86, size * 0.92);
-  body.addColorStop(0, 'rgb(104,104,104)');
-  body.addColorStop(0.5, 'rgb(76,76,76)');
-  body.addColorStop(1, 'rgb(52,52,52)');
+  body.addColorStop(0, 'rgb(98,98,98)');
+  body.addColorStop(0.5, 'rgb(67,67,67)');
+  body.addColorStop(1, 'rgb(35,35,35)');
   ctx.fillStyle = body;
   ctx.fill();
 
@@ -1160,14 +1188,56 @@ function buildGlazeMarkTexture(variant: number): THREE.CanvasTexture {
   // Shoulder first (wide, mid), rim second (narrow, dark) — `stroke()` centres on the
   // path and the clip discards the outer half, so each lands as a band of half its
   // width just INSIDE the silhouette.
-  ctx.lineWidth = size * 0.055;
-  ctx.strokeStyle = 'rgb(44,44,44)';
-  outline();
-  ctx.stroke();
-  ctx.lineWidth = size * 0.03;
-  ctx.strokeStyle = 'rgb(26,26,26)';
-  outline();
-  ctx.stroke();
+  //
+  // ══ 🚨 AND "SELF-SOLVING" WAS FALSIFIED TOO — SAME DEFECT, THIRD POLARITY ══════
+  //
+  // The two strokes above are GONE and the wording is kept, per this file's rule, with
+  // the reason. The dark rim never became invisible over a neighbour. It cannot:
+  //
+  //     a mark composites  0.78·C·tex + 0.22·below
+  //
+  // so the difference between a rim pixel and a body pixel is **0.78·C·(0.30 − 0.102)
+  // ≈ 0.15·C, a CONSTANT, whatever `below` is.** The rim is a multiplicative darkening
+  // of the mark's own colour, and `below` cancels out of the comparison entirely. The
+  // premise — "invisible where it lands on a neighbouring mark's dark body" — is not
+  // approximately wrong, it is structurally impossible. Worked at the shipped hexes,
+  // over the measured floor: the interior contour is |36.3 − 19.4| = **16.9 luma** and
+  // the union contour |48.8 − 31.8| = **17.0 luma. THE TWO ARE THE SAME NUMBER**, which
+  // is exactly what "reads as N shapes rather than one" means.
+  //
+  // Measured, not argued (`tools/tmp/pl_stack.mjs`, the segmentation census that
+  // `docs/LESSONS.md` §6b says did not exist — mean Sobel luma over the STRICT INTERIOR
+  // of the pile's ablated union, cast body removed): interiorEdge **42.726** against a
+  // **5.851** floor read on the same pile with every glaze texture repainted flat.
+  // **86% of the interior contour energy was drawn by this texture.** And three fresh
+  // critics named it on three different sheets across two capture dates —
+  // *"hard-edged overlapping circular boundaries"*, *"flat, unshaded stacked circles"*,
+  // *"hard cartoon outlines"* — the last one on 2026-08-12 pixels, i.e. SIX DAYS AFTER
+  // the polarity flip landed. The adjective moved again; the noun never has.
+  //
+  // ── THE RIM IS NOW IN THE ALPHA CHANNEL, AND *THAT* IS SELF-CANCELLING ─────────
+  //
+  // Same band, same width, no change to the value map: the rim keeps the body's own
+  // grey and is marked **fully opaque**, while the body carries `GROUND_MARK_OPACITY`.
+  // The material's own opacity moves to 1.0 and the map's alpha owns the blend.
+  //
+  //   over the FLOOR      1.0·C·body   vs   0.78·C·body + 0.22·Floor
+  //                       → a contour of 0.22·(C·body − Floor) ≈ 16 luma. UNCHANGED.
+  //   over a NEIGHBOUR    the pixel underneath is ALREADY ≈ C·body, so raising alpha
+  //                       moves it by 0.22·(C·body − C·body) ≈ 0. **≈ 4 luma at one
+  //                       layer of depth and vanishing with every further layer.**
+  //
+  // The dark-rim version claimed this property and could not have it, because a
+  // MULTIPLIER cannot know what is beneath it. An ALPHA can — that is what alpha is.
+  // Predicted 16.9 → ~3.8 luma of interior contour, a 4.4x reduction, with the union
+  // contour held; `pl_stack.mjs` is the instrument that can tell those two apart.
+  //
+  // ⚠️ The value range this stroke was carrying is NOT free. It was ~3% of the mark's
+  // pixels at 26–44 against a body of 52–104, and removing it takes the bottom off the
+  // histogram — the exact trade this file records going wrong in the other direction
+  // ("a first pass replaced the bright rim with speckles … and MEASURED FLATTER").
+  // `tr_area`'s `mark L stdev` is the number that governs it and it is reported in the
+  // commit; the dark PITS below still populate the dark half.
   // ── INTERIOR SPECKLES — where the upward half of the value range went ──────────
   //
   // The rim used to be the mark's only bright value and it could not be one, being a
@@ -1182,10 +1252,50 @@ function buildGlazeMarkTexture(variant: number): THREE.CanvasTexture {
   // is dark: anything on the boundary stacks into a contour when marks overlap, and
   // anything in the interior stacks into texture. Deterministic per variant — no RNG,
   // so a judgement screenshot is reproducible.
+  //
+  // ── 🚨 THE SPECKLES WERE THE *BIGGER* HALF OF "STACKED CIRCLES", NOT THE RIM ───
+  //
+  // The rim's move into alpha (above) took the interior contour structure from
+  // **34.595 to 27.638** on `pl_stack.mjs` — real, 25x its 0.274 between-run floor, and
+  // the lobe outlines are visibly gone from the PNG. It left **80% of the term
+  // standing**, because a mark carries ONE rim and **NINE hard-edged discs**: seven
+  // speckles at 255-207 and two pits at 24-20, every one of them a flat `fill()` with a
+  // step of up to 3.4x against a body of 52-104. Read on the after-frame they stopped
+  // being "one of the things in there" and became THE internal feature — which is the
+  // critics' phrase almost word for word: *"flat, unshaded stacked circles with hard
+  // edges"*, *"hard-edged overlapping circular boundaries"*.
+  //
+  // ⚠️ AND THE FIX IS NOT TO REMOVE THEM — the block below already records that trap,
+  // and it is kept verbatim because it is still true. So the peak VALUE is untouched
+  // (255 and 20 both stay) and only the PROFILE changes: full strength across the core,
+  // then a ramp to nothing. The circle stops having a boundary; the value range keeps
+  // its two ends.
+  //
+  // The radius is grown to pay for the ramp rather than losing the bright mass with it.
+  // For a linear alpha ramp from `CORE` to 1 the mean alpha over the annulus is ~0.5, so
+  // a disc of outer radius R carries ~pi.R^2.(0.5 + 0.5.CORE^2) of the flat disc's mass;
+  // setting that equal to the old pi.r^2 gives **R = r / sqrt(0.5 + 0.5.CORE^2)**, which
+  // at CORE 0.45 is 1.29x. That is where `SPECKLE_GROW` comes from — it is solved, not
+  // picked, so changing CORE keeps the mass automatically.
+  //
+  // ⚠️ Alpha inside the texture is SAFE HERE and is not the compounding bug the alpha
+  // pass warns about: the body fill underneath is fully OPAQUE, so `source-over` of any
+  // partial alpha leaves the destination alpha at 1. Every speckle sits well inside the
+  // silhouette (|centre| <= 0.30 against a mean lobe radius of 0.40), so none of them
+  // can reach the antialiased edge where that would stop being true.
+  const SPECKLE_CORE = 0.45;
+  const SPECKLE_GROW = 1 / Math.sqrt(0.5 + 0.5 * SPECKLE_CORE * SPECKLE_CORE);
   const dot = (fx: number, fy: number, fr: number, v: number): void => {
+    const x = c + fx * size;
+    const y = c + fy * size;
+    const r = fr * size * SPECKLE_GROW;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(${v},${v},${v},1)`);
+    g.addColorStop(SPECKLE_CORE, `rgba(${v},${v},${v},1)`);
+    g.addColorStop(1, `rgba(${v},${v},${v},0)`);
+    ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(c + fx * size, c + fy * size, fr * size, 0, Math.PI * 2);
-    ctx.fillStyle = `rgb(${v},${v},${v})`;
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
   };
   //
@@ -1221,6 +1331,51 @@ function buildGlazeMarkTexture(variant: number): THREE.CanvasTexture {
   dot(-0.06 + 0.05 * variant, 0.20, 0.075, 24);
   dot(0.20 - 0.04 * variant, -0.17, 0.055, 20);
   ctx.restore();
+
+  // ── THE ALPHA PASS — one write, from two explicit populations ─────────────────
+  //
+  // ⚠️ IT IS A SEPARATE PASS ON PURPOSE, AND DRAWING THE RIM WITH `rgba(…, 0.78)`
+  // WOULD BE A BUG. Canvas 2D composites `source-over`, so an alpha-0.78 mark drawn
+  // over an alpha-0.78 body gives **0.78 + 0.78·0.22 = 0.95**, not 0.78 — every
+  // overdraw inside the texture would compound its own alpha and the body would end
+  // up a patchwork of opacities that no constant describes. So the value structure
+  // above is drawn fully OPAQUE, and alpha is written exactly once, here.
+  //
+  // The rim band comes off a SECOND canvas carrying the same path, because a stroke on
+  // the value canvas would also change the value — which is the whole thing this change
+  // removes.
+  const rimCanvas = document.createElement('canvas');
+  rimCanvas.width = size;
+  rimCanvas.height = size;
+  const rctx = rimCanvas.getContext('2d')!;
+  rctx.save();
+  outlineOn(rctx);
+  rctx.clip();
+  // `stroke()` centres on the path and the clip discards the outer half, so this lands
+  // as a band of half its width just inside the silhouette — the same construction, and
+  // the same 0.055 width, the dark shoulder used. Nothing about the mark's FOOTPRINT
+  // moves; `TRAIL.radius` is still the hitbox and `GLAZE_FILL` still the mean radius.
+  rctx.lineWidth = size * 0.055;
+  rctx.strokeStyle = '#ffffff';
+  outlineOn(rctx);
+  rctx.stroke();
+  rctx.restore();
+  const rim = rctx.getImageData(0, 0, size, size).data;
+
+  const img = ctx.getImageData(0, 0, size, size);
+  const d = img.data;
+  const bodyA = GROUND_MARK_OPACITY;
+  for (let i = 0; i < d.length; i += 4) {
+    const cover = d[i + 3];
+    if (cover === 0) continue;
+    const t = rim[i + 3] / 255;
+    // ⚠️ SCALED, NEVER ASSIGNED. `cover` is the silhouette's own ANTIALIASED coverage;
+    // writing a constant here would harden the lobe edge into a jagged one, and the
+    // edge being hard-but-clean is the half of "hard-edged circles" the art direction
+    // says to keep. Multiplying leaves the AA intact and applies opacity on top of it.
+    d[i + 3] = Math.round(cover * (bodyA + (1 - bodyA) * t));
+  }
+  ctx.putImageData(img, 0, 0);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
@@ -2042,8 +2197,18 @@ export class VfxLayer {
    * unlit flat fill has zero shading variation by construction, which is what the
    * blind rounds read as "flat".
    */
+  /**
+   * ⚠️ `opacity: 1` IS NOT "THE MARKS BECAME OPAQUE", AND READING IT THAT WAY WOULD
+   * UNDO THE FIX. `MeshBasicMaterial`'s delivered alpha is `map.a × material.opacity`,
+   * and `buildGlazeMarkTexture`'s alpha pass now carries `GROUND_MARK_OPACITY` in the
+   * map itself — 0.78 across the body, 1.0 in the rim band, which is what makes a pile
+   * of marks draw ONE contour instead of one per mark. Multiplying by 0.78 a second
+   * time here would take the body to 0.61 and flatten the rim back to 0.78, i.e. it
+   * would restore the ratio the fix exists to break. The constant did not change; it
+   * MOVED, and the header above it says so.
+   */
   private groundMarkMat(color: string, map: THREE.Texture): THREE.MeshBasicMaterial {
-    const mat = noDepthWrite(flatMat(color, { transparent: true, opacity: GROUND_MARK_OPACITY }));
+    const mat = noDepthWrite(flatMat(color, { transparent: true, opacity: 1 }));
     mat.map = map;
     mat.needsUpdate = true;
     return mat;
