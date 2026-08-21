@@ -490,7 +490,23 @@ try {
     console.log('── ARM G: the shipped path, seeded through the profile ────');
     const desk = { tag: 'desk', width: 1280, height: 720 };
     const p390 = { tag: 'p390', width: 390, height: 844 };
-    const CENTER = { x: 1400, y: 1000 }, RING = 190;
+    // 🚨 WAS `{ x: 1400, y: 1000 }` — THE ARENA CENTRE, WHICH IS INSIDE `boiling_pot`
+    // (104×104 at 1400,1000). `al_guard`'s "no fixture point inside a CoverBox" arm has
+    // been failing on this line and getting reported as "pre-existing, not mine" by six
+    // agents in a row, which is how a red gate becomes furniture.
+    //
+    // The six fighters sit on a ring of radius 190 and were always clear of the 52 wu
+    // half-width, so nothing was measured wrong — but the guard cannot tell a construction
+    // ORIGIN from a station, and it should not have to. Moved the origin off the prop
+    // instead of teaching the guard an exception: an exemption is a thing to maintain, an
+    // offset is not.
+    //
+    // ⚠️ Derived from `ARENA_W`/`ARENA_H` rather than retyped, per CLAUDE.md — the 1× map's
+    // centre (700,500) is still a LEGAL point on the ×4 map, so a stale centre here would
+    // be invisible to every legality check. Offset by one pot width, north-east, which is
+    // open floor at every seat count.
+    const ARENA_W = 2800, ARENA_H = 2000;   // mirrors src/arena/shared.ts; al_guard §A polices these
+    const CENTER = { x: ARENA_W / 2 + 130, y: ARENA_H / 2 - 130 }, RING = 190;
     const six = CAST.map((id, i) => {
       const a = (i / CAST.length) * Math.PI * 2;
       return `${id}@${Math.round(CENTER.x + Math.cos(a) * RING)},${Math.round(CENTER.y + Math.sin(a) * RING)}`;
