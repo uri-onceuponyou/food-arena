@@ -10,7 +10,58 @@
  * Neither weapon is `ranged`, so `projectile`/`trail` have nothing to attach to —
  * `cast`/`impact` are the only meaningful hooks here.
  *
- * ── THE PROJECT-WIDE CONSTRAINT THIS FILE EXISTS TO SATISFY ────────────────────
+ * ── 🚨 READ THIS FIRST. THE CONSTRAINT BELOW INVERTED ON 2026-08-21 (`afad1ca`). ──
+ *
+ * Everything from here to "VERIFIED, NOT ASSUMED" was written for a **400 wu** slam and
+ * is kept verbatim, because the premise it records is exactly what Uri overruled:
+ *
+ *   > *"If the question is whether the giant should catch everything in the visible
+ *   > screen, the answer is almost, but it shouldn't catch everything in the map."*
+ *
+ * `REACH.ultimateSlam` is now `GUARANTEED_VISIBLE_RADIUS - BODY_LENGTH` =
+ * **157.22 wu (7.86 m)**, down from 400 (20 m). The consequence is not a smaller number;
+ * it is the **reversal of this file's founding constraint**:
+ *
+ *      THE CASTER IS NOW ALWAYS ON SCREEN WHEN THE SLAM CAN REACH YOU.
+ *
+ * 157.22 < 199.22, and `FAIR_PLAY.radiusUnits` is *"the disc every supported device is
+ * guaranteed to show around the player"* on every supported aspect ratio. So an opponent
+ * close enough to hit you with this weapon is inside that disc **with exactly one body
+ * length (42 wu) of margin** — that margin IS the derivation. The off-screen case this
+ * file was built to survive can no longer occur.
+ *
+ * ⚠️ **NOTHING BELOW WAS EDITED TO ACHIEVE THAT, AND THAT IS THE POINT.** `afad1ca`
+ * touched `rules.ts` and nothing else — `src/vfx/**` and `src/game/vfx.ts` are BYTE
+ * IDENTICAL across it. The drawing followed on its own because the AOE reads
+ * `const R = wu(ctx.weapon.range ?? 0)` and every element scales off `R`. Measured,
+ * paired, on detached worktrees of `f11b6c6` and `afad1ca` (which differ only in
+ * `rules.ts`), shipped `spawnWeaponCast` cast beat, 800x450 readback, delta >= 6:
+ *
+ *     pitch 58, SHIPPED match framing   260,963 px (72.5% of frame)  ->  115,635 (32.1%)
+ *       painted bbox                    799x449 of 800x450           ->  499x359
+ *     pitch 20 detector, 400 wu wide     66,296 px (18.4%)           ->    9,478  (2.8%)
+ *
+ * **At 400 wu the effect had NO EDGE ANYWHERE ON SCREEN. At 157.22 it has one on three
+ * sides.** Five other weapon rows measured in the same runs are byte-identical across
+ * the two arms (`hamburger.Smash` 6533, `.Tomato` 437, `.Lettuce` 702, `.Onion` 718,
+ * `lollipop.Smash` 6988), which is the paired null control, and the absolute-px floor
+ * from that run is **0.0%** — so the -55.7% is EXACT, not a move inside a floor. Drift
+ * control (frozen frame vs itself, x3): 0, 0, 0 px. (`tools/tmp/wv_area.mjs`,
+ * `tools/tmp/gv_slam.mjs`.)
+ *
+ * ⚠️ **WHAT THAT SLACKENS, NOT TAKEN HERE, AND PRICED SO NOBODY RE-DERIVES IT.** Three
+ * numbers below were forced by the 20 m disc and are now merely CHOICES: the AOE fill's
+ * `0.3` alpha and the swirl's `0.4` (cut because at 20 m the disc *"erased the arena
+ * outright"* — at 7.86 m it repaints a third of the frame, not three quarters); the
+ * sugar pops' retreat to the inner `POP_SPAN` 0.55 (its arithmetic — *"22 points over
+ * 1257 m2 is one pop per 57 m2"* — is a 20 m calculation; the whole 157.22 wu disc is
+ * 194 m2, so ten pops spread over ALL of it would now be one per 19 m2, three times
+ * denser than the density that was rejected); and `FRONT_TIME` 0.46 s, which now carries
+ * the rim 7.86 m instead of 20 m, i.e. at 17.1 m/s instead of 43.5. **All three are
+ * legibility judgements, and this pass changed none of them** — a taste move without a
+ * critic round is what `docs/LESSONS.md` exists to prevent. They are recorded as open.
+ *
+ * ── THE PROJECT-WIDE CONSTRAINT THIS FILE EXISTS TO SATISFY (⚠️ SUPERSEDED — see above)
  *
  * `REACH.ultimateSlam` is 400 wu — 2.0x `FAIR_PLAY.radiusUnits` (199.2 wu), the
  * radius the camera guarantees is visible in every direction on every aspect ratio.
@@ -45,7 +96,17 @@
  *
  * plus `SUGAR POPS` near the epicentre, as texture on the centre of the effect only.
  *
- * ── VERIFIED, NOT ASSUMED (2026-08-04) ────────────────────────────────────────
+ * ── VERIFIED, NOT ASSUMED (2026-08-04) — ⚠️ AND THE RECIPE IS NOW UNREACHABLE ──
+ *
+ * 🚨 The reproduction below is kept because the METHOD is still right and the VERDICT is
+ * still the record of what a 400 wu slam looked like. **The STATE it reproduces can no
+ * longer occur.** It works by letting the AI close until it is inside `range` and fire —
+ * at 400 wu that put the caster at ~398 wu, off frame. At 157.22 wu the same procedure
+ * fires the ultimate at ~157 wu, which is INSIDE the 199.22 wu disc the camera guarantees
+ * around you. **There is no distance at which this weapon can be fired at you from off
+ * screen any more.** Anyone re-running `lolliv.mjs --mode incoming` to re-check the
+ * off-screen tell will get a caster in frame and should not read that as a regression.
+ *
  * Everything above was authored without ever being rendered. It has now been driven
  * in the live game and looked at. The way to reproduce the off-screen case with no
  * scripted aiming at all is `?player=donut&enemy=lollipop`: `ai.ts` picks the
@@ -92,6 +153,10 @@
  *
  * The ultimate is the one sanctioned exception, and only in AREA — it is 20 m of
  * translucent ground fill, not 20 m of opaque bloom.
+ * ⚠️ **7.86 m since `afad1ca`, not 20** — the sentence's POINT (translucent, not opaque)
+ * is unchanged and is now easier to honour, since the exception it asks for is a
+ * quarter the size. The two `20 m` figures are kept as the record of what the rule was
+ * written against.
  */
 
 import * as THREE from 'three';
@@ -148,6 +213,10 @@ function finishTex(ctx: CanvasRenderingContext2D): THREE.CanvasTexture {
   // These are sampled at a grazing angle across most of the frame (58°-pitched
   // camera, and the AOE disc is 40 m across) — anisotropy 1 averages the swirl arms
   // into mush at the far edge before they ever reach a pixel.
+  // ⚠️ **15.7 m across since `afad1ca`, not 40.** The grazing-angle argument is
+  // unchanged (a 58° pitch does not care how wide the disc is) and 8 is now more
+  // headroom than the case needs, so this is LEFT ALONE: lowering it would be a
+  // micro-optimisation traded against a texture the whole ultimate's identity rests on.
   tex.anisotropy = 8;
   tex.needsUpdate = true;
   return tex;
@@ -547,6 +616,22 @@ function spawnSugarMote(
  * screen when the caster is, which is exactly the case the constraint at the top of
  * this file says we cannot rely on.
  *
+ * 🚨 **AND THAT DEMOTION EXPIRED ON 2026-08-21 — THIS PROP IS NOW PART OF THE TELL FOR
+ * FREE.** The sentence above is exactly right and its conclusion has flipped: at
+ * `REACH.ultimateSlam` 157.22 wu the caster is inside the 199.22 wu guaranteed-visible
+ * disc **whenever the slam can reach you**, so "only ever on screen when the caster is"
+ * now means "always". Nothing here changed and nothing needs to; it is stated because
+ * the next agent to read the demotion would otherwise budget for a bonus beat that is
+ * in fact reliable. See the header for the measurement.
+ *
+ * ⚠️ Its GROUND COVERAGE is unchanged and is still an under-claim, but by far less:
+ * `headRadius` 1.785 m = 35.7 wu at `fwd` 2.835 m = 56.7 wu reaches **92.4 wu** of
+ * ground against a **157.22 wu** hitbox — **1.70x short, where `rules.ts` records it as
+ * 4.3x short against the old 400.** `rules.ts` calls hitbox-and-prop *"one rule stated
+ * in two places"*; that gap is now small enough that closing it is a real option rather
+ * than an impossible one. NOT taken here — the prop's size is a silhouette decision
+ * measured against `CHARACTER_HEIGHT` (see below), not a hitbox indicator.
+ *
  * SIZED AND PLACED SO IT DOES NOT EAT THE CASTER. Measured at shipped framing on the
  * first render of this file: at 1.15 CH radius, centred on the cast point, the head
  * plus its swirl covered Lollipop completely for the whole 0.75 s — she was not
@@ -669,6 +754,38 @@ function spawnGiantLollipop(ctx: WeaponVfxCtx, x: number, z: number, dirX: numbe
 // circle is 12.08 m, against the ~10 m the camera guarantees, so it is partly off
 // frame by construction and pricing it needs a camera-framing read this file cannot
 // do. Reported, not shipped.
+//
+// ── 🚨 EVERY BLOCKER IN THE FOUR PARAGRAPHS ABOVE WAS ARITHMETIC ON 400 wu, AND THE
+//    SLAM IS 157.22 wu SINCE `afad1ca`. THEY ARE KEPT; HERE IS WHAT SURVIVES. ────────
+//
+//   * **"NO EDGE ON SCREEN" IS FALSE NOW, AND IT IS MEASURED.** 157.22 wu is 7.86 m
+//     against the 9.96 m the camera guarantees, so the hitbox circle is INSIDE the
+//     guaranteed disc. `tools/tmp/wv_area.mjs` on detached worktrees of `f11b6c6` and
+//     `afad1ca` (which differ only in `rules.ts`): the shipped cast's painted bbox went
+//     **799x449 of an 800x450 readback — literally the whole frame — to 499x359**, and
+//     the area from **260,963 px (72.5%) to 115,635 (32.1%)**. The generic footprint's
+//     refusal was priced at *"259,315 px, 64.0% of the frame"*; the shape it refused is
+//     now less than half that. **The refusal became a CHOICE for the first time.**
+//   * **THE ESCAPABLE BAND IS NOW ON SCREEN TOO.** `range - slowestSpeed * castSec` at
+//     castMs 1500 is `157.22 - 79.20 x 1.5` = **38.42 wu = 1.92 m**, not 241.6 wu /
+//     12.08 m. It is comfortably inside the frame, so the "partly off frame by
+//     construction" objection has evaporated and the shape is drawable.
+//   * **AND AT THE RULE'S OWN DERIVED WIND-UP THE BAND IS EMPTY — WHICH IS §80's
+//     REQUIREMENT MET, NOT A DEFECT.** `sim.test.mjs` §33(o) derives **2300 ms** on HEAD
+//     (32.9% of the 7000 ms cooldown). At 2300 ms the band is `157.22 - 79.20 x 2.3` =
+//     **-24.94 wu**: the slowest fighter in the roster clears the entire disc inside the
+//     wind-up, i.e. the whole thing becomes dodgeable.
+//     ⚠️ **2300 ms is a HEAD number and it is NOT the 1800 ms `afad1ca`'s message
+//     records.** That commit was right when written; `fd83a5c` then dropped
+//     `PLAYER_SPEED` 0.12 -> 0.09 and the derivation moved with it. The wind-up is a
+//     function of the global speed, so quote it from `sim.test.mjs`, never from a commit.
+//   * **WHAT DOES NOT CHANGE:** the footprint below still marks the PROP, at 92.4 wu of
+//     ground against a 157.22 wu hitbox — 1.70x short, where `rules.ts` prices it at
+//     4.3x short against 400. Under-claiming is still the safe direction and this pass
+//     did not move it: the hook is DORMANT (`castMs` 0, so `cast-started` never fires),
+//     so there is no rendered frame to judge a change by, and marking the true hitbox is
+//     a design call rather than a consequence of a radius. **Recorded as open, priced,
+//     not taken** — the same disposition `rules.ts` gave `ENDGAME_STANDOFF`.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** The giant candy's head radius and forward offset at the resolve. Both are copied
@@ -831,6 +948,31 @@ export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
    * flash, streaks, shards) and its 360° melee wedge — neither is replaced, both
    * still fire. Both of those are epicentre-anchored, which is precisely why the
    * off-screen case needed something else.
+   *
+   * 🚨 **THAT PARAGRAPH IS FALSE TODAY AND WAS FALSIFIED BY MEASUREMENT, NOT BY
+   * READING.** It is kept because it describes the ink budget this effect's alphas were
+   * tuned against, and because "both still fire" is exactly the assumption that produced
+   * the three-overlapping-washes defect `game/vfx.ts:spawnWeaponCast` was built to
+   * arbitrate. What that arbitration actually does now, from its own source:
+   *
+   *   - **THE 360° MELEE WEDGE DOES NOT FIRE.** `spawnWeaponCast` guards it with
+   *     `if (!(weapon.giantSlam && bespokeCast))`, and this hook IS `bespokeCast`. So
+   *     the *"20 m red disc at 0.88 opacity"* the AOE FILL's ink-budget note below says
+   *     it is competing with has not been on screen since that guard landed.
+   *   - **THE STAR POP, FLASH AND STREAKS DO NOT FIRE EITHER.** The same call passes
+   *     `{ bespokeOwnsGround: bespokeCast }`, and everything except the shards sits
+   *     inside `if (!bespokeOwnsGround)`. Measured (`tools/tmp/gv_slam.mjs`, pitch 58,
+   *     800x450 readback, same seed both arms, at `REACH.ultimateSlam`, on a detached
+   *     worktree of `f8d2756`): the generic pass delivers **96,577 px** with the flag
+   *     off and **1,877 px** with it on — **98.1% of it stands down.** What survives is
+   *     `burst(…, 3.2, 14, …)`, whose `sizeFactor` is a literal and correctly does NOT
+   *     scale with range: those are epicentre debris, not a reach indicator.
+   *
+   * So this hook does not ADD to two other full-frame passes; **it is very nearly the
+   * whole cast** — the shipped sum is **115,671 px, 32.1% of the frame**, and 1,877 of
+   * that is everything `game/vfx.ts` contributes. **~94,700 px of frame that this note
+   * assumes is already spent is in fact free**, and that is a second, independent reason
+   * the alphas below are open rather than settled.
    */
   Giant: {
     cast(ctx) {
@@ -838,6 +980,14 @@ export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
       // The ability's REAL reach, straight out of `rules.ts` (`REACH.ultimateSlam`
       // via `Weapon.range`) — never a hardcoded radius, so if the ladder moves the
       // tell moves with it and stays exactly as big as the hitbox.
+      //
+      // ✅ **AND THE LADDER MOVED, SO THIS LINE HAS NOW BEEN CASHED IN.** `afad1ca` took
+      // the slam 400 -> 157.22 wu without touching a byte of `src/vfx/**`, and measured
+      // on detached worktrees either side of it the shipped cast went **260,963 px ->
+      // 115,635** at pitch 58 while five other weapons' rows stayed byte-identical.
+      // The `?? 0` matters too and is not defensive noise: a missing range draws NOTHING
+      // here, where a `?? 400` would draw a stale hitbox — which is exactly the defect
+      // `game/vfx.ts:2488` still carries on its QA path.
       const R = wu(ctx.weapon.range ?? 0);
 
       // ── 1. AOE FILL — the screen-filling half of the tell ────────────────────
