@@ -1051,8 +1051,19 @@ if (args.selftest) {
     // below `c5b9754`. It is still text and it can still go stale — but staleness costs a
     // red row, never a green one.
     const { dir, applied } = patchedSimDir('selftest-bad', [
-      ['rules.ts', /export const AI_CHASE_SPEED = (tune\('AI_CHASE_SPEED', )?0\.07\b/,
-        'export const AI_CHASE_SPEED = $10.0700001'],
+      // WAS anchored on the LITERAL `0.07`. `fd83a5c` made it 0.0525 (§75(b), the whole
+      // game 25% slower), the regex stopped matching, the patch became a no-op and
+      // `applied[0]` went red.
+      //
+      // ✅ THE CONTROL BEHAVED EXACTLY AS ITS OWN COMMENT PROMISED — *"staleness costs a
+      // red row, never a green one."* That is the failure direction you want, and it is
+      // why this is a two-line fix instead of a silent wrong number. Compare `pj_probe`,
+      // whose roster regex went stale the same way and returned an EMPTY table at exit 0.
+      //
+      // Perturbs whatever value is THERE rather than naming one, so the next speed change
+      // cannot restale it.
+      ['rules.ts', /export const AI_CHASE_SPEED = (tune\('AI_CHASE_SPEED', )?(0\.\d+)\b/,
+        (_m, t, v) => `export const AI_CHASE_SPEED = ${t ?? ''}${(Number(v) * (1 + 1e-6)).toPrecision(12)}`],
     ]);
     ok('the known-bad sim was actually patched (a no-op patch would fake this control)', applied[0]);
     const BAD = await loadSim(dir);

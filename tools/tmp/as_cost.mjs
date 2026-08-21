@@ -825,7 +825,19 @@ if (args.selftest) {
     };
     const C = await census({ simDir: `${ROOT}/src/game`, arena: caged, seeds: 1, policy: 'smart2', dt: 16.667 });
     ok('D6 KNOWN-BAD: an AI sealed in a 52 wu pocket IS counted as stalled by §48\'s own rule — so a 0% elsewhere is a measurement',
-      C.spanStalled / C.spanSamples > 0.15 && C.maxSpanStallMs > 10000,
+      // WAS `C.spanStalled / C.spanSamples > 0.15 && C.maxSpanStallMs > 10000`.
+      // REVERSED 2026-08-21 because `fd83a5c` (PLAYER_SPEED 0.12 -> 0.09) took the SHARE
+      // from 21.7% to 14.7% while `maxSpanStallMs` stayed **118.9 s in every arm** — the
+      // sealed pocket still produces an unbroken whole-match stall, so it did NOT become
+      // escapable. Only the denominator grew: a slower player besieges the cage for longer
+      // and those extra samples fail `d > eReach`.
+      //
+      // 🚨 THE SHARE WAS NEVER THE QUANTITY THIS ARM IS ABOUT. Its own wording is "an AI
+      // sealed in a 52 wu pocket IS counted as stalled — so a 0% elsewhere is a
+      // measurement": what must be true is that the detector CAN FIRE, not that it fires
+      // at some rate. A share threshold makes the arm a hostage to every speed constant.
+      // Derived from the clock rather than a literal, so a schedule change cannot restale it.
+      C.spanStalled > 0 && C.maxSpanStallMs > MATCH_DURATION_MS * 0.5,
       `§48-rule ${((C.spanStalled / C.spanSamples) * 100).toFixed(1)}% of samples · longest ${(C.maxSpanStallMs / 1000).toFixed(1)}s`);
     ok('D7 …and that stall is booked to FRESH belief, not to perception — the split points the right way',
       C.spanFresh > 100 * Math.max(1, C.spanStale),
