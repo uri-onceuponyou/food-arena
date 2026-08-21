@@ -153,12 +153,13 @@ import {
   HIT_RADIUS_VS_PLAYER,
   speedFor,
   suddenDeathActive,
+  TRAIL,
   type Weapon,
   type WeaponType,
 } from './rules.ts';
 import type { Fighter, GameEvent, MatchState } from './state.ts';
 import { isCasting, movementLocked, nearestLivingOpponent, sightingIndex } from './state.ts';
-import { attemptAttack } from './combat.ts';
+import { attemptAttack, isOnOwnTrail } from './combat.ts';
 import { isVisibleFrom, moveToward, terrainSlowAt } from './movement.ts';
 
 /**
@@ -1104,8 +1105,49 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
    * — `DECISIONS §75` records it as a live asymmetry in the STATUS effect. Terrain has one
    * factor for everybody, because a floor does not know who is standing on it.
    */
-  const aiSlowMult = (now < self.status.slowedUntil ? AI_SLOW_MULTIPLIER : 1)
-    * terrainSlowAt(self.x, self.y, state.arena, state.splats);
+  /**
+   * ── 🚨 THE STICKY TRAIL IS IN HERE NOW, AND ITS ABSENCE WAS THE SEVENTH DEFECT ──
+   *
+   * ⚠️ **AND IT SURVIVED THE PASS THAT FIXED THE SIXTH**, three paragraphs up, which is
+   * the part worth reading: `b2be2f7` added the TERRAIN term to this exact expression,
+   * measured it with a one-tick control, and did not look for the other multiplier
+   * sitting beside it in `sim.ts:moveFighter`. One rule stated in `rules.ts` and
+   * implemented twice is this file's oldest and most expensive shape, and fixing one
+   * instance of it is not evidence about the next line.
+   *
+   * `rules.ts:TRAIL.speedBoost` (1.35) is applied in `sim.ts:moveFighter` — which moves
+   * HUMAN-controlled fighters — and was applied nowhere else, so **a Donut bot got no
+   * speed from its own trail while a Donut player got 35%.** Measured with the same
+   * one-tick control that caught the terrain defect (`tools/tmp/bb_probe.mjs --trail`,
+   * 12 ticks, a mark injected under the fighter each tick): **player ratio 1.350000,
+   * enemy ratio 1.000000.** Donut is the roster's only `hasTrail: true` character, so
+   * this is one character's passive reaching one seat.
+   *
+   * ⚠️ **`wm_gate` PASSES `trail-speed-boost` AND ALWAYS WOULD HAVE.** That term is read
+   * off a FIELD — `def.hasTrail === true && TRAIL.speedBoost > 1` — and never measured on
+   * a bot, which is the identical blind spot that hid `splat-slows-anyone` until it was
+   * made a MEASURED term. A vocabulary term that reads a constant cannot see who the
+   * constant reaches. The hunk that would fix it is routed to that file's owner.
+   *
+   * ⚠️ **IT MULTIPLIES, IT DOES NOT `Math.min`/`Math.max`** — same rule as the terrain
+   * term above. `moveFighter` has always written `terrain * boost * slow`, so a boosted
+   * Donut standing in a puddle is 0.45 x 1.35, and taking the strongest term instead
+   * would make the AI's stacking rule differ from the player's — the very shape being
+   * closed here.
+   *
+   * ⚠️ **`isOnOwnTrail` IS IMPORTED FROM `combat.ts`, NEVER RE-DERIVED.** That function's
+   * own header says it lives there *"so both call sites share one definition"*; this is
+   * the third, and a private copy of the `ownerId` + radius test here would be the defect
+   * back the day `TRAIL.radius` moved. This file already imports `attemptAttack` from the
+   * same module, so no new dependency edge exists.
+   *
+   * ⚠️ **WAS `aiSlowMult`, AND THE OLD NAME IS RECORDED BECAUSE IT STOPPED BEING TRUE.**
+   * The expression can now be greater than 1, so a name that says "slow" would mislead
+   * the next reader at exactly the line where the boost has to be noticed.
+   */
+  const aiSpeedMult = (now < self.status.slowedUntil ? AI_SLOW_MULTIPLIER : 1)
+    * terrainSlowAt(self.x, self.y, state.arena, state.splats)
+    * (isOnOwnTrail(state, self) ? TRAIL.speedBoost : 1);
 
   /**
    * ── WHAT A STUN LOCKS ────────────────────────────────────────────────────
@@ -1224,7 +1266,7 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
   // multiplier. Passed in rather than re-derived inside `dangerSteer` so the "can I clear
   // this telegraph in time?" test uses the same number the movement below will use; a
   // conservative guess there would be a second, quieter statement of the AI's own speed.
-  const ownSpeed = speedFor(self.characterId, fleeing ? AI_FLEE_SPEED : AI_CHASE_SPEED) * aiSlowMult;
+  const ownSpeed = speedFor(self.characterId, fleeing ? AI_FLEE_SPEED : AI_CHASE_SPEED) * aiSpeedMult;
   const danger = dangerSteer(state, self,
     (intentSign * adx) / adist, (intentSign * ady) / adist, ownSpeed);
   const urgent = danger >= AI_ESCAPE_PRIORITY;
@@ -1306,7 +1348,7 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
     // it. Aim is set once, at the player, in the facing block above — read it before
     // re-introducing anything that turns a retreating fighter's aim with its feet.
     if (!rooted) {
-      const step = speedFor(self.characterId, AI_FLEE_SPEED) * dt * aiSlowMult;
+      const step = speedFor(self.characterId, AI_FLEE_SPEED) * dt * aiSpeedMult;
       // Flee target is directly away from the player, so slide around cover toward
       // that point rather than pinning against it — now bent back inside the ring, which
       // is the whole reason a retreating AI used to run itself into the fog. At zero
@@ -1348,7 +1390,7 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
     if (chosenIndex !== null) {
       attemptAttack(state, self, chosenIndex, events);
     } else if (!rooted) {
-      const step = speedFor(self.characterId, AI_CHASE_SPEED) * dt * aiSlowMult;
+      const step = speedFor(self.characterId, AI_CHASE_SPEED) * dt * aiSpeedMult;
       // ⚠️ `tx, ty`, NOT `player.x, player.y`. This is site 3 of the three named in the
       // perception block above, and it was the DIRECT read — the one an implementation
       // that only replaced `adx/ady` would have left pointing at the truth.

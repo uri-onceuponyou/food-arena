@@ -32,7 +32,11 @@ import { castThreat, pressValue, stepAI } from './ai.ts';
 // Section 19 fires Lollipop's slam directly, because the thing under test is that it
 // lands from beyond every other weapon's reach WITHOUT AIM — driving it through a whole
 // match would confound that with whether the driver ever chose it.
-import { applyDamage, attemptAttack, resolveDueCast, statusReadyAt } from './combat.ts';
+// Section 25(a2) needs the sim's OWN `isOnOwnTrail`, not a copy of the `ownerId` +
+// `TRAIL.radius` test — the section's whole claim is that ONE predicate is now consulted
+// by two files, and a re-derived version here would pass forever against a sim that had
+// stopped calling it.
+import { applyDamage, attemptAttack, isOnOwnTrail, resolveDueCast, statusReadyAt } from './combat.ts';
 // Section 26 tests CONCEALMENT. The predicates are imported rather than re-derived for
 // the same reason `pressValue` and `statusReadyAt` are: the section's entire claim is that
 // ONE rule is read by four call sites, and a copy of the AABB test here would pass forever
@@ -3358,6 +3362,83 @@ console.log('\n23. Character levels');
     check('🔴 …and it is the SAME multiplier on both seats — one rule, one implementation',
       approx(wet.enemy / dry.enemy, wet.player / dry.player, 1e-12),
       `enemy ${(wet.enemy / dry.enemy).toFixed(12)} vs player ${(wet.player / dry.player).toFixed(12)}`);
+  }
+
+  // ── (a2) 🚨 THE SEVENTH INSTANCE, AND IT SURVIVED THE PASS THAT FIXED THE SIXTH ──
+  //
+  // `TRAIL.speedBoost` (1.35) sits ONE LINE from the terrain factor in
+  // `sim.ts:moveFighter` and was implemented in exactly the same one place, so **a Donut
+  // BOT got no speed from its own trail while a Donut PLAYER got 35%.** `b2be2f7` added
+  // the terrain term to `ai.ts`'s multiplier, measured it with the control above, and did
+  // not look at the multiplier beside it. That is the lesson worth keeping: fixing one
+  // instance of "a rule stated once in `rules.ts` and implemented twice" is not evidence
+  // about the next line.
+  //
+  // ⚠️ **AND `wm_gate` PASSES `trail-speed-boost` AND ALWAYS WOULD HAVE.** That term is
+  // read off a FIELD (`def.hasTrail === true && TRAIL.speedBoost > 1`) and never measured
+  // on a bot — the identical blind spot that hid `splat-slows-anyone` until it was made a
+  // MEASURED term. A vocabulary term that reads a constant cannot see who it reaches.
+  //
+  // SAME ONE-TICK SHAPE AS (a), FOR THE SAME REASON: two whole matches would differ in
+  // more than the floor under them. Both fighters are pinned 900 wu apart, past every
+  // weapon in the roster, so the AI is in its chase-MOVE branch; the only difference
+  // between the arms is a mark under each fighter's feet.
+  {
+    const trailers = CHARACTER_IDS.filter((id) => CHARACTERS[id].hasTrail);
+    check('(a2) exactly one character in the roster carries the Sticky Trail (non-vacuity)',
+      trailers.length === 1 && trailers[0] === 'donut', `hasTrail: [${trailers.join(', ')}]`);
+
+    const oneTick = (onTrail) => {
+      const state = playingMatch(makeArena({ maxSafeRadius: 50_000 }), 'donut', 'donut');
+      state.player.x = 600; state.player.y = 1000;
+      state.enemy.x = 1500; state.enemy.y = 1000;
+      if (onTrail) {
+        // INJECTED, not earned. A mark the fighter DROPPED would also depend on
+        // `TRAIL.dropIntervalMs` and on it having already moved, which would confound the
+        // arm with the drop schedule. `ownerId` is the fighter's own slot, which is what
+        // `isOnOwnTrail` keys on — a mark belonging to the OTHER fighter boosts nobody.
+        for (const f of [state.player, state.enemy]) {
+          state.trailMarks.push({
+            id: state.nextId++, ownerId: f.id, ownerRole: f.role, x: f.x, y: f.y,
+            expiresAt: state.elapsed + 1e6, damagedMask: 0, damaged: false,
+          });
+        }
+      }
+      // Read the SIM'S OWN predicate before the tick — `isOnOwnTrail` is imported from
+      // `combat.ts`, never re-derived, so this observes the thing the sim consults rather
+      // than a copy of the `ownerId` + `TRAIL.radius` test written here.
+      const seen = { player: isOnOwnTrail(state, state.player), enemy: isOnOwnTrail(state, state.enemy) };
+      const p0x = state.player.x, p0y = state.player.y, e0x = state.enemy.x, e0y = state.enemy.y;
+      stepMatch(state, 16.667, { move: { x: 1, y: 0 }, aim: { x: 1, y: 0 }, selectedWeapon: 0, attack: false });
+      return {
+        player: Math.hypot(state.player.x - p0x, state.player.y - p0y),
+        enemy: Math.hypot(state.enemy.x - e0x, state.enemy.y - e0y),
+        seen,
+      };
+    };
+    const bare = oneTick(false);
+    const onTrail = oneTick(true);
+
+    check('(a2) trail control: both fighters move on bare floor (a zero makes every ratio vacuous)',
+      bare.player > 0 && bare.enemy > 0,
+      `player ${bare.player.toFixed(4)} enemy ${bare.enemy.toFixed(4)} wu/tick`);
+    check('(a2) trail control: the SIM sees a mark of their own under BOTH fighters, and none in the bare arm',
+      onTrail.seen.player === true && onTrail.seen.enemy === true
+      && bare.seen.player === false && bare.seen.enemy === false,
+      `onTrail p=${onTrail.seen.player} e=${onTrail.seen.enemy} · bare p=${bare.seen.player} e=${bare.seen.enemy}`);
+    check('(a2) the PLAYER is boosted by its own trail, at exactly TRAIL.speedBoost',
+      approx(onTrail.player / bare.player, TRAIL.speedBoost, 1e-9),
+      `ratio ${(onTrail.player / bare.player).toFixed(9)} vs ${TRAIL.speedBoost}`);
+    check('(a2) 🔴 the AI IS boosted by its own trail too, at exactly the same factor',
+      approx(onTrail.enemy / bare.enemy, TRAIL.speedBoost, 1e-9),
+      `ratio ${(onTrail.enemy / bare.enemy).toFixed(9)} vs ${TRAIL.speedBoost} `
+      + '— if this reads 1.000000000 the seventh ai.ts defect is back; see ai.ts:aiSpeedMult');
+    // Same reasoning as (a)'s last row: asserting the two ratios are EQUAL is a different
+    // statement from asserting each equals the constant, and it is the one a second,
+    // privately-copied implementation in `ai.ts` would fail the moment the copies drifted.
+    check('(a2) 🔴 …and it is the SAME multiplier on both seats — one rule, one implementation',
+      approx(onTrail.enemy / bare.enemy, onTrail.player / bare.player, 1e-12),
+      `enemy ${(onTrail.enemy / bare.enemy).toFixed(12)} vs player ${(onTrail.player / bare.player).toFixed(12)}`);
   }
 
   // ── (b) THE BLAST RADIUS OF (a), AS A PROPERTY OF `rules.ts` ──────────────
