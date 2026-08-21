@@ -1,0 +1,127 @@
+{
+  "tag": "before",
+  "base": "http://localhost:50237",
+  "boot": {
+    "plates": 6,
+    "hp": [
+      70,
+      110,
+      80,
+      110,
+      120,
+      120
+    ],
+    "slots": [
+      {
+        "x": 640,
+        "y": 434
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "desiredWU": {
+      "x": 300,
+      "y": 810
+    },
+    "targetWU": {
+      "x": 300,
+      "y": 810
+    },
+    "bodyRadiusWU": 42,
+    "phase": "countdown",
+    "frames": 8,
+    "gameover": false
+  },
+  "atDeath": {
+    "plates": 6,
+    "hp": [
+      0,
+      43,
+      43,
+      90,
+      0,
+      92
+    ],
+    "slots": [
+      {
+        "x": 640,
+        "y": 434
+      },
+      null,
+      null,
+      {
+        "x": 642,
+        "y": 434
+      },
+      null,
+      {
+        "x": 752,
+        "y": 415
+      }
+    ],
+    "desiredWU": {
+      "x": 300,
+      "y": 810
+    },
+    "targetWU": {
+      "x": 300,
+      "y": 810
+    },
+    "bodyRadiusWU": 42,
+    "phase": "playing",
+    "frames": 113,
+    "gameover": false
+  },
+  "after": {
+    "plates": 6,
+    "hp": [
+      0,
+      30,
+      40,
+      8,
+      0,
+      60
+    ],
+    "slots": [
+      {
+        "x": 640,
+        "y": 434
+      },
+      null,
+      null,
+      {
+        "x": 419,
+        "y": 451
+      },
+      null,
+      {
+        "x": 574,
+        "y": 435
+      }
+    ],
+    "desiredWU": {
+      "x": 300,
+      "y": 810
+    },
+    "targetWU": {
+      "x": 300,
+      "y": 810
+    },
+    "bodyRadiusWU": 42,
+    "phase": "playing",
+    "frames": 128,
+    "gameover": false
+  },
+  "moved": 0,
+  "drift": {
+    "ok": true,
+    "same": true,
+    "kbDiffers": true,
+    "bytes": 1904754,
+    "blank": false
+  },
+  "errors": []
+}

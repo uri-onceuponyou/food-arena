@@ -1,0 +1,133 @@
+{
+  "tag": "after",
+  "base": "http://localhost:50190",
+  "boot": {
+    "plates": 6,
+    "hp": [
+      70,
+      110,
+      80,
+      110,
+      120,
+      120
+    ],
+    "slots": [
+      {
+        "x": 640,
+        "y": 434
+      },
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "desiredWU": {
+      "x": 300,
+      "y": 810
+    },
+    "targetWU": {
+      "x": 300,
+      "y": 810
+    },
+    "bodyRadiusWU": 42,
+    "phase": "countdown",
+    "frames": 8,
+    "viewSubject": 0,
+    "viewReason": "local",
+    "gameover": false
+  },
+  "atDeath": {
+    "plates": 6,
+    "hp": [
+      0,
+      43,
+      43,
+      90,
+      0,
+      92
+    ],
+    "slots": [
+      {
+        "x": 640,
+        "y": 434
+      },
+      null,
+      null,
+      {
+        "x": 642,
+        "y": 434
+      },
+      null,
+      {
+        "x": 752,
+        "y": 415
+      }
+    ],
+    "desiredWU": {
+      "x": 300,
+      "y": 810
+    },
+    "targetWU": {
+      "x": 300,
+      "y": 810
+    },
+    "bodyRadiusWU": 42,
+    "phase": "playing",
+    "frames": 113,
+    "viewSubject": 0,
+    "viewReason": "dwell",
+    "gameover": false
+  },
+  "after": {
+    "plates": 6,
+    "hp": [
+      0,
+      30,
+      40,
+      8,
+      0,
+      60
+    ],
+    "slots": [
+      {
+        "x": 706,
+        "y": 434
+      },
+      null,
+      null,
+      {
+        "x": 318,
+        "y": 463
+      },
+      null,
+      {
+        "x": 504,
+        "y": 446
+      }
+    ],
+    "desiredWU": {
+      "x": 212.5862407674336,
+      "y": 816.3524008492161
+    },
+    "targetWU": {
+      "x": 218.48500727020954,
+      "y": 815.7494892492407
+    },
+    "bodyRadiusWU": 42,
+    "phase": "playing",
+    "frames": 129,
+    "viewSubject": 5,
+    "viewReason": "hold",
+    "gameover": false
+  },
+  "moved": 87.64427134569726,
+  "drift": {
+    "ok": true,
+    "same": true,
+    "kbDiffers": true,
+    "bytes": 1629158,
+    "blank": false
+  },
+  "errors": []
+}
