@@ -325,6 +325,7 @@ const OFFLINE = [
   { key: 'tools/tmp/kx_seatfair.mjs --selftest', probes: [pr(['tools/tmp/kx_seatfair.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/kx_fogcover.mjs --selftest', probes: [pr(['tools/tmp/kx_fogcover.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/wm_gate.mjs --selftest', probes: [pr(['tools/tmp/wm_gate.mjs', '--selftest'], S)] },
+  { key: 'tools/tmp/q1_sigma.mjs --selftest', probes: [pr(['tools/tmp/q1_sigma.mjs', '--selftest'], /selftest (\d+) pass \/ \d+ fail/)] },
   { key: 'tools/tmp/rc_prose.mjs', probes: [pr(['tools/tmp/rc_prose.mjs'], /(\d+)\/\d+ checks passed/)] },
   { key: 'tools/tmp/nk_neckgate.mjs --selftest', probes: [pr(['tools/tmp/nk_neckgate.mjs', '--selftest'], /(\d+) pass, \d+ fail/)] },
   { key: 'tools/tmp/xr_repro.mjs --selftest', probes: [pr(['tools/tmp/xr_repro.mjs', '--selftest'], /selftest (\d+) pass \/ \d+ fail/)] },
