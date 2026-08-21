@@ -586,6 +586,35 @@ export const ENEMY_SIZE = 42;
 /**
  * Base movement: px per ms.
  *
+ * ── ✅ LANDED 2026-08-21. `0.12 -> 0.09`, AND THE BOTS CAME WITH IT AT THE SAME RATE. ──
+ *
+ * The block below is kept ENTIRE, in the present tense it was written in, because it is
+ * the record of what was measured, what was refused, and — in its last paragraph — the
+ * one question that was blocking it. **Uri answered that question:**
+ *
+ *   > *"75 - drop the bots as well. same rate."*
+ *
+ * So all three movement constants were multiplied by **0.75** and every ratio between them
+ * is preserved: `PLAYER_SPEED / AI_CHASE_SPEED` stays 1.714…x and `AI_FLEE_SPEED /
+ * AI_CHASE_SPEED` stays 1.214…x. The paragraph below that says *"Do not land either one
+ * from a brief. Let him move the sliders"* was RIGHT and is now SPENT: he moved them.
+ *
+ * ⚠️ **THE RATIOS ARE PRESERVED TO 1e-12, NOT TO THE BIT, AND THAT IS ARITHMETIC RATHER
+ * THAN SLOPPINESS.** `0.07 * 0.75` is `0.052500000000000005`, so the authored value is the
+ * clean decimal `0.0525` — which is what a tuning panel must show — and `0.12/0.07` and
+ * `0.09/0.0525` differ in the last ulp (1.714285714285714 vs 1.7142857142857142).
+ * `sim.test.mjs` §38 asserts the ratios with a relative tolerance and says why.
+ *
+ * ⚠️ **AND THE CONSEQUENCE THE BLOCK BELOW PREDICTED IS REAL AND WAS PAID:**
+ * `waterbottle.Mega.castMs` is DERIVED from the slowest human's speed (`sim.test.mjs`
+ * §33(o) asserts the derivation, it is not a taste call), so 1100 -> **1400** followed
+ * automatically. It is a wind-up getting LONGER, i.e. MORE dodgeable, which is the
+ * direction `DECISIONS §80` asks for — and it is a nerf to the roster's weakest character,
+ * which is reported rather than compensated (`§77`). The five rows this block warned about
+ * were REVERSED with their old wording kept, exactly as it said they would have to be.
+ *
+ * ── 🔴 THE ORIGINAL ENTRY, UNCHANGED BELOW THIS LINE ────────────────────────
+ *
  * ── 🔴 `DECISIONS §75(b)` IS ANSWERED (0.12 -> 0.09) AND DELIBERATELY **NOT LANDED HERE** ──
  *
  * Uri answered; this constant did not move, and the reason is recorded so nobody lands it
@@ -630,18 +659,18 @@ export const ENEMY_SIZE = 42;
  * takes the gap 1.71x → 1.29x; dropping both together holds it at 1.71x. **Do not land
  * either one from a brief. Let him move the sliders.**
  */
-export const PLAYER_SPEED = tune('PLAYER_SPEED', 0.12, {
+export const PLAYER_SPEED = tune('PLAYER_SPEED', 0.09, {
   group: 'combat', unit: 'wu/ms', min: 0.01, max: 0.5,
-  doc: 'Player base movement. §75(b) is answered (0.09) and UNLANDED — see AI_CHASE_SPEED, because the PAIR is the decision and not this field alone.',
+  doc: 'Player base movement. §75(b) LANDED 2026-08-21: 0.12 -> 0.09 with AI_CHASE_SPEED and AI_FLEE_SPEED scaled by the same 0.75, so every ratio is preserved ("drop the bots as well, same rate").',
 });
-/** AI chase / flee speeds. Prototype: `0.07 * dt` and `0.085 * dt`. */
-export const AI_CHASE_SPEED = tune('AI_CHASE_SPEED', 0.07, {
+/** AI chase / flee speeds. Prototype: `0.07 * dt` and `0.085 * dt`, both x0.75 since §75(b). */
+export const AI_CHASE_SPEED = tune('AI_CHASE_SPEED', 0.0525, {
   group: 'combat', unit: 'wu/ms', min: 0.01, max: 0.5,
-  doc: 'Bot chase speed. PLAYER_SPEED / this is 1.71x today. Move only this and the game gets harder, move only the player and it gets harder too.',
+  doc: 'Bot chase speed. PLAYER_SPEED / this is 1.71x and §75(b) held it there on purpose. Move only this and the game gets harder, move only the player and it gets harder too.',
 });
-export const AI_FLEE_SPEED = tune('AI_FLEE_SPEED', 0.085, {
+export const AI_FLEE_SPEED = tune('AI_FLEE_SPEED', 0.06375, {
   group: 'combat', unit: 'wu/ms', min: 0.01, max: 0.5,
-  doc: 'Bot flee speed — deliberately ABOVE the chase speed, so disengaging is faster than closing.',
+  doc: 'Bot flee speed — deliberately ABOVE the chase speed (1.21x), so disengaging is faster than closing.',
 });
 /** AI retreats below this fraction of max HP. */
 export const AI_FLEE_HP_FRACTION = 0.28;
@@ -4544,7 +4573,23 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // measured at `33318a1`, BEFORE `16b635d` shipped this field. Two live decisions rest
       // on that stale figure. Changing `castMs` here turns 5 rows red in `sim.test.mjs`
       // (§33(l)/(n)/(o), all of which encode the disc) and that file is not this pass's.
-      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', castMs: 1100, emoji: '🌊' },
+      //
+      // ── 🚨 `castMs` 1100 -> 1400 ON 2026-08-21, AND IT WAS NOT A TUNING DECISION ──
+      //
+      // `sim.test.mjs` §33(o) asserts this field is DERIVED, not authored:
+      // `roundUp50(range / slowestHumanSpeed * 1000 + REACTION_MS)`. `DECISIONS §75(b)`
+      // landed in the same session — `PLAYER_SPEED` 0.12 -> 0.09 with the bot speeds scaled
+      // by the same 0.75 — so the slowest human went 105.6 -> **79.2 wu/s**, the escape
+      // boundary went 795.45 -> **1060.61 ms**, and the SAME rule returns **1400**. The
+      // input moved; the derived value followed. `PLAYER_SPEED`'s own block predicted this
+      // number, by name, before the speed change was authorised.
+      //
+      // ⚠️ **IT IS A NERF TO THE ROSTER'S WEAKEST CHARACTER AND IT IS REPORTED, NOT PAID
+      // BACK.** A longer wind-up is a MORE dodgeable one (`DECISIONS §80`'s own constructive
+      // finding, and the direction Uri asked for), which is right for a super and expensive
+      // for Water Bottle. `§77` withholds permission to re-tune five other characters to
+      // hide it. The price is in the commit that landed it.
+      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', castMs: 1400, emoji: '🌊' },
     ],
     abilities: [
       { emoji: '💦', name: 'Water Spray', desc: 'Sprays water that slows enemies down a lot', weapon: 'Spray' },

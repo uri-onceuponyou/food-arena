@@ -126,6 +126,11 @@ import {
   // that the reference speed is the roster's own movement cap. A literal 120 or 3500 here
   // would keep passing after `PLAYER_SPEED`, `SPEED_TOP_STAT` or the reach ladder moved.
   FLEE_REFERENCE_SPEED, projectileMaxAgeMs, AI_CHASE_SPEED,
+  // Section 38: `DECISIONS §75(b)`. `AI_FLEE_SPEED` comes in beside the other two because
+  // the section's whole claim is about the RATIOS between the three — Uri's answer was
+  // "same rate", not "0.09" — and a section holding two of three constants could not
+  // express it.
+  AI_FLEE_SPEED,
   // Section 33: the cast system. `FOG_DPS` is imported rather than written as 50 because
   // the AI's sudden-death refusal is DERIVED from it — a literal here would keep passing
   // after `FOG_DAMAGE` or `FOG_TICK_MS` moved, which is exactly the drift the constant
@@ -6537,8 +6542,29 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
     // claim about the RUNG rather than about a weapon, because that is the durable fact and
     // because a row naming a weapon goes stale the moment the weapon is fixed.
     const orphanLaw = REACH.rangedMax - (TOP_HUMAN * FLIGHT_MS.drift) / 1000 + HIT_RADIUS_VS_ENEMY;
-    check('…and on the orphaned `FLIGHT_MS.drift` rung that law is NEGATIVE at every range — inert, not weak (§50a)',
-      orphanLaw < 0, `${orphanLaw.toFixed(1)} wu at the ladder's longest reach`);
+    // ── ⚠️ REVERSED 2026-08-21: THE SIGN FLIPPED WHEN THE ROSTER SLOWED DOWN ────
+    //
+    // IT USED TO READ, and it was true of a 120 wu/s roster:
+    //
+    //   > `check('…and on the orphaned `FLIGHT_MS.drift` rung that law is NEGATIVE at every
+    //   >        range — inert, not weak (§50a)', orphanLaw < 0, …)`
+    //
+    // `DECISIONS §75(b)` took `PLAYER_SPEED` 0.12 -> 0.09, so `TOP_HUMAN` went 120 -> 90 and
+    // the same expression went **-44.0 -> +8.5 wu**. The threshold was the literal `0`, and
+    // a literal that happens to sit on the far side of a derived quantity is exactly the
+    // class this file keeps finding: it stops testing what it says the moment its input
+    // moves, and it moves for a reason that has nothing to do with the claim.
+    //
+    // THE DURABLE CLAIM is not the sign, it is that a weapon on this rung could not connect
+    // at anything resembling its own range under the OLD law — 8.5 wu of effective reach on
+    // a 140 wu weapon is inert in every sense that matters. So the threshold is now ONE BODY
+    // LENGTH, the ladder's own unit: you would have to be closer than a fighter is wide to
+    // land the game's longest-ranged weapon. That holds at both speeds and it is the
+    // statement §50a actually rests on.
+    check('…and on the orphaned `FLIGHT_MS.drift` rung that law leaves under ONE BODY LENGTH of reach — inert, not weak (§50a)',
+      orphanLaw < BODY_LENGTH,
+      `${orphanLaw.toFixed(1)} wu at the ladder's longest reach (${REACH.rangedMax}), against one body length ${BODY_LENGTH} `
+      + `— was ${(REACH.rangedMax - (120 * FLIGHT_MS.drift) / 1000 + HIT_RADIUS_VS_ENEMY).toFixed(1)} at TOP_HUMAN 120`);
   }
 
   // ── (b) THE GATE IS DELIVERABLE — the defect, stated as its own repair ────
@@ -6584,9 +6610,32 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
     check('a fleeing target is hit having been charged the SEPARATION crossed, not the path flown',
       r.dealt > 0 && r.firstHitAt !== null && Math.abs(r.firstHitAt.traveled - crossed) < 6,
       r.firstHitAt ? `charged ${r.firstHitAt.traveled.toFixed(1)} vs separation crossed ${crossed}` : 'no hit');
-    check('…and the path it flew is far longer than the budget it spent — the refund is real and large',
-      r.firstHitAt !== null && r.firstHitAt.path > r.firstHitAt.traveled * 3,
-      r.firstHitAt ? `path ${r.firstHitAt.path.toFixed(1)} vs charged ${r.firstHitAt.traveled.toFixed(1)}` : 'no hit');
+    // ── ⚠️ REVERSED 2026-08-21: THE `x3` WAS A LITERAL AND THE RATIO IS PHYSICS ─
+    //
+    // IT USED TO READ, and it was true of a 120 wu/s roster:
+    //
+    //   > `r.firstHitAt.path > r.firstHitAt.traveled * 3`   ("far longer … real and large")
+    //
+    // `DECISIONS §75(b)` took `TOP_HUMAN` 120 -> 90 and the ratio went **4.0 -> 2.25**, so
+    // the row failed while the rule it tests did not move at all. The `3` was never a claim
+    // about anything: the ratio is `v / (v − S)` — the shot's speed over its closing speed —
+    // which is 160/40 at 120 wu/s and 160/70 at 90. A magnitude threshold that is really a
+    // function of two constants has to be written as that function.
+    //
+    // Both halves are asserted, because either alone is weak: the ratio must MATCH the
+    // closed form (that is the rule), and it must be meaningfully above 1 (that is what
+    // makes the row distinguish the two retirement rules at all — under path-length
+    // retirement it is exactly 1 by definition).
+    const closingRatio = CHARACTERS.hamburger.weapons.find((w) => w.key === 'Lettuce').speed
+      / (CHARACTERS.hamburger.weapons.find((w) => w.key === 'Lettuce').speed - TOP_HUMAN);
+    check('…and the path it flew is longer than the budget it spent by exactly `v / (v − S)` — the refund is real and derived',
+      r.firstHitAt !== null && closingRatio > 1.5
+      && Math.abs(r.firstHitAt.path / r.firstHitAt.traveled - closingRatio) < 0.15 * closingRatio,
+      r.firstHitAt
+        ? `path ${r.firstHitAt.path.toFixed(1)} vs charged ${r.firstHitAt.traveled.toFixed(1)} `
+          + `= ${(r.firstHitAt.path / r.firstHitAt.traveled).toFixed(2)}x, closed form ${closingRatio.toFixed(2)}x `
+          + `(was 4.00x at TOP_HUMAN 120)`
+        : 'no hit');
 
     // THE CONTROL, and it is the one that says the fixture can tell the arms apart at all:
     // the SAME weapon at the SAME separation against a STATIONARY target is charged its
@@ -6682,9 +6731,28 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
 
     const LETTUCE = CHARACTERS.hamburger.weapons.find((w) => w.key === 'Lettuce');
     const wouldNeedMs = (LETTUCE.range / (LETTUCE.speed - boosted)) * 1000;
-    check('…and the budget alone would keep a shot chasing it for MORE THAN FOUR TIMES the cap — which is what the cap is for',
-      LETTUCE.speed > boosted && wouldNeedMs > 4 * projectileMaxAgeMs(LETTUCE),
-      `${(wouldNeedMs / 1000).toFixed(1)} s of budget against a ${(projectileMaxAgeMs(LETTUCE) / 1000).toFixed(2)} s cap`);
+    // ── ⚠️ REVERSED 2026-08-21: "FOUR TIMES" WAS A MAGNITUDE, NOT THE CLAIM ────
+    //
+    // IT USED TO READ, and it was true of a 120 wu/s roster:
+    //
+    //   > `LETTUCE.speed > boosted && wouldNeedMs > 4 * projectileMaxAgeMs(LETTUCE)`
+    //   > ("MORE THAN FOUR TIMES the cap — which is what the cap is for")
+    //
+    // The `4` was a picture of how bad it was, and it was a function of a MARGIN rather than
+    // of a rule: at `PLAYER_SPEED` 0.12 a trail-boosted Donut ran at 152.28 wu/s against a
+    // 160 wu/s shot — a closing speed of **7.72 wu/s**, hence 18.1 s of budget against a
+    // 3.5 s cap. `DECISIONS §75(b)` took the boost to 114.21 wu/s, the closing speed to
+    // **45.79**, and the ratio to 1.53. Nothing about the cap changed; the roster got
+    // slower and a divisor near zero stopped being near zero.
+    //
+    // THE CLAIM the cap actually rests on is that the BUDGET ALONE would not retire this
+    // shot inside the cap — strictly greater, and it still is. The magnitude is printed
+    // rather than asserted, which is where a picture belongs.
+    check('…and the budget alone would keep a shot chasing it PAST the cap — which is what the cap is for',
+      LETTUCE.speed > boosted && wouldNeedMs > projectileMaxAgeMs(LETTUCE),
+      `${(wouldNeedMs / 1000).toFixed(1)} s of budget against a ${(projectileMaxAgeMs(LETTUCE) / 1000).toFixed(2)} s cap `
+      + `= ${(wouldNeedMs / projectileMaxAgeMs(LETTUCE)).toFixed(2)}x (was 5.18x at PLAYER_SPEED 0.12, on a 7.72 wu/s closing speed; `
+      + `now ${(LETTUCE.speed - boosted).toFixed(2)})`);
 
     const r = press('hamburger', 'Lettuce', LETTUCE.range, boosted, 0, 20000);
     check('the shot against a trail-boosted runner dies by the CAP, with its budget still unspent',
@@ -9422,6 +9490,170 @@ console.log('\n37. `REACH.ultimateSlam` is derived from the guaranteed-visible r
       readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../ui/screens/characterSelect.ts'), 'utf8')
         .includes('if (range >= REACH.ultimateSlam) return \'Widest\';'),
       'the label reads the constant, so it follows the shrink by construction');
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 38. THE WHOLE GAME IS 25% SLOWER, AND EVERY RATIO BETWEEN THE THREE MOVEMENT
+//     CONSTANTS IS PRESERVED — `DECISIONS §75(b)`
+//
+// Uri, 2026-08-12: *"All characters are moving too fast."* Answered 2026-08-21, after the
+// one question that had blocked it for a session — whether the BOTS should move too:
+//
+//   > *"75 - drop the bots as well. same rate."*
+//
+// So `PLAYER_SPEED` 0.12 -> 0.09, `AI_CHASE_SPEED` 0.07 -> 0.0525, `AI_FLEE_SPEED`
+// 0.085 -> 0.06375: all three x0.75. **The answer is the RATIO, not the number** — dropping
+// only the player would have taken the player/bot gap 1.71x -> 1.29x, which `rules.ts`
+// records as *"a balance change wearing a feel change's clothes"*. This section asserts the
+// invariant he actually specified, and then the three derived consequences that a speed
+// change reaches and that nothing else in this file would have noticed.
+console.log('\n38. The game is 25% slower, with every speed ratio preserved (DECISIONS §75(b))');
+{
+  const SCALE = 0.75;
+  const WAS = { player: 0.12, chase: 0.07, flee: 0.085 }; // the pre-§75(b) roster, for the record
+
+  // ── (a) THE INVARIANT URI SPECIFIED: "SAME RATE" ───────────────────────────
+  //
+  // ⚠️ **TO 1e-12, NOT TO THE BIT, AND THAT IS ARITHMETIC RATHER THAN SLOPPINESS.**
+  // `0.07 * 0.75` is `0.052500000000000005`, so the authored constant is the clean decimal
+  // `0.0525` — which is what a tuning panel (§76) must show — and `0.12/0.07` therefore
+  // differs from `0.09/0.0525` in the last ulp (1.714285714285714 vs 1.7142857142857142).
+  // An exact-equality row here would go red on a float artefact and teach the next agent
+  // to delete it.
+  {
+    check('(a) the three movement constants are distinct, positive, and ordered chase < flee < player (non-vacuity)',
+      AI_CHASE_SPEED > 0 && AI_CHASE_SPEED < AI_FLEE_SPEED && AI_FLEE_SPEED < PLAYER_SPEED,
+      `player ${PLAYER_SPEED} flee ${AI_FLEE_SPEED} chase ${AI_CHASE_SPEED}`);
+    const rel = (a, b) => Math.abs(a - b) / Math.abs(b);
+    check('(a) 🔴 the player/bot gap is UNCHANGED — "drop the bots as well, same rate"',
+      rel(PLAYER_SPEED / AI_CHASE_SPEED, WAS.player / WAS.chase) < 1e-12,
+      `${(PLAYER_SPEED / AI_CHASE_SPEED).toFixed(12)} vs ${(WAS.player / WAS.chase).toFixed(12)}`);
+    check('(a) 🔴 …and so is flee/chase, so disengaging is still faster than closing by the same margin',
+      rel(AI_FLEE_SPEED / AI_CHASE_SPEED, WAS.flee / WAS.chase) < 1e-12,
+      `${(AI_FLEE_SPEED / AI_CHASE_SPEED).toFixed(12)} vs ${(WAS.flee / WAS.chase).toFixed(12)}`);
+    check('(a) 🔴 …and all three really did move, by the same factor',
+      [[PLAYER_SPEED, WAS.player], [AI_CHASE_SPEED, WAS.chase], [AI_FLEE_SPEED, WAS.flee]]
+        .every(([now, was]) => rel(now, was * SCALE) < 1e-12),
+      `x${(PLAYER_SPEED / WAS.player).toFixed(6)} / x${(AI_CHASE_SPEED / WAS.chase).toFixed(6)} / x${(AI_FLEE_SPEED / WAS.flee).toFixed(6)}`);
+  }
+
+  // ── (b) WHAT IT BOUGHT, IN THE UNITS THE COMPLAINT WAS MADE IN ────────────
+  //
+  // `rules.ts` prices the change against the REACH ladder — *"a ranged weapon whose maximum
+  // reach is closed in 1.17 s is not a ranged weapon"* — so the row asserts that closing
+  // time actually moved, derived from the ladder rather than quoting 1.56.
+  {
+    const speeds = CHARACTER_IDS.map((id) => speedFor(id, PLAYER_SPEED) * 1000);
+    const fastest = Math.max(...speeds);
+    const wasFastest = Math.max(...CHARACTER_IDS.map((id) => speedFor(id, WAS.player) * 1000));
+    check('(b) closing the ladder\'s longest reach takes measurably longer than it did',
+      REACH.rangedMax / fastest > (REACH.rangedMax / wasFastest) * 1.3,
+      `${(REACH.rangedMax / fastest).toFixed(2)}s vs ${(REACH.rangedMax / wasFastest).toFixed(2)}s at the old speed`);
+    // 🚨 THE ONE THING A SPEED CHANGE CANNOT PAY FOR: weapon `speed` did NOT move, so every
+    // projectile is now harder to dodge in exactly this proportion. Asserted rather than
+    // left in prose, because it is the cost of the change and `DECISIONS §80` is Uri's
+    // instruction that supers must be DODGEABLE.
+    const evade = HIT_RADIUS_VS_PLAYER / PLAYER_SPEED;
+    check('(b) ⚠️ the evade window GREW — a shot is harder to dodge by exactly the speed ratio, because weapon `speed` did not move',
+      approx(evade, (HIT_RADIUS_VS_PLAYER / WAS.player) / SCALE, 1e-9),
+      `${evade.toFixed(2)} ms to clear your own hit radius, was ${(HIT_RADIUS_VS_PLAYER / WAS.player).toFixed(2)} ms `
+      + `— +${(100 / SCALE - 100).toFixed(1)}% and no projectile constant moved to answer it`);
+  }
+
+  // ── (c) 🔴 THE FOG SCHEDULE IS STILL SURVIVABLE, AT EVERY SEAT COUNT ───────
+  //
+  // The ring closes on a WALL CLOCK (`FOG_CLOSE_MS`), so slowing the fighters without
+  // slowing the schedule is exactly the way this change could have broken the game — and
+  // nothing else in this file would have noticed, because every fog row is about the ring
+  // and none of them is about whether a person can keep up with it.
+  //
+  // The test is the ring's own CLOSING RATE against the SLOWEST character in the roster,
+  // read off the shipped `fogRadiusAt` rather than from a formula written here.
+  {
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const slowest = Math.min(...CHARACTER_IDS.map((id) => speedFor(id, PLAYER_SPEED) * 1000));
+    const maxR = Math.hypot(arena.width / 2, arena.height / 2);
+    const rates = [];
+    for (const n of [2, 3, 4, 5, 6]) {
+      const floor = minSafeRadiusFor(n);
+      let peak = 0;
+      for (let t = 0; t + 100 <= FOG_CLOSE_MS; t += 100) {
+        const a = fogRadiusAt(t, maxR, floor);
+        const b = fogRadiusAt(t + 100, maxR, floor);
+        peak = Math.max(peak, ((a - b) / 100) * 1000); // wu per second
+      }
+      rates.push({ n, peak });
+    }
+    check('(c) the ring really does close during the window measured (non-vacuity)',
+      rates.length === 5 && rates.every((r) => r.peak > 0),
+      rates.map((r) => `${r.n}:${r.peak.toFixed(1)}`).join(' '));
+    check('(c) 🔴 the slowest character still outruns the closing ring at every seat count — the schedule survives the slowdown',
+      rates.every((r) => r.peak < slowest),
+      `peak close ${Math.max(...rates.map((r) => r.peak)).toFixed(1)} wu/s vs the slowest fighter's ${slowest.toFixed(1)} wu/s`);
+    // …and it survives it even while SLOWED, which is the case that would actually kill you.
+    check('(c) 🔴 …and outruns it even while slowed, which is the case that would actually kill someone',
+      rates.every((r) => r.peak < slowest * SLOW_MOVE_MULTIPLIER),
+      `peak ${Math.max(...rates.map((r) => r.peak)).toFixed(1)} wu/s vs a slowed ${(slowest * SLOW_MOVE_MULTIPLIER).toFixed(1)} wu/s`);
+  }
+
+  // ── (d) ⚠️ THE STATUS LOCK DID **NOT** MOVE, AND THE BRIEF THAT ASKED SAID IT WOULD ──
+  //
+  // The concern was that *"`STUN_DURATION_MS` and `SLOW_DURATION_MS` are wall-clock too, so
+  // a 2000 ms stun now costs MORE distance"*. It costs **LESS**: distance = duration x
+  // speed, and the speed fell. And §75's lock metric — the share of a fight a target spends
+  // locked — is a pure function of DURATIONS and COOLDOWNS with no speed term in it at all,
+  // so it is invariant under this change by construction. Both directions are asserted
+  // because "unchanged" is a claim, and an unasserted one is the kind that turns out false.
+  {
+    const lockShare = (durationMs, graceMs, cooldownMs) =>
+      durationMs / (Math.ceil((durationMs + graceMs) / cooldownMs) * cooldownMs);
+    const CHEESE = CHARACTERS.pizza.weapons.find((w) => w.key === 'Cheese');
+    check('(d) the lock fixture is a real stun weapon with a real cooldown (non-vacuity)',
+      CHEESE.effect === 'stun' && CHEESE.cooldown > 0 && STUN_DURATION_MS > 0,
+      `${CHEESE.name} cd ${CHEESE.cooldown} ms, stun ${STUN_DURATION_MS} ms`);
+    // ⚠️ THIS ROW WAS WRITTEN FIRST AS `lockShare(…) === lockShare(…)`, WHICH IS `x === x`
+    // AND PASSED IMMEDIATELY. That is `CLAUDE.md` #6's *"a comment with a tick next to it"*
+    // — ask what implementation would fail it, and the answer was "none". The falsifiable
+    // form is to compare against the number `DECISIONS §75` PUBLISHED for this exact weapon
+    // (Cheese, 76.9%): it is a function of three constants, none of which is a speed, so it
+    // must still read 76.9% — and it goes red if `STUN_DURATION_MS`, `STUN_GRACE_MS` or the
+    // cooldown ever moves, which is precisely when §75's table needs re-reading.
+    check('(d) the status LOCK SHARE still reads §75\'s published 76.9% — it is durations and cooldowns, with no speed term',
+      approx(lockShare(STUN_DURATION_MS, STUN_GRACE_MS, CHEESE.cooldown), 0.769, 5e-4),
+      `${(100 * lockShare(STUN_DURATION_MS, STUN_GRACE_MS, CHEESE.cooldown)).toFixed(1)}% of a fight vs §75's 76.9%`);
+    check('(d) …and a stun now denies LESS ground, not more — distance is duration x speed',
+      STUN_DURATION_MS * PLAYER_SPEED < STUN_DURATION_MS * WAS.player,
+      `${(STUN_DURATION_MS * PLAYER_SPEED).toFixed(1)} wu denied, was ${(STUN_DURATION_MS * WAS.player).toFixed(1)} wu`);
+  }
+
+  // ── (e) THE DERIVED CONSTANTS THAT FOLLOWED, AND THE ONE THAT DID NOT MOVE ─
+  {
+    check('(e) `FLEE_REFERENCE_SPEED` followed automatically — it is `PLAYER_SPEED` in wu/s and nothing else',
+      FLEE_REFERENCE_SPEED === PLAYER_SPEED * 1000,
+      `${FLEE_REFERENCE_SPEED} wu/s, was ${WAS.player * 1000}`);
+    // 🚨 THE CAMERA DID NOT MOVE, AND THAT IS NOT LUCK. `PLAYER_SPEED` appears twice in the
+    // guaranteed-radius derivation and cancels: a slower fighter needs proportionally longer
+    // to cross its own hit radius, so the reaction distance it must be SHOWN is unchanged.
+    // §37 asserts the expression; this row asserts the INVARIANCE, which is the design fact.
+    const radiusAt = (ps) => REACH.rangedMax + HIT_RADIUS_VS_PLAYER
+      + (ps * TRAIL.speedBoost) * (HIT_RADIUS_VS_PLAYER / ps);
+    check('(e) 🔴 the guaranteed-visible radius is INVARIANT under a speed change — PLAYER_SPEED cancels out of it',
+      approx(radiusAt(PLAYER_SPEED), radiusAt(WAS.player), 1e-9)
+      && approx(GUARANTEED_VISIBLE_RADIUS, radiusAt(WAS.player), 1e-9),
+      `${GUARANTEED_VISIBLE_RADIUS} now vs ${radiusAt(WAS.player)} at the old speed`);
+    // …and the one field that DID have to follow, so the dependency is written down where
+    // the next speed change will trip over it. §33(o) asserts the derivation itself.
+    const MEGA38 = CHARACTERS.waterbottle.weapons.find((w) => w.key === 'Mega');
+    const derivedAt = (ps) => {
+      const slowest = Math.min(...CHARACTER_IDS.map((id) => speedFor(id, ps) * 1000));
+      return Math.ceil((((MEGA38.range / slowest) * 1000 + 300) / 50)) * 50;
+    };
+    check('(e) 🔴 `waterbottle.Mega.castMs` is a FUNCTION OF THE ROSTER SPEED, and it followed the change',
+      MEGA38.castMs === derivedAt(PLAYER_SPEED) && derivedAt(WAS.player) === 1100
+      && derivedAt(PLAYER_SPEED) > derivedAt(WAS.player),
+      `castMs ${MEGA38.castMs} at ${PLAYER_SPEED}, would be ${derivedAt(WAS.player)} at ${WAS.player} `
+      + '— a LONGER wind-up is a more dodgeable one (DECISIONS §80), and a nerf to the roster\'s weakest character');
   }
 }
 
