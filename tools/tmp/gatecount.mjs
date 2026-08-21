@@ -326,6 +326,12 @@ const OFFLINE = [
   { key: 'tools/tmp/kx_fogcover.mjs --selftest', probes: [pr(['tools/tmp/kx_fogcover.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/wm_gate.mjs --selftest', probes: [pr(['tools/tmp/wm_gate.mjs', '--selftest'], S)] },
   { key: 'tools/tmp/q1_sigma.mjs --selftest', probes: [pr(['tools/tmp/q1_sigma.mjs', '--selftest'], /selftest (\d+) pass \/ \d+ fail/)] },
+  // The three gates that actually protect the blind run. They were enforced by BRIEF ONLY
+  // until 2026-08-21 — an agent noticed while routing `q1_sigma` that the arm checking the
+  // instrument was registered while the arms checking the BLIND were not.
+  { key: 'tools/tmp/q1_ledger.mjs --selftest', probes: [pr(['tools/tmp/q1_ledger.mjs', '--selftest'], /selftest (\d+) pass \/ \d+ fail/)] },
+  { key: 'tools/tmp/q1_public.mjs --selftest', probes: [pr(['tools/tmp/q1_public.mjs', '--selftest'], S)] },
+  { key: 'tools/tmp/q1_verify.mjs', probes: [pr(['tools/tmp/q1_verify.mjs'], /(\d+)\/\d+ sheets vouched/)] },
   { key: 'tools/tmp/rc_prose.mjs', probes: [pr(['tools/tmp/rc_prose.mjs'], /(\d+)\/\d+ checks passed/)] },
   { key: 'tools/tmp/nk_neckgate.mjs --selftest', probes: [pr(['tools/tmp/nk_neckgate.mjs', '--selftest'], /(\d+) pass, \d+ fail/)] },
   { key: 'tools/tmp/xr_repro.mjs --selftest', probes: [pr(['tools/tmp/xr_repro.mjs', '--selftest'], /selftest (\d+) pass \/ \d+ fail/)] },
