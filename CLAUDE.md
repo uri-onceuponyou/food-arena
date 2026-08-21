@@ -354,14 +354,29 @@ desaturates; removed deliberately). ⚠️ **Do not fix anything by desaturating
 Reference plates live in `reference/images/curated/` — `gameplay_topdown/` for the arena and cast,
 `menus/` for the screens (6 plates supplied by Uri).
 
-⚠️ **"ADDING COOL CHROMA IS THE CHEAP LEVER" IS NOW STALE — the frame moved under it.** That advice
-(`docs/LESSONS.md` §8) was true when the frame was under-chromatic overall and warm-heavy in share.
-Measured **2026-08-06** on the debris pass: **warm chroma now FAILS LOW (0.053 against a 0.072
-minimum) while cool sits at 0.427 against a 0.343 target — over.** A teal-chip palette copied
-literally from `bs_01` was **rejected on `arena-scan`** for exactly this: *"copying the plate would
-have spent the one budget this frame has none of."*
-→ **Warm is the scarce budget today.** Re-read `arena-scan --baseline` before assuming either
-direction; the rails move as the arena changes, and the standing advice ages with them.
+🚨 **DO NOT TAKE A CHROMA DIRECTION FROM THIS FILE. RUN `arena-scan --baseline` AND READ IT.**
+This paragraph has now been wrong TWICE, in opposite directions, and the second time is the
+instructive one.
+
+  * `docs/LESSONS.md` §8 said *"adding cool chroma is the cheap lever"*. True once.
+  * This file then said **warm chroma FAILS LOW (0.053 vs a 0.072 minimum), cool is OVER** and
+    **"warm is the scarce budget today"** — measured 2026-08-06 on the debris pass, and it cited
+    **`DECISIONS §73`** as its source.
+  * ⚠️ **§73 IS THE SECTION THAT RETIRED IT, AND ITS TITLE SAYS SO: *"THE ARENA'S WARM PROBLEM IS
+    FIXED"*.** The old baseline was pinned 61 commits before the ×4 map, so for a day it compared
+    a 2800×2000 arena against a 1400×1000 one. Re-baselined: warm chroma **0.0596 FAIL → 0.0823
+    PASS**, cool moved *toward* target, **all 11 rails pass — the first time `--gate` fired on
+    nothing.** Floor first: four sweeps of one commit spread 0.0002, so the move is 114× the noise.
+
+**So a rule here cited a document that had already reversed it, and the citation is what made it
+look verified.** It survived because "warm is scarce" reads like hard-won knowledge — and it was,
+for about a day. Found 2026-08-21 by an agent that ran the tool instead of reading this line, after
+I had put it into every arena brief of the weekend.
+
+→ **There is no standing chroma direction. The rails move as the arena changes; the tool is the
+only source.** ⚠️ And two things that have NOT changed: **do not fix anything by desaturating**
+(falsified four times), and a teal-chip palette copied literally from a plate was **rejected on
+`arena-scan`** — copying a plate's colours is not the same as passing its rails.
 
 ---
 
