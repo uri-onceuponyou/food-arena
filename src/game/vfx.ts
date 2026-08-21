@@ -46,7 +46,7 @@ import type { Fighter, FighterId, FighterRole, MatchState, Projectile, Splat, Tr
 // The presentation-side seat rules, stated once for all four consumers of the event
 // stream — see `roster.ts` for why every resolver has a legacy-role fallback.
 import { fighterOf, fightersOf, slotOf } from './roster';
-import { SPLAT_RADIUS, TRAIL } from './rules';
+import { SPLAT_RADIUS, TRAIL, REACH } from './rules';
 // The sim's own predicate for "may this status be applied yet", exported by
 // `combat.ts` specifically so this layer can render the shrug-off window without
 // re-deriving the arithmetic (see its doc comment). Importing it rather than copying
@@ -2485,7 +2485,17 @@ export class VfxLayer {
         // The raw generic shockwave, with no arbitration — this is the attribution
         // probe for "what does this pass alone cost". `'weaponFired'` below is the
         // one that measures what actually ships.
-        this.spawnGiantSlamShockwave(xWU, yWU, qaWeapon?.color ?? color, qaWeapon?.range ?? 400);
+        // 🚨 WAS `?? 400`, AND 400 IS NO LONGER A NUMBER IN THIS GAME. `afad1ca` derived
+        // `REACH.ultimateSlam` from the camera's guaranteed-visible disc; it is 157.22 today
+        // and will move again if the camera does. A QA fire without a `weaponKey` therefore
+        // photographed a **799 px-wide shockwave against the 457 px one that ships** — every
+        // probe taking that path measured a weapon that does not exist.
+        //
+        // Derived from `REACH`, never retyped: CLAUDE.md's rule about stale coordinates
+        // applies to reaches for exactly this reason, and a fallback literal is the quietest
+        // place for one to rot — it only fires when an argument is missing, so nothing
+        // routine exercises it.
+        this.spawnGiantSlamShockwave(xWU, yWU, qaWeapon?.color ?? color, qaWeapon?.range ?? REACH.ultimateSlam);
       }
       else if (kind === 'coverScuff') {
         this.spawnCoverScuff(xWU, yWU, qaWeapon?.color ?? color, 1, 0);

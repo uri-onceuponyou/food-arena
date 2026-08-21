@@ -539,6 +539,7 @@ const SKIP = [
   ['tools/aspect.mjs',                     'browser',     'needs a snapshot URL and a GL context'],
   ['tools/tmp/sv_shot.mjs',                'browser',     'drives a real six-seat match to a local death; PREVIEW_BASE required'],
   ['tools/tmp/pl_stack.mjs',               'browser',     'segmentation census of the ground-mark stack; PREVIEW_BASE required'],
+  ['tools/tmp/gv_slam.mjs',                'browser',     'giantSlam ring vs its weapon reach; PREVIEW_BASE required'],
   // The weapon-promise pair. `--selftest` is OFFLINE above (24 arms); these two are not.
   ['tools/tmp/wm_gate.mjs --ratchet',      'non-numeric', "verdict is 'fault set unchanged' vs NEW/FIXED lines — the COUNT is in wm_ledger.json, whose sha field is the thing that must match, not an integer here"],
   ['tools/tmp/wi_guard.mjs',               'browser',     'renders 27 bespoke impacts at two pitches; PREVIEW_BASE required, ~3.5 min'],
