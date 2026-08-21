@@ -156,7 +156,11 @@ const FOIL_R = CH * 0.075;    // 0.158 m foil crinkle
 const RICE_L = CH * 0.090;    // 0.189 m grain length (~8.5 px)
 const RICE_R = CH * 0.032;    // 0.067 m grain width
 const BEAN_R = CH * 0.058;    // 0.122 m bean
-const DICE_R = CH * 0.050;    // 0.105 m cube
+// `DICE_R = CH * 0.050` (0.105 m) lived here and has been REMOVED, not retuned. Its
+// only consumer was Topping Swarm's impact, which drew every piece of a broken topping
+// at `DICE_R * 0.79` = 0.083 m — half the size of the 0.16-0.21 m dice `buildTopping`
+// visibly assembles that same pellet from. The chunks are now sized off `PELLET_S`,
+// i.e. off the pellet's own build formula, so the two cannot drift apart again.
 const STRAND_L = CH * 0.10;   // 0.210 m cheese strand
 const STRAND_R = CH * 0.022;  // 0.046 m
 
@@ -488,6 +492,77 @@ function spawnFilling(
 }
 
 /**
+ * ONE PIECE OF THE TOPPING THAT JUST HIT YOU — `buildTopping`'s own parts, broken off.
+ *
+ * `spawnFilling` is the SPILLED-FILLING vocabulary and it hardcodes a colour per kind,
+ * which is right for Disc and Roll: that is Burrito's own filling coming out of
+ * Burrito. Topping Swarm is the other direction. The thing that broke is a PELLET,
+ * `rules.ts` gives each of the four its own colour and its own form, and a hit that
+ * scatters generic white rice tells the player nothing about which of the four landed
+ * on them.
+ *
+ * 🚨 **AND THE SIZE IS THE MEASURED HALF OF THIS.** `rs_probe` decomposed this weapon's
+ * impact object by object at pitch 58 with the shared anchor suppressed:
+ *
+ *     16 objects spawned, EIGHT of which delivered exactly ZERO pixels
+ *     largest single element      57 px      whole sculpt   128 px (floor: 300)
+ *     bbox of every changed pixel 37 x 21 px, entirely inside the fighter
+ *     occlusion (depthTest off/on) 2.83x
+ *
+ * The debris was `DICE_R * 0.79` = **0.083 m** across (`DICE_R` was `CH * 0.050`, and
+ * it is gone — see the geometry block), while `buildTopping` builds each
+ * of the three dice inside the tomato pellet at `S * (1.0-1.35)` = **0.16-0.21 m** — so
+ * the pieces a topping broke into were HALF THE SIZE of the pieces it was visibly made
+ * of, thrown from a ring 0.36 m from the centre, i.e. inside the target's own body.
+ *
+ * These are the same parts at the same dimensions `buildTopping` uses, which is what
+ * "it came apart" is supposed to look like, and the caller launches them from outside
+ * the silhouette. `S` is deliberately read off the same expression rather than copied:
+ * `docs/LESSONS.md` §5's stale-copy class is already live in this file's `impactScale`.
+ */
+const PELLET_S = CH * 0.075;
+/**
+ * The chunks' own material pool, not shared with `nextFillingMat`.
+ *
+ * Topping Swarm puts FOUR pellets in the air and they can land within a frame of one
+ * another, so a volley is 4 x `SWARM_CHUNKS` chunks live at once — which on its own
+ * would wrap the 34-slot filling pool that `cast()` has just handed twelve pieces to,
+ * and two live effects animating one slot's `opacity` is the collision this file's own
+ * ribbon note records. 28 slots is exactly one full volley.
+ */
+const nextChunkMat = materialPool(28, () => fading(RICE));
+/** Chunks per pellet. Named because `nextChunkMat`'s size is derived from it. */
+const SWARM_CHUNKS = 7;
+
+function spawnToppingChunk(
+  ctx: WeaponVfxCtx, index: number,
+  ox: number, oy: number, oz: number,
+  vx: number, vy: number, vz: number,
+  scale: number, life: number,
+): void {
+  const c = ctx.color;
+  const S = PELLET_S * scale;
+  if (index === 0) {
+    // A torn herb blade — `buildTopping`'s `blade.scale.set(S*0.5, S*2.6, S*0.22)`.
+    spawnDebris(ctx, bladeGeo, nextChunkMat(), c, ox, oy, oz, vx, vy, vz,
+      S * 0.5, S * 2.6, S * 0.22, life, -7.2);
+  } else if (index === 1) {
+    // One dice off the pico clump — `S * (1.0 + rnd * 0.35)`, its own build formula.
+    const r = S * (1.0 + Math.random() * 0.35);
+    spawnDebris(ctx, diceGeo, nextChunkMat(), c, ox, oy, oz, vx, vy, vz, r, r, r, life);
+  } else if (index === 2) {
+    // One shred off the cheese bundle — `strand.scale.set(S*2.5, STRAND_R*1.2, ...)`,
+    // thickened because a single free strand has no bundle behind it to read against.
+    spawnDebris(ctx, strandGeo, nextChunkMat(), c, ox, oy, oz, vx, vy, vz,
+      S * 2.5, STRAND_R * 2.2, STRAND_R * 2.2, life, -6.5);
+  } else {
+    // One grain off the rice clump — `grain.scale.set(RICE_R*1.15, RICE_L*1.15, ...)`.
+    spawnDebris(ctx, riceGeo, nextChunkMat(), c, ox, oy, oz, vx, vy, vz,
+      RICE_R * 1.15 * scale, RICE_L * 1.15 * scale, RICE_R * 1.15 * scale, life, -7.5);
+  }
+}
+
+/**
  * THE FOIL POP — Burrito's "an event happened here" beat.
  *
  * Eight hard crinkles thrown outward from a CONTACT RING and gone in 0.14 s. Fully
@@ -500,6 +575,17 @@ function spawnFilling(
  * from the hit — already past Hamburger's 0.6 m-radius bun — and travels to 0.92 m,
  * so it can be this loud without ever covering the head and torso the player is
  * reading the fight off.
+ *
+ * 🚨 **THE PARAGRAPH ABOVE IS A CLAIM ABOUT `scale = 1` AND `scale` MULTIPLIES BOTH
+ * RADII.** It is kept word for word because the way it went wrong is the useful part:
+ * it reads as a property of the effect, and it is a property of ONE CALL. `r0` is
+ * `CH * 0.26 * scale`, so the only caller that ever passed less than 1 — Topping
+ * Swarm, at `impactScale(4) * 0.8 * 0.7` = **0.554** — was drawing its contact ring at
+ * **0.30 m to 0.51 m**, i.e. entirely inside the bun this comment says it clears.
+ * `rs_probe` caught it from the other end: eight of that hook's sixteen objects
+ * delivered exactly ZERO pixels. **A radius that must clear a body cannot be scaled by
+ * a damage curve.** Callers that want a smaller pop should scale the CRINKLES and
+ * leave the ring alone; `scale` still does both, so pass 1 unless you have measured it.
  */
 function spawnFoilPop(ctx: WeaponVfxCtx, scale: number): void {
   const { x, y, z } = ctx.position;
@@ -1302,42 +1388,71 @@ export const burritoWeaponVfx: CharacterWeaponVfxMap = {
         });
       }
     },
-    // 5 damage from one of four pellets — deliberately the smallest hit in the file.
-    // It still carries the tortilla and foil signature so it reads as Burrito's.
+    /**
+     * THE TOPPING COMES APART. 4 damage from one of four pellets — still the smallest
+     * hit in the file, and it still carries the tortilla and foil signature so it
+     * reads as Burrito's.
+     *
+     * ⚠️ **THE OLD COMMENT IS KEPT AND IT WAS WRONG TWICE:**
+     *
+     * > *"5 damage from one of four pellets — deliberately the smallest hit in the
+     * > file. It still carries the tortilla and foil signature so it reads as
+     * > Burrito's."*
+     *
+     * The damage is **4** (`rules.ts` nerfed it and the comment did not follow), and
+     * "the smallest hit in the file" had stopped being a design choice and become a
+     * defect: `wi_guard` arm E measures the hand-authored sculpt with the shared anchor
+     * suppressed, and this one delivered **128 px at pitch 58 against a 300 px floor** —
+     * the worst row on the roster, and one whose composite was 78% shared anchor. It
+     * did not read as Burrito's, because it barely read at all.
+     *
+     * `rs_probe` found the cause before any of this was redrawn, and it was NOT scale:
+     *
+     *     16 objects spawned, EIGHT delivering exactly 0 px
+     *     bbox of every changed pixel   37 x 21 px — entirely inside the fighter
+     *     occlusion (depthTest off/on)  2.83x at pitch 58, 2.18x at pitch 20
+     *     control: `burrito.Roll`       1.35x, same file, same helpers, 1428 px
+     *
+     * Everything launched from `CH * 0.22 * s` = **0.36 m**, and the foil pop's ring
+     * from 0.30 m — both inside a fighter whose widest part is a ~0.6 m-radius head.
+     * This is `discImpact`'s own recorded bug ("debris launched from dead centre spends
+     * over half its life inside a silhouette that a pitched top-down camera hides
+     * completely"), which that hook fixed with a contact ring at `CH * 0.26` and this
+     * one never got.
+     *
+     * So: launch from OUTSIDE the body, at the size of the thing that broke.
+     */
     impact(ctx) {
       const s = impactScale(ctx.damage) * 0.8;
       const { x, y, z } = ctx.position;
       const d = ctx.direction;
-      spawnFoilPop(ctx, s * 0.7);
-      const R0 = CH * 0.22 * s;
-      for (let i = 0; i < 5; i++) {
-        const a = (i / 5) * TWO_PI + Math.random() * 0.8;
-        const out = (2.1 + Math.random() * 1.2) * s;
-        const mat = nextFillingMat();
-        mat.color.set(ctx.color);
-        mat.opacity = 1;
-        const bit = new THREE.Mesh(diceGeo, mat);
-        bit.renderOrder = 9;
-        const ox = x + Math.cos(a) * R0, oz = z + Math.sin(a) * R0;
-        const vx = Math.cos(a) * out + d.x * 0.6;
-        const vz = Math.sin(a) * out + d.z * 0.6;
-        const vy = 1.6 + Math.random() * 1.1;
-        const r = DICE_R * s;
-        bit.scale.setScalar(r);
-        bit.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-        ctx.spawnTransient(bit, 0.36, (t, e) => {
-          const yy = y + vy * e - 4.5 * e * e;
-          bit.position.set(ox + vx * e, Math.max(GROUND_Y, yy), oz + vz * e);
-          mat.opacity = 1 - Math.pow(t, 2.2);
-        });
+      // 1, not `s * 0.7`. The ring has to clear a body, and a body does not shrink
+      // when the damage does — see `spawnFoilPop`'s header for the whole argument.
+      spawnFoilPop(ctx, 1);
+      // `discImpact`'s contact ring, which is the one in this file that was measured
+      // against a fighter's actual width. 0.588 m — past Hamburger's bun.
+      const R0 = CH * 0.28;
+      const kind = toppingIndex(ctx);
+      for (let i = 0; i < SWARM_CHUNKS; i++) {
+        const a = (i / SWARM_CHUNKS) * TWO_PI + Math.random() * 0.8;
+        const out = (2.6 + Math.random() * 1.5) * s;
+        spawnToppingChunk(
+          ctx, kind,
+          x + Math.cos(a) * R0, y, z + Math.sin(a) * R0,
+          Math.cos(a) * out + d.x * 0.7, 1.8 + Math.random() * 1.2, Math.sin(a) * out + d.z * 0.7,
+          1.15, 0.44 + Math.random() * 0.1,
+        );
       }
-      for (let i = 0; i < 3; i++) {
-        const a = Math.random() * TWO_PI;
-        const out = (2.2 + Math.random() * 1.3) * s;
+      // The wrap it was squeezed out of, torn. Four rather than three, and at the size
+      // `discImpact` throws them (`0.9 + rnd * 0.5`) rather than at 0.7 * s = 0.55 —
+      // this hook was the only caller shrinking them below every other hit in the file.
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * TWO_PI + Math.random() * 0.9;
+        const out = (2.5 + Math.random() * 1.5) * s;
         spawnFlake(
           ctx, x + Math.cos(a) * R0, y, z + Math.sin(a) * R0,
-          Math.cos(a) * out + d.x * 0.5, 1.5 + Math.random() * 1.2, Math.sin(a) * out + d.z * 0.5,
-          0.7 * s, 0.34,
+          Math.cos(a) * out + d.x * 0.5, 1.6 + Math.random() * 1.2, Math.sin(a) * out + d.z * 0.5,
+          1.0 + Math.random() * 0.4, 0.38,
         );
       }
     },

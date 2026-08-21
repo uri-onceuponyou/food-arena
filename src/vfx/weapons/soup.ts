@@ -349,6 +349,24 @@ dropGeo.scale(0.78, 0.78, 1.4);
 /** Unrotated round blob, for things whose long axis is NOT travel (the impact
  * compression column, splash crowns). */
 const blobGeo = new THREE.SphereGeometry(1, 10, 8);
+/**
+ * THE SPREAD SHEET — the thin skirt of liquid a splash throws outward before it
+ * breaks into the droplets this file already draws.
+ *
+ * An OPEN cone, wide at the top and narrow at the base, so it flares away from the
+ * point of contact. `open-ended` matters twice: it has no caps to read as a solid
+ * dome, and `flatLiquid` is `DoubleSide`, so the far wall of the skirt is drawn too
+ * and the ring reads as a ring rather than as a crescent.
+ *
+ * ⚠️ It is a SHEET and not another ground mark on purpose. `rs_probe` measured this
+ * weapon's whole sculpt at pitch 58 with the anchor suppressed and found an occlusion
+ * ratio of **3.01x**: two thirds of it was drawn behind the fighter, because the spill
+ * mark is laid on the floor at the target's own `x,z` and a 58° camera puts the body
+ * squarely on top of it. Adding ground area does not fix that. A vertical skirt whose
+ * outer edge sits at ~0.7 m clears the silhouette at BOTH cameras, which is the
+ * geometric fix CLAUDE.md #3 asks for rather than an appearance fix at one pitch.
+ */
+const sheetGeo = new THREE.CylinderGeometry(1, 0.34, 1, 24, 1, true);
 
 /**
  * Steam puff. This was a 7-sided open `ConeGeometry`, and rendering it settled the
@@ -425,6 +443,24 @@ const nextCoreMat = materialPool(10, () => flatLiquid(BROTH_HOT, 0.9));
 const nextBrothMat = materialPool(28, () => flatLiquid(BROTH_BODY, 0.95));
 const nextHotMat = materialPool(14, () => flatLiquid(BROTH_HOT, 0.95));
 const nextNoodleMat = materialPool(16, () => flatLiquid(NOODLE_PALE, 1));
+/**
+ * The spread sheet's own pool, deliberately not shared with `nextRimMat`.
+ *
+ * A sheet owns its slot for its whole 0.24 s while animating its own `opacity` every
+ * frame, and so does a spill-mark rim for 0.42 s. Splash puts THREE of each on screen
+ * within a few frames of one another; sharing a ten-slot pool between two live
+ * animators of the same slot is the collision this file's own `spawnDroplet` note
+ * records, arriving from the other direction. Six slots covers the worst case (three
+ * pellets, plus one still fading from the volley before).
+ *
+ * It is `BROTH_DEEP` rather than `BROTH_HOT`, and that is the LEGIBILITY half.
+ * `209e270` measured delivered area's rank correlation with legibility at 0.230 and
+ * the weapon's own LIGHTNESS at **−0.738** — lighter reads worse — and `soup.Splash`
+ * is already the 3rd-hardest of 23 weapons to see against the arena's cream
+ * concealment cloth. Paying for this weapon's floor in hot gold would have bought the
+ * pixels with the one budget it has none of.
+ */
+const nextSheetMat = materialPool(6, () => flatLiquid(BROTH_DEEP, 0.85));
 /**
  * PROJECTILE BODIES get their own pools, and nothing ever animates their opacity.
  *
@@ -630,6 +666,44 @@ function spawnSpillMark(ctx: WeaponVfxCtx, x: number, z: number, radius: number,
 }
 
 /**
+ * THE SPREAD, DRAWN. This file's header says what Soup is — *"SPREADING on impact:
+ * the mass does not fly apart into debris, it hits the surface and spreads"* — and
+ * until now the only thing that spread was a decal lying flat on the floor. The
+ * droplets were drawn with nothing for them to have come OFF.
+ *
+ * A skirt of broth flung outward from the point of contact: it opens fast for the
+ * first half of its life, then collapses toward the floor and thins away rather than
+ * shrinking, which is `spawnSpillMark`'s rule ("liquid soaks in and evaporates, it
+ * does not retract") applied to a vertical surface instead of a horizontal one.
+ *
+ * Short — 0.24 s at the caller — because three of these land nearly together and the
+ * character underneath has to stay readable.
+ */
+function spawnSpreadSheet(ctx: WeaponVfxCtx, x: number, z: number, radius: number, life: number): void {
+  const mesh = new THREE.Mesh(sheetGeo, nextSheetMat());
+  const mat = mesh.material as THREE.MeshBasicMaterial;
+  // SET, never READ — the previous user of this slot faded it to ~0 and left it there.
+  mat.color.set(BROTH_DEEP);
+  mat.opacity = 0.85;
+  mesh.rotation.y = Math.random() * Math.PI * 2;   // flat cone: yaw only, never a tip
+  mesh.renderOrder = 8;                            // over the spill mark, under the flash
+  const h0 = radius * 0.78;
+  // Laid out once at t = 0 before the layer sees it: `spawnTransient`'s `onUpdate`
+  // does not run until the NEXT `updateEffects` tick, so anything left at its default
+  // 1x1x1 scale draws a one-frame metre-wide cone at the point of contact.
+  const drive = (t: number): void => {
+    const e = t < 0.5 ? 1 - Math.pow(1 - t / 0.5, 2.4) : 1;
+    const r = radius * THREE.MathUtils.lerp(0.24, 1, e);
+    const h = h0 * THREE.MathUtils.lerp(1, 0.18, e);
+    mesh.position.set(x, SPLAT_Y + h * 0.5, z);
+    mesh.scale.set(r, h, r);
+    mat.opacity = 0.85 * (1 - Math.pow(t, 1.6));
+  };
+  drive(0);
+  ctx.spawnTransient(mesh, life, drive);
+}
+
+/**
  * The instant of contact: a small additive hot flash. Kept deliberately smaller than
  * the spill mark it sits on — the mass of this effect belongs on the GROUND, and an
  * airborne bloom over the target is exactly what made the old generic burst swallow
@@ -780,32 +854,87 @@ const Splash = {
     }
   },
 
-  /** Three of these land nearly together (3-pellet spread), so this is the SMALLEST
-   * effect in the file by a wide margin — mark, a short crown of droplets, one wisp.
-   * Three overlapping copies still have to leave the character readable. */
+  /**
+   * Three of these land nearly together (3-pellet spread), so this is still the
+   * smallest effect in the file — and three overlapping copies still have to leave the
+   * character readable, which is why the sheet is 0.24 s and the mark radius has not
+   * moved.
+   *
+   * ⚠️ **THE OLD WORDING IS KEPT BECAUSE IT NAMED THE PARTS AND NOT THE PROBLEM:**
+   *
+   * > *"the SMALLEST effect in the file by a wide margin — mark, a short crown of
+   * > droplets, one wisp."*
+   *
+   * True, and it was ALSO the smallest thing on screen: `wi_guard` arm E measures the
+   * hand-authored sculpt with the shared anchor suppressed and this weapon delivered
+   * **277 px against a 300 px floor**, one of only two RESCUE rows on the roster — a
+   * hit the shared anchor was carrying rather than one that read as Soup.
+   *
+   * `rs_probe` decomposed it object by object before anything here was redrawn, and
+   * the cause was not size, it was PLACEMENT:
+   *
+   *     occlusion (depthTest off / on)    3.01x at pitch 58, 1.82x at pitch 20
+   *     biggest single element            the spill mark rim, 169 px of 327
+   *     bbox of every changed pixel       57 x 57 px, entirely inside the fighter
+   *
+   * Two thirds of the effect was drawn BEHIND the target: the mark is laid on the
+   * floor at the target's own `x,z`, and from 58° the body sits on top of it. So the
+   * three changes below are all the same change — put the liquid where the camera can
+   * see it:
+   *
+   *   1. the mark is PUSHED PAST the target along the shot line, which is also what a
+   *      thrown gout actually does — it carries its momentum through and lands beyond,
+   *      instead of appearing centred under the thing it hit;
+   *   2. a SPREAD SHEET, vertical, whose outer edge clears the silhouette (see
+   *      `spawnSpreadSheet` — it is also the element the droplets were missing);
+   *   3. the droplets leave from a wider ring and carry the shot's momentum, so they
+   *      clear the body instead of arcing up inside it.
+   *
+   * Nothing here got brighter: the sheet is `BROTH_DEEP`. Area is not legibility
+   * (`209e270`: rank correlation 0.230, against −0.738 for lightness) and this weapon
+   * is already 3rd-hardest of 23 to see against the cream cloth.
+   */
   impact(ctx: WeaponVfxCtx): void {
     const { x, z } = ctx.position;
+    const d = ctx.direction;
+    // `ctx.direction` is attacker -> hit, and it is zero-length for anything that
+    // reaches this hook without a source (`vfx/weapons/types.ts`). Falling back to a
+    // fixed axis keeps the offsets below finite rather than collapsing them onto the
+    // target, which would silently restore the defect this hook was rewritten for.
+    let dx = d.x, dz = d.z;
+    const dl = Math.hypot(dx, dz);
+    if (dl < 1e-4) { dx = 1; dz = 0; } else { dx /= dl; dz /= dl; }
 
     spawnContactFlash(ctx, x, ctx.position.y * 0.55, z, CH * 0.19);
-    spawnSpillMark(ctx, x, z, SPLASH_MARK_RADIUS, 0.38);
+
+    // PAST the target, not on it. 0.85 of the mark's own radius is the smallest push
+    // that puts the mark's centre outside a fighter's footprint while its near edge
+    // still touches the point of contact, so the hit still reads as having happened
+    // HERE rather than as an unrelated puddle a metre away.
+    const push = SPLASH_MARK_RADIUS * 0.85;
+    spawnSpillMark(ctx, x + dx * push, z + dz * push, SPLASH_MARK_RADIUS, 0.42);
+
+    spawnSpreadSheet(ctx, x + dx * push * 0.45, z + dz * push * 0.45, SPLASH_MARK_RADIUS * 1.15, 0.24);
 
     // The crown: droplets thrown up and outward from the contact ring, not radial
     // debris — a liquid hitting a surface throws a ring of small drops UP first and
-    // outward second, the opposite emphasis from flying shards.
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2 + Math.random() * 0.6;
-      const out = 1.5 + Math.random() * 1.4;
+    // outward second, the opposite emphasis from flying shards. They now leave from
+    // the sheet's own rim rather than from dead centre, and carry a share of the
+    // shot's momentum, which is what takes them clear of the silhouette.
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2 + Math.random() * 0.6;
+      const out = 1.7 + Math.random() * 1.5;
       spawnDroplet(
         ctx,
-        x + Math.cos(a) * SPLASH_MARK_RADIUS * 0.3, ctx.position.y * 0.5, z + Math.sin(a) * SPLASH_MARK_RADIUS * 0.3,
-        Math.cos(a) * out, 2.1 + Math.random() * 1.2, Math.sin(a) * out,
-        DROP_RADIUS * (0.7 + Math.random() * 0.5),
-        0.34 + Math.random() * 0.12,
+        x + Math.cos(a) * SPLASH_MARK_RADIUS * 0.55, ctx.position.y * 0.5, z + Math.sin(a) * SPLASH_MARK_RADIUS * 0.55,
+        Math.cos(a) * out + dx * 0.9, 2.1 + Math.random() * 1.2, Math.sin(a) * out + dz * 0.9,
+        DROP_RADIUS * (1 + Math.random() * 0.7),
+        0.36 + Math.random() * 0.12,
         i % 3 === 0,
       );
     }
 
-    spawnSteam(ctx, x, SPLAT_Y + CH * 0.05, z, CH * 0.14, CH * 0.3, 0.5);
+    spawnSteam(ctx, x + dx * push * 0.6, SPLAT_Y + CH * 0.05, z + dz * push * 0.6, CH * 0.14, CH * 0.3, 0.5);
   },
 
   /** A forward SLOSH out of the bowl, not a muzzle flash: the broth's leading lip
