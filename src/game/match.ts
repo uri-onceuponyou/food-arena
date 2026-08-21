@@ -43,7 +43,11 @@ import {
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 // The shake falloff lives in `render/camera.ts` because both radii it needs are the
 // camera's own: what every display is GUARANTEED to show, and what the widest one CAN.
-import { shakeProximityScale } from '../render/camera';
+// `resolveViewSubject` is the spectator camera's whole policy and it lives beside
+// `shakeProximityScale` for the same reason that one does: `camera.ts` is importable from
+// a `.mjs` tool and this file never will be (it imports `ui/hud.ts`). A camera rule whose
+// failure mode only appears at six seats has to be drivable without a GPU.
+import { resolveViewSubject, shakeProximityScale, type ViewSubjectReason } from '../render/camera';
 import { InputController } from './input';
 import { createPointerLock, type PointerLockController } from './pointerLock';
 import { VfxLayer } from './vfx';
@@ -266,6 +270,22 @@ export interface MatchDebug {
   qaSpawnInsideCover: string | null;
   /** Frames the loop has run. Lets a probe prove the loop is alive while paused. */
   frames: number;
+  /**
+   * WHICH SLOT THE CAMERA IS WATCHING. `LOCAL_SLOT` for every frame a living player ever
+   * sees; a spectated seat after the local one dies. Published because "the camera moved
+   * off the corpse" is otherwise only answerable from pixels, and a pixel answer cannot
+   * tell a hand-off apart from a fighter who happened to walk into frame.
+   */
+  viewSubject: number;
+  /**
+   * WHICH RUNG OF `camera.ts:resolveViewSubject` PRODUCED IT, plus `'dwell'` for the hold
+   * after a death, which is this file's and not that function's.
+   *
+   * ⚠️ A probe that only checks `viewSubject` cannot tell a correct killer hand-off from a
+   * lucky nearest-living one — at six seats they frequently name the same slot. This is
+   * what makes the difference assertable.
+   */
+  viewReason: ViewSubjectReason | 'dwell';
 }
 
 /**
@@ -554,6 +574,60 @@ export class GameSession {
   private readonly eliminated: number[] = [];
 
   /**
+   * WHO LANDED THE KILLING BLOW ON EACH SLOT — `killedBy[victim] = killerSlot | null`.
+   *
+   * Null means "nobody": fog, a hazard, or a trail mark whose owner cannot be resolved.
+   * Those are not edge cases here, they are the common ending — `SUDDEN_DEATH_RADIUS` is
+   * 0, so the ring is what kills the last survivors of a match nobody closes out.
+   *
+   * ⚠️ **BUILT FROM THE `hit-landed` THAT PRECEDES THE `death`, NOT FROM THE `death`
+   * EVENT, WHICH CARRIES NO ATTACKER.** `state.ts:1121` is
+   * `{ type: 'death'; fighterRole; fighterId }` and nothing else. `combat.ts:applyDamage`
+   * always pushes `hit-landed` immediately before `death` in the same batch, which is the
+   * same guarantee `lastHitColor` in `handleEvents` already leans on one line away — so
+   * this is a second reader of an invariant that is already load-bearing, not a new one.
+   *
+   * Indexed by SLOT and sparse: a fighter who has not died has no entry, and
+   * `resolveViewSubject` reads a missing entry as null by contract.
+   */
+  private readonly killedBy: (number | null)[] = [];
+
+  /**
+   * WHICH SLOT THE CAMERA IS WATCHING. `LOCAL_SLOT` for every frame of every match a
+   * living player has ever seen — see `camera.ts:resolveViewSubject` rung 1, which forces
+   * exactly that while the local seat is alive.
+   */
+  private viewSubject: number = LOCAL_SLOT;
+
+  /**
+   * HOW LONG THE CAMERA STAYS ON A SUBJECT THAT HAS JUST DIED, IN MILLISECONDS.
+   *
+   * Counted down in `updateViewSubject`, armed in `handleEvents`' `death` case whenever
+   * the fighter who died IS the current subject — which, while you are alive, can only be
+   * you. Without it the hand-off fires on the same frame as the killing blow and you never
+   * see your own death: the burst, the 90 ms of hit-stop and the death animation all play
+   * to an empty seat while the camera is already somewhere else.
+   */
+  private spectateDwellMs = 0;
+
+  /**
+   * THE DWELL, AND WHERE ITS NUMBER COMES FROM.
+   *
+   * `vfx.ts:spawnDeathBurst` is `this.burst(origin, color, 2.6, 9, { life: 1.35 })` — the
+   * biggest non-ultimate moment in a match, by its own comment. The camera holds your
+   * death for exactly as long as the effect that describes it, so the beat is not cut in
+   * half by the hand-off.
+   *
+   * ⚠️ **THIS IS A COPY OF THAT 1.35 AND THERE IS NOTHING TO IMPORT.** `life` is an
+   * inline argument inside `vfx.ts`, not an exported constant, and `vfx.ts` is not this
+   * owner's file. Naming its source here is the whole mitigation: if the burst's lifetime
+   * moves, this is stale, and the comment says where to look. `sv_subject.mjs` arm F
+   * asserts the two agree by reading the literal out of `vfx.ts`, so it goes red rather
+   * than quietly drifting.
+   */
+  private static readonly SPECTATE_DWELL_MS = 1350;
+
+  /**
    * THIS MATCH'S FINISHING ORDER, COMPUTED ONCE ON THE `'ended'` TRANSITION.
    *
    * ⚠️ **CACHED RATHER THAN RECOMPUTED PER FRAME, AND THAT IS CORRECTNESS BEFORE IT IS
@@ -678,6 +752,7 @@ export class GameSession {
     phase: 'countdown', winner: null, paused: false,
     moveX: 0, moveY: 0, attack: false, facingX: 0, facingY: 0, selectedWeapon: 0,
     pointerLocked: false, qaSpawnInsideCover: null, frames: 0,
+    viewSubject: LOCAL_SLOT, viewReason: 'local',
   };
 
   /** QA mirror of the event → feel edge. Allocated once; see `FeelDebug`. */
@@ -852,7 +927,11 @@ export class GameSession {
     // two cursors, one of them a ghost that no longer tracks the mouse.
     this.hud.update(this.state, {
       selectedWeapon: this.input.selectedWeapon,
-      safeArrow: this.safeArrow(),
+      // ⚠️ `hudSafeArrow()`, not `safeArrow()` — `hudResult`'s header says why in full:
+      // there are TWO `hud.update` call sites and a per-frame field spelled differently at
+      // each is a paused frame that can disagree with a running one. A dead player's
+      // chevron was exactly that shape waiting to happen.
+      safeArrow: this.hudSafeArrow(),
       aim: null,
       ...this.hudResult(),
     });
@@ -951,6 +1030,13 @@ export class GameSession {
     // Same class of bug as the line above, and a more expensive one: last match's knockout
     // order would rank this match's finishers, and it would pay them.
     this.eliminated.length = 0;
+    // Same reason again, one rung further: a stale `killedBy` would hand the spectator
+    // camera to LAST match's killer, and a stale `viewSubject` would open this match
+    // watching whoever won the previous one. Reset beside every other per-match
+    // accumulator so there is one place to look.
+    this.killedBy.length = 0;
+    this.viewSubject = LOCAL_SLOT;
+    this.spectateDwellMs = 0;
     this.hitStopBudgetMs = 0;
     this.hitStopBankedMs = 0;
     for (const k of Object.keys(this.feel.events)) this.feel.events[k] = 0;
@@ -1203,6 +1289,36 @@ export class GameSession {
     model.root.rotation.y = Math.atan2(fighter.facing.x, fighter.facing.y);
   }
 
+  /**
+   * WHICH SLOT IS RESPONSIBLE FOR A HIT — or `undefined` when nothing is.
+   *
+   * The other half of the question `colorForDamageSource` asks one method below, and
+   * deliberately a sibling of it rather than a second return value from it: the colour is
+   * needed for every hit and the attribution only for the hit that kills, and folding them
+   * together would make `spawnImpactBurst`'s call site pay for the lookup 60 times a
+   * second.
+   *
+   * ⚠️ **`undefined` IS A REAL ANSWER, NOT A FAILURE.** Fog and hazard are `DamageSource`s
+   * with no attacker BY TYPE — there is no seat that "did" a closing ring — and
+   * `resolveViewSubject` is built to fall through to its nearest-living rung on exactly
+   * this. Returning a plausible slot here (the nearest fighter, slot 0, the victim's last
+   * attacker) is how a spectator camera would end up blaming a bystander for the ring.
+   *
+   * ⚠️ **THE INDEX COMES FROM `indexOf`, NOT FROM `f.id`.** `outcome()` twenty lines up
+   * gives the reason in full: `fighters[i].id === i` is a sim invariant, but `fightersOf`'s
+   * two-seat fallback can be handed a pair an instrument built, where the object's position
+   * in the roster is the authority and `id` may not exist at all. Identity comparison is
+   * correct for both.
+   */
+  private attackerSlotOf(source: DamageSource, targetRole: FighterRole): number | undefined {
+    let attacker: Fighter | null = null;
+    if (source.kind === 'weapon') attacker = weaponAttackerOf(this.state, source, targetRole);
+    else if (source.kind === 'trail') attacker = trailOwnerOf(this.state, source);
+    if (!attacker) return undefined;
+    const slot = fightersOf(this.state).indexOf(attacker);
+    return slot >= 0 ? slot : undefined;
+  }
+
   /** Resolve a tint for a damage-source, so every hit's VFX matches what caused it —
    * a weapon's own colour (rules.ts), or a fixed tint for the three ambient sources
    * that have no weapon of their own. */
@@ -1294,8 +1410,126 @@ export class GameSession {
   private shakeProximity(xWU: number, yWU: number): number {
     // Derived from pitch / fov / fair radius, none of which move during a session.
     if (this.shakeFadeUnits < 0) this.shakeFadeUnits = this.stage.rig.shakeFadeRadiusUnits();
-    const me = localFighter(this.state);
+    // ⚠️ WAS `localFighter(this.state)`, AND THE OLD WORDING IS THE PARAGRAPH ABOVE:
+    // *"The centre is the LOCAL SEAT'S SIM POSITION, not `CameraRig`'s follow target."*
+    // That rule is unchanged in substance and its reasoning still holds to the letter —
+    // the sim position is still the one that puts a hit on YOU at exactly 0, and it is
+    // still not the follow target. What moved is WHOSE sim position, and only for a
+    // player who no longer has one that means anything: once you are dead the camera is
+    // somewhere else entirely (`updateViewSubject`), so centring the falloff on your
+    // corpse would attenuate every kick by the distance from the frame to a body nobody
+    // is looking at — full-strength shake for explosions off screen and none for the
+    // firefight filling it, which is the exact complaint (*"the screen shakes a lot"*)
+    // that `shakeProximityScale` exists to answer, inverted.
+    //
+    // ⚠️ **AND IT IS BYTE-IDENTICAL WHILE YOU ARE ALIVE, BY CONSTRUCTION, NOT BY A
+    // TOLERANCE.** `resolveViewSubject` rung 1 can only return `localSlot` while that seat
+    // is alive, so `viewObserver()` and `localFighter()` are the same object for every
+    // frame `tools/tmp/sh_dist.mjs` has ever scored, at two seats and at six.
+    const me = this.viewObserver();
     return shakeProximityScale(Math.hypot(xWU - me.x, yWU - me.y), this.shakeFadeUnits);
+  }
+
+  /**
+   * THE FIGHTER THE CAMERA IS WATCHING — the local seat while it lives, a spectated one
+   * after it dies. See `camera.ts:resolveViewSubject` for the ladder.
+   *
+   * Falls back to `localFighter` for an out-of-range subject rather than throwing. That
+   * is reachable in one real way: `viewSubject` survives into the next `spawnMatch` for
+   * one call ordering or another, and a six-seat match followed by a two-seat one would
+   * index past the roster. `spawnMatch` resets it, so this is belt and braces — but the
+   * failure it prevents is a black screen, and the cost is a branch.
+   */
+  private viewObserver(): Fighter {
+    return fightersOf(this.state)[this.viewSubject] ?? localFighter(this.state);
+  }
+
+  /**
+   * POINT THE CAMERA AT SOMEBODY WORTH WATCHING.
+   *
+   * 🚨 THE DEFECT: `7a32f3d` stopped a corpse from moving and firing, and in doing so
+   * froze its position for the rest of the match — while this file followed
+   * `groundPos(observer.x, observer.y)` with `observer` hard-wired to the local seat. So
+   * dying pinned the camera to your own body for up to `MATCH_DURATION_MS` = 150 s.
+   * `sim.ts` recorded it at the site of its own fix and routed it here.
+   *
+   * ── WHY THE POLICY IS NOT IN THIS METHOD ─────────────────────────────────────
+   *
+   * Everything decidable from values is in `camera.ts:resolveViewSubject`, which is pure
+   * and Node-importable; this method is the part that cannot be — the clock, the rig, and
+   * the mutation. That split is the only reason a six-seat elimination ladder can be
+   * driven end to end without a GPU, and six seats is where every one of these rules stops
+   * being the same statement (see that function's header, and arm C of
+   * `tools/tmp/sv_subject.mjs`).
+   *
+   * ── THE THREE THINGS THIS ADDS TO THE PURE RULE ──────────────────────────────
+   *
+   * **1. The dwell.** `SPECTATE_DWELL_MS` of holding on a subject that has just died, so
+   * the death you were watching finishes playing before the hand-off.
+   *
+   * **2. The cut.** A subject change beyond `cutBeyondUnits` is a `snapTo`, not a
+   * `follow`. `followLerp` is 0.12 per 60 fps frame, so a glide covers ~98% of any
+   * distance in half a second — across 2 000 world units that is a whip pan over bare
+   * floor with nothing legible in it, and film language has had the answer to that since
+   * before real-time cameras existed: cut. Inside the radius the glide is kept, because
+   * there continuity is worth something. The threshold is the rig's own
+   * `shakeFadeRadiusUnits()` — the farthest ground point ANY supported display can show —
+   * so it is derived from the frame rather than tuned by eye, and it moves if pitch, fov
+   * or the fair radius ever move.
+   *
+   * **3. Nothing else.** In particular it does NOT touch `this.state`. The sim is
+   * deterministic and seeded and that underwrites every balance number in the repo; a
+   * camera is presentation and must be provably incapable of reaching it. Nothing below
+   * writes to a `Fighter`, and `sim.ts` imports neither this file nor `camera.ts`.
+   */
+  private updateViewSubject(rawDtMs: number): void {
+    const roster = fightersOf(this.state);
+
+    // Alive: the shipped camera, unchanged, and the dwell disarmed so it can never be
+    // carried into a later death. Stated as its own branch rather than left to
+    // `resolveViewSubject` so that "a living player's camera is untouched" is a property
+    // of this file too and not only of that one.
+    if (roster[LOCAL_SLOT]?.alive) {
+      this.viewSubject = LOCAL_SLOT;
+      this.spectateDwellMs = 0;
+      this.debug.viewSubject = LOCAL_SLOT;
+      this.debug.viewReason = 'local';
+      return;
+    }
+
+    if (this.spectateDwellMs > 0) {
+      this.spectateDwellMs = Math.max(0, this.spectateDwellMs - rawDtMs);
+      this.debug.viewReason = 'dwell';
+      return;
+    }
+
+    if (this.shakeFadeUnits < 0) this.shakeFadeUnits = this.stage.rig.shakeFadeRadiusUnits();
+    const cam = this.stage.rig.targetUnits();
+    const next = resolveViewSubject({
+      seats: roster,
+      localSlot: LOCAL_SLOT,
+      current: this.viewSubject,
+      killedBy: this.killedBy,
+      cameraX: cam.x,
+      cameraY: cam.y,
+      cutBeyondUnits: this.shakeFadeUnits,
+    });
+
+    if (next.slot !== this.viewSubject) {
+      this.viewSubject = next.slot;
+      if (next.cut) {
+        // `snapTo` sets target AND desired and applies immediately, so there is no
+        // one-frame smear from the old position to the new one.
+        const to = roster[next.slot];
+        if (to) {
+          const p = groundPos(to.x, to.y);
+          this.stage.rig.snapTo(p.x, p.z);
+          this.stage.lighting.focus(p.x, p.z);
+        }
+      }
+    }
+    this.debug.viewSubject = this.viewSubject;
+    this.debug.viewReason = next.reason;
   }
 
   /** Nudge a fighter's VISUAL model away from an attack source. Sim positions are
@@ -1326,6 +1560,10 @@ export class GameSession {
     // so at three fighters the third one's death burst would have been tinted with
     // whatever slot 1 was last hit by.
     const lastHitColor: (string | undefined)[] = [];
+    // Same lifetime, same invariant, same index: WHO landed that hit, so the `death`
+    // below can name a killer the event itself does not carry. See `killedBy`.
+    // `undefined` is "no attributable attacker" — fog and hazard have none by type.
+    const lastHitBy: (number | undefined)[] = [];
 
     for (const ev of events) {
       // QA census of the event → feel edge. Keyed exactly as `feel_census.mjs` keys
@@ -1386,6 +1624,11 @@ export class GameSession {
 
           const color = this.colorForDamageSource(ev.targetRole, ev.source);
           lastHitColor[targetSlot] = color;
+          // WHO, beside WHAT COLOUR — recorded here rather than in the `death` case
+          // because the `death` event carries no attacker at all (`state.ts:1121`), and
+          // recorded BEFORE the fog `break` below so a fog kill correctly records
+          // `undefined` instead of inheriting the last weapon that touched this seat.
+          lastHitBy[targetSlot] = this.attackerSlotOf(ev.source, ev.targetRole);
 
           // ── Closing fog: deliberately NOT the generic impact treatment ────────
           // Fog damage used to run the exact same code path as a weapon hit —
@@ -1522,6 +1765,16 @@ export class GameSession {
           const slot = slotOf(ev.fighterId, ev.fighterRole);
           // The one record of knockout ORDER anywhere. `MatchOutcome`.
           this.eliminated.push(slot);
+          // WHO killed them, for the spectator camera's killer chain. `?? null` rather
+          // than leaving the hole: `killedBy` distinguishes "died to nobody" from "not
+          // dead", and only an explicit null says the first.
+          this.killedBy[slot] = lastHitBy[slot] ?? null;
+          // ⚠️ ARMED FOR ANY SUBJECT'S DEATH, NOT JUST THE LOCAL SEAT'S. While you are
+          // alive the subject IS you (`resolveViewSubject` rung 1), so this can only fire
+          // on your own death; once you are spectating it fires on your subject's, which
+          // is the same beat for the same reason — you watch the death you were watching
+          // for, then hand off. Written unconditionally so the two cases cannot drift.
+          if (slot === this.viewSubject) this.spectateDwellMs = GameSession.SPECTATE_DWELL_MS;
           this.models[slot]?.play('death');
           const fighter = fighterOf(this.state, ev.fighterId, ev.fighterRole);
           const color = lastHitColor[slot] ?? '#FFFFFF';
@@ -1687,6 +1940,19 @@ export class GameSession {
    * `payout` is gated on `endedOutcome` rather than standing alone so that every field
    * here has the SAME lifetime — non-null on an ended match, null everywhere else.
    */
+  /**
+   * The safety chevron as the HUD should receive it — **null once the local seat is
+   * dead.** Same one-place-for-two-call-sites rule as `hudResult` below, and the same
+   * reason: `pause()` builds a frame as well as `loop()` does.
+   *
+   * `safeArrow()` itself is left untouched. It answers "where is safety, from the local
+   * seat", which is still a true and useful thing for it to answer; whether to DRAW it is
+   * a different question and belongs at the edge, where both callers meet.
+   */
+  private hudSafeArrow(): HudFrameInfo['safeArrow'] {
+    return localFighter(this.state).alive ? this.safeArrow() : null;
+  }
+
   private hudResult(): Pick<HudFrameInfo, 'place' | 'order' | 'payout'> {
     return {
       place: this.hudPlace(),
@@ -1888,7 +2154,19 @@ export class GameSession {
     // rather than by the absence of a line: `fighterVisibleTo` would in fact return
     // true for a fighter asked about itself, and leaning on that would make "you can
     // always see yourself" a consequence of a distance test instead of a stated rule.
-    const observer = localFighter(this.state);
+    // ⚠️ CHOSEN BEFORE ANYTHING READS `observer`, because everything below is downstream
+    // of it: the camera, the light, concealment, and the HP pills. See `updateViewSubject`.
+    this.updateViewSubject(rawDtMs);
+    // ⚠️ WAS `localFighter(this.state)`. The old line was right and its rule is unchanged
+    // — *the observer is the seat this screen is playing* — but a dead seat is not a seat
+    // anyone is looking through. Concealment asked from a corpse 2 000 wu away would hide
+    // the fighter the camera is pointed AT from the person watching them, which is the
+    // "rendering and invisible" failure with a reason attached. `viewObserver()` is
+    // `localFighter()` for every frame a living player draws (`resolveViewSubject` rung 1),
+    // so the shipped read is untouched; once dead, you see what your subject sees, which is
+    // the convention every spectator mode in the genre uses and the only one that cannot
+    // show you an invisible killer.
+    const observer = this.viewObserver();
     this.models.forEach((m, i) => {
       if (i === LOCAL_SLOT) return;
       const f = roster[i];
@@ -1930,10 +2208,13 @@ export class GameSession {
       this.stage.rig,
     );
 
-    // The camera follows THIS SCREEN'S seat. One client, one camera, one subject.
-    const localPos = groundPos(observer.x, observer.y);
-    this.stage.rig.follow(localPos.x, localPos.z);
-    this.stage.lighting.focus(localPos.x, localPos.z);
+    // The camera follows THIS SCREEN'S SUBJECT. One client, one camera, one subject —
+    // and the subject is this screen's seat until that seat dies. `updateViewSubject`
+    // above owns the choice; this stays the one place that steers the rig, so a future
+    // second call site is a diff and not a silent second policy.
+    const viewPos = groundPos(observer.x, observer.y);
+    this.stage.rig.follow(viewPos.x, viewPos.z);
+    this.stage.lighting.focus(viewPos.x, viewPos.z);
 
     // TEMP DEBUG: ground-plane screen projections for scripted aim in
     // tools/tmp/vfx_convert_capture.mjs (the floating HUD pill sits well above the
@@ -1951,11 +2232,28 @@ export class GameSession {
 
     this.hud.update(this.state, {
       selectedWeapon: this.input.selectedWeapon,
-      safeArrow: this.safeArrow(),
+      // ⚠️ BOTH OF THE NEXT TWO ARE NULLED FOR A DEAD LOCAL SEAT, AND ONLY AT THIS CALL
+      // SITE. They are the two HUD elements this file owns the *input* to that become
+      // lies the moment you die: a "run this way to safety" chevron drawn over a body
+      // that cannot move, and a reticle for a weapon that cannot fire (`sim.ts`
+      // `continue`s past the whole controller branch for a corpse since `7a32f3d`).
+      //
+      // 🚨 GATED HERE RATHER THAN INSIDE `safeArrow()` / `aimCursor()` ON PURPOSE:
+      // `buildInput()` calls `aimCursor()` too, and its return value goes into
+      // `stepMatch`. Changing the function would change what the sim is HANDED — inert
+      // today, because the corpse guard runs before `applyAim`, but "inert today" is not
+      // the same as "cannot affect a deterministic, seeded simulation that underwrites
+      // every balance number in the repo". Gating the render and leaving the input path
+      // byte-identical makes that a structural fact instead of an argument.
+      // ⚠️ `localFighter`, NOT `viewObserver()` — this is about whether YOU can act, not
+      // about who is on screen. A spectated fighter's route to safety is not your HUD's
+      // to draw, and `hud.ts` has no idea it is being spectated at all (see the routed
+      // hunk in this commit's report).
+      safeArrow: this.hudSafeArrow(),
       // Null unless pointer-locked — see `HudFrameInfo.aim`. Computed for every phase,
       // not just 'playing', so the countdown is not five seconds of an invisible
       // cursor with nothing on screen to orient by.
-      aim: this.aimCursor(),
+      aim: localFighter(this.state).alive ? this.aimCursor() : null,
       // 🔴 THE RESULT CARD COULD NOT SAY WHERE YOU FINISHED, WHO CAME SECOND, OR WHAT IT
       // PAID. Three sockets `hud.ts` deliberately left open rather than deriving answers it
       // has no right to — the rank (`place`), the finishing order the loser list is printed

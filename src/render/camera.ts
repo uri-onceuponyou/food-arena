@@ -21,7 +21,7 @@ import * as THREE from 'three';
 // reason), so without them this module cannot be imported from a `.mjs` tool at all —
 // and `tools/tmp/sh_dist.mjs` scores the shipped `shakeProximityScale` on a real match
 // corpus rather than a transcription of it. A transcribed curve is a curve nothing gates.
-import { WORLD_SCALE, wu } from '../units.ts';
+import { toWorldUnits, WORLD_SCALE, wu } from '../units.ts';
 import { CHARACTERS, HIT_RADIUS_VS_PLAYER, PLAYER_SPEED, TRAIL } from '../game/rules.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -387,6 +387,170 @@ export function shakeProximityScale(
   return 1 - (1 - floor) * t;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// WHO THE CAMERA IS WATCHING — and what happens when that is a corpse
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 🚨 URI, AFTER A SIX-PLAYER MATCH: *"when i played 6 players and lost, i continued to
+// move as dead, able to fire and move."* `7a32f3d` closed the input half in `sim.ts` — a
+// dead fighter now `continue`s before the controller branch. `sim.ts` also wrote down what
+// that fix left behind, and routed it here:
+//
+//   *"What IS still wrong for a spectator is that the camera is pinned to the body —
+//    reported to the orchestrator; `match.ts` is not this file's to fix."*
+//
+// `match.ts` followed `groundPos(observer.x, observer.y)` where `observer` is always the
+// LOCAL seat, and a corpse's position is frozen for the rest of the match. At
+// `MATCH_DURATION_MS` = 150 000 ms that is **up to two and a half minutes of your own
+// body**, with the match you were just playing happening off-screen. Nothing in `src/`
+// had a spectator camera — `grep -rn "spectat" src/` found one `slot: null` in the lobby
+// protocol and these two sim comments, and no camera code at all.
+//
+// ── WHY THE RULE LIVES IN THIS FILE AND NOT IN `match.ts` ────────────────────
+//
+// `match.ts` imports `three` AND `ui/hud.ts`, so it can never be imported by a `.mjs`
+// tool. This module already carries the `.ts`-extension note above precisely so that it
+// CAN be, and `shakeProximityScale` is already gated that way by `sh_dist.mjs`. A camera
+// policy that only six seats can express is exactly the kind of thing that must be
+// testable without a GPU — see the N=2 vacuity note below.
+//
+// ── THE LADDER, AND WHAT WAS REJECTED ────────────────────────────────────────
+//
+//   1. LOCAL ALIVE  → the local seat. **This branch is what makes a living player's
+//      camera unchanged BY CONSTRUCTION rather than by a tolerance**: while you are
+//      alive `resolveViewSubject` can only ever return `localSlot`, so every frame the
+//      shipped game has ever drawn is reached by the same `follow()` argument as before.
+//   2. CURRENT SUBJECT STILL ALIVE → keep it. Stickiness is a rule, not an optimisation:
+//      without it "nearest living" re-picks as fighters move and the camera hops between
+//      two people running past each other, which is worse than the defect.
+//   3. THE KILLER CHAIN → whoever landed the killing blow on the current subject, if they
+//      are alive; otherwise whoever killed THEM, and so on. This is the battle-royale
+//      convention and it answers the question a dead player actually has ("who got me"),
+//      it puts the camera where a fight was happening one tick ago, and it is a rule
+//      rather than a heuristic, so it reads the same way every time.
+//   4. NEAREST LIVING TO THE CAMERA → the fallback when there is no killer at all. There
+//      often isn't: fog, a hazard and a trail mark are all `DamageSource`s with no
+//      attacker, and `SUDDEN_DEATH_RADIUS = 0` means the ring eventually kills everyone.
+//      Nearest to **the camera**, not to the corpse, so successive hand-offs chain
+//      locally instead of teleporting back across the map each time.
+//   5. NOBODY LEFT → hold the last subject. A draw is reachable (the ring collapses to
+//      zero) and there is nothing to follow; freezing on the last thing that happened is
+//      honest, and a rule that returned "slot 0" here would re-pin the camera to the
+//      corpse — the original defect, wearing a hand-off's clothes.
+//
+// REJECTED — **the action centroid.** The arena is 2800×2000 and six fighters spread over
+// it; the mean of their positions is very often bare floor with nobody in frame at all.
+// "The camera watches nothing" is not an improvement on "the camera watches your body".
+// REJECTED — **the leader (most HP / most kills).** Stable and always non-empty, but it
+// answers a question nobody asked and it can sit across the map from every fight.
+// REJECTED — **free-look.** The best answer eventually, and it needs input plumbing, a
+// UI affordance and a touch story; it is a feature, not a defect fix, and shipping the
+// ladder first does not foreclose it.
+//
+// ── ⚠️ EVERY ONE OF THESE RULES IS THE SAME STATEMENT AT TWO SEATS ───────────
+//
+// With `MAX_FIGHTERS` 2 there is exactly one other fighter, so once you are dead
+// "your killer", "the nearest living fighter" and "the only one left" all name slot 1 —
+// and so does a rule that just picks the lowest living index, and so does one with a
+// broken chain walk. **A two-seat test of this file passes vacuously for all of them.**
+// It can only see the pinning itself, never the policy. `tools/tmp/sv_subject.mjs` arm C
+// is that control, run rather than asserted: three deliberately-wrong policies agree with
+// this one on **every** step at N=2 and disagree on real steps at N=6.
+
+/** One seat, as the view rule sees it. World units, the sim's own coordinates. */
+export interface ViewSeat {
+  readonly alive: boolean;
+  readonly x: number;
+  readonly y: number;
+}
+
+/** Which rung of the ladder produced the subject. Reported so a probe can assert that a
+ * battery actually EXERCISED a rung rather than merely agreeing with the answer. */
+export type ViewSubjectReason = 'local' | 'hold' | 'killer' | 'nearest' | 'stranded';
+
+export interface ViewSubjectInput {
+  /** Every seat in slot order — `roster.ts:fightersOf` order. */
+  readonly seats: readonly ViewSeat[];
+  /** `roster.ts:LOCAL_SLOT`. Passed rather than assumed 0 so a replay/second-screen view
+   * can ask the same question about a different seat. */
+  readonly localSlot: number;
+  /** Who the camera is watching right now. */
+  readonly current: number;
+  /** `killedBy[slot]` = the slot that landed the killing blow, or null for fog / hazard /
+   * a trail with no owner / not dead. Sparse and short is fine — a missing entry is null. */
+  readonly killedBy: readonly (number | null | undefined)[];
+  /** The camera's CURRENT look-at point in world units (not `desired`). */
+  readonly cameraX: number;
+  readonly cameraY: number;
+  /** Beyond this distance from the camera a subject change is a CUT, not a glide. See
+   * `CameraRig.shakeFadeRadiusUnits()` — the farthest ground point ANY supported display
+   * can show. Past it the glide is pure floor sliding by, so a cut is strictly more
+   * legible; inside it the glide preserves spatial continuity. Derived, not tasted. */
+  readonly cutBeyondUnits: number;
+}
+
+export interface ViewSubject {
+  readonly slot: number;
+  readonly reason: ViewSubjectReason;
+  /** True only when the subject CHANGED and the new one is beyond `cutBeyondUnits`. */
+  readonly cut: boolean;
+}
+
+/**
+ * Pure. No `three`, no DOM, no clock — every input is an argument and the output is a
+ * value, which is what lets `sv_subject.mjs` drive a full six-seat elimination through it
+ * in Node and what lets the known-bad arms swap this function out for the shipped
+ * `() => LOCAL_SLOT` and watch the battery go red.
+ */
+export function resolveViewSubject(input: ViewSubjectInput): ViewSubject {
+  const { seats, localSlot, current, killedBy, cameraX, cameraY, cutBeyondUnits } = input;
+
+  const decide = (slot: number, reason: ViewSubjectReason): ViewSubject => {
+    const seat = seats[slot];
+    const changed = slot !== current;
+    const cut = changed && seat !== undefined
+      && Math.hypot(seat.x - cameraX, seat.y - cameraY) > cutBeyondUnits;
+    return { slot, reason, cut };
+  };
+
+  // 1 — alive: yourself, always. The shipped camera, byte for byte.
+  if (seats[localSlot]?.alive) return decide(localSlot, 'local');
+
+  // 2 — stickiness. Never re-pick a subject that is still alive.
+  if (seats[current]?.alive) return decide(current, 'hold');
+
+  // 3 — the killer chain. `seen` is not defensive dressing: a projectile already in the
+  // air when its owner dies still lands, so A-killed-B-killed-A is reachable and an
+  // unguarded walk would spin forever on it.
+  const seen = new Set<number>([current]);
+  let node = current;
+  for (;;) {
+    const k = killedBy[node];
+    if (k === null || k === undefined) break;
+    if (k < 0 || k >= seats.length || seen.has(k)) break;
+    seen.add(k);
+    if (seats[k].alive) return decide(k, 'killer');
+    node = k;
+  }
+
+  // 4 — nearest living to the CAMERA. Strict `<` so ties resolve to the lowest slot,
+  // which makes the whole rule deterministic on a tie rather than order-of-iteration
+  // dependent — two fighters equidistant from the camera is not a rare event when the
+  // ring has squeezed six people into a 237 wu disc.
+  let best = -1;
+  let bestDist = Infinity;
+  for (let i = 0; i < seats.length; i++) {
+    const s = seats[i];
+    if (!s.alive) continue;
+    const d = Math.hypot(s.x - cameraX, s.y - cameraY);
+    if (d < bestDist) { bestDist = d; best = i; }
+  }
+  if (best >= 0) return decide(best, 'nearest');
+
+  // 5 — nobody is alive. Hold. Deliberately NOT `localSlot`.
+  return decide(current, 'stranded');
+}
+
 export interface CameraRigOptions {
   /** Downward pitch in degrees. 90 = straight down. Brawl Stars sits around 55-62. */
   pitchDeg?: number;
@@ -667,6 +831,25 @@ export class CameraRig {
   /** Set the follow target for smooth catch-up. */
   follow(x: number, z: number): void {
     this.desired.set(x, 0, z);
+  }
+
+  /**
+   * Where the camera is looking RIGHT NOW, in WORLD UNITS.
+   *
+   * ⚠️ `target`, not `desired`, and that is the whole point of the accessor. `desired` is
+   * where the camera has been ASKED to look; `target` is where the follow lerp has
+   * actually got to. `resolveViewSubject`'s "nearest living fighter to the camera" and its
+   * cut/glide threshold are both questions about what is ON SCREEN, and only `target`
+   * answers that — mid-glide the two are hundreds of world units apart, which is exactly
+   * the moment a hand-off is most likely to fire.
+   *
+   * World units rather than metres because every consumer (`Fighter.x/y`, the arena, the
+   * fair radius) is in world units; converting here means one conversion instead of one
+   * per call site. `shakeOffset` is deliberately NOT added: the shake is a sub-metre
+   * jitter and folding it in would make a pure selection rule non-deterministic.
+   */
+  targetUnits(): { x: number; y: number } {
+    return { x: toWorldUnits(this.target.x), y: toWorldUnits(this.target.z) };
   }
 
   /** Kick off a screen shake. `amount` is in metres. */
