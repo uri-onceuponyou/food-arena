@@ -1,0 +1,7 @@
+# Contains CROPS OF THIRD-PARTY REFERENCE PLATES (reference/images/curated/**).
+# CLAUDE.md permanent constraint: those must NEVER be committed or published, and
+# a crop derived from one is derived from it. The repo .gitignore covers
+# `reference/` and `shots/` but NOT `tools/tmp/**`, so `git add tools/tmp` would
+# ship them. This file is the only thing standing between that and a public repo.
+*
+!.gitignore
