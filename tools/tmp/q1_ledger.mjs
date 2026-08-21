@@ -88,9 +88,9 @@ function main() {
   const by = {};
   for (const a of man.assignments) {
     const k = `${a.arm}/${a.element}`;
-    by[k] ??= { done: 0, total: 0, skipped: 0, rows: [] };
+    by[k] ??= { done: 0, total: 0, skipped: 0, rows: [], sheets: new Set() };
     by[k].total++;
-    if (scored.has(idOf(a))) { by[k].done++; by[k].rows.push(scored.get(idOf(a))); }
+    if (scored.has(idOf(a))) { by[k].done++; by[k].rows.push(scored.get(idOf(a))); by[k].sheets.add(a.sheet); }
     else if (doneIds.has(idOf(a))) by[k].skipped++;
   }
   console.log(`\n══ Q1 LEDGER ══  ${done.length} of ${man.assignments.length} scored\n`);
@@ -101,7 +101,26 @@ function main() {
     // the truth (0.980), i.e. it claimed more confidence than two observations can support.
     // Second time a display in this round understated its own floor; the first was counting
     // SKIPPED rows toward k. Both times the number was wrong in the flattering direction.
-    const floor = d === 0 ? null : (1.96 * Math.SQRT2 * 0.50 / Math.sqrt(d)).toFixed(3);
+    // 🚨 `k` IS DISTINCT SHEETS, NOT SCORED ROWS — AND IT WAS ROWS UNTIL 2026-08-22.
+    //
+    // `q1_packets.mjs`'s `DRIFT_ORDER = [1,2,3,4,5,6,1,2]` gives every drift element **8
+    // seats over 6 distinct sheets** on purpose (its comment: "two critics see one
+    // identical file, which is the sd-0.50 design, not a defect"). So a fully-scored drift
+    // arm published a floor computed from **n=8** while resting on **6** distinct images —
+    // `drift_base_arena` printed 0.490 where the honest figure is 0.566.
+    //
+    // Two reads of the SAME pixels are not two independent observations of the artwork.
+    // The published floor was therefore **tighter than the evidence**, which is the
+    // direction every floor error in this round has gone: the k1 fallback that claimed
+    // more confidence than two observations support, the arm that counted SKIPPED rows
+    // toward k, and now this. **Three separate ways to be flatteringly wrong about n.**
+    //
+    // ⚠️ The MEANS are unaffected (4.125 → 4.167 on the worst cell) — a repeated read is a
+    // legitimate observation of the CRITIC. It is only illegitimate as evidence about the
+    // IMAGE, which is exactly what a floor quantifies.
+    const kDistinct = by[k].sheets.size;
+    const floor = d === 0 ? null : (1.96 * Math.SQRT2 * 0.50 / Math.sqrt(kDistinct)).toFixed(3);
+    const dupTag = kDistinct < d ? `  ⚠️ ${d} reads over ${kDistinct} DISTINCT sheets` : '';
     const tag = sk ? `  (${sk} skipped)` : '';
     // ⚠️ THE GAP IS THE ANSWER, AND THIS TOOL DID NOT PRINT IT. Every panel agent
     // recomputed it out of `q1_public.jsonl` by hand — six agents, six chances to slip,
@@ -124,7 +143,7 @@ function main() {
         + `  GAP ${(rows.reduce((a, r) => a + (r.reference - r.ours), 0) / rows.length).toFixed(3)}`
         + ` (n=${rows.length})`
       : '  ours     —  ref     —  GAP     —';
-    console.log(`  ${k.padEnd(26)} ${String(d).padStart(2)}/${t}   floor ${d === 0 ? '    —' : floor.padStart(5)}${gapCol}${tag}`);
+    console.log(`  ${k.padEnd(26)} ${String(d).padStart(2)}/${t}   floor ${d === 0 ? '    —' : floor.padStart(5)}${gapCol}${tag}${dupTag}`);
   }
   if (!next) { console.log('\n  COMPLETE.\n'); return; }
   console.log(`\n  NEXT: ${idOf(next)}`);
