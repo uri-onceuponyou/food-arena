@@ -95,6 +95,12 @@ import {
   // from `REACH`/`POT`/`HIT_RADIUS_*` and compares. A literal 166 or 237 here would keep
   // passing after the ladder, the hit radius or the hazard moved out from under it.
   ENDGAME_STANDOFF, minSafeRadiusFor,
+  // Section 37: `REACH.ultimateSlam` stopped being authored on 2026-08-21 and is now
+  // `GUARANTEED_VISIBLE_RADIUS - BODY_LENGTH`. Both come in for the reason every derived
+  // constant above does — the section's claim IS the derivation, and a literal 157.22 or 42
+  // here would keep passing after the camera, the reach ladder or `PLAYER_SIZE` moved out
+  // from under it, which is precisely the drift that makes the second statement dangerous.
+  GUARANTEED_VISIBLE_RADIUS, BODY_LENGTH,
   // Section 30: `DECISIONS §2`, sudden death. Every one of these is imported rather than
   // written as 30 000 / 15 000 / 0, because the section's whole claim is that the collapse
   // and its consequences are DERIVED — the window is `MATCH_DURATION_MS - SUDDEN_DEATH_MS`,
@@ -2164,21 +2170,35 @@ const preFog = (hp) => hp + FOG_DAMAGE;
   //
   // Raising its damage must not have quietly turned it into an ordinary swing: it still
   // has to land from beyond every other weapon's reach, with no aim, and still stun.
+  //
+  // ── ⚠️ THE TEST DISTANCE WAS `otherReach + 100` AND THAT +100 WAS A LITERAL ─────
+  //
+  // It worked for as long as the slam was 400 wu and stopped working the minute it became
+  // `GUARANTEED_VISIBLE_RADIUS - BODY_LENGTH` (157.22): 240 wu is outside the weapon, so
+  // the row failed for a fixture reason and said nothing about the claim. The claim is
+  // *"beyond every other reach"*, so the distance is now the MIDPOINT of the interval that
+  // sentence names, and the interval is asserted NON-EMPTY first — with the slam derived
+  // from a camera constant, "the widest weapon in the game" is a fact that can now stop
+  // being true, and a row testing an empty interval would pass by having nothing to check.
   {
     const arena = makeArena({ width: 2000, height: 2000, maxSafeRadius: 100000 });
     const state = playingMatch(arena, 'lollipop', 'donut');
     const giantIdx = CHARACTERS.lollipop.weapons.findIndex((w) => w.key === 'Giant');
     const otherReach = Math.max(...CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons
       .filter((w) => !w.giantSlam).map((w) => w.range ?? 0)));
+    check('the slam still out-reaches every other weapon, so "beyond" names a real gap (non-vacuity)',
+      giant.range > otherReach,
+      `slam ${giant.range} vs next-longest ${otherReach} (gap ${(giant.range - otherReach).toFixed(2)}wu)`);
+    const at = (otherReach + giant.range) / 2;
     state.player.x = 1000; state.player.y = 1000;
-    state.enemy.x = 1000 + otherReach + 100; state.enemy.y = 1000;
+    state.enemy.x = 1000 + at; state.enemy.y = 1000;
     state.player.facing = { x: -1, y: 0 }; // pointing AWAY: a 360-degree cone needs no bearing
     const hp0 = state.enemy.hp;
     const evs = [];
     attemptAttack(state, state.player, giantIdx, evs);
     check('the slam lands beyond every other weapon\'s reach, unaimed, and stuns',
       state.enemy.hp === hp0 - giant.damage && state.enemy.status.stunnedUntil > state.elapsed,
-      `dealt ${hp0 - state.enemy.hp} at ${otherReach + 100}wu (next-longest reach ${otherReach}wu), stunned=${state.enemy.status.stunnedUntil > state.elapsed}`);
+      `dealt ${hp0 - state.enemy.hp} at ${at.toFixed(2)}wu (next-longest reach ${otherReach}wu, slam ${giant.range}), stunned=${state.enemy.status.stunnedUntil > state.elapsed}`);
   }
 
   // ── (g) A STUN IS A MOVEMENT LOCK, NOT A SILENCE ──────────────────────────
@@ -7989,17 +8009,36 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
     check('…and `castMs` was restored to the ROSTER value, not to a literal',
       MEGA.castMs === SHIPPED_CAST_MS && SHIPPED_CAST_MS > 0, `castMs ${MEGA.castMs}`);
 
-    // KNOWN-BAD 2 — AND IT IS THE RECORD OF WHY `lollipop.Giant` IS NOT CONVERTED.
-    // Run the same rule over the one special that was refused: a 360° slam at
-    // `REACH.ultimateSlam` needs the slowest human to cross 400 wu, so the rule returns a
-    // wind-up longer than half its own cooldown. There is no duration at which that weapon
-    // is both dodgeable and pressable, which is the answer to `DECISIONS §9`.
+    // ── ⚠️ REVERSED 2026-08-21. THE REFUSAL'S OWN JUSTIFICATION HAS EVAPORATED. ────
+    //
+    // IT USED TO READ, and the wording is kept because it was TRUE of a 400 wu slam and it
+    // is the record of why `DECISIONS §9`/`§77` were answered the way they were:
+    //
+    //   > *"KNOWN-BAD 2 — AND IT IS THE RECORD OF WHY `lollipop.Giant` IS NOT CONVERTED.
+    //   > Run the same rule over the one special that was refused: a 360° slam at
+    //   > `REACH.ultimateSlam` needs the slowest human to cross 400 wu, so the rule returns
+    //   > a wind-up longer than half its own cooldown. There is no duration at which that
+    //   > weapon is both dodgeable and pressable."*
+    //
+    //   > `check('`lollipop.Giant` has NO wind-up, and the rule says why',
+    //   >        (GIANT.castMs ?? 0) === 0 && roundUp50(…) > GIANT.cooldown / 2)`
+    //
+    // Uri shrank the slam to `GUARANTEED_VISIBLE_RADIUS - BODY_LENGTH` (§81), and the same
+    // rule now derives a wind-up of about a QUARTER of the cooldown instead of 59% of it.
+    // **So the arithmetic that blocked the conversion no longer blocks it.** The weapon is
+    // still unconverted — adding a wind-up is a balance change and a design call, not a
+    // consequence of a radius — and this row now asserts BOTH halves of the true state:
+    // it has no wind-up, AND the door §77 recorded as shut is open. It goes red the day
+    // somebody converts it, which is exactly when this paragraph should be re-read.
     const GIANT = CHARACTERS.lollipop.weapons.find((w) => w.key === 'Giant');
-    check('`lollipop.Giant` has NO wind-up, and the rule says why',
+    const giantDerived = roundUp50(windowMs(GIANT, slowestHuman) + REACTION_MS);
+    check('`lollipop.Giant` has NO wind-up — and the shrink has made one AFFORDABLE for the first time',
       (GIANT.castMs ?? 0) === 0
-      && roundUp50(windowMs(GIANT, slowestHuman) + REACTION_MS) > GIANT.cooldown / 2,
-      `derived ${roundUp50(windowMs(GIANT, slowestHuman) + REACTION_MS)} ms against a `
-      + `${GIANT.cooldown} ms cooldown; escape window ${windowMs(GIANT, slowestHuman).toFixed(2)} ms`);
+      && giantDerived <= GIANT.cooldown / 2
+      && giantDerived > windowMs(GIANT, fastestHuman),
+      `derived ${giantDerived} ms = ${(100 * giantDerived / GIANT.cooldown).toFixed(1)}% of a `
+      + `${GIANT.cooldown} ms cooldown (was 4100 ms = 59% at range 400); escape window `
+      + `${windowMs(GIANT, fastestHuman).toFixed(2)}/${windowMs(GIANT, slowestHuman).toFixed(2)} ms fast/slow`);
   }
 
   // ── (p) A CAST COMMITS POSITION, NOT SILENCE — `DECISIONS §78` ────────────
@@ -9183,6 +9222,125 @@ console.log('\n36. A projectile hits whoever it strikes — body-blocking, at si
     check('(g) at TWO seats the shot damages exactly ONE fighter, and nothing was retargeted',
       hits.size === 1 && hits.get(two.fighters[1].id) === 1 && retargeted === false,
       `hits [${[...hits].map(([k, v]) => `${k}x${v}`).join(' ')}], retargeted=${retargeted}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 37. THE SLAM IS DERIVED FROM THE CAMERA, NOT AUTHORED — and the two places that
+//     compute the camera's radius must not drift apart
+//
+// Uri, 2026-08-21, answering `DECISIONS §81(a)`: *"If the question is whether the giant
+// should catch everything in the visible screen, the answer is almost, but it shouldn't
+// catch everything in the map."*
+//
+// `REACH.ultimateSlam` was **400**, authored, and explicitly *"anchored to the ARENA, not
+// to the weapon ladder"*. It is now `GUARANTEED_VISIBLE_RADIUS - BODY_LENGTH` = 157.22 wu.
+//
+// 🚨 THE RISK THE CHANGE INTRODUCES IS NOT THE NUMBER, IT IS THE SECOND STATEMENT.
+// `render/camera.ts:FAIR_PLAY.radiusUnits` computes the guaranteed-visible radius from the
+// roster; `rules.ts:GUARANTEED_VISIBLE_RADIUS` now computes it from the ladder, because
+// `rules.ts` is the frozen design layer and may not import from `render/`, which imports
+// it. One rule, two implementations, in two files — this project's most expensive defect
+// class, six recorded instances in `ai.ts` alone. So it is ASSERTED rather than trusted:
+// (b) source-scans `render/camera.ts` for the three terms of its derivation, and
+// `tools/tmp/bb_slam.mjs --agree` imports BOTH modules and requires bit equality (this
+// file cannot import `camera.ts` — it pulls in `three`, and the known-bad rigs in
+// `bb_block.mjs`/`mv_multi.mjs` copy `src/` to a temp dir with no `node_modules`, so a
+// `three` import here would break every one of them).
+console.log('\n37. `REACH.ultimateSlam` is derived from the guaranteed-visible radius');
+{
+  const SLAM = REACH.ultimateSlam;
+
+  // ── (a) THE DERIVATION, TERM BY TERM ───────────────────────────────────────
+  check('(a) the guaranteed-visible radius is the ladder ceiling + hit radius + a reaction distance',
+    GUARANTEED_VISIBLE_RADIUS
+      === REACH.rangedMax + HIT_RADIUS_VS_PLAYER
+        + (PLAYER_SPEED * TRAIL.speedBoost) * (HIT_RADIUS_VS_PLAYER / PLAYER_SPEED),
+    `${GUARANTEED_VISIBLE_RADIUS} from ${REACH.rangedMax} + ${HIT_RADIUS_VS_PLAYER} + reaction`);
+  check('(a) …and the slam is that radius less ONE BODY LENGTH — the ladder\'s own unit',
+    SLAM === GUARANTEED_VISIBLE_RADIUS - BODY_LENGTH && BODY_LENGTH === PLAYER_SIZE,
+    `slam ${SLAM} = ${GUARANTEED_VISIBLE_RADIUS} - ${BODY_LENGTH} (${(SLAM / BODY_LENGTH).toFixed(2)} bl)`);
+  check('(a) …so the margin is a real, visible gap — not zero, and not the whole disc',
+    SLAM < GUARANTEED_VISIBLE_RADIUS && SLAM > GUARANTEED_VISIBLE_RADIUS * 0.5,
+    `${(100 * SLAM / GUARANTEED_VISIBLE_RADIUS).toFixed(1)}% of the guaranteed disc`);
+  // The claim Uri actually made, in the units he made it in: it must NOT reach the map.
+  // `arena/shared.ts` owns the map size, so this reads it off the fixture rather than
+  // naming 2800 — a literal here would be a legal coordinate and invisible to `al_guard`.
+  {
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const diag = Math.hypot(arena.width, arena.height);
+    check('(a) …and it does NOT reach the whole map, which is the half of the answer that says "not everything"',
+      SLAM < diag * 0.1,
+      `slam ${SLAM} vs arena diagonal ${diag.toFixed(2)} (${(100 * SLAM / diag).toFixed(1)}%; was ${(100 * 400 / diag).toFixed(1)}% at 400)`);
+  }
+
+  // ── (b) 🔴 THE TWO STATEMENTS OF THE CAMERA RULE MUST NOT DRIFT ────────────
+  //
+  // A source scan, deliberately: the strong form (import both, compare) needs `three` and
+  // lives in `bb_slam.mjs`. This one catches the change at the moment somebody EDITS the
+  // camera's derivation, which is when they should be reading this section.
+  {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../render/camera.ts'), 'utf8');
+    const terms = [
+      'const MAX_THREAT_REACH = MAX_WEAPON_RANGE + HIT_RADIUS_VS_PLAYER;',
+      'const EVADE_WINDOW_MS = HIT_RADIUS_VS_PLAYER / PLAYER_SPEED;',
+      'const MAX_CLOSING_SPEED = PLAYER_SPEED * TRAIL.speedBoost;',
+      'radiusUnits: MAX_THREAT_REACH + MAX_CLOSING_SPEED * EVADE_WINDOW_MS,',
+    ];
+    const missing = terms.filter((t) => !src.includes(t));
+    check('(b) the camera source really was read, and it is the file with the fair-play block (non-vacuity)',
+      src.length > 1000 && src.includes('THE FAIR-PLAY RECTANGLE'),
+      `${src.length} bytes`);
+    check('(b) 🔴 `render/camera.ts` still derives its radius from the SAME three terms `rules.ts` does',
+      missing.length === 0,
+      missing.length === 0 ? 'all four lines present' : `MISSING: ${missing.join(' | ')}`);
+    check('(b) …and it still EXCLUDES the slam from that radius, which is what makes the derivation well-defined',
+      src.includes('if (w.giantSlam) continue;'),
+      'a slam included in MAX_WEAPON_RANGE makes radius and slam a fixed-point equation');
+  }
+
+  // ── (c) THE ENDGAME EXEMPTION: STILL IN FORCE, AND NOW DELETABLE ───────────
+  //
+  // `ENDGAME_STANDOFF` excludes the slam, and its own block prices that as *"would demand
+  // a 500 wu final ring"*. That was the price of covering 400. This row states what the
+  // price is NOW, so the option is visible rather than buried: at 157.22 the standoff
+  // WOULD fit inside the guaranteed disc, i.e. the design rule the exemption protects —
+  // *"every neighbour is out of reach and still on screen"* — would survive its deletion.
+  // It is not deleted here because it moves `minSafeRadiusFor(N)` and N=4 clears its floor
+  // by 0.17 wu; that is Uri's §53b ring, not this pass's constant.
+  {
+    const wouldBe = SLAM + Math.max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY);
+    check('(c) the slam is STILL excluded from `ENDGAME_STANDOFF` — nothing about the ring moved here',
+      ENDGAME_STANDOFF === REACH.rangedMax + Math.max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY)
+      && ENDGAME_STANDOFF < wouldBe,
+      `standoff ${ENDGAME_STANDOFF}, would be ${wouldBe.toFixed(2)} if the slam were covered`);
+    check('(c) …and covering it would now FIT on screen, where at 400 it could not — the exemption became a choice',
+      wouldBe <= GUARANTEED_VISIBLE_RADIUS
+      && 400 + Math.max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY) > GUARANTEED_VISIBLE_RADIUS,
+      `${wouldBe.toFixed(2)} vs guaranteed ${GUARANTEED_VISIBLE_RADIUS} (at 400 it was 426)`);
+    check('(c) …and the ring floors are untouched at every seat count',
+      minSafeRadiusFor(2) === 140 && minSafeRadiusFor(4) === 140 && minSafeRadiusFor(6) > 236,
+      [2, 3, 4, 5, 6].map((n) => `${n}:${minSafeRadiusFor(n).toFixed(2)}`).join(' '));
+  }
+
+  // ── (d) THE CARD IS STILL TRUE, WHICH IS WHY IT WAS WRITTEN RELATIVELY ─────
+  //
+  // `DECISIONS §81` records the choice: `lollipop.Giant`'s blurb says *"the widest area in
+  // the game"* rather than a number, *"precisely so that it stays true after you take lever
+  // 1"*. This is that lever being taken, so the row that shows the card survived it.
+  {
+    const others = CHARACTER_IDS.flatMap((id) => CHARACTERS[id].weapons
+      .filter((w) => !w.giantSlam).map((w) => w.range ?? 0));
+    check('(d) the comparison set is non-empty and excludes the slam itself (non-vacuity)',
+      others.length > 20 && !others.includes(SLAM),
+      `${others.length} non-slam weapons, max ${Math.max(...others)}`);
+    check('(d) the slam is STILL the widest area in the game — the card survives lever 1',
+      SLAM > Math.max(...others),
+      `slam ${SLAM} vs next ${Math.max(...others)}`);
+    check('(d) …and `characterSelect.ts:reachLabel` still classes it as the widest (its threshold IS the constant)',
+      readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../ui/screens/characterSelect.ts'), 'utf8')
+        .includes('if (range >= REACH.ultimateSlam) return \'Widest\';'),
+      'the label reads the constant, so it follows the shrink by construction');
   }
 }
 

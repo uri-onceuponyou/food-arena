@@ -1254,6 +1254,47 @@ export const HIT_RADIUS_VS_ENEMY = 26;
 /** One body length, in world units. Every reach below is a multiple of this. */
 export const BODY_LENGTH = PLAYER_SIZE; // 42
 
+/**
+ * `REACH.rangedMax`, HOISTED OUT OF THE OBJECT LITERAL so `ultimateSlam` can be derived
+ * from it. An object literal cannot reference its own sibling, and the alternative —
+ * retyping 140 inside the slam's expression — is the exact thing `CLAUDE.md` forbids
+ * (*"Derive from `shared.ts`. Never retype a coordinate"*, and the reach ladder is a
+ * coordinate system). This const and `REACH.rangedMax` are one value with one name.
+ */
+const RANGED_MAX = 140;
+
+/**
+ * ── THE DISC EVERY SUPPORTED ASPECT RATIO IS GUARANTEED TO SHOW AROUND YOU. 199.22 wu. ──
+ *
+ * 🚨 **THIS IS A SECOND STATEMENT OF `render/camera.ts:FAIR_PLAY.radiusUnits`, AND THAT IS
+ * THIS PROJECT'S MOST EXPENSIVE DEFECT SHAPE — SO IT IS ASSERTED, NOT TRUSTED.** It exists
+ * here because `REACH.ultimateSlam` below is now DERIVED from it (Uri, §81/§80: *"the giant
+ * should catch almost everything in the visible screen, but it shouldn't catch everything
+ * in the map"*) and `rules.ts` is the frozen design layer — it may not import from `render/`,
+ * which imports IT. `sim.test.mjs` §37 source-scans `render/camera.ts` for the three terms,
+ * and `tools/tmp/bb_slam.mjs --agree` imports BOTH modules and requires the two numbers to
+ * be equal to the bit. The right end state is `camera.ts` importing this constant; that is a
+ * one-line hunk in a file this pass does not own, and it is routed rather than taken.
+ *
+ * ── WHY `PLAYER_SPEED` APPEARS AND THEN CANCELS ─────────────────────────────
+ *
+ * `camera.ts` builds the reaction term as `MAX_CLOSING_SPEED * EVADE_WINDOW_MS` =
+ * `(PLAYER_SPEED * TRAIL.speedBoost) * (HIT_RADIUS_VS_PLAYER / PLAYER_SPEED)`. `PLAYER_SPEED`
+ * cancels ALGEBRAICALLY — the term is just `TRAIL.speedBoost * HIT_RADIUS_VS_PLAYER` — and
+ * writing the short form would be tidier and WRONG. Measured: the two forms are bit-equal at
+ * `PLAYER_SPEED` 0.12 and differ by **7.105e-15** at 0.09, so a global speed change would
+ * silently split this constant from the camera's in the last ulp and the equality gate would
+ * go red on a float artefact rather than on a real disagreement. The expression is therefore
+ * written in the camera's own shape, cancelling term included.
+ *
+ * ⚠️ **AND THAT CANCELLATION IS ITSELF A DESIGN FACT WORTH KNOWING: THE CAMERA DOES NOT MOVE
+ * WHEN THE GAME GETS SLOWER.** A slower fighter needs proportionally longer to cross its own
+ * hit radius, so the reaction distance it must be shown is unchanged.
+ */
+export const GUARANTEED_VISIBLE_RADIUS =
+  RANGED_MAX + HIT_RADIUS_VS_PLAYER
+  + (PLAYER_SPEED * TRAIL.speedBoost) * (HIT_RADIUS_VS_PLAYER / PLAYER_SPEED);
+
 export const REACH = {
   /** 1.38 bl — fast utility melee (Burrito's Roll Stun). A body-check. */
   meleeQuick: 58,
@@ -1276,7 +1317,7 @@ export const REACH = {
    * pushes the camera back and shrinks every character on screen; do not raise it
    * without re-shooting `node tools/aspect.mjs` and looking at the result.
    */
-  rangedMax: 140,
+  rangedMax: RANGED_MAX,
 
   /**
    * Lollipop's Giant Lollipop, and nothing else. DELIBERATELY NOT ON THE LADDER: it
@@ -1299,8 +1340,60 @@ export const REACH = {
    * => CONSTRAINT ON THE VFX OWNER, and it got HEAVIER with this retune: the slam
    * now reaches 2.0x the guaranteed-visible radius, where it used to reach 1.25x.
    * The caster is off screen far more often, so the tell has to carry more weight.
+   *
+   * ── 🚨 REVERSED 2026-08-21 BY URI. 400 -> 157.22, AND IT IS NO LONGER AUTHORED. ──
+   *
+   * Everything above this line described a 400 wu constant *"anchored to the ARENA, not to
+   * the weapon ladder"*. **It is now anchored to the CAMERA**, and the paragraphs are kept
+   * because the reasoning they record is exactly what Uri overruled:
+   *
+   *   > *"If the question is whether the giant should catch everything in the visible
+   *   > screen, the answer is almost, but it shouldn't catch everything in the map."*
+   *
+   * `GUARANTEED_VISIBLE_RADIUS` (199.22 wu) is *"the disc every supported aspect ratio is
+   * guaranteed to show around you"*, so *"everything in the visible screen"* is that number
+   * and *"almost"* is a margin off it.
+   *
+   * **THE MARGIN IS ONE BODY LENGTH, AND THAT IS THE LADDER'S OWN UNIT.** `BODY_LENGTH`
+   * opens this block — *"Every reach below is a multiple of this"* — and every rung is
+   * quoted in bl (58 = 1.38 bl … 140 = 3.33 bl). So the slam is `3.74 bl`, and the margin
+   * is the width of the fighter you are looking at: at the edge of the slam you can see a
+   * whole body's clearance between yourself and the guaranteed frame. That is what makes
+   * *"almost"* legible rather than notional — a catch at the exact frame boundary is
+   * indistinguishable from one that reached off screen, which is the failure the margin
+   * exists to prevent.
+   *
+   * ⚠️ **WHAT WAS REJECTED, so nobody re-opens it as a new idea.**
+   *   * **A percentage (0.95 x 199.22 = 189.26).** A tuned number wearing a derivation;
+   *     nothing else in this design is 5% of anything.
+   *   * **Minus `HIT_RADIUS_VS_PLAYER` (174.02).** A category error — the hit radius is a
+   *     PROJECTILE's tolerance and a melee swing has no hit-radius term at all
+   *     (`combat.ts:deliverWeapon` compares centre-to-centre against `range`). It also
+   *     lands 0.8 wu the WRONG side of the standoff bound below, so it buys nothing.
+   *   * **Rounding to an integer.** The ladder's rungs are authored integers; this one is
+   *     derived, and rounding it would re-introduce exactly the literal the derivation
+   *     exists to remove.
+   *
+   * ── ⚠️ THE EXEMPTIONS ARE **NOT** DELETED, AND ONE OF THEM STRUCTURALLY CANNOT BE ──
+   *
+   * 1. **`render/camera.ts:MAX_WEAPON_RANGE` skips `giantSlam`, and that skip is now
+   *    LOAD-BEARING RATHER THAN A CONCESSION.** Deriving the slam FROM the guaranteed
+   *    radius while the guaranteed radius is computed FROM the longest weapon range is a
+   *    fixed-point equation: including it gives `R = 0.79 R + 59.22`, i.e. R = 282 and a
+   *    slam of 240, and every further iteration pushes the camera further back. The skip
+   *    is what makes this derivation well defined. **It must stay.**
+   * 2. **`ENDGAME_STANDOFF` still excludes it — but its stated cost is now STALE.** That
+   *    block says covering the slam *"would demand a 500 wu final ring"*; that was the
+   *    price of covering 400. At 157.22 the standoff would be `157.22 + 26 = 183.22`,
+   *    which sits INSIDE `GUARANTEED_VISIBLE_RADIUS` — so the design rule it protects
+   *    (*"every neighbour is out of reach and still on screen"*) would survive, and the
+   *    exemption is deletable for the first time. **It is deliberately NOT deleted here:**
+   *    166 -> 183.22 moves `minSafeRadiusFor(N)`, and N=4 clears its floor by **0.17 wu**
+   *    (that razor is stated in the block below), so the duel and the four-player match
+   *    would stop being bit-identical and the ring would move at N=4/5/6. That is Uri's
+   *    §53b ring, not this pass's constant. **Parked for him, priced in the report.**
    */
-  ultimateSlam: 400,
+  ultimateSlam: GUARANTEED_VISIBLE_RADIUS - BODY_LENGTH,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
