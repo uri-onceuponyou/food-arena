@@ -43,6 +43,8 @@
  * possible place to learn that.
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const MANIFEST = 'shots/review/q1-manifest.json';
 const LEDGER = 'tools/tmp/q1_scores.jsonl';
@@ -154,8 +156,31 @@ function selftest() {
   process.exit(f ? 1 : 0);
 }
 
-const argv = process.argv.slice(2);
-if (argv.includes('--selftest')) selftest();
+/**
+ * 🚨 IS_MAIN — MISSING UNTIL 2026-08-21, IN A FILE THAT EXPORTS **AND WRITES**.
+ *
+ * This module exports `runOrder` and `load`, so a peer tool importing it for the run
+ * order also ran the CLI block below. Proved both arms in a scratch cwd:
+ *
+ *   * a plain `await import()` ran `main()` — from the repo it PRINTED THE WHOLE LEDGER
+ *     into the importer's output; from anywhere else it THREW inside `readFileSync`, so
+ *     the importer saw an fs crash it never caused.
+ *   * a tool whose own `argv` happened to be `--record '<json>'` **APPENDED A ROW** by
+ *     merely importing this file — and `q1_scores.jsonl` is resolved RELATIVE TO CWD, so
+ *     the write lands wherever the importer happens to be standing.
+ *
+ * That last one is the dangerous shape: the failure is a silent write to a path nobody
+ * chose, in the file that decides which panel is scored next. **Fifth instance of
+ * `AGENT-BRIEF` §3's class in this repo, and the first that mutates state.**
+ *
+ * Same block form as `q1_public.mjs`, which was fixed for the same reason.
+ */
+const IS_MAIN = process.argv[1] !== undefined
+  && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+
+const argv = IS_MAIN ? process.argv.slice(2) : [];
+if (!IS_MAIN) { /* imported for `runOrder`/`load` — the CLI path must not run, and must not WRITE */ }
+else if (argv.includes('--selftest')) selftest();
 else if (argv[0] === '--record') {
   const rec = JSON.parse(argv[1]);
   for (const k of ['id', 'ours', 'reference', 'oursNote', 'referenceNote']) {

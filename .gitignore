@@ -48,3 +48,15 @@ reference/videos/
 # ⚠️ Durability is handled instead by `tools/tmp/q1_public.mjs`, which commits a
 # role-only projection: every score, floor and sha, and NO referenceNote text.
 tools/tmp/q1_scores.jsonl
+
+# ── AND ANY PARALLEL SCRATCH THAT FEEDS IT ────────────────────────────────────
+# 🚨 A PATTERN THAT NAMES ONE FILE DOES NOT COVER THE DIRECTORY THAT FEEDS IT.
+# `q1_scores.jsonl` was ignored on 2026-08-21 because every row carries a critic's
+# prose description of a third-party reference plate. Running five panels in
+# parallel then created `tools/tmp/q1_par/*.json` — five files, ALL FIVE carrying a
+# raw `referenceNote` — untracked but NOT ignored, i.e. one `git add tools/tmp`
+# from the same breach, in a PUBLIC repo.
+#
+# The ignore rule was written against a FILE. The exposure moved to a DIRECTORY the
+# moment the work parallelised. Ignore the shape, not the instance.
+tools/tmp/q1_par/
