@@ -60,3 +60,41 @@ tools/tmp/q1_scores.jsonl
 # The ignore rule was written against a FILE. The exposure moved to a DIRECTORY the
 # moment the work parallelised. Ignore the shape, not the instance.
 tools/tmp/q1_par/
+
+# ── AGENT ARTEFACT DIRECTORIES UNDER tools/tmp/ ───────────────────────────────
+# 🚨 THESE HOLD RENDERED PIXELS, AND SOME FRAMES ARE COMPARISON SHEETS BUILT
+# AGAINST REFERENCE PLATES. `reference/` itself is ignored; an output directory
+# that CONTAINS a plate's pixels is the same disclosure by another route, and
+# this repo is PUBLIC.
+#
+# Measured 2026-08-22 while closing the session: 63 untracked directories under
+# tools/tmp/, at least 12 of them holding PNGs, one with 70. None was ignored.
+# The TOOLS are committed — they are the instruments and the record of how a
+# number was produced. The OUTPUT is not: it is regenerable by definition, and
+# `shots/` was already ignored for exactly this reason while its siblings under
+# tools/tmp/ were not.
+#
+# ⚠️ This is the THIRD time this session an ignore rule had to follow the work:
+# q1_scores.jsonl (a file), q1_par/ (a directory), and now every agent scratch
+# directory. Each time the reasoning was already written down and the shape of
+# the work had moved. Ignore the SHAPE.
+# ⚠️ AND THE FIRST VERSION OF THIS BLOCK ENUMERATED DIRECTORY NAMES — `*_out/`,
+# `*_shots/`, `*_vs/`, and four literals. It left **31 of 63** directories
+# uncovered, because agents name their scratch whatever they like (`gv_A20d/`,
+# `ar2_shallow/`). Enumerating instances is what made the two earlier rules stale.
+# The invariant is not the NAME, it is that a rendered pixel does not belong in a
+# public repo: match the EXTENSION anywhere under tools/tmp/.
+tools/tmp/**/*.png
+tools/tmp/**/*.jpg
+tools/tmp/**/*.jpeg
+tools/tmp/**/*.webp
+tools/tmp/**/*.gif
+tools/tmp/**/*.log
+
+# The extension rule above stops PIXELS leaking. It does not stop the rest of an
+# artefact directory — run logs, per-station result JSON — from being swept in by a
+# `git add tools/tmp`. Measured: 0 images but **309 paths** would still stage.
+# An agent's OUTPUT directory is regenerable by definition; its TOOL is the record.
+tools/tmp/*_out/
+tools/tmp/*_out_*/
+tools/tmp/*_shots/
