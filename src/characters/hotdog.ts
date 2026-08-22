@@ -1007,7 +1007,29 @@ export class HotDogCharacter extends BaseCharacter {
     // head. The eyes are now 0.155R spheres at +/-0.42R, which fills the central
     // ~45% of the sausage's own width instead of the old 26%.
     const EYE_X = R * 0.42;
-    const EYE_DY = R * 0.115;
+    /**
+     * ⚠️ WAS `R * 0.115`, and that value was tuned ENTIRELY at the lobby camera.
+     * `onSausage` returns a tilt as well as a point, so this constant sets BOTH how
+     * high the eye rides the sausage AND which way it faces: at 0.115R against
+     * `SAUS_R` 0.38R the eye normal is atan(0.115 / sqrt(0.38^2 - 0.115^2)) = 17.6
+     * degrees above horizontal. The MATCH camera is at 58 (`camera.ts`, grep
+     * `opts.pitchDeg ?? 58`), so the eye was presenting 40.4 degrees off-axis and
+     * sitting low enough that the bun's top edge cut it — measured at gameplay
+     * subject scale (106x97 px, 10.78% of frame height), the visible sclera was
+     * 44 px against the lash hood's 107 px, i.e. the DARK part of the eye was 2.4x
+     * the white. At the lobby the same ratio is 2423 : 1697, i.e. white-dominant.
+     * The ratio INVERTING between the two cameras is the whole defect: a hood over
+     * the top of a sphere presents its full area to a camera looking down while the
+     * sclera it covers recedes.
+     *
+     * 0.150R puts the normal at 23.2 degrees — 5.6 degrees more of the eye turned
+     * toward the match camera — and lifts the sclera clear of the bun's occluding
+     * edge. It is NOT pushed further because the ceiling is real and geometric: the
+     * mustard zigzag's front nodes project to screen-height +0.20R at the lobby
+     * camera and the sclera's top already reached +0.125R there, so the whole
+     * available strip is 0.075R. This spends under half of it.
+     */
+    const EYE_DY = R * 0.150;
     const SCL = R * 0.148;
     /** ONE direction for both pupils. See the header — mirrored is cross-eyed. */
     const GAZE_X = R * 0.030;
@@ -1085,7 +1107,27 @@ export class HotDogCharacter extends BaseCharacter {
       const lash = new THREE.Mesh(new THREE.SphereGeometry(SCL * 1.06, 16, 12), inkMat);
       lash.name = 'eye_lash';
       lash.scale.set(1, 0.46, 0.66);
-      lash.position.set(0, SCL * 0.72, R * 0.012);
+      // ⚠️ WAS `SCL * 0.72`. The hood's bottom edge sat at SCL * 0.232 (0.72 minus
+      // its own half-height 1.06 * 0.46 = 0.488), covering the top three quarters of
+      // the sclera's upper half. Swept live through the shipped path with no source
+      // edit (`fq_face --lash-lift`), visible sclera px, both cameras, same frozen
+      // frame — the response is monotone and improves BOTH, which is the test a
+      // real geometric fix has to pass rather than a one-pitch cheat:
+      //     lift   match p58 sclera   lobby p20 sclera
+      //     1.00        44 px             2423 px
+      //     1.15        51 px             2637 px
+      //     1.30        57 px             2851 px   <- ships
+      //     1.45        66 px             3020 px
+      // 1.45 was rejected on the PICTURE, not the number: at the lobby the lid stops
+      // reading as a drooping hood and the character loses the "relaxed" expression
+      // the whole face spec is built on ("a lid ANGLE over a full eye, not a missing
+      // eye"). 0.72 -> 0.936 is 1.30.
+      // 🚨 AND THE METRIC MOVING IS NOT THE PICTURE MOVING: at 58 this lift alone is
+      // 44 -> 57 px on a 6,344 px silhouette and is NOT visible in the frame. It is
+      // committed for the lobby gain and as half of the pair with `EYE_DY`; the
+      // match-camera readability of this cast is NOT solved by it and is parked in
+      // the report as a cast-wide finding, not quietly claimed here.
+      lash.position.set(0, SCL * 0.936, R * 0.012);
       // Outer corner DOWN. `rotation.z` is applied in the eye's own frame, so the
       // sign has to mirror: about +Z, a positive angle lifts +X.
       lash.rotation.z = -sx * 0.20;
