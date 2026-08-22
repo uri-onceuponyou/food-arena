@@ -1,0 +1,16 @@
+[
+ { "id": "ship" },
+ { "id": "keyOff",   "keyInt": 0 },
+ { "id": "frontOff", "frontInt": 0 },
+ { "id": "fillOff",  "fillInt": 0 },
+ { "id": "rimOff",   "rimInt": 0 },
+ { "id": "key2.5",   "keyInt": 2.5 },
+ { "id": "key1.8",   "keyInt": 1.8 },
+ { "id": "front3.2", "frontInt": 3.2 },
+ { "id": "front4.4", "frontInt": 4.4 },
+ { "id": "fill0.35", "fillInt": 0.35 },
+ { "id": "c1_k2.2f3.6", "keyInt": 2.2, "frontInt": 3.6 },
+ { "id": "c2_k1.8f4.4", "keyInt": 1.8, "frontInt": 4.4 },
+ { "id": "c3_k2.2f3.6fi0.40", "keyInt": 2.2, "frontInt": 3.6, "fillInt": 0.40 },
+ { "id": "ship2" }
+]

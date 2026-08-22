@@ -980,16 +980,57 @@ const CONTACT_SPREAD = 2.3;
  * OPPOSITE flank is the one this exists for: it read exactly 0.000 at all three
  * stations before, because a cast shadow only darkens one side.
  *
- * ── RAISED x1.33, AND THE REFERENCE BAND IS WHAT DECIDED HOW FAR ────────────
- * The row above is the ceiling this is priced against, not a target to beat. Scaling
- * the peak by 0.40/0.30 = 1.33 takes the three measured opposite-flank contributions
- * to roughly 0.18 / 0.10 / 0.19 — still under the reference's own 0.198 maximum, and
- * that is the whole reason it is 0.40 and not the 0.46 the first draft carried, which
- * lands the strongest station at ~0.21 and OUT of the band. The channel ratios are
- * unchanged (0.40 / 0.36 / 0.29 preserves 1.00 : 0.90 : 0.70 to two places), so the
- * cool lean the paragraph above derives is preserved exactly rather than re-tasted.
+ * ── ⚠️ RAISED x1.33 — THE OLD WORDING, KEPT, BECAUSE IT IS STILL CORRECT AND ITS
+ *    PREMISE STOPPED BEING TRUE UNDERNEATH IT ────────────────────────────────
+ *   *"The row above is the ceiling this is priced against, not a target to beat.
+ *   Scaling the peak by 0.40/0.30 = 1.33 takes the three measured opposite-flank
+ *   contributions to roughly 0.18 / 0.10 / 0.19 — still under the reference's own
+ *   0.198 maximum, and that is the whole reason it is 0.40 and not the 0.46 the first
+ *   draft carried, which lands the strongest station at ~0.21 and OUT of the band."*
+ *
+ * 🚨 **THAT PRICING WAS DONE WHEN THIS DECAL WAS THE ONLY CONTACT LAYER A FIGHTER HAD,
+ * AND `d16fcec` PUT A SECOND ONE UNDER IT WITHOUT RE-PRICING THE FIRST.** It is the
+ * measurement's own words: `cs_charcontact.mjs --ours` *"isolates this decal from the
+ * cast shadow by rendering a third frame with the contact group hidden"*, so the
+ * 0.18 / 0.10 / 0.19 it compared against the reference's 0.198 is this decal ALONE.
+ * `ContactAOEffect` did not exist when that sentence was written.
+ *
+ * Measured on `0b8caec` by `tools/tmp/dp_polar.mjs --mode blob`, over the ring of
+ * GROUND within 70 px of the hero's own silhouette (34,704 px at hub — 2.4% of the
+ * frame, which is why no whole-frame acceptance number in `d16fcec` could see any of
+ * it). Each layer is single-variable, in Rec.709 luma codes 0-255:
+ *
+ *   station      DECAL    contact AO   hero CAST   sum    all three off
+ *   spawn_sw     13.28       5.47         4.71    23.46      29.52
+ *   spawn_ne     11.76       5.75         4.02    21.54      25.41
+ *   hub          15.03       6.57         5.13    26.73      33.27
+ *
+ * The all-off arm is LARGER than the sum at every station — three multiplies compound,
+ * so the layers are super-additive by 3.9-6.5 codes. `stage.ts` carries the scar this
+ * is the sequel to: *"the third soft darkening layer that a critic read as one
+ * directionless blob and that scored this element 3/10."* Three layers is what is here
+ * again, and the fighter now stands in a 33-code hole (ring median V 0.651 against
+ * open ground at 0.761) where this decal alone was priced to deliver about 15.
+ *
+ * → **UNDOING THE x1.33 IS THE WHOLE CHANGE**, because the x1.33 bought exactly the
+ * headroom the AO now occupies. 0.40 x 0.75 = 0.30, i.e. the peak this carried before
+ * `48e5f6c`, which returns the decal to the 0.137 / 0.074 / 0.144 it was measured at
+ * and puts DECAL + AO + CAST back at roughly the 0.19 / 0.10 / 0.20 that the reference
+ * band's 0.198 ceiling was the stopping rule for. The channel ratios are preserved
+ * EXACTLY (a single 0.75 scale), so the cool lean the paragraph above derives is
+ * untouched — this is a depth change, not a colour one.
+ *
+ * ⚠️ **AND THE AO'S OWN RANGE GATE WAS THE FIRST CANDIDATE AND IS REJECTED, MEASURED.**
+ * The hypothesis was that `rangeRadii = 2.5` admits occluders past the point where the
+ * estimator saturates (`ta + tb` reaches 1 at exactly one `caoRadius` of view-z
+ * difference), so anything beyond ~1 radius could only be bleed. Swept live at
+ * 2.5 / 2.0 / 1.6 / 1.2 / 1.0 radii on one frozen frame: the ratio of near-field
+ * contact to far-field bleed is FLAT across the whole sweep (60.5 / 61.2 / 64.4 /
+ * 62.5 / 62.3), because gating at the saturation point removes precisely the pairs
+ * that were contributing 1.0 — the MOST occluded ones, everywhere, not the bleed. The
+ * gate is a dimmer in disguise at those values and the shipped 2.5 is correct.
  */
-const CONTACT_TINT: readonly [number, number, number] = [0.40, 0.36, 0.29];
+const CONTACT_TINT: readonly [number, number, number] = [0.30, 0.27, 0.2175];
 
 /**
  * The decal's texture: white everywhere except a soft radial core.
