@@ -1050,6 +1050,31 @@ function shadeVfxObject(object: THREE.Object3D): void {
  * BRIEF QUOTES.** It thresholds at `|grad luma| < 0.5`, so ANY non-constant ramp moves
  * it by construction and it cannot fail. Judge on `segRatio`, `stepRatio` and
  * `falloffR`, which have no cut in them.
+ *
+ * ── WHAT THIS ACTUALLY DID, TALLIED RATHER THAN REMEMBERED ──────────────────────
+ *
+ * Five impact cases x two pitches, paired and exact per case (`fx_flat` -> `fx_ab`, two
+ * detached worktrees of `0b8caec` differing in this file alone):
+ *
+ *     falloffR  ("has a core", MORE NEGATIVE is better)   better 7 / worse 3 of 10
+ *     stepRatio (lobes HIGH, one mass LOW)                better 2 / worse 8 of 10
+ *     segRatio  (interior contour vs the union's own)     better 3 / worse 7 of 10
+ *
+ * ⚠️ **`97f487a`'s message says `segRatio` and `stepRatio` "move the WRONG way on 9 of
+ * 10 case/pitch pairs" and that is not a number that exists.** It is 8 of 10 and 7 of
+ * 10 on two separate columns — 15 of 20 (case x pitch x column), never 9 of 10. Second
+ * inherited count in two commits; `--amend` is banned, so the wrong one stays there and
+ * the right one lives here.
+ *
+ * The honest reading, which no single column gives: **the core is real and the mass
+ * around it is not yet one mass.** `falloffR` is the column round 1 moved by exactly
+ * -0.0000 and it now moves on 7 of 10. But `stepRatio` and `segRatio` are the columns
+ * that would say the lobes had FUSED, and they say the opposite. Part of that is
+ * measurement — `depthTest: false` puts the core over the victim, so the ablation mask
+ * now contains the FIGHTER's own edges and counts them as internal structure of the
+ * effect. Part of it is real: the lobes are still hard-edged opaque arcs, because the
+ * mean-preserving ramp is an exact no-op on the shell distributions this roster uses.
+ * **Anything that wants those two columns has to change the LOBES, not the union.**
  */
 /**
  * Raw rim weight: a lobe at the union's rim keeps `1 - this` of its own alpha, BEFORE
