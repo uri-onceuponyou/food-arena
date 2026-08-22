@@ -53,7 +53,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
 import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
@@ -522,10 +522,10 @@ export class TacoCharacter extends BaseCharacter {
     const podMat = toonMat({ color: POD, roughness: 0.76 });
     const meatMat = toonMat({ color: MEAT, roughness: 0.55 });         // seared, faintly greasy
     const meatDarkMat = toonMat({ color: MEAT_DARK, roughness: 0.5 });
-    const tomatoMat = glossyMat({ color: TOMATO, roughness: 0.18 });   // wettest surface on the model
+    const tomatoMat = glossyMat({ rim: true, color: TOMATO, roughness: 0.18 });   // wettest surface on the model
     const lettuceMatA = toonMat({ color: LETTUCE, roughness: 0.6 });   // leafy, satin not shiny
     const lettuceMatB = toonMat({ color: LETTUCE_DARK, roughness: 0.6 });
-    const onionMat = glossyMat({ color: ONION, roughness: 0.32 });     // moist, faintly translucent
+    const onionMat = glossyMat({ rim: true, color: ONION, roughness: 0.32 });     // moist, faintly translucent
 
     // ── Shell ────────────────────────────────────────────────────────────────
     // A wide, jagged-topped trapezoid — the "hard shell taco" read at a glance — but
@@ -1175,7 +1175,7 @@ export class TacoCharacter extends BaseCharacter {
     // The Onion Bomb tie moves from the whole fist to a wrist band. It keeps the
     // projectile's colour on the character, and a BAND AT THE WRIST is an
     // arm-exclusive feature — a leg has no wrist — so it pays for itself twice.
-    const cuffMat = glossyMat({ color: ONION, roughness: 0.32 });
+    const cuffMat = glossyMat({ rim: true, color: ONION, roughness: 0.32 });
     this.rig.dressLimbs((part, size) => {
       switch (part) {
         case 'upperArmL': case 'upperArmR': {
@@ -1288,7 +1288,7 @@ export class TacoCharacter extends BaseCharacter {
 
     this.buildSilhouetteEvents();
 
-    outlineGroup(this.root);
+    outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
   }

@@ -531,12 +531,54 @@ export const OUTLINE_INK = '#241a33';
 /**
  * Default outline thickness, in metres, for a ~2.1 m character.
  *
- * Tuned DOWN hard from an initial 0.035. In the actual gameplay reference frames,
- * characters carry almost no ink line — they separate from the environment through
- * value contrast, rim light and the ground ring beneath them. A heavy outline is one
- * of the loudest "hobby project" tells, so this is intentionally subtle.
+ * ── ⚠️ KEPT, WITH ITS ORIGINAL REASONING, BUT IT IS NO LONGER THE CHARACTER INK ──
+ * The wording below is the rule it encoded and it is still right about WIDTH. What it
+ * was wrong about is UNITS, and the correction is `OUTLINE_CHAR_SCREEN` under it.
+ *
+ *   *"Tuned DOWN hard from an initial 0.035. In the actual gameplay reference frames,
+ *   characters carry almost no ink line — they separate from the environment through
+ *   value contrast, rim light and the ground ring beneath them. A heavy outline is one
+ *   of the loudest 'hobby project' tells, so this is intentionally subtle."*
+ *
+ * 🚨 **A WORLD-SPACE THICKNESS CANNOT SERVE TWO CAMERAS, AND THIS GAME SHIPS TWO.**
+ * The hull expands a fixed number of METRES, so its width in PIXELS is whatever the
+ * camera distance makes it. At the match camera a fighter measures ~90 px of a 900 px
+ * frame — about 0.023 m per pixel — so **0.004 m is 0.17 px: the character ink line
+ * does not exist at the framing the game is played at.** At the lobby camera the same
+ * character is roughly ten times bigger on screen, so the same constant draws a line
+ * ten times heavier there, which is the "sticker" failure the note above is describing.
+ * One number was being asked to be both, and it could only ever be right at one
+ * distance. That is why the value was tuned twice in opposite directions.
+ *
+ * Still exported and still the default for `addOutline`/`outlineGroup`, because the
+ * ARENA's ink is world-space on purpose (a prop's ink should get heavier as you walk
+ * up to it) and `arena/**` is owned elsewhere. Characters now use the screen-space
+ * path below.
  */
 export const OUTLINE_THIN = 0.004;
+
+/**
+ * CHARACTER ink, as a fraction of VIEWPORT HEIGHT — the unit an ink line is actually
+ * authored in, and the reason it can be one number for both shipped cameras.
+ *
+ * `screenSpace: true` hulls expand in CLIP space by `thickness * w`, i.e. by a constant
+ * fraction of the half-height of the frame, with the x component divided by the aspect
+ * recovered from the projection matrix so the line is the same width on both axes. So:
+ *
+ *     px = thickness * viewportHeight / 2
+ *
+ * 0.0034 is **1.53 px at the shipped 900 px capture height** and the same 1.53 px at any
+ * other resolution, on either camera, at any distance. It is chosen as the thinnest line
+ * that is reliably more than one pixel — one pixel of ink dithers in and out under SMAA
+ * and reads as an artefact rather than a contour — and it is deliberately at the bottom
+ * of the usable range, because the note above is right that heavy ink is a tell.
+ *
+ * ⚠️ It must stay below `PROP_INK_MIN`, which is compared against the same field: the
+ * tier policy drops any hull at or above 0.012 on `low`, and character ink is exactly
+ * what `low` is supposed to keep. 0.0034 is 3.5x clear of that, and `--selftest` in
+ * `tools/tmp/v2_ablate.mjs` asserts it rather than leaving it to be noticed.
+ */
+export const OUTLINE_CHAR_SCREEN = 0.0034;
 
 /**
  * The arena's "this mass blocks you" ink — `arena/kitchen.ts` passes this literal to
@@ -585,7 +627,11 @@ type OutlineMaterial = THREE.ShaderMaterial;
  * draw. Pixel-for-pixel identical output; it is the same shader with the same
  * uniforms.
  */
-function outlineMaterial(thickness: number, color: THREE.ColorRepresentation): OutlineMaterial {
+function outlineMaterial(
+  thickness: number,
+  color: THREE.ColorRepresentation,
+  screenSpace = false,
+): OutlineMaterial {
   // A dedicated ShaderMaterial rather than patching MeshBasicMaterial: basic
   // materials carry no normal chunks, so `objectNormal` is undefined there and the
   // hull silently never expands (an outline that renders as nothing at all).
@@ -594,11 +640,44 @@ function outlineMaterial(thickness: number, color: THREE.ColorRepresentation): O
       outlineColor: { value: new THREE.Color(color) },
       outlineThickness: { value: thickness },
     },
-    // Expansion happens in VIEW space, not object space. Expanding `position` directly
-    // means the offset is subsequently multiplied by the object's scale, so a mesh
-    // scaled 3x gets a 3x fatter outline — which reads as a randomly uneven ink line
-    // across a model built from differently-scaled parts.
-    vertexShader: /* glsl */ `
+    // ── WORLD path: expansion happens in VIEW space, not object space. Expanding
+    // `position` directly means the offset is subsequently multiplied by the object's
+    // scale, so a mesh scaled 3x gets a 3x fatter outline — which reads as a randomly
+    // uneven ink line across a model built from differently-scaled parts.
+    //
+    // ── SCREEN path: the same expansion carried one transform further, into CLIP
+    // space, where a displacement of `t * w` is a constant fraction of the frame at
+    // ANY depth. That is the whole difference: the world path draws a line whose
+    // pixel width is a function of camera distance (0.17 px on a fighter at the match
+    // camera, ~10x that on the same fighter in the lobby), the screen path draws the
+    // same width at both. Both paths are compiled from this one function so they
+    // cannot drift; the world path's three lines are byte-for-byte what shipped.
+    //
+    // The aspect correction is recovered from the projection matrix rather than passed
+    // in as a uniform — `P[1][1] = 1/tan(fov/2)` and `P[0][0] = P[1][1]/aspect` — so
+    // nothing has to be re-pushed on resize, on a live tier change, or on the two
+    // different FOVs the lobby and match cameras run. A uniform here would be a second
+    // source of truth that goes stale silently the first time one of them is missed.
+    vertexShader: screenSpace ? /* glsl */ `
+      uniform float outlineThickness;
+      void main() {
+        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+        vec3 n = normalize(normalMatrix * normal);
+        vec4 clip  = projectionMatrix * mvPosition;
+        vec4 clipN = projectionMatrix * vec4(mvPosition.xyz + n, 1.0);
+        // The normal's direction on SCREEN, which is the clip-space delta divided by w
+        // (the perspective divide) — not the clip-space delta itself.
+        vec2 dir = clipN.xy / max(1e-6, clipN.w) - clip.xy / max(1e-6, clip.w);
+        float aspect = projectionMatrix[1][1] / max(1e-6, projectionMatrix[0][0]);
+        // Normalise in a square space so a horizontal and a vertical edge get the same
+        // width, then take the offset back into clip space through the same aspect.
+        vec2 sq = vec2(dir.x * aspect, dir.y);
+        float len = length(sq);
+        vec2 unit = len > 1e-6 ? sq / len : vec2(0.0);
+        clip.xy += vec2(unit.x / aspect, unit.y) * outlineThickness * clip.w;
+        gl_Position = clip;
+      }
+    ` : /* glsl */ `
       uniform float outlineThickness;
       void main() {
         vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
@@ -661,6 +740,21 @@ export interface OutlineGroupOptions {
    * `low`). Intended for decoration-scale ink; see the tier policy in `outlineGroup`.
    */
   tierOptional?: boolean;
+  /**
+   * Read `thickness` as a fraction of VIEWPORT HEIGHT instead of as metres.
+   *
+   * For CHARACTERS. A world-space ink line is a different width in pixels at every
+   * camera distance, and this game ships two cameras an order of magnitude apart —
+   * see `OUTLINE_CHAR_SCREEN`. Opt-in, and NOT the default, because the arena's ink
+   * genuinely wants the world-space behaviour (a prop's contour thickening as you
+   * approach it is correct) and `arena/**` is owned elsewhere.
+   *
+   * ⚠️ `thickness` is still compared against `PROP_INK_MIN` by the tier gate below.
+   * The two units are not interchangeable, and the guard is a floor rather than a
+   * conversion: any screen-space value large enough to trip a metres threshold would
+   * be an ink line ~5 px wide, which is not something this project would ship anyway.
+   */
+  screenSpace?: boolean;
 }
 
 /**
@@ -702,7 +796,7 @@ export function outlineGroup(
   });
   if (!targets.length) return;
 
-  const mat = outlineMaterial(thickness, color);
+  const mat = outlineMaterial(thickness, color, opts.screenSpace === true);
   if (opts.merge) {
     const merged = bakeHulls(group, targets, mat);
     if (merged) {
@@ -717,6 +811,28 @@ export function outlineGroup(
   for (const m of targets) {
     m.parent?.add(addOutline(m, thickness, color, mat));
   }
+}
+
+/**
+ * THE CHARACTER INK LINE. One call, one policy, one place to change it.
+ *
+ * Every character's `build()` ended with a bare `outlineGroup(this.root)`, which took
+ * `OUTLINE_THIN`'s **metres** and therefore drew a line whose pixel width was a function
+ * of camera distance — 0.17 px on a fighter at the match camera, roughly ten times that
+ * on the same fighter in the lobby. That is not a value that can be tuned right; it is a
+ * unit that cannot be right at two distances, and it had been tuned twice in opposite
+ * directions by rounds looking at different cameras.
+ *
+ * This exists as a function rather than as three extra arguments at twelve call sites
+ * because the twelve call sites are the thing that went wrong: a policy spread across
+ * twelve files is twelve places to forget it, and the one that forgets is invisible —
+ * a character with no contour looks like a character that needs more contrast.
+ *
+ * ⚠️ Named `outlineCharacter`, not `outlineGroup(…, { character: true })`, so a grep for
+ * who carries character ink returns the roster and nothing else.
+ */
+export function outlineCharacter(root: THREE.Object3D): void {
+  outlineGroup(root, OUTLINE_CHAR_SCREEN, OUTLINE_INK, { screenSpace: true });
 }
 
 /**

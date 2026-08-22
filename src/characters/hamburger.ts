@@ -56,7 +56,7 @@ import { BaseCharacter } from './types';
 import type { AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox, RAMP_CHARACTER, OUTLINE_THIN } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox, RAMP_CHARACTER } from '../render/toon';
 import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
@@ -2179,7 +2179,7 @@ export class HamburgerCharacter extends BaseCharacter {
 
     // Outline: a whisper, per render/toon.ts — the reference bar carries almost
     // no ink line.
-    outlineGroup(this.root, OUTLINE_THIN);
+    outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
   }

@@ -644,8 +644,19 @@ const CONTACT_Y = 0.09;
  * `tools/tmp/cs_charcontact.mjs` measures in. Its NEAR band is t 1.10-2.20, and the
  * reference plates' props carry their darkening out to about t 2.3, so the falloff
  * has to still be alive at 2.2 and gone by 2.6.
+ *
+ * ── 2.6 -> 2.3, ON URI'S OWN INSTRUCTION, AND THE CONSTRAINT ABOVE STILL BINDS ──
+ *   > *"a small tight contact shadow directly under each character's feet ... keep the
+ *   > directional shadow but soften and shorten it, and let the contact shadow do the
+ *   > work of grounding."*
+ * "Small and tight" is a statement about WHERE THE MASS IS, not only about the radius,
+ * so this moves with the exponent in `contactTexture` and the peak in `CONTACT_TINT`
+ * below — all three, or the decal just gets fainter. 2.3 is the tightest value that
+ * still satisfies the sentence above: the falloff is alive at t = 2.20 (0.0126 of the
+ * floor, against 0.0212 before) and reaches zero at 2.3 rather than trailing to 2.6.
+ * Derived, not guessed: at t = 2.20 with SPREAD 2.3 the normalised radius is 0.957.
  */
-const CONTACT_SPREAD = 2.6;
+const CONTACT_SPREAD = 2.3;
 
 /**
  * Peak multiply, as (1 - r, 1 - g, 1 - b) subtracted at the centre.
@@ -670,8 +681,17 @@ const CONTACT_SPREAD = 2.6;
  * against the reference's opposite-flank 0.061 / 0.087 / 0.198 on bs_06's props. The
  * OPPOSITE flank is the one this exists for: it read exactly 0.000 at all three
  * stations before, because a cast shadow only darkens one side.
+ *
+ * ── RAISED x1.33, AND THE REFERENCE BAND IS WHAT DECIDED HOW FAR ────────────
+ * The row above is the ceiling this is priced against, not a target to beat. Scaling
+ * the peak by 0.40/0.30 = 1.33 takes the three measured opposite-flank contributions
+ * to roughly 0.18 / 0.10 / 0.19 — still under the reference's own 0.198 maximum, and
+ * that is the whole reason it is 0.40 and not the 0.46 the first draft carried, which
+ * lands the strongest station at ~0.21 and OUT of the band. The channel ratios are
+ * unchanged (0.40 / 0.36 / 0.29 preserves 1.00 : 0.90 : 0.70 to two places), so the
+ * cool lean the paragraph above derives is preserved exactly rather than re-tasted.
  */
-const CONTACT_TINT: readonly [number, number, number] = [0.30, 0.27, 0.21];
+const CONTACT_TINT: readonly [number, number, number] = [0.40, 0.36, 0.29];
 
 /**
  * The decal's texture: white everywhere except a soft radial core.
@@ -690,11 +710,26 @@ function contactTexture(size = 64): THREE.DataTexture {
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
       const r = Math.min(1, Math.hypot((x - c) / c, (y - c) / c));
-      // (1-r)^1.4: a soft shoulder at the centre and a long tail, so the darkening is
-      // still ~46% of peak at t=1.10 (the inner edge of the measured band) and ~7% at
-      // t=2.20 (its outer edge). A linear ramp put too much of the mass under the
-      // character, where its own body hides it.
-      const f = Math.pow(Math.max(0, 1 - r), 1.4);
+      // ── EXPONENT 1.4 -> 1.15, AND THE OLD REASONING IS KEPT BECAUSE IT IS STILL
+      //    THE CONSTRAINT, JUST NOT THE ONLY ONE ──────────────────────────────
+      //   *"(1-r)^1.4: a soft shoulder at the centre and a long tail, so the darkening
+      //   is still ~46% of peak at t=1.10 (the inner edge of the measured band) and ~7%
+      //   at t=2.20 (its outer edge). A linear ramp put too much of the mass under the
+      //   character, where its own body hides it."*
+      // That is why this is 1.15 and NOT 1.0: a linear ramp really does bury the mass
+      // under the body at 58 deg. But 1.4 was chosen against a SPREAD of 2.6, and the
+      // spread is now 2.3, which already pulls the tail in. Re-derived at the new
+      // spread rather than inherited — the shape of the curve is a function of both:
+      //
+      //   t          1.10    1.60    2.20     (normalised r = t / SPREAD)
+      //   was  2.6 ^1.4     0.462   0.267   0.0705
+      //   now  2.3 ^1.15    0.475   0.255   0.0287
+      //
+      // i.e. slightly MORE at the feet, the same in the middle, and 2.5x less in the
+      // outer band — which is "small and tight" expressed as a curve rather than as an
+      // adjective. Combined with the 1.33x peak, the darkening at t = 1.10 goes
+      // 0.30 x 0.462 = 0.139 -> 0.40 x 0.475 = 0.190 of the floor it lands on.
+      const f = Math.pow(Math.max(0, 1 - r), 1.15);
       const i = (y * size + x) * 4;
       data[i] = Math.round(255 * (1 - CONTACT_TINT[0] * f));
       data[i + 1] = Math.round(255 * (1 - CONTACT_TINT[1] * f));

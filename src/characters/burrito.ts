@@ -74,7 +74,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineCharacter } from '../render/toon';
 import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
@@ -589,10 +589,10 @@ export class BurritoCharacter extends BaseCharacter {
     // same fix as the wrap surface above.
     const meatMat = toonMat({ color: MEAT, roughness: 0.55 });
     const meatDarkMat = toonMat({ color: MEAT_DARK, roughness: 0.5 });
-    const tomatoMat = glossyMat({ color: TOMATO, roughness: 0.2 });
-    const cheeseMat = glossyMat({ color: CHEESE, roughness: 0.3 });
+    const tomatoMat = glossyMat({ rim: true, color: TOMATO, roughness: 0.2 });
+    const cheeseMat = glossyMat({ rim: true, color: CHEESE, roughness: 0.3 });
     const lettuceMat = toonMat({ color: LETTUCE, roughness: 0.6 });
-    const creamMat = glossyMat({ color: SOUR_CREAM, roughness: 0.15 });
+    const creamMat = glossyMat({ rim: true, color: SOUR_CREAM, roughness: 0.15 });
 
     const placeOnDome = (
       spot: Spot,
@@ -1050,7 +1050,7 @@ export class BurritoCharacter extends BaseCharacter {
 
     this.buildSpill(R);
 
-    outlineGroup(this.root);
+    outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
   }
@@ -1102,7 +1102,7 @@ export class BurritoCharacter extends BaseCharacter {
     const head = this.rig.joints.head;
     const box = localBounds(head);
     const lettuceMat = toonMat({ color: LETTUCE, roughness: 0.55 });
-    const cheeseMat = glossyMat({ color: CHEESE, roughness: 0.28 });
+    const cheeseMat = glossyMat({ rim: true, color: CHEESE, roughness: 0.28 });
 
     // ⚠️ The lettuce WAS at -0.34PI (-61 deg) and it covered the left eye's outer corner
     // — the eye spans to -44 deg and the leaf is 0.60R wide, so the two overlap on

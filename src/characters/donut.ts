@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineCharacter } from '../render/toon';
 import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
@@ -454,7 +454,7 @@ export class DonutCharacter extends BaseCharacter {
     // as icing on bread rather than as one moulded plastic object.
     const glaze = new THREE.Mesh(
       new THREE.TorusGeometry(ringR, tubeR * 1.04, 18, 40),
-      glossyMat({ color: GLAZE, roughness: 0.16 })
+      glossyMat({ rim: true, color: GLAZE, roughness: 0.16 })
     );
     glaze.name = 'donut_glaze';
     glaze.position.z = tubeR * 0.16;
@@ -584,7 +584,7 @@ export class DonutCharacter extends BaseCharacter {
       const collarY = size.h * 0.86;
       const collarR = bodyHalfW * 0.82;
       const collarTube = bodyHalfW * 0.30;
-      const collarMat = glossyMat({ color: GLAZE, roughness: 0.16 });
+      const collarMat = glossyMat({ rim: true, color: GLAZE, roughness: 0.16 });
       // Radial segments pushed up from a first pass at 12 — viewed near
       // edge-on from the front (a flat ring's own tube cross-section faces the
       // camera almost directly there), 12 facets around the tube showed as a
@@ -666,13 +666,13 @@ export class DonutCharacter extends BaseCharacter {
     const limbPinkDarkMat = toonMat({ color: LIMB_PINK_DARK, roughness: 0.7 });
     const sleeveDoughMat = toonMat({ color: SLEEVE_DOUGH, roughness: 0.7 });
     const sleeveDoughDarkMat = toonMat({ color: SLEEVE_DOUGH_DARK, roughness: 0.7 });
-    const glazeHandMat = glossyMat({ color: GLAZE, roughness: 0.16 });
+    const glazeHandMat = glossyMat({ rim: true, color: GLAZE, roughness: 0.16 });
     // Roughness 0.22 -> 0.34. `glossyMat` carries `clearcoat: 0.6`, so at 0.22 the
     // boot returns a broad specular and its measured p50 rose 0.0599 -> 0.1000 once
     // `taperedSegment` gave it a real tapered face to catch the key with. That is
     // half of `kneeL|footL`'s 0.0015 miss against the 0.10 gate; the shin tone
     // above carries the other half.
-    const chocFootMat = glossyMat({ color: CHOC_DIP, roughness: 0.34 });
+    const chocFootMat = glossyMat({ rim: true, color: CHOC_DIP, roughness: 0.34 });
     this.rig.dressLimbs((part, size) => {
       switch (part) {
         // ── The radii are CONTINUITY constraints, not taste ────────────────────
@@ -812,7 +812,7 @@ export class DonutCharacter extends BaseCharacter {
     this.buildFace(R, ringR, tubeR);
     this.buildSilhouetteEvents(R);
 
-    outlineGroup(this.root);
+    outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
   }

@@ -29,7 +29,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
 import { ChibiRig, taperedSegment } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
@@ -904,7 +904,7 @@ export class EggCharacter extends BaseCharacter {
     // 0.065R -> 0.052R and flatter. It is the last warm accent on the model now that
     // the yolk FILL is gone, so it stays — but at the old size, sitting proud of the
     // surface, it rendered as a loose orange bead rather than as wet yolk in a crack.
-    const yolk = new THREE.Mesh(new THREE.SphereGeometry(R * 0.052, 12, 10), glossyMat({ color: YOLK, roughness: 0.2 }));
+    const yolk = new THREE.Mesh(new THREE.SphereGeometry(R * 0.052, 12, 10), glossyMat({ rim: true, color: YOLK, roughness: 0.2 }));
     yolk.scale.set(1, 1, 0.32);
     yolk.position.copy(tipSurface.pos).addScaledVector(tipSurface.normal, R * 0.003);
     yolk.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), tipSurface.normal);
@@ -1045,7 +1045,7 @@ export class EggCharacter extends BaseCharacter {
     // instead of a generic block.
     const limbShellMat = toonMat({ color: LIMB_LILAC, roughness: 0.4 });
     const limbShellShadowMat = toonMat({ color: LIMB_LILAC_SHADOW, roughness: 0.42 });
-    const yolkHandMat = glossyMat({ color: YOLK_HAND, roughness: 0.2 }); // deepened — see YOLK_HAND
+    const yolkHandMat = glossyMat({ rim: true, color: YOLK_HAND, roughness: 0.2 }); // deepened — see YOLK_HAND
     const crackFootMat = toonMat({ color: CRACK_DARK, roughness: 0.5 });
     // ── 🚨 THE SHELL TRIM, AND IT IS PAYING A MEASURED DEBT ─────────────────────
     // Joining the limb segments (see `dressLimbs`) fixed the bead and CREATED a
@@ -1263,7 +1263,7 @@ export class EggCharacter extends BaseCharacter {
 
     this.buildFace(R);
 
-    outlineGroup(this.root);
+    outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
   }
@@ -1445,7 +1445,7 @@ export class EggCharacter extends BaseCharacter {
       // is NOT mirrored: the head's yaw is a rotation, so both clasps move the same
       // way round the shell, which is why this is `+ 0.14` and not `sx * 0.14`.
       const p = eggSurface(sx * 0.72 * Math.PI + 0.14, PHI_RIM - 0.02, R);
-      const clasp = new THREE.Mesh(new THREE.SphereGeometry(R * 0.05, 12, 10), glossyMat({ color: NEON_ACCENT, roughness: 0.25 }));
+      const clasp = new THREE.Mesh(new THREE.SphereGeometry(R * 0.05, 12, 10), glossyMat({ rim: true, color: NEON_ACCENT, roughness: 0.25 }));
       clasp.position.copy(p.pos).addScaledVector(p.normal, R * 0.085);
       clasp.name = 'egg_cowl_clasp';
       clasp.castShadow = true;

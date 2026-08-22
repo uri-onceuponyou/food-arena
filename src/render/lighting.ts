@@ -95,11 +95,18 @@ export interface LightingRig {
  *   horizontal half-FOV at 21:9 ........... atan(tan(17) * 2.333) = 35.5 deg
  *   => widest visible half-width .......... tan(35.5) * 34.4 = 24.6 m
  *   => furthest visible ground corner ..... hypot(24.6, 12.0) = 27.4 m from the player
- *   + shadow reach of the tallest cover at the key's 39 deg elevation:
- *     1.7 m / tan(39) ..................... 2.1 m
+ *   + shadow reach of the tallest cover at the key's 46 deg elevation:
+ *     1.7 m / tan(46) ..................... 1.6 m
  *   ------------------------------------------------------------------------------
- *   = 29.5 m, and a caster must be INSIDE the frustum to cast at all, so the box has
+ *   = 29.0 m, and a caster must be INSIDE the frustum to cast at all, so the box has
  *     to hold that corner plus the casters up-light of it. 34 m, with margin.
+ *
+ * ⚠️ The elevation term was `1.7 / tan(39) = 2.1 m` and this sum was `29.5 m`. Both are
+ * re-derived here rather than left, because `MATCH_SHADOW_RADIUS_M` is a DERIVED number
+ * and a derivation that quietly stops matching its inputs is how a constant becomes
+ * folklore. The requirement got SMALLER when the key came up, so 34 m still clears it
+ * with more margin than before — no change to the constant, only to the arithmetic that
+ * justifies it.
  *
  * `focus()` clamps UP to this, so a call site asking for a smaller box cannot silently
  * clip shadows off the corners of an ultrawide display.
@@ -122,18 +129,54 @@ export interface LightingRig {
 export const MATCH_SHADOW_RADIUS_M = 34;
 
 /**
- * The key's offset from whatever it is aimed at — 45 m at elevation 39 deg, azimuth
+ * The key's offset from whatever it is aimed at — 45 m at elevation 46 deg, azimuth
  * -31 deg (measured from +X toward +Z, so a NEGATIVE azimuth is the far side of the
  * camera axis and throws shadows toward the viewer).
+ *
+ *   x = 45 * cos46 * cos(-31) =  26.79
+ *   y = 45 * sin46            =  32.37
+ *   z = 45 * cos46 * sin(-31) = -16.10
+ *
+ * ── ⚠️ THIS WAS 39 DEG. THE OLD VALUES, KEPT, BECAUSE THE ROUND THAT SET THEM
+ *    MEASURED 48 DEG AS WORSE AND THAT MEASUREMENT IS NOT WRONG — IT IS STALE ──
  *
  *   x = 45 * cos39 * cos(-31) =  29.98
  *   y = 45 * sin39            =  28.32
  *   z = 45 * cos39 * sin(-31) = -18.01
  *
+ * Uri, on the shipped build: *"The current directional shadows are long and offset,
+ * which makes characters look like they're floating — keep the directional shadow but
+ * soften and shorten it, and let the contact shadow do the work of grounding."*
+ *
+ * **The second half of that sentence is what makes it a different question from the one
+ * 39 deg answered.** The sweep below chose 39 over 48 on `contactShadeDL` and `heroDL`
+ * — i.e. on how much CONTACT the cast shadow delivered — at a time when the cast shadow
+ * was the only contact cue in the frame. `48e5f6c` then added a centred per-fighter
+ * contact decal, and this same commit raises its peak 1.33x and tightens it. So the
+ * cast shadow no longer has to buy contact, and the term it was being traded against is
+ * the one Uri is naming: LENGTH.
+ *
+ * 46 deg, not 50 and not 55, because the stopping point is derivable rather than a
+ * taste: a cast shadow's ground length is `1/tan(elevation)` of its caster's height, so
+ *
+ *   39 deg -> 1.235 x the caster's height     46 deg -> 0.966 x     50 deg -> 0.839 x
+ *
+ * and 46 is the first whole degree where **the shadow is shorter than the thing casting
+ * it**. This file already names 1.73x as the length at which "the shadow detaches from
+ * its own object and reads as a stain on the floor"; 1.0x is the other side of that
+ * same argument and is the last point at which the shadow is unambiguously attached.
+ * Going further starts closing on the camera axis, which the sweep below shows hides the
+ * shadow under its own caster.
+ *
+ * The two derived quantities downstream were re-checked, not inherited: the far corner
+ * of the 34 m box along this axis is 45 + 34*(0.5953 + 0.3577) = 77.4 m, still inside
+ * `shadow.camera.far = 95`, and the nearest in-box caster sits 12.6 m past the near
+ * plane (it was 8.7 m at 39 deg, so the clipping headroom went UP).
+ *
  * Exported as one constant because `focus()` re-sets `key.position` every frame and
  * used to do it from a hand-copied literal.
  */
-export const KEY_OFFSET = new THREE.Vector3(29.98, 28.32, -18.01);
+export const KEY_OFFSET = new THREE.Vector3(26.79, 32.37, -16.10);
 
 export function createLighting(opts?: {
   shadowRadius?: number;
@@ -261,15 +304,31 @@ export function createLighting(opts?: {
   key.shadow.camera.far = 95;
   key.shadow.bias = -0.0006;
   key.shadow.normalBias = 0.035;
-  // Blur radius tightened four times now (3 → 1.4 → 0.9 → 0.6 → 0.4) chasing a
-  // crisper, more legible cast-shadow edge — see the note above on the decal layer
-  // this stacks with.
+  // ── 0.4 -> 1.6, THE "SOFTEN" HALF OF URI'S SENTENCE ────────────────────────
+  // The history below is kept verbatim because it is the reason to be sceptical of
+  // this change, and that scepticism is the honest thing to hand the next reader:
   //
-  // Re-tested at 1.4 and 3.0 once the shadow was hugging the base, on the theory that a
-  // soft short shadow reads as contact AO: every metric in `contactshadow.mjs` moved by
-  // under 0.001 and the frames were indistinguishable to look at. Left where four
-  // previous rounds put it rather than moved on no evidence.
-  key.shadow.radius = 0.4;
+  //   *"Blur radius tightened four times now (3 -> 1.4 -> 0.9 -> 0.6 -> 0.4) chasing a
+  //   crisper, more legible cast-shadow edge — see the note above on the decal layer
+  //   this stacks with. Re-tested at 1.4 and 3.0 once the shadow was hugging the base,
+  //   on the theory that a soft short shadow reads as contact AO: every metric in
+  //   `contactshadow.mjs` moved by under 0.001 and the frames were indistinguishable to
+  //   look at. Left where four previous rounds put it rather than moved on no
+  //   evidence."*
+  //
+  // ⚠️ So this project has ALREADY measured that this knob is close to a no-op on the
+  // instruments it owns, and the honest prediction for the A/B accompanying this commit
+  // is that the whole-frame delta attributable to THIS line alone is small. It is
+  // changed anyway, and declared, because (a) it is half of an explicit instruction from
+  // the owner, (b) the two things it was tested against have both moved underneath it —
+  // the key is 7 deg higher and the contact decal is 1.33x deeper, so "a soft short
+  // shadow reads as contact AO" is now being asked of a shadow that is 22% shorter and
+  // is no longer the only contact cue — and (c) `docs/LESSONS.md` §6b's mirror image
+  // applies: a flat metric is not evidence a change did nothing, and no statistic here
+  // measures edge softness at all.
+  // **If the paired ablation says it is invisible, that is the result and it should be
+  // reported as one — not quietly kept because it was asked for.**
+  key.shadow.radius = 1.6;
   group.add(key);
   group.add(key.target);
 

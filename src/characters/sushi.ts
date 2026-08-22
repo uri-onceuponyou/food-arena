@@ -46,7 +46,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType, withoutNeck } from './bodies';
 import { aim, localBounds, massAnchor, rod } from './appendages';
@@ -1074,7 +1074,7 @@ export class SushiCharacter extends BaseCharacter {
     this.buildAccessories(R, { yAt, zAt, hemAt });
     this.buildSilhouetteEvents(R);
 
-    outlineGroup(this.root);
+    outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
   }

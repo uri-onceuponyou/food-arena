@@ -41,7 +41,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType, withoutNeck } from './bodies';
 import { curl, knob, localBounds, massAnchor } from './appendages';
@@ -575,7 +575,7 @@ export class PizzaCharacter extends BaseCharacter {
     sauceShape.lineTo(0, sTip);
     const sauce = new THREE.Mesh(
       new THREE.ExtrudeGeometry(sauceShape, { depth: R * 0.05, bevelEnabled: false, curveSegments: 16 }),
-      glossyMat({ color: SAUCE, roughness: 0.18 })
+      glossyMat({ rim: true, color: SAUCE, roughness: 0.18 })
     );
     sauce.name = 'pizza_sauce';
     sauce.position.z = depth / 2 - R * 0.01;
@@ -608,7 +608,7 @@ export class PizzaCharacter extends BaseCharacter {
     cheeseShape.quadraticCurveTo(0, cBase - R * 0.20, -cHalfW * 0.33, cBase - R * 0.03);
     cheeseShape.quadraticCurveTo(-cHalfW * 0.68, cBase - R * 0.14, -cHalfW, cRim);
     cheeseShape.lineTo(0, cTip);
-    const cheeseMat = glossyMat({ color: CHEESE, roughness: 0.25, emissive: CHEESE, emissiveIntensity: 0.18 });
+    const cheeseMat = glossyMat({ rim: true, color: CHEESE, roughness: 0.25, emissive: CHEESE, emissiveIntensity: 0.18 });
     const cheese = new THREE.Mesh(
       new THREE.ExtrudeGeometry(cheeseShape, { depth: R * 0.07, bevelEnabled: true, bevelThickness: R * 0.02, bevelSize: R * 0.02, bevelSegments: 2, curveSegments: 16 }),
       cheeseMat
@@ -640,7 +640,7 @@ export class PizzaCharacter extends BaseCharacter {
     // the blush's old job — see `buildFace`), one small one near the tip. Every
     // position is checked against the cheese triangle's own half-width at that height
     // so no disc hangs off the melt onto the sauce.
-    const pepMat = glossyMat({ color: PEPPERONI, roughness: 0.18 });
+    const pepMat = glossyMat({ rim: true, color: PEPPERONI, roughness: 0.18 });
     // [x, y, radius] — radii differ so the row cannot read as a manufactured set.
     const pepSpots: [number, number, number][] = [
       [-R * 0.37, -R * 0.33, R * 0.078],
@@ -671,7 +671,7 @@ export class PizzaCharacter extends BaseCharacter {
     // rejected is available to them: a drip cannot be an ear (it is not at the side of
     // the head) and it cannot be a nose (it is below the mouth and it does not leave
     // the mass). This is where "melted" now lives.
-    const dripMat = glossyMat({ color: CHEESE, roughness: 0.24, emissive: CHEESE, emissiveIntensity: 0.14 });
+    const dripMat = glossyMat({ rim: true, color: CHEESE, roughness: 0.24, emissive: CHEESE, emissiveIntensity: 0.14 });
     const drips: [number, number, number][] = [
       [-R * 0.30, -R * 0.635, R * 0.070],
       [R * 0.06, -R * 0.700, R * 0.082],
@@ -1040,7 +1040,7 @@ export class PizzaCharacter extends BaseCharacter {
     this.buildAccessories(R, head);
     this.buildSilhouetteEvents(R);
 
-    outlineGroup(this.root);
+    outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
   }
@@ -1570,7 +1570,7 @@ export class PizzaCharacter extends BaseCharacter {
     // Both limb tones are the charred crust now — see LIMB_CHAR. The slice keeps CRUST.
     const doughMat = toonMat({ color: LIMB_MID, roughness: 0.85 });
     const doughDarkMat = toonMat({ color: LIMB_CHAR, roughness: 0.8 });
-    const pepMat = glossyMat({ color: PEPPERONI, roughness: 0.18 });
+    const pepMat = glossyMat({ rim: true, color: PEPPERONI, roughness: 0.18 });
     const charMat = toonMat({ color: CRUST_CHAR, roughness: 0.75 });
     const bootMat = toonMat({ color: BOOT_CRUST, roughness: 0.72 });
 

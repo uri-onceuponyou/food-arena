@@ -44,7 +44,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType, withoutNeck } from './bodies';
 // `loop` is deliberately no longer imported: it built the two torus arcs that read
@@ -728,8 +728,8 @@ export class SoupCharacter extends BaseCharacter {
     const head = this.rig.joints.head;
 
     // ── Materials ────────────────────────────────────────────────────────────
-    const ceramicMat = glossyMat({ color: CERAMIC, roughness: 0.25 });      // glazed bowl
-    const ceramicShadeMat = glossyMat({ color: CERAMIC_SHADE, roughness: 0.28 });
+    const ceramicMat = glossyMat({ rim: true, color: CERAMIC, roughness: 0.25 });      // glazed bowl
+    const ceramicShadeMat = glossyMat({ rim: true, color: CERAMIC_SHADE, roughness: 0.28 });
     const trimMat = toonMat({ color: RIM_TRIM, roughness: 0.4 });
     // ── 🚨 THE "HOLE IN THE BOWL" WAS THIS MATERIAL, AND I MISDIAGNOSED IT TWICE ──
     // At the three-quarter lobby facing the bowl's interior renders as a broad
@@ -983,7 +983,7 @@ export class SoupCharacter extends BaseCharacter {
     this.buildAccessories();
     this.buildSilhouetteEvents();
 
-    outlineGroup(this.root);
+    outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
   }
@@ -1567,7 +1567,7 @@ export class SoupCharacter extends BaseCharacter {
     // near-white area on the cast's worst near-white offender, and a ladle bowl is a
     // shadowed concave surface — it has no business being brighter than the ceramic
     // it hangs beside. Read as metal by its `metalness`, not by its albedo.
-    const bowlMat = glossyMat({ color: '#9AA3AC', roughness: 0.34, metalness: 0.4 });
+    const bowlMat = glossyMat({ rim: true, color: '#9AA3AC', roughness: 0.34, metalness: 0.4 });
     const scoop = new THREE.Mesh(new THREE.SphereGeometry(handRadius * 0.5, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.62), bowlMat);
     scoop.name = 'soup_ladle_scoop';
     scoop.position.set(0, -handRadius * 1.55, 0);
@@ -1850,7 +1850,7 @@ export class SoupCharacter extends BaseCharacter {
     handle.castShadow = true;
     miniLadle.add(handle);
 
-    const scoopMat = glossyMat({ color: '#9AA3AC', roughness: 0.34, metalness: 0.4 });
+    const scoopMat = glossyMat({ rim: true, color: '#9AA3AC', roughness: 0.34, metalness: 0.4 });
     const scoop = new THREE.Mesh(new THREE.SphereGeometry(shoulderWidth * 0.13, 14, 10, 0, Math.PI * 2, 0, Math.PI * 0.62), scoopMat);
     scoop.name = 'soup_sling_ladle_scoop';
     scoop.rotation.x = Math.PI;
@@ -2065,7 +2065,7 @@ export class SoupCharacter extends BaseCharacter {
       len: rBowl * 0.86, rBase: rBowl * 0.075, rTip: rBowl * 0.058,
     }));
     const bowlEnd = new THREE.Mesh(new THREE.SphereGeometry(rBowl * 0.13, 12, 10),
-      glossyMat({ color: '#C7CDD4', roughness: 0.3, metalness: 0.4 }));
+      glossyMat({ rim: true, color: '#C7CDD4', roughness: 0.3, metalness: 0.4 }));
     bowlEnd.name = 'soup_spoon_bowl';
     bowlEnd.scale.set(1, 0.42, 1.25);
     bowlEnd.position.y = rBowl * 0.86;
@@ -2145,8 +2145,8 @@ export class SoupCharacter extends BaseCharacter {
     // `GLAZE_GREY`'s own note (above) records the intent — "grey sleeves, cream
     // mitts, dark boots" — and `rules.ts` now states it as spec. Each tone below is
     // one rung of the ladder at the top of this file.
-    const sleeveMat = glossyMat({ color: SLEEVE_GREY, roughness: 0.34 }); // upper arm — grey stoneware sleeve
-    const cuffMat = glossyMat({ color: CUFF_GREY, roughness: 0.38 });     // forearm — the darker rolled cuff
+    const sleeveMat = glossyMat({ rim: true, color: SLEEVE_GREY, roughness: 0.34 }); // upper arm — grey stoneware sleeve
+    const cuffMat = glossyMat({ rim: true, color: CUFF_GREY, roughness: 0.38 });     // forearm — the darker rolled cuff
     const mittMat = toonMat({ color: MITT_CREAM, roughness: 0.62 });      // cream cloth mitt
     const legMat = toonMat({ color: LEG_STONE, roughness: 0.55 });        // dark stoneware post
     const trimMat = toonMat({ color: RIM_TRIM, roughness: 0.4 });

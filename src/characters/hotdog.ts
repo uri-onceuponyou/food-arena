@@ -34,7 +34,7 @@ import * as THREE from 'three';
 import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
-import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType, withoutNeck } from './bodies';
 // `aim`, `rod` and `knob` went with the duplicate mustard bottle — see
@@ -575,8 +575,8 @@ export class HotDogCharacter extends BaseCharacter {
 
       const bunMat = toonMat({ color: BUN_LIGHT, roughness: 0.85 });
       const bunShadeMat = toonMat({ color: BUN_SHADE, roughness: 0.85 });
-      const meatMat = glossyMat({ color: PALETTE.sausage, roughness: 0.3 });
-      const seamMat = glossyMat({ color: PALETTE.mustard, roughness: 0.15 });
+      const meatMat = glossyMat({ rim: true, color: PALETTE.sausage, roughness: 0.3 });
+      const seamMat = glossyMat({ rim: true, color: PALETTE.mustard, roughness: 0.15 });
 
       const lobeR = size.w * 0.19;
       const lobeLen = size.h * 0.50;
@@ -795,9 +795,9 @@ export class HotDogCharacter extends BaseCharacter {
     // bread + meat + sauce, not one plastic shader repeated in different colours
     // (that was the single biggest criticism of an earlier character here). ───
     const bunMat = toonMat({ color: BUN_LIGHT, roughness: 0.85 }); // dry, matte-baked crust — see BUN_LIGHT
-    const sausageMat = glossyMat({ color: PALETTE.sausage, roughness: 0.3 }); // taut, faintly greasy skin
-    const mustardMat = glossyMat({ color: PALETTE.mustard, roughness: 0.15 }); // wettest surface on the model
-    const ketchupMat = glossyMat({ color: PALETTE.ketchup, roughness: 0.15 });
+    const sausageMat = glossyMat({ rim: true, color: PALETTE.sausage, roughness: 0.3 }); // taut, faintly greasy skin
+    const mustardMat = glossyMat({ rim: true, color: PALETTE.mustard, roughness: 0.15 }); // wettest surface on the model
+    const ketchupMat = glossyMat({ rim: true, color: PALETTE.ketchup, roughness: 0.15 });
     const glowMat = toonMat({
       color: CYBER, roughness: 0.4, metalness: 0.3, emissive: CYBER, emissiveIntensity: 0.45,
     });
@@ -914,7 +914,7 @@ export class HotDogCharacter extends BaseCharacter {
     this.buildAccessories(R, head, { LOBE_Y, LOBE_DZ, LOBE_TILT, LOBE_LEN, LOBE_D, LOBE_H });
     this.buildSilhouetteEvents(R, { LOBE_LEN }, SAUS_Y);
 
-    outlineGroup(this.root);
+    outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
   }
@@ -998,7 +998,7 @@ export class HotDogCharacter extends BaseCharacter {
     const scleraMat = toonMat({ color: SCLERA, roughness: 0.28 });
     const inkMat = toonMat({ color: ink, roughness: 0.24 });
     const throatMat = toonMat({ color: THROAT, roughness: 0.6 });
-    const tongueMat = glossyMat({ color: TONGUE, roughness: 0.35 });
+    const tongueMat = glossyMat({ rim: true, color: TONGUE, roughness: 0.35 });
 
     // ── The face was too SMALL for the mass carrying it ──────────────────────
     // A blind critic described it as "a tiny face squeezed onto the lower third
@@ -1354,7 +1354,7 @@ export class HotDogCharacter extends BaseCharacter {
 
     const holsterMat = toonMat({ color: HOLSTER_LEATHER, roughness: 0.76 });
     const buckleMat = toonMat({ color: HOLSTER_BUCKLE, roughness: 0.32, metalness: 0.5 });
-    const bottleMat = glossyMat({ color: PALETTE.mustard, roughness: 0.2 });
+    const bottleMat = glossyMat({ rim: true, color: PALETTE.mustard, roughness: 0.2 });
 
     // The dressed split-bun torso (see the constructor's own `dressTorso` call)
     // is custom geometry, not the rig's default barrel. Measuring its REAL
@@ -1516,10 +1516,10 @@ export class HotDogCharacter extends BaseCharacter {
     const bunMat = toonMat({ color: LIMB_BUN, roughness: 0.85 });
     const bunDarkMat = toonMat({ color: LIMB_BUN_DARK, roughness: 0.8 });
     const bootMat = toonMat({ color: BOOT_CHAR, roughness: 0.8 });
-    const ketchupMat = glossyMat({ color: PALETTE.ketchup, roughness: 0.15 });
+    const ketchupMat = glossyMat({ rim: true, color: PALETTE.ketchup, roughness: 0.15 });
     // MITT_SAUSAGE, not `PALETTE.sausage`: the mitts sat at exactly the head's own
     // sausage value, so `handL` had nowhere to separate to against the forearm above it.
-    const sausageMat = glossyMat({ color: MITT_SAUSAGE, roughness: 0.3 });
+    const sausageMat = glossyMat({ rim: true, color: MITT_SAUSAGE, roughness: 0.3 });
     // ── The shoulder sleeve, and why it is MUSTARD and not the torso's own bun ───
     // The obvious choice for "make the arm start as part of the body" is `BUN_SHADE`,
     // the torso's own tone. It is the wrong one: `torso|shoulderL` has been sitting on
@@ -1528,7 +1528,7 @@ export class HotDogCharacter extends BaseCharacter {
     // roughly zero — buying a silhouette read by deleting a value read. Mustard is this
     // character's own condiment language, is already on the torso as the zigzag, and is
     // a step AWAY from both the bun and the limb tan rather than into either.
-    const sleeveMat = glossyMat({ color: PALETTE.mustard, roughness: 0.25 });
+    const sleeveMat = glossyMat({ rim: true, color: PALETTE.mustard, roughness: 0.25 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {

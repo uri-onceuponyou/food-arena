@@ -60,7 +60,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 // `PALETTE` is no longer imported: the face's dark is now this character's own
 // `CAP_DARK` rung rather than the shared ink, so nothing here reads the global.
-import { toonMat, glossyMat, flatMat, outlineGroup, roundedBox } from '../render/toon';
+import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
 import { ChibiRig, type LimbPart } from './rig';
 import { bodyType } from './bodies';
 // `rod` and `knob` went with the deleted flip nozzle — see `buildSilhouetteEvents`.
@@ -692,12 +692,12 @@ export class WaterBottleCharacter extends BaseCharacter {
     };
 
     // ── Materials ────────────────────────────────────────────────────────────
-    const shellMat = glossyMat({ color: PLASTIC, roughness: 0.12, transmission: 0.6 });
+    const shellMat = glossyMat({ rim: true, color: PLASTIC, roughness: 0.12, transmission: 0.6 });
     const capMat = toonMat({ color: CAP, roughness: 0.4 }); // matte — the eye's resting place
     const capRidgeMat = toonMat({ color: CAP_DARK, roughness: 0.4 });
     const labelMat = toonMat({ color: LABEL, roughness: 0.55 });
     const labelTrimMat = toonMat({ color: LABEL_TRIM, roughness: 0.4 });
-    const waterMat = glossyMat({ color: WATER, roughness: 0.08, transmission: 0 }); // opaque on purpose — see file header
+    const waterMat = glossyMat({ rim: true, color: WATER, roughness: 0.08, transmission: 0 }); // opaque on purpose — see file header
     const fillRingMat = toonMat({ color: WATER_DEEP, roughness: 0.3 });
 
     // ── Shell ────────────────────────────────────────────────────────────────
@@ -935,7 +935,7 @@ export class WaterBottleCharacter extends BaseCharacter {
     this.buildAccessories(R, shellSurface);
     this.buildSilhouetteEvents(R);
 
-    outlineGroup(this.root);
+    outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
   }
@@ -1535,7 +1535,7 @@ export class WaterBottleCharacter extends BaseCharacter {
         at.clone().add(new THREE.Vector3(R * 0.30, R * 0.19, -R * 0.14)),
         at.clone().add(new THREE.Vector3(R * 0.66, R * 0.19, -R * 0.24)),
       ];
-      const straw = curl(glossyMat({ color: LABEL, roughness: 0.3 }), pts, {
+      const straw = curl(glossyMat({ rim: true, color: LABEL, roughness: 0.3 }), pts, {
         rBase: R * 0.050, rTip: R * 0.042,
       });
       straw.name = 'waterbottle_straw';
@@ -1700,7 +1700,7 @@ export class WaterBottleCharacter extends BaseCharacter {
     // (a rung this file already owns) would separate them — and would take the
     // character's own MEDIAN down toward a floor it sits only 0.0779 clear of, trading
     // `dLcontact` for `dlBelow10`. This character already fails `dlBelow10` 6 of 18.
-    const plasticMat = glossyMat({ color: WATER, roughness: 0.16 });
+    const plasticMat = glossyMat({ rim: true, color: WATER, roughness: 0.16 });
     const capMat = toonMat({ color: CAP, roughness: 0.4 });
     const capDarkMat = toonMat({ color: CAP_DARK, roughness: 0.4 });
 
