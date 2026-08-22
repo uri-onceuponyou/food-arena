@@ -820,15 +820,24 @@ function makeGreaseSurfaceTexture(highlightHex: string): THREE.CanvasTexture {
     ctx.fill();
   }
 
+  // The sheen streaks were TWO HARD-EDGED BARS at a single width and alpha, running
+  // corner to corner — which at match framing reads as paint on a road, not as light
+  // caught on a viscous surface, and which the lobed outline made worse by clipping
+  // them dead against the new edge (`tools/tmp/wt_iter1/iter1_grease_p58.png`).
+  // Same two streaks, same colour, same angle: three passes at falling width and
+  // rising alpha give a feathered core instead of a step, and they stop well short of
+  // the rim so the outline is never what ends them.
   const [lr, lg, lb] = hexToRgb(highlightHex);
-  ctx.strokeStyle = `rgba(${lr},${lg},${lb},0.28)`;
-  ctx.lineWidth = size * 0.05;
   ctx.lineCap = 'round';
   for (const off of [-0.22, 0.18]) {
-    ctx.beginPath();
-    ctx.moveTo(size * (0.15 + off * 0.4), size * (0.82 + off * 0.3));
-    ctx.lineTo(size * (0.78 + off * 0.4), size * (0.2 + off * 0.3));
-    ctx.stroke();
+    for (const [wMul, alpha] of [[2.6, 0.05], [1.6, 0.08], [0.9, 0.13]] as const) {
+      ctx.strokeStyle = `rgba(${lr},${lg},${lb},${alpha})`;
+      ctx.lineWidth = size * 0.05 * wMul;
+      ctx.beginPath();
+      ctx.moveTo(size * (0.26 + off * 0.4), size * (0.72 + off * 0.3));
+      ctx.lineTo(size * (0.70 + off * 0.4), size * (0.30 + off * 0.3));
+      ctx.stroke();
+    }
   }
 
   for (let i = 0; i < 5; i++) {
@@ -952,6 +961,35 @@ function makeGreaseSurfaceTexture(highlightHex: string): THREE.CanvasTexture {
 // ─────────────────────────────────────────────────────────────────────────────
 const PUDDLE_RENDER_ORDER = { halo: 1.0, body: 1.2, surf: 1.4, rim: 1.6 } as const;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ONE PLANE FOR ALL THREE LAYERS — a 10 cm stack is 27 cm of parallax at pitch 20
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The pool used to be built on three heights: body at `FLOOR_Y.decal` (0.15), surface
+// at 0.16, wet rim at `FLOOR_Y.fine` (0.25). That was correct while the DEPTH BUFFER
+// decided who covered whom. It stopped being correct the moment `PUDDLE_RENDER_ORDER`
+// took that job over, and it left a defect that the match camera hides and the shallow
+// camera does not:
+//
+//   a layer h above the ground projects h * cot(pitch) toward the viewer.
+//     pitch 58   0.10 m of stack -> 0.062 m of slide     (invisible at framing)
+//     pitch 20   0.10 m of stack -> 0.275 m of slide     (11% of the pool's radius)
+//
+// So at a shallow angle the rim slides toward the camera and tears away from the far
+// edge of the body, and the gap fills with the pool's own dark AO halo: a hard reddish
+// contour hugging the far shoreline. It is plainly there in the SHIPPED build —
+// `tools/tmp/wt_before/before_water_p20.png`, which is HEAD, not this change — and it
+// is exactly CLAUDE.md #3's point. The shallow view did not make the pool wrong; it
+// made a wrongness visible. A film of water a few millimetres deep has no business
+// being built on 10 cm of stack at any angle.
+//
+// Fixed as geometry, not as appearance: all three layers move to ONE y and the draw
+// order that was already deciding the result keeps deciding it. Both `nonOccluding`
+// materials have `depthWrite: false` and the surface overlay never wrote depth, so
+// coplanar layers cannot z-fight — nothing here writes a depth value for another to
+// tie with, and `LessEqualDepth` passes them all against the floor's.
+const PUDDLE_PLANE_Y = FLOOR_Y.decal;
+
 /**
  * A clone of `mat` that no longer writes depth.
  *
@@ -987,19 +1025,24 @@ function makeWaterSurfaceTexture(): THREE.CanvasTexture {
   let seed = 6421;
   const rand = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
 
-  // Four evenly-spaced, equally-bright, perfectly concentric white rings at 0.4 alpha
-  // is not what a ripple looks like — it is what a RADAR SWEEP or a targeting reticle
-  // looks like, and on a 5m disc it was a big part of why this puddle read as a
-  // gameplay pad rather than a spill. Same shapes, but the alpha is now low and
-  // UNEVEN ring to ring (a real disturbance loses energy outward and never produces
-  // four identical crests), which leaves surface movement without drawing a target.
-  for (const [rr, alpha] of [[0.14, 0.2], [0.24, 0.13], [0.35, 0.17], [0.46, 0.09]] as const) {
-    ctx.strokeStyle = `rgba(255,255,255,${alpha})`;
-    ctx.lineWidth = size * (0.012 + rr * 0.01);
-    ctx.beginPath();
-    ctx.arc(cx, cy, size * rr, 0, Math.PI * 2);
-    ctx.stroke();
-  }
+  // 🚨 THE CONCENTRIC RINGS ARE GONE, AND THE PREVIOUS ATTEMPT TO SAVE THEM IS WHY.
+  //
+  // Old wording, kept per the reversal rule: *"Four evenly-spaced, equally-bright,
+  // perfectly concentric white rings at 0.4 alpha is not what a ripple looks like — it
+  // is what a RADAR SWEEP or a targeting reticle looks like... Same shapes, but the
+  // alpha is now low and UNEVEN ring to ring, which leaves surface movement without
+  // drawing a target."*
+  //
+  // Unevening the alpha did not work, and the render says so plainly
+  // (`tools/tmp/wt_before/before_water_p20.png`, and the same object at the match
+  // camera): it still reads as a dartboard. The reticle read never came from the rings
+  // being EVEN. It came from their being CIRCLES ABOUT ONE CENTRE, which is the exact
+  // thing Uri named — *"the water should look like water. not circles"* — and a circle
+  // drawn inside the pool is as much a circle as the outline was.
+  //
+  // Surface movement is now the shader's job and it runs on `vShore`, so its crests
+  // follow the pool's own edge instead of a circle. What stays in the canvas is the
+  // part a shader is bad at: a few irregular, hand-placed caustic patches.
 
   for (let i = 0; i < 3; i++) {
     const bx = rand() * size, by = rand() * size;
@@ -1021,6 +1064,438 @@ function makeWaterSurfaceTexture(): THREE.CanvasTexture {
   return tex;
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A PUDDLE IS NOT A CIRCLE — the outline, the motion and the reflection
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Uri, on the shipped pools: *"water paddels, the water should look like water. not
+// circles. add some dynamics and reflection from the water paddels so they look
+// better."*
+//
+// He is describing the SILHOUETTE, and the silhouette is what the eye resolves first
+// on a 2.5 m shape at 578 wu of framing. Everything above this line is surface
+// TREATMENT — blotches, streaks, ripple rings, a wet meniscus — layered on three
+// concentric perfect circles:
+//
+//     disc   CircleGeometry(R, 32)
+//     surf   CircleGeometry(R * 0.97, 32)
+//     trim   RingGeometry(R - 0.045R, R + 0.045R, 40)
+//
+// Verified before acting on it (`shots` in `tools/tmp/wt_before/`): at the match
+// camera the water pool reads as a flat cyan disc with four concentric rings — the
+// exact "radar sweep / targeting reticle" the `makeWaterSurfaceTexture` note above
+// says it fixed by unevening the alpha. Unevening the alpha did not fix it, because
+// the reticle read never came from the rings' evenness. It came from the fact that
+// every contour in the object, including its outer edge, is a circle about one centre.
+//
+// ── WHAT MUST NOT MOVE ───────────────────────────────────────────────────────
+//
+// 🚨 THE SIM COLLIDES ON A RADIUS AND THAT IS NOT NEGOTIABLE.
+// `src/game/movement.ts` — `Math.hypot(x - hz.x, y - hz.y) < hz.radius` — a centre
+// test against the scalar `kitchen.ts` registers. Nothing here reaches it: this file
+// registers no collision at all (see the module header). So the outline below is a
+// VISUAL boundary over an unchanged circular one, which is the correct shape of the
+// change and the only one in scope for a rendering pass.
+//
+// The two are therefore reconciled on AREA rather than on radius. `puddleProfile`
+// normalises so that the enclosed area equals the circle it replaces to within 0.1%,
+// which keeps "how big is this hazard" honest on average; individual angles run
+// under and over. Measured on the shipped profiles, in units of R = 50 wu:
+//
+//     kind     min r    max r    area / circle    coefficient of variation
+//     water    0.803    1.143        0.9991              0.1025
+//     grease   0.879    1.108        0.9992              0.0617
+//
+// ⚠️ THAT TABLE IS FOUR COUNTS AND COUNTS GO STALE HERE AT ROUGHLY COIN-FLIP RATE.
+// `tools/tmp/wt_probe.mjs` §D parses the lobes, the seeds and this table out of THIS
+// FILE, re-runs `puddleProfile`'s arithmetic and requires them to agree to 0.001 —
+// with a MOVES arm that bumps an amplitude and demands the table go red, so it cannot
+// pass by comparing nothing to nothing. Change a lobe and §D tells you which line to
+// rewrite.
+//
+// So the visual edge disagrees with the slow field by at most 0.143 R = 7.2 wu
+// (0.36 m) outward and 0.197 R = 9.9 wu inward. For scale, a fighter is 42 wu across.
+// The shipped wet rim ALREADY overshot the collision circle by 0.045 R = 2.3 wu, so
+// this is a widening of an existing mismatch, not a new class of one — and the pool's
+// own AO halo has always feathered out to R * 2, far past either. Stated rather than
+// buried, because it is the one thing in this change a player could in principle feel.
+//
+// Grease is deliberately the ROUNDER of the two (cv 0.0617 against water's 0.1025,
+// a factor of 1.66). That is the same distinction the surface overlays already make
+// and the module header insists on: grease is viscous and pools into a fat blob;
+// water is thin and sprawls. **Do not make grease look like water** — it is the one
+// thing a player reads to know which hazard he is standing in.
+
+/** Outline samples per pool. 96 rather than the old 32: at 32 a lobe of order 5
+ * is only six segments wide and reads as a polygon, which is a different wrong
+ * shape rather than a right one. Cost is 64 vertices per mesh and zero draw calls. */
+const PUDDLE_SEGMENTS = 96;
+
+/** `[harmonic order, amplitude]`. Low orders only — a real pool's edge is smooth
+ * curvature, not noise, and anything above ~8 turns into a gear. */
+type Lobes = ReadonlyArray<readonly [number, number]>;
+
+const WATER_LOBES: Lobes = [[2, 0.115], [3, 0.075], [5, 0.042], [7, 0.020]];
+const GREASE_LOBES: Lobes = [[2, 0.070], [3, 0.048], [5, 0.020]];
+
+/**
+ * A closed radial profile — `PUDDLE_SEGMENTS` unit radii — normalised so the enclosed
+ * area is exactly that of the unit circle.
+ *
+ * AREA-preserving, not max-preserving. Normalising the maximum to 1 (so the visual can
+ * never over-promise the slow field) costs the water pool 23.5% of its area, i.e. the
+ * hazard visibly shrinks; that trades a boundary error nobody can see for a size error
+ * everybody can. The area constraint is `sum(r^2) == n`, straight out of the polar
+ * area integral, so the scale is `sqrt(n / sum(r^2))` in one line rather than a solve.
+ *
+ * Deterministic from `seed` — a fixed LCG, the same one the surface textures above use
+ * — so the two pools have different outlines and each pool has the SAME outline on
+ * every load. `Math.random` here would make every capture in this repo unreproducible.
+ */
+function puddleProfile(seed: number, lobes: Lobes): number[] {
+  let s = seed;
+  const rand = () => { s = (s * 48271) % 2147483647; return s / 2147483647; };
+  const phase = lobes.map(() => rand() * Math.PI * 2);
+  const r: number[] = [];
+  for (let i = 0; i < PUDDLE_SEGMENTS; i++) {
+    const th = (i / PUDDLE_SEGMENTS) * Math.PI * 2;
+    let v = 1;
+    for (let k = 0; k < lobes.length; k++) v += lobes[k][1] * Math.sin(lobes[k][0] * th + phase[k]);
+    r.push(v);
+  }
+  let sq = 0;
+  for (const v of r) sq += v * v;
+  const k = Math.sqrt(PUDDLE_SEGMENTS / sq);
+  return r.map((v) => v * k);
+}
+
+/**
+ * A triangle fan on `profile`, authored in the XY plane with +Z normals — exactly
+ * `CircleGeometry`'s own convention, so the caller's `rotation.x = -PI/2` and every
+ * existing y-offset keep working unchanged.
+ *
+ * ⚠️ UVs are normalised against `radius * max(profile)`, NOT against `radius`.
+ * `CircleGeometry` maps `u = x / radius / 2 + 0.5`, which puts the rim exactly on the
+ * texture edge; with lobes running past 1.0 that same formula walks off the texture
+ * and `ClampToEdgeWrapping` smears the last row of pixels down the longest lobes. The
+ * cost is that the authored detail sits at 1/max(profile) of its old scale — 87.5% on
+ * water — which is a size change to the blotches, not a mapping error.
+ *
+ * ── `aShore`, and why the shader needs it ────────────────────────────────────
+ * A float per vertex: 0 at the centre, 1 on the outline, whatever the local radius
+ * is. A triangle fan interpolates it linearly along each spoke, so `vShore` is a
+ * distance field whose ISO-CONTOURS FOLLOW THE SHORE rather than being circles about
+ * the centre — one attribute, no branching. That is the whole fix for the defect the
+ * first render of this change exposed (`tools/tmp/wt_iter1/`): shore-parallel
+ * contours read as a shallow pool, and contours that are circles inside a lobed
+ * outline read as a TARGET PAINTED ON one.
+ */
+function lobedDiscGeometry(radius: number, profile: readonly number[]): THREE.BufferGeometry {
+  const n = profile.length;
+  let mx = 0;
+  for (const v of profile) mx = Math.max(mx, v);
+  const uvR = radius * mx * 2;
+  const pos = new Float32Array((n + 1) * 3);
+  const nor = new Float32Array((n + 1) * 3);
+  const uv = new Float32Array((n + 1) * 2);
+  const shore = new Float32Array(n + 1);
+  nor[2] = 1; uv[0] = 0.5; uv[1] = 0.5; shore[0] = 0;
+  for (let i = 0; i < n; i++) {
+    const th = (i / n) * Math.PI * 2;
+    const r = radius * profile[i];
+    const x = Math.cos(th) * r, y = Math.sin(th) * r;
+    pos[(i + 1) * 3] = x; pos[(i + 1) * 3 + 1] = y;
+    nor[(i + 1) * 3 + 2] = 1;
+    uv[(i + 1) * 2] = x / uvR + 0.5;
+    uv[(i + 1) * 2 + 1] = y / uvR + 0.5;
+    shore[i + 1] = 1;
+  }
+  const idx: number[] = [];
+  for (let i = 0; i < n; i++) idx.push(0, i + 1, ((i + 1) % n) + 1);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setAttribute('aShore', new THREE.BufferAttribute(shore, 1));
+  g.setIndex(idx);
+  return g;
+}
+
+/** The wet meniscus as a strip of constant width tracing the SAME profile — so the
+ * edge line and the body edge are one contour, which is the whole point. */
+function lobedRingGeometry(radius: number, halfWidth: number, profile: readonly number[]): THREE.BufferGeometry {
+  const n = profile.length;
+  const pos = new Float32Array(n * 2 * 3);
+  const nor = new Float32Array(n * 2 * 3);
+  const uv = new Float32Array(n * 2 * 2);
+  for (let i = 0; i < n; i++) {
+    const th = (i / n) * Math.PI * 2;
+    const c = Math.cos(th), s = Math.sin(th);
+    const ri = radius * profile[i] - halfWidth;
+    const ro = radius * profile[i] + halfWidth;
+    pos[i * 6] = c * ri; pos[i * 6 + 1] = s * ri;
+    pos[i * 6 + 3] = c * ro; pos[i * 6 + 4] = s * ro;
+    nor[i * 6 + 2] = 1; nor[i * 6 + 5] = 1;
+    uv[i * 4] = i / n; uv[i * 4 + 1] = 0;
+    uv[i * 4 + 2] = i / n; uv[i * 4 + 3] = 1;
+  }
+  const idx: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = i * 2, b = i * 2 + 1;
+    const c = ((i + 1) % n) * 2, d = ((i + 1) % n) * 2 + 1;
+    idx.push(a, b, d, a, d, c);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return g;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DYNAMICS AND REFLECTION — and the clock that keeps a capture reproducible
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// 🚨 THE SIM IS SEEDED AND DETERMINISTIC AND THAT UNDERWRITES EVERY BALANCE NUMBER
+// IN THIS PROJECT. Nothing below reaches sim state, reads a `Fighter`, or is read by
+// anything that does. It is a render-clock animation on two decorative overlays.
+//
+// ⚠️ AND A RENDER-CLOCK ANIMATION IS A TRAP FOR EVERY INSTRUMENT IN THIS REPO.
+// `docs/AGENT-BRIEF.md` §3 records the camera shake re-randomising on every
+// `render()`, so 344 of 344 "frozen" frames drifted — a moving puddle would do the
+// same to `arena-scan`, to `q1_capture` and to any A/B taken through `preview.html`.
+// Two things stop it:
+//
+//   - the app's own freeze already works. Every capture tool here replaces
+//     `requestAnimationFrame` with a stub, and with no rAF there is no `render()`, so
+//     `onBeforeRender` never fires and the phase cannot advance.
+//   - `preview.html?t=` is honoured DIRECTLY. `src/preview.ts` steps animation to
+//     exactly `t` in 1/120 sub-steps and then renders with dt = 0; reading the same
+//     `t` here means the pool's phase is a function of the URL, so two loads of one
+//     URL are byte-identical even though three `render()` calls happen between them.
+//     Measured with `tools/tmp/wt_shot.mjs --drift`: two independent page loads,
+//     **0 differing pixels of 962,000**.
+//
+// `window.__puddleTime` overrides both, for a tool that wants to drive the phase.
+const PUDDLE_FROZEN_T: number | null = (() => {
+  try {
+    if (typeof location === 'undefined') return null;
+    if (!/preview\.html$/.test(location.pathname)) return null;
+    const raw = new URLSearchParams(location.search).get('t');
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  } catch { return null; }
+})();
+
+function puddleSeconds(): number {
+  const forced = (globalThis as unknown as { __puddleTime?: unknown }).__puddleTime;
+  if (typeof forced === 'number' && Number.isFinite(forced)) return forced;
+  if (PUDDLE_FROZEN_T !== null) return PUDDLE_FROZEN_T;
+  return performance.now() / 1000;
+}
+
+interface PuddleSurfaceUniforms {
+  uPTime: { value: number };
+  /** Where the ripples come from, in the disc's own UV space. Matches the drip point
+   * `makeWaterSurfaceTexture` already draws its rings around, so the authored rings
+   * and the shader's travelling crests are concentric with each other. */
+  uPDrip: { value: THREE.Vector2 };
+  /** x frequency · y speed · z radial falloff · w amplitude. */
+  uPRipple: { value: THREE.Vector4 };
+  /** x axis angle (rad) · y drift speed · z travel · w half-width. */
+  uPBand: { value: THREE.Vector4 };
+  /** x sky strength · y Fresnel exponent · z band strength · w crest gain. */
+  uPFres: { value: THREE.Vector4 };
+  /** What the pool mirrors. */
+  uPSky: { value: THREE.Color };
+}
+
+/**
+ * ⚠️ ONE SHADER PROGRAM FOR BOTH POOLS, VIA A PINNED CACHE KEY.
+ *
+ * `Material.customProgramCacheKey()` returns `onBeforeCompile.toString()` by default
+ * (`three/src/materials/Material.js:541`, read in the installed 0.180.0), so two
+ * materials carrying two closures compile two IDENTICAL programs. Pinning the key to
+ * a constant collapses that to one. Uniform VALUES stay per material regardless:
+ * `WebGLRenderer` assigns `materialProperties.uniforms = parameters.uniforms` per
+ * material, after calling that material's own `onBeforeCompile` (`WebGLRenderer.js`
+ * `:2084` / `:2091`).
+ *
+ * 🚨 A PINNED KEY IS A PROMISE THAT THE SOURCE IS THE SAME. It is kept by
+ * construction: both patches below are pure module-level string transforms with no
+ * per-kind branching — everything that differs between grease and water is a UNIFORM.
+ * If a `#define` ever enters this shader, the key has to carry it or the second pool
+ * silently renders with the first pool's program. `tools/tmp/wt_probe.mjs` asserts the
+ * two patched sources are byte-identical, so that stops being a comment.
+ */
+const PUDDLE_PROGRAM_KEY = 'fa_puddle_surface_v1';
+
+function patchPuddleVertex(src: string): string {
+  return src
+    .replace('#include <common>', '#include <common>\nvarying vec3 vFaWorld;\nvarying float vShore;\nvarying vec2 vLocal;\nattribute float aShore;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvShore = aShore;\n\tvLocal = position.xy;')
+    // AFTER `project_vertex`, where `transformed` is still in scope. Deliberately not
+    // `worldpos_vertex`: that chunk is compiled in only when shadows/fog/envmap ask
+    // for it, so depending on it would make this silently vary with lighting settings.
+    .replace('#include <project_vertex>', '#include <project_vertex>\n\tvFaWorld = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;');
+}
+
+function patchPuddleFragment(src: string): string {
+  return src
+    .replace('#include <common>', `#include <common>
+varying vec3 vFaWorld;
+varying float vShore;
+varying vec2 vLocal;
+uniform float uPTime;
+uniform vec2  uPDrip;
+uniform vec4  uPRipple;
+uniform vec4  uPBand;
+uniform vec4  uPFres;
+uniform vec3  uPSky;`)
+    .replace('#include <map_fragment>', `#include <map_fragment>
+{
+	// DYNAMICS — and the FIRST version of this was a defect, not a feature.
+	// It ran \`sin( length( vMapUv - drip ) * k - t )\`: crests on circles about one
+	// point, stacked on the four concentric rings the canvas already drew. The render
+	// is kept at \`tools/tmp/wt_iter1/\` — a lobed outline with a BULLSEYE inside it,
+	// which is a WORSE read than the plain disc it replaced, because the outline says
+	// "pool" and the interior says "target". Uri's note is *"not circles"*, and a circle
+	// drawn INSIDE the pool is still a circle.
+	//
+	// Two changes fix it and both are geometric rather than cosmetic:
+	//   - the wave travels on \`vShore\`, so its crests run PARALLEL TO THE SHORE. A
+	//     shallow pool's own shading does exactly that; the contours are the depth.
+	//   - a second wave carries an ANGULAR term, so the two never resolve into a clean
+	//     ring anywhere in the pool. Interference, not concentricity.
+	// ⚠️ \`atan\` IS UNDEFINED AT THE FAN'S CENTRE VERTEX AND IT SHOWED. Every spoke of
+	// the fan meets at vShore = 0, so the angular wave's phase is discontinuous exactly
+	// there and rendered as a small dark curl pinned to the pool's middle
+	// (\`tools/tmp/wt_iter4/iter4_water_p58.png\`, dead centre). Ramping the angular term
+	// in from the middle removes the singularity instead of hiding it: at vShore = 0 the
+	// wave is purely radial, where an angle has no meaning anyway.
+	float faAng = atan( vLocal.y, vLocal.x );
+	float faMix = 0.45 * smoothstep( 0.03, 0.34, vShore );
+	float faW1  = sin( vShore * uPRipple.x - uPTime * uPRipple.y );
+	float faW2  = sin( vShore * uPRipple.x * 0.62 + faAng * 2.0 + uPTime * uPRipple.y * 0.55 );
+	float faWave = ( faW1 * ( 1.0 - faMix ) + faW2 * faMix ) * exp( -vShore * uPRipple.z );
+	// CRESTS, not a sinusoid. A raw sine spends most of its range near zero and reads
+	// as a soft haze; raising the positive half to a power leaves thin bright lines
+	// where the surface is actually tilted toward the light, with flat water between
+	// them. That is what the eye uses to call something a liquid surface.
+	// The same fan singularity, one term further on: EVERY spoke meets at vShore = 0,
+	// so any crest that survives to the middle collapses into a single lit pixel there
+	// (\`wt_iter5\`, a white dot dead centre where \`wt_iter4\` had a dark one). Faded out
+	// over the innermost 12% rather than reshaped — a pool's deepest point is the one
+	// place with no surface tilt to catch anything.
+	float faRip = pow( max( faWave, 0.0 ), 2.4 ) * uPRipple.w * smoothstep( 0.0, 0.12, vShore );
+
+	// A soft specular band drifting across the pool — the highlight a liquid surface
+	// throws as it rocks. Tight and quick on water, broad and crawling on grease.
+	vec2  faP    = vMapUv - uPDrip;
+	vec2  faDir  = vec2( cos( uPBand.x ), sin( uPBand.x ) );
+	float faOff  = sin( uPTime * uPBand.y ) * uPBand.z;
+	float faBand = smoothstep( uPBand.w, 0.0, abs( dot( faP, faDir ) - faOff ) ) * uPFres.z;
+
+	// REFLECTION, and it is not a probe. On a flat pool the GRAZING half is the
+	// reflective half — the far edge of a real puddle mirrors the sky while the near
+	// edge shows what is under the water — so the whole effect is the view vector's own
+	// elevation. It is therefore right at BOTH shipped pitches by construction rather
+	// than tuned at one: a shallower camera grazes more and reflects more, which is the
+	// direction physics asks for. ~16 ALU on two small discs, zero draw calls; an env
+	// probe would have cost a render target and fought the flat-shaded art direction.
+	//
+	// ⚠️ The exponent is LOW on purpose. At the match camera's 58 deg the view vector is
+	// 0.848 up, so \`1 - v.y\` is 0.152 and a CUBE of that is 0.0035 — the first version
+	// used 3.0 and the reflection was invisible at the only camera anyone plays at. The
+	// base term keeps it present everywhere and the grazing term makes it GROW as the
+	// camera drops. It is that behaviour, not the magnitude, that reads as water.
+	vec3  faV = normalize( cameraPosition - vFaWorld );
+	float faF = pow( 1.0 - clamp( faV.y, 0.0, 1.0 ), uPFres.y );
+	// A crest tilts toward the sky and reflects harder; a trough tilts away. This is
+	// what makes a shimmer instead of a wash — a CONSTANT reflection just pales the
+	// pool out, which is exactly what the first render did.
+	// DEEP IN THE MIDDLE, THIN AT THE SHORE. A pool is a lens: the middle holds enough
+	// liquid to mirror, the edge is a film over the floor. Riding the reflection on
+	// \`vShore\` is what gives the pool an interior at all — without it the whole disc
+	// lifts by one constant and the render is a flat blob with a good outline
+	// (\`tools/tmp/wt_iter2/\`), which is a different failure from the bullseye and just
+	// as dead.
+	float faDepth = 1.0 - 0.62 * pow( vShore, 1.6 );
+	float faSky = uPFres.x * ( 0.34 + 0.66 * faF ) * faDepth * ( 0.62 + 0.38 * faWave * uPFres.w );
+
+	// The pool THINS at its edge, and thin liquid is bright liquid. One band just
+	// inside the shoreline, riding the same \`vShore\` the crests do, so it follows every
+	// lobe instead of being a ring. It is the last thing standing between "a coloured
+	// shape with a rim" and "a shallow pool with a shore".
+	float faShore = smoothstep( 0.74, 0.99, vShore ) * uPBand.w * 1.15;
+
+	float faL = clamp( faBand + faSky + faRip + faShore, 0.0, 1.0 );
+
+	// Source-over of the sky layer ON TOP of the authored texel, in un-premultiplied
+	// space. \`diffuseColor.rgb += sky * l\` with \`a += l\` is the obvious version and it
+	// DARKENS: the blend is \`rgb * a + dst * (1 - a)\`, so a lift of l contributes l^2
+	// while opening 1 - l of the pool underneath.
+	float faA = faL + diffuseColor.a * ( 1.0 - faL );
+	diffuseColor.rgb = ( uPSky * faL + diffuseColor.rgb * diffuseColor.a * ( 1.0 - faL ) ) / max( faA, 1e-4 );
+	diffuseColor.a = faA;
+}`);
+}
+
+/** Sky the water mirrors — `lighting.ts`'s hemisphere SKY endpoint, `0xd8ecff`.
+ * Copied rather than imported: `src/render/lighting.ts` builds it inline in a
+ * constructor and exports nothing, and it is not this file's to edit. If the rig's
+ * sky moves, this is the line that has to move with it. Lifted from 0xd8ecff toward
+ * white because it is composited at a low alpha over an already-blue pool: the
+ * hemisphere's own value could not separate a crest from the water under it. */
+const PUDDLE_SKY_HEX = 0xeaf6ff;
+
+/**
+ * The surface overlay's material: the authored per-kind texture, plus the shader
+ * above. Was a bare `MeshBasicMaterial`; it still IS one, so whatever the render
+ * pipeline does to basic materials keeps happening to it — which is the reason this
+ * is an `onBeforeCompile` patch and not a `ShaderMaterial`, with a peer live in
+ * `src/render/**` as it lands.
+ */
+function puddleSurfaceMaterial(isGrease: boolean, map: THREE.Texture): { mat: THREE.MeshBasicMaterial; uniforms: PuddleSurfaceUniforms } {
+  const m = new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false });
+  m.name = isGrease ? 'puddle_grease_surface' : 'puddle_water_surface';
+  const uniforms: PuddleSurfaceUniforms = isGrease ? {
+    uPTime: { value: 0 },
+    uPDrip: { value: new THREE.Vector2(0.5, 0.5) },
+    // Grease at a THIRD of water's wave frequency, a fifth of its amplitude and a
+    // fifth of its speed, with a broad slow sheen instead of a tight quick one. It is
+    // viscous: it swells, it does not ripple. Keeping these two apart is not a taste
+    // call — the module header records that the substance read is how a player knows
+    // which hazard he is standing in.
+    uPRipple: { value: new THREE.Vector4(4.6, 0.30, 0.40, 0.16) },
+    uPBand: { value: new THREE.Vector4(2.2, 0.06, 0.14, 0.20) },
+    uPFres: { value: new THREE.Vector4(0.17, 2.2, 0.13, 0.6) },
+    // Grease does not mirror the sky, it catches the burner. `KPAL.flameCore` is the
+    // warm light-catch this pool is actually lit by and is reserved chroma, so the
+    // link cannot drift out from under it — the same argument the sheen streak above
+    // already makes for pinning to `KPAL.flame`.
+    uPSky: { value: new THREE.Color().setStyle(KPAL.flameCore, THREE.SRGBColorSpace) },
+  } : {
+    uPTime: { value: 0 },
+    // The drip point `makeWaterSurfaceTexture` draws its rings around, in UV.
+    uPDrip: { value: new THREE.Vector2(0.46, 0.52) },
+    uPRipple: { value: new THREE.Vector4(16.0, 1.7, 0.35, 0.46) },
+    uPBand: { value: new THREE.Vector4(0.9, 0.30, 0.25, 0.075) },
+    uPFres: { value: new THREE.Vector4(0.34, 1.4, 0.34, 1.0) },
+    uPSky: { value: new THREE.Color().setHex(PUDDLE_SKY_HEX, THREE.SRGBColorSpace) },
+  };
+  m.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = patchPuddleVertex(shader.vertexShader);
+    shader.fragmentShader = patchPuddleFragment(shader.fragmentShader);
+  };
+  m.customProgramCacheKey = () => PUDDLE_PROGRAM_KEY;
+  return { mat: m, uniforms };
+}
+
 export function buildPuddleVisual(
   M: Materials,
   px: number,
@@ -1039,6 +1514,9 @@ export function buildPuddleVisual(
   // parameter, which would mean editing `kitchen.ts`'s call sites (out of bounds
   // for this file).
   const isGrease = mat === M.grease;
+  // The pool's own outline. Seeded per kind, so the two pools are different shapes
+  // and each is the SAME shape on every load — see `puddleProfile`.
+  const profile = puddleProfile(isGrease ? 51712026 : 20260812, isGrease ? GREASE_LOBES : WATER_LOBES);
   // The pool's own value key. See the `GREASE_BODY_L_DROP` note above: grease only —
   // the water pool is the north hazard, no character fails a station on it (mean dL
   // +0.274 at `water_near`), and it is already the darker of the two after the round
@@ -1070,9 +1548,12 @@ export function buildPuddleVisual(
   // direction is also the local one.
   applyContactRamp(shadow);
 
-  const disc = mesh(new THREE.CircleGeometry(R, 32), bodyMat, 'puddle');
+  // Was `new THREE.CircleGeometry(R, 32)`. Kept in the record per the reversal rule:
+  // a 32-segment disc is a perfect circle, and Uri read the pool as a circle because
+  // it WAS one — at every contour, not just this one.
+  const disc = mesh(lobedDiscGeometry(R, profile), bodyMat, 'puddle');
   disc.rotation.x = -Math.PI / 2;
-  disc.position.set(gp.x, FLOOR_Y.decal, gp.z);
+  disc.position.set(gp.x, PUDDLE_PLANE_Y, gp.z);
   disc.renderOrder = PUDDLE_RENDER_ORDER.body;
   noOutline(disc);
   g.add(disc);
@@ -1091,13 +1572,19 @@ export function buildPuddleVisual(
   // warm light-catch this puddle is actually lit by and is reserved chroma, so the
   // link is to a colour that cannot drift out from under it for hierarchy reasons.
   const surfTex = isGrease ? makeGreaseSurfaceTexture(KPAL.flame) : makeWaterSurfaceTexture();
-  const surf = new THREE.Mesh(
-    new THREE.CircleGeometry(R * 0.97, 32),
-    new THREE.MeshBasicMaterial({ map: surfTex, transparent: true, depthWrite: false })
-  );
+  const { mat: surfMat, uniforms: surfUniforms } = puddleSurfaceMaterial(isGrease, surfTex);
+  const surf = new THREE.Mesh(lobedDiscGeometry(R * 0.97, profile), surfMat);
+  // THE ONE PER-FRAME HOOK, and it is entirely inside this file. three calls
+  // `onBeforeRender` on each drawable immediately before submitting it
+  // (`WebGLRenderer.renderObject`), so the phase advances exactly when the pool is
+  // drawn and stops dead when it is not — which is what makes every existing
+  // rAF-freezing capture tool in this repo still reproducible without being told
+  // anything. `ambient.ts` drives the pot the other way, through `arena.update`, and
+  // that file is not this owner's to edit; this needs nobody's cooperation.
+  surf.onBeforeRender = () => { surfUniforms.uPTime.value = puddleSeconds(); };
   surf.name = isGrease ? 'puddle_grease_surface__no_outline' : 'puddle_water_surface__no_outline';
   surf.rotation.x = -Math.PI / 2;
-  surf.position.set(gp.x, FLOOR_Y.decal + 0.01, gp.z);
+  surf.position.set(gp.x, PUDDLE_PLANE_Y, gp.z);
   // Was 2 — a tie with the character contact decal, and the tie-break is a depth sort
   // that put the sheen ON TOP of the shadow. See `PUDDLE_RENDER_ORDER`.
   surf.renderOrder = PUDDLE_RENDER_ORDER.surf;
@@ -1111,7 +1598,10 @@ export function buildPuddleVisual(
   // deliberately no second bold accent band, glow halo or icon ring on top of it.
   const trimW = R * 0.045;
   const trim = mesh(
-    new THREE.RingGeometry(R - trimW, R + trimW, 40),
+    // Was `new THREE.RingGeometry(R - trimW, R + trimW, 40)` — a perfect annulus, so
+    // the pool's sharpest contour was the roundest thing in it. Same width, same
+    // material, traced on the body's own outline instead.
+    lobedRingGeometry(R, trimW, profile),
     // Opaque at y = 0.25, so it stamped depth 16 cm above the character's contact
     // decal and cut a hard ring through it for any fighter standing near the pool's
     // edge. See `PUDDLE_RENDER_ORDER`: opacity is untouched, only the queue moves.
@@ -1119,7 +1609,7 @@ export function buildPuddleVisual(
     'puddle_wet_rim'
   );
   trim.rotation.x = -Math.PI / 2;
-  trim.position.set(gp.x, FLOOR_Y.fine, gp.z);
+  trim.position.set(gp.x, PUDDLE_PLANE_Y, gp.z);
   trim.renderOrder = PUDDLE_RENDER_ORDER.rim;
   noOutline(trim);
   g.add(trim);
