@@ -9,6 +9,15 @@ Everything below was paid for. Reading this is cheaper than re-learning any of i
 **True cause eighteen separate times.** Assume rendering-but-invisible *first*, and prove it
 with an unmissable probe rather than reasoning about it.
 
+🚨 **THAT OPENING LINE IS STALE AGAINST ITS OWN BODY, AND IT IS KEPT HERE ON PURPOSE.** Three
+screens down, this same section describes **the twentieth**. `docs/AGENT-BRIEF.md` §4.2 says
+**twenty**; `CLAUDE.md` rule 4 says **eighteen**. Three files, three answers, and one of them
+contradicts itself inside one section. **No nineteenth is written down anywhere** — nothing was
+deleted, one was simply never added, which is how a hand-kept tally rots.
+→ **The ENUMERATION below is the count. Do not restate it in a fourth place.** Found
+2026-08-22 by an agent adding to this file, never by a check — an instance of §24 (a number
+beside a claim reads as verified) and §25 (nobody recounts a list).
+
 The first sixteen, grouped by mechanism — the variety is the point:
 
 **Occluded or buried**
@@ -139,7 +148,13 @@ the missing thing everyone assumed; it was the *plausible* thing nobody checked.
 ## 2. Probe before you loop
 
 **Every plateau ever probed on this project turned out to be a bug or an ownership
-deadlock — never a taste gap.** Five for five.
+deadlock — never a taste gap.** ~~Five for five.~~
+
+⚠️ **THE TALLY IS NO LONGER KEPT HERE, AND THE OLD WORDING IS LEFT ABOVE TO SHOW WHY.**
+`CLAUDE.md` rule 5 keeps this count and this line disagreed with it for months — neither
+number wrong when it was written, both presented as current. **One copy, and it is not this
+one.** (Same class as §1's opening line and as §17's boxed warning; three instances in one
+file is the argument for the rule.)
 
 A ~20k probe has repeatedly beaten a ~300k critic loop. The floor loop spent **309k tokens
 for a score that did not move at all**, while a single silhouette render named exactly which
@@ -147,6 +162,28 @@ characters failed and a checker probe root-caused a five-round blocker in minute
 
 Corollary: **no critic round finds a bug.** If an element has plateaued, build an instrument
 before buying more rounds.
+
+### A measurement can CLOSE a road, and a null is the cheapest result in this project
+
+2026-08-22. The arena's blind gap — `new/arena` closed the round at **ours 4.625 / reference
+8.250** over 8 scored panels (re-derived from the committed `tools/tmp/q1_public.jsonl`, not
+quoted) — had four standing explanations. **All four came back NULL, every one killed by an
+instrument, and not one scoring round was spent on any of them:**
+
+| the hypothesis | what the measurement said | SHA |
+|---|---|---|
+| *we scored the FRAME somebody picked, not the game* | plate-matched **paired** mean Δours **0.000** across 4 cells (sd 0.816) against a 0.693 between-arms floor — the four deltas cancel exactly | `9585ed6` |
+| *the arena is too EMPTY* | four blind reads spanning **13.0% → 24.9%** prop footprint scored 5, 6, 6, 5 — **+0.00** | `fd76ef0` |
+| *the ground needs surface treatment* | ground-only **hf 2.69× ABOVE the whole reference range**, mf 1.81× above — texturing moves us *away* from the plates | `6c133ce` |
+| *the plates frame their subject much bigger* | reference **8.4–14.2%** of frame height (median 12.4), ours **8.8–10.8%** — INSIDE, ratio of medians 1.22× | `6c133ce` |
+
+→ **Ask what a hypothesis PREDICTS, and go measure that, before buying a round to test it.**
+Each of these cost one instrument and an afternoon; the round's own k=4 floor is 0.693, so a
+critic loop could not have separated most of them anyway.
+⚠️ And note the direction of the third: the answer was **not** *"do more of it"*, it was
+*"we are already out of band on the HIGH side."* A road closed is worth as much as a road
+found — and **only a reference arm can tell you which side of the band you are on.** A
+concentration or detail statistic with no reference arm is a description, not a defect.
 
 ---
 
@@ -175,6 +212,27 @@ the control, with that critic ranking our menu *above* shipped Brawl Stars.
   (limbs vanish into torsos) was correct and valuable; its *mechanism* was wrong, and the true
   cause was a sign error in nine of eleven stance blocks. **Take the symptom, re-derive the
   cause.**
+  🚨 **THIRD INSTANCE, AND IT REPLICATED ON THREE FRAMES, THREE PLATES AND THREE INDEPENDENT
+  CRITICS.** The 2026-08-22 round's critics said our ground and our effects *"wash into each
+  other"* / are *"low-contrast"*, and each prescribed **VALUE separation** — the one axis that
+  already works. Measured on the exact pixels each critic scored:
+
+  | frame, and what was compared | HUE separation | VALUE separation |
+  |---|---|---|
+  | drift base **arena**, effect vs ground (`f8d2756`) | **1.68°** | Δluma **51.94** |
+  | drift base **cast**, effect vs ground (`dd59910`) | **0.82°** | Δluma **51.48** |
+  | new **arena_alt**, two figures vs their own floor ring (`9585ed6`) | **15.2°** / 66.9° | Δluma **65.44** / **71.64** |
+
+  **The symptom is real. The axis named is the one already delivering 51–72 luma. The axis
+  that has collapsed — hue — is never named by any of them.**
+  ⚠️ And the qualifier the first panel could not see: **the collapse is FIGURE-SPECIFIC.** Only
+  the figure whose own artwork shares the ground's hue family collapses (15.2°); the other
+  separates at 66.9°. *"Add hue separation"* is no more a global instruction than *"add value
+  separation"* was.
+  ⚠️ **It did NOT go four-for-four, and the fourth panel is the more useful one.** `dd7c5ce`
+  named the symptom and **prescribed no axis at all**; its agent recorded a *partial*
+  replication and refused to report four-for-four. **A pattern reported at the count you were
+  hoping for is §25 wearing a result's clothes.**
 - Trust order: **named reproducible gaps > objective acceptance tests > trends > the bare
   number.**
 
@@ -214,6 +272,63 @@ still score 8.
 → **State a resolution floor for every instrument, and refuse to act inside it.** This project had
 floors for win rate (~9 pp) and pacing (~0.8 s) and none for the instrument that decided what every
 agent worked on.
+
+### 🚨 AND THE INSTRUMENT ITSELF MOVED — by the size of the effect it exists to measure
+
+2026-08-22. Four **drift arms** — 2026-08-05 sheets, **byte-identical, referenced rather than
+rebuilt**, so the pixels cannot have changed — were re-scored to k=6 distinct sheets. Every one
+read LOWER. Both columns are re-derivable from committed files: the means from
+`tools/tmp/q1_public.jsonl`, each first read from its own `what` string in
+`shots/review/q1-manifest.json`.
+
+| arm | 2026-08-05 (n=6) | 2026-08-18/21, 6 distinct sheets | Δ | vs the 0.566 six-vs-six floor |
+|---|---|---|---|---|
+| `drift_base_arena` | 5.17 | 4.167 | **−1.003** | **clears** |
+| `drift_cr1_arena` | 5.00 | 4.167 | **−0.833** | **clears** |
+| `drift_base_cast` | 4.33 | 3.500 | **−0.830** | **clears** |
+| `drift_cr1_cast` | 3.83 | 3.500 | −0.330 | inside |
+
+**Three of four clear the floor and all four point the same way, on pixels that cannot have
+changed.** The gap the whole round exists to measure is 3.0–3.6 points and the arms' own
+session-to-session move is 0.5–1.0 — **the same order as the effect.** Any before/after quoted
+across 2026-08-05 → now is confounded by it.
+
+⚠️ **CANDIDATE, NOT SETTLED — and the honest version is the weaker one.** At the σ measured
+*today* (`q1_sigma` §A: **0.649 on df 39, CI [0.526, 0.819]**, which EXCLUDES the published
+0.50) the six-vs-six floor is **0.734** and only `base_arena` survives; at the CI's upper end
+none do. §C — the historic fan-outs the published σ = 0.50 was built from — is **untouched at
+0.501 on df 26**, so the published floor is not wrong about its own source; the *ours* side is
+simply noisier than the reference side, and σ is a property of a population, not of a tool.
+
+→ **A drift arm is the only instrument that could have caught this, and it is now the price of
+admission for any cross-session score.** Re-score byte-identical sheets alongside the new ones,
+in the same wave, with the same rubric. **A round without that control cannot tell a better
+game from a stricter judge** — and this project has twice reported "the pass made it worse" on
+exactly that ambiguity (§6b's corollary saw it first, at 1.30σ / 1.80σ, and correctly refused
+to act).
+
+### A naming tally is an ATTENTION signal, not a defect census
+
+Three critics scored **one image** — the same file, referenced not rebuilt (`a82500b`):
+
+    c1  named the large opaque area effect as the top defect
+    c2  named it first, and the flat pale slab second
+    c3  named the slab ONLY, and did not mention the area effect at all
+
+The thing c3 did not mention is **27.65% of the whole frame and 41.47% of the top half**, and
+it passes over both fighters. c3 scored 3 anyway. Across the ledger the effect is named in
+**13 of 22** scored notes — tallied with a term regex **and** by reading all 22 notes by hand,
+the two agreeing exactly — and in **9 of 10** drift-arm notes; this was the first drift-arm
+miss on record.
+
+→ **What such a tally CAN support:** which defect critics choose to spend their one sentence
+on. **What it CANNOT support:** that the defect is what costs the score. Two reasons, both in
+the data rather than in an argument. (1) The naming is unstable on **identical pixels**, as
+above. (2) The one control whose *ours* panel is a shipped third-party plate drew the **same
+class of complaint** from its critic and still scored 8 — so that defect does not, on its own,
+explain a 4-point gap. **A count of mentions measures the critics' attention, and attention is
+the property this instrument is least stable in.** Same shape as §6b, one level earlier: a
+probe tells you what is broken, a tally tells you only what got written down.
 
 ### The RUBRIC is worth 2.0 points, and there was never a canonical one
 
@@ -317,6 +432,26 @@ The general form: **when part of a tool reads the working tree and part reads a 
 in its output.** A number that is 90% isolated invites you to trust the 10% that isn't. Either
 isolate the whole thing, or print which side each result came from — the arena-scan colour gate
 now stamps the SHA its baseline represents for the same reason.
+
+### The NUMBERS were of the SERVED tree and the LABEL was of another
+
+`with_snapshot` and `sx_snap` copy the repo, serve the **copy**, and export `SNAPSHOT_DIR`.
+Three tools then parsed `src/game/rules.ts` **out of their own checkout** and stamped the run
+with what they found there. Observed (`830f7d7`): an A/B printed `soup.Splash #E8792A` while
+measuring a worktree where that weapon is `#CC9F0D`.
+
+**The measurement was right and the label was of a different tree — which is worse than either
+half being wrong, because each is correct in isolation and only a reader who already knows the
+answer can tell.** The partly-isolated lint above puts part of the *verdict* on the wrong tree;
+this puts the verdict on the right one and its *name* on the wrong one, which no assertion in
+the repo is shaped to catch.
+
+→ `SNAPSHOT_DIR` now wins when set **and the tool PRINTS the root it used** — silent when local,
+loud when served. **The announcement IS the guard**, because a wrong root has no other symptom.
+⚠️ Third copy-paste defect in that one duplicated parser in a single day, all three found by
+somebody tripping over an answer that looked wrong rather than by a check (`0db6ec8` was a regex
+that had stopped matching the roster and returned an empty table **at exit 0**). **A parser
+duplicated across three files is one bug with three lives.**
 
 ### A mask from one render and a value from another is a lie wherever they disagree
 
@@ -503,6 +638,13 @@ before/after that spans one needs the identical-sheet control run alongside it. 
 this round would have been reported as *"the render pass made the cast worse"* — a conclusion two
 earlier passes on this project reached and that was never once true.
 
+⚠️ **FOLLOWED UP AND LARGELY CONFIRMED, 2026-08-22 — see §3, *"AND THE INSTRUMENT ITSELF
+MOVED"*.** Four drift arms re-read to k=6 distinct sheets all moved the same way and three
+cleared the six-vs-six floor. The wording above stays exactly as written because **it was right
+to refuse it at 1.30σ / 1.80σ**: it was called suggestive, it was not acted on, and it named the
+experiment (*"8 critics per arm would settle it"*) that eventually answered it. That is what a
+suggestive result is supposed to earn — a bigger n, not a conclusion.
+
 ---
 
 ## 7. Local optima fight each other; watch the sum
@@ -529,7 +671,30 @@ we had already dropped *below all ten plates*. The critics were right about the 
 (separation) and wrong about the **mechanism**. The reference reserves **hue**, not
 saturation: a saturated *cool* ground with the warm half of the wheel left for the cast.
 
-Adding cool chroma lowers the warm band's share more cheaply than removing warm chroma does.
+~~Adding cool chroma lowers the warm band's share more cheaply than removing warm chroma does.~~
+
+🚨 **THAT SENTENCE IS RETIRED, AND WHAT HAPPENED TO IT AFTERWARDS IS THE MORE USEFUL LESSON**
+(`f3052ef`, 2026-08-21; `CLAUDE.md`'s art-direction block now names this line by section).
+It was true when written. `CLAUDE.md` then carried the **opposite** correction — *"warm chroma
+FAILS LOW (0.053 against a 0.072 minimum), cool is over, **warm is the scarce budget today**"* —
+and cited `DECISIONS §73` as its source. **§73 is the section that retired it; its title is
+"THE ARENA'S WARM PROBLEM IS FIXED".** The old `arena-scan` baseline had been pinned **61
+commits before the ×4 map**, so for a day it compared a 2800×2000 arena against a 1400×1000
+one. Re-baselined: warm chroma **0.0596 FAIL → 0.0823 PASS**, cool moved *toward* target,
+**all 11 rails pass — the first time `--gate` fired on nothing.** Floor first: four sweeps of
+one commit spread **0.0002**, so the move is **114× the noise.** Not marginal.
+
+→ **There is no standing chroma direction in this project. The rails move as the arena changes,
+and `arena-scan --baseline` is the only source.** Two things that have NOT moved and are kept:
+**never fix anything by desaturating** (falsified four times), and a teal-chip palette copied
+literally from a plate was **rejected on `arena-scan`** — copying a plate's colours is not the
+same as passing its rails.
+
+⚠️ **Two contradictory directions sat in two authoritative files at once, for a day, and both
+read as verified.** The correction came from an agent that **ran the tool instead of reading
+either line** — see §24. And note what the fix does *not* add: a guard. `gatecount` polices
+counts and cannot read prose. **The honest remedy is to write fewer directions in a document
+and more pointers to the tool that produces them.**
 
 Similarly: scoping. `KPAL` controls ~21% of the frame; `floor.ts` overrides ~34% and
 `props/counters.ts` ~16%. `KPAL.cabinet` and `KPAL.butcherBlock` reach the screen at **zero
@@ -963,6 +1128,17 @@ and **eleven were standing inside solid props**. `np_nfighter` read **62/62** wi
 **1,077 wu off centre**. The logic was flawless in both. Aim is a different property and no amount of
 logic testing can reach it.
 
+**And the same shape one level below `--selftest`: `node --check` PASSED THREE FILES THAT COULD
+NOT RUN** (`830f7d7`). Each used a `SELF` binding declared **6, 2 and 34 lines below its own
+first use** — a temporal-dead-zone `ReferenceError` at module load, in all three. `--check`
+cannot see it because **it validates SYNTAX and never ORDER.** Caught by grepping the two line
+numbers and comparing them, and then by *running* the tool.
+→ **A checker answers the question it was built for, and its silence is evidence about no other
+question.** Before you quote a green checker, say out loud what it examines: `--check` examines
+syntax; `--selftest` examines logic; `gatecount` examines whether a count matches its documented
+copy; `tsc` examines types on the WORKING tree. **None of them examines aim, order, or where the
+thing is pointed.**
+
 ### A check that compares two numbers must compare the same KIND of number
 
 `hl_sweep`'s SWAP arm failed **12 of 22** for a day and was the only thing holding the instrument
@@ -1093,6 +1269,34 @@ this session and never deleted — `docs/STATE.md` and `docs/DECISIONS-FOR-URI.m
 superseded claim above its replacement, because the *reason a wrong thing was believed* is the part
 that stops it being believed again.
 
+### It happened again the next session, and the failure has a SHAPE worth recognising
+
+Not an argument for distrust — an argument for **re-deriving the one premise your task rests
+on** before you act, because the wrong claims cluster in three recognisable places:
+
+- **The SIZE of a set the orchestrator did not count.** A wave was briefed as *"five panels"*
+  three times and was **six, six and ten** (`a7f611c`, `2315f55`, `a86fe9b`). Every merge agent
+  derived the pending set by **diffing ids against the ledger** rather than counting files in a
+  directory — the directory held 27 files and 11 files on two of those occasions — and each one
+  reported the discrepancy as a result.
+- **A RULE stated as though it were general.** *"A duplicate sheet is a manifest defect — skip it
+  and report it"* is **false for the drift arm**, which is duplicated **by design**
+  (`DRIFT_ORDER = [1,2,3,4,5,6,1,2]`, with the packet builder's own comment saying so). Five
+  panels found that independently, and the inconsistency is now permanent in the data: **three
+  duplicate cells were scored and five were skipped**, on different readings of one sentence.
+- **A claim about the TREE that was true yesterday.** *"Peers hold `src/` dirty, decline to quote
+  `tsc`"* was false at the moment it was acted on — `git status` showed zero tracked
+  modifications — which mattered, because the tool in question builds its allowlist by parsing
+  `rules.ts` **on the working tree** (`dd7c5ce`). Also false in the same brief: *"your panel is
+  the first new-arena read"* (two earlier panels were), *"the cap carries no surface map"* (it
+  has one, at a period the statistics cannot reach — **the perceptual claim survived, its
+  mechanism did not**), and *"the taller fighter is ~12% of frame height"* (**10.8%**).
+
+→ **The pattern: an orchestrator is reliable about INTENT and unreliable about COUNTS, CURRENT
+TREE STATE, and the SCOPE of a rule.** Those three are exactly what a single command can settle.
+**Settle them first, in the same breath, and report what did not check out — a falsified premise
+is a deliverable.**
+
 ---
 
 ## 20. A STANDARD ERROR IS NOT ALWAYS THE SCALE OF THE THING YOU ARE MEASURING
@@ -1199,3 +1403,257 @@ tools directory. **A default that is a fixed path is a shared resource**, so a t
 must either claim it (a lock file, a PID suffix) or take it from the caller. And a related smell worth
 recognising: `kx_seatfair --emit`'s selftest left an **empty JSON in `tools/tmp` on every run** — a
 tool that litters the shared namespace as a side effect of *testing itself*.
+
+---
+
+## 24. 🚨 A CITATION IS NOT A VERIFICATION — and a LINE NUMBER is not a citation
+
+**Three citation drifts in `CLAUDE.md` in one weekend — plus a fourth found in this file while
+writing this section — and every one was found by an agent re-deriving a claim it had been
+handed as true. Not one was found by a check.**
+
+**1. A rule cited the document that had already reversed it** (`f3052ef`, and §8 above holds the
+full measurement). `CLAUDE.md` said *"warm is the scarce budget today"* and pointed at
+`DECISIONS §73`. §73 is titled **"THE ARENA'S WARM PROBLEM IS FIXED"**.
+
+> **Nobody follows a reference that appears to agree.** The citation is not decoration — it is
+> the thing that stops the next reader checking. A wrong claim with a section reference beside
+> it is *more* durable than the same claim bare.
+
+It also survived because it **sounded like hard-won knowledge**: *"warm is scarce"* is exactly
+the shape of a lesson this project earns. It was one, for about a day. It then went into every
+arena brief of the weekend.
+
+**2. A line citation drifted twice in a day** (`67d58d8` → `9019142`). `CLAUDE.md` rule 3 — the
+rule about *looking at the right camera* — cited the match camera's pitch default at **`:265`**,
+which is a distance helper. It was corrected to **`:476`**, with the lesson *"cite the SYMBOL as
+well as the line."* **Peers moved it to `:640` inside a day and `:476` was wrong again.** Caught
+by a third agent re-deriving it.
+
+> **Citing the symbol *as well as* the line still ships a number that rots.** The line adds
+> nothing a `grep` does not, and subtracts trust every time it drifts.
+
+→ **The line number is gone. The citation is the grep**: `grep opts.pitchDeg ?? 58`. Cite a
+**symbol, a filename, or a command that reproduces the value** — never a coordinate into a file
+somebody else owns. Same principle as §18's *"derive from `shared.ts`, never retype a
+coordinate"*, applied to prose.
+
+**3. A count in a document contradicted the same document's own body** — §1's opening line, and
+§2's tally, both in this file. See both.
+
+⚠️ **AND THERE IS NO GUARD FOR THIS CLASS, WHICH IS THE PART TO INTERNALISE.** `gatecount` reads
+exactly two files and only recognises a copy on a line naming a `.mjs` path; it priced the
+adjacent idea — matching bare tool names — at **16 false positives for 1 true positive** on these
+real documents and rejected it, because a guard that cries wolf gets switched off.
+→ So the remedy is not a check, it is a **habit and a shape**: **write fewer claims a check
+cannot police, and more pointers to the tool that produces the number.** A document that says
+*"run `arena-scan --baseline`"* cannot go stale. A document that says *"warm is 0.053"* is stale
+the moment somebody changes the arena.
+
+---
+
+## 25. A COUNT WRITTEN FROM MEMORY IS WRONG HERE AT ROUGHLY COIN-FLIP RATE
+
+Measured twice, by two agents, **on themselves**, in one session — and the first time with the
+correct output still sitting in the terminal.
+
+**Instance 1 (`eecac15` → `6c2e402`).** An agent published `279.3` where the derivation gives
+`282.3`. It then wrote a commit to correct that typo — and **that commit printed a four-row
+table it had typed from memory instead of pasting the script's output.** Three of the four rows
+were wrong:
+
+| row | printed in the correction | what the file actually said |
+|---|---|---|
+| `ctrl_same_anchor` | 229.5 | **342.2** |
+| `replicate_13pct` | 336.4 | **336.0** |
+| `a900L_dlegal` | 166.6 | **181.7** |
+| `a360_dense` | 435.8 | 435.8 *(the only right one)* |
+
+**The failure recurred inside the commit written to fix it, about ninety seconds later.** That
+pass measured itself at **4 of 5** typed numbers wrong. Nothing downstream moved — the table was
+*illustration*, **which is exactly why it felt safe to type.**
+
+**Instance 2 (`f72e2ce` → `a786f74`).** An agent inherited *"verified seven times"* from a brief
+and wrote *"the EIGHTH verification"* without checking. The ledger records **three** prior — its
+own was the fourth. The correcting commit then made **two more** unchecked claims (*"fired in
+five of nine rounds"*, *"the fourth refusal on record"*); scanning the log returns exactly one
+prior refusal, so they were the **second and third**. **Three unverified counts in three
+consecutive commits, the last of them inside the correction of the second.**
+
+> **The lesson is NOT "do not inherit the orchestrator's number."** The brief already said that,
+> and both agents then did it with their own. It is narrower and harsher: **a count written from
+> memory is wrong here at roughly the rate of a coin flip, whoever it came from.**
+
+→ **Print it from a command in the same breath as you write it down, or paste the output, or
+omit the number.** There is no third habit that survives contact.
+→ **And because `git commit --amend` is banned, a wrong number in a message stands forever.**
+The remedy this project uses is the same one it uses for a reversed assertion: leave the old
+wording, put the correction beside it, and **make the correction travel with the DATA** — the
+`note` field on the row, not only a report an orchestrator may summarise away.
+
+⚠️ Corollary for tallies specifically: **do not report a pattern at the count you were hoping
+for.** §3's hue/value finding replicated three times and was written up as *three*, with the
+fourth panel recorded as a **partial** — because its critic prescribed no axis at all. Rounding
+that to four-for-four would have been this section, dressed as a result.
+
+---
+
+## 26. AN ABSENT VALUE IS NOT A NEUTRAL VALUE — it silently picks a branch, and it picks the flattering one
+
+Four instances in one session, all in one instrument family, none of them caught by a check —
+three passed silently and the fourth shouted the *wrong* alarm:
+
+- **`Set.has(undefined)` is `false`** (`433a8b5`). A security guard withheld a note when
+  `plateOurs.has(row.element)` was true. `--record` makes `element` **optional**, so a row
+  arriving without one read as *"not a protected element"* and **published**. The row that hit it
+  was an ordinary frame, so the outcome was right **by luck**; on a control row it would have
+  published a critic's description of a third-party plate into a **public** repo — *the exact
+  breach the file had been rewritten to prevent, reached by omitting a field rather than by
+  defeating the check.* **A guard whose bypass is "leave a field out" is not a guard.**
+- **`null >= 7` is `false`** (`5cd3fb6`). Recording a *deliberate skip* ran the validity test
+  `reference >= 7 && <= 9` without consulting `skipped`, so a healthy row printed the loudest
+  string in the round — **"🔴 REF OUTSIDE 7–9 — DISCARD THIS ROUND"** — five times.
+- **A field missing from the projection** (same commit). `skipped` was not in `PUBLIC_FIELDS`, so
+  the committed record carried **5 rows with a null score and no flag**. A clean checkout could
+  not tell a deliberate skip from a failed one, and counting those five toward `k` prints floors
+  **tighter than the evidence**. *A record that cannot reproduce its own floors does not fail
+  loudly; it fails quietly and flatteringly.*
+- **A lookup with a fallback** (`grep man.floors tools/tmp/q1_ledger.mjs` — §24's rule applies
+  to this file too, so no line number). `man.floors` carries k1/k3/k4/k6/k8; a
+  `?? '<0.49'` fallback printed **`<0.49` for k=2** where the truth is **0.980** — claiming more
+  confidence than two observations can support.
+
+→ **An absent input must fail CLOSED.** And the sibling shape from the same file: a helper
+returning `null` for *unknown* is not the same as returning an empty set for *none* — **collapse
+those two and every "nothing to check" becomes a pass.** This is §17's `[].every()` vacuity with
+one value instead of a set.
+
+### Three separate ways to be flatteringly wrong about `n`, in ONE round
+
+All three from one instrument, all three found by agents auditing their own arm:
+
+1. the **k=2 fallback** above, claiming a floor of `<0.49` where two observations give 0.980;
+2. an arm that **counted SKIPPED rows toward `k`**;
+3. **repeated sheets counted as independent** (`8f544fc`) — `q1_packets.mjs` builds every drift
+   element as `DRIFT_ORDER = [1,2,3,4,5,6,1,2]`, i.e. **8 seats over 6 distinct sheets, on
+   purpose**, so a fully-scored arm published a floor from **n=8** (0.490) while resting on **6
+   distinct images** (0.566).
+
+**Every one erred in the direction that makes our own numbers look better.** That is not
+coincidence — a tighter floor makes more differences "resolvable", which is the answer an agent
+wants, so the mistakes that survive review are the ones that flatter.
+
+⚠️ **And the distinction that stops the fix from becoming a fourth error: the MEANS are
+unaffected** (4.125 → 4.167 on the worst cell). **A repeated read is a perfectly good
+observation OF THE CRITIC. It is only illegitimate as evidence about the IMAGE** — which is
+exactly what a floor quantifies. This was a **floor** error, not a **score** error, and
+conflating them would have been the fourth way to be wrong.
+
+→ **Before quoting `n`, say what one observation IS.** Sibling of §20: there the question was
+whether the error bar describes the statistic; here it is whether the sample describes the
+subject.
+
+---
+
+## 27. IGNORE THE SHAPE, NOT THE INSTANCE — an ignore rule goes stale the moment the work changes shape
+
+**Three times in one session, each time the reasoning already written down and correct, each
+time the shape of the work moved out from under it:**
+
+| SHA | the rule as written | how it went stale |
+|---|---|---|
+| `c45df36` | ignore **a FILE** (`q1_scores.jsonl`, whose every row holds a critic's prose about a third-party plate; this repo is **PUBLIC**) | hours — see the row below |
+| `b1a70ed` | …the exposure moved to **a DIRECTORY** the moment five panels ran in parallel: `tools/tmp/q1_par/*.json`, **five files, all five carrying a raw `referenceNote`** | hours |
+| `85f1847` | …and to **EVERY agent scratch directory** once six agents ran at once: **151 untracked paths**, at least 12 directories holding PNGs, one holding **70** | hours |
+
+**"Untracked" is not "ignored."** `??` in `git status` distinguishes untracked from tracked and
+says nothing about safe; **one `git add tools/tmp` ships the lot**, and agents pathspec-commit
+that directory constantly.
+
+**The last rule had to be rewritten TWICE in one sitting, the same way each time:**
+
+    v1  enumerated directory NAMES (*_out/, *_shots/, *_vs/, four literals)
+        -> left 31 of 63 directories uncovered. Agents name scratch whatever they like.
+    v2  matched the EXTENSION anywhere under tools/tmp/
+        -> 0 images would stage, but 309 paths still would — run logs and result JSON.
+    v3  both: extensions for pixels, directory shapes for the rest.
+
+**Verified by asking git rather than by reading the rule:** `git add --dry-run tools/tmp` went
+**309 paths → 127, with 0 images.**
+
+🚨 **AND v3 IS ALREADY LEAKING, WHICH IS THE POINT RATHER THAN AN EMBARRASSMENT.** Re-derived
+2026-08-22, one commit later: `git add --dry-run tools/tmp` stages **92 paths, 0 images — and
+4 text artefacts**, `lk1_msg.txt`, `sbj_msg.txt`, and `SUMMARY.txt` in two `lq_scan_*/`
+directories. The extension list covers `.log` and not `.txt`; the directory list covers
+`*_out/`, `*_out_*/` and `*_shots/` and not `lq_scan_head/`. **v3 kept half an enumeration —
+the exact thing v1 was rewritten for — and that half went stale within a day.**
+
+→ **An enumeration of today's names is a list somebody has to maintain, and the maintenance is
+what nobody does.** Ignore the **invariant**: *a rendered pixel does not belong in a public
+repo*, *an agent's output directory is regenerable by definition*. When you must enumerate,
+**verify by asking git, not by reading your own rule** — and re-ask after the next fan-out.
+
+**The split that decides what to commit, and it generalises past `.gitignore`:**
+**a TOOL is the record of how a number was produced and gets committed; OUTPUT is regenerable
+by definition and does not.** ⚠️ With one deliberate exception: **a ledger is not an artefact.**
+`wm_ledger.json` and `q1_public.jsonl` are what a clean checkout needs in order to reproduce a
+floor, and they are kept for the same reason `docs/` is.
+
+⚠️ Note what none of these fixes is: **a guard.** `gatecount` cannot read a `.gitignore` and
+cannot see a missing `IS_MAIN`. Both remedies are the same one — **make the unsafe thing
+structurally impossible instead of remembering not to do it** (an allowlist that REFUSES rather
+than filtering; a `referenceNote` that is absent from the projection **by construction**, so no
+filter can be forgotten).
+
+---
+
+## 28. SIX SEATS IS WHERE THIS PROJECT'S DEFECTS LIVE — and the FIX for a two-seat defect is not a two-seat question
+
+`MAX_FIGHTERS` is **6** and Uri plays six-player. **Six defects of one class were found in a
+single session**, and each had been shipped, correct-looking, for as long as the code existed:
+the result card, corpse input, shake proximity, seat order, **melee** hitting one fighter
+(`3483d23`) and **projectiles** hitting one fighter (`5c11427`).
+
+**The mechanism is the same every time, and it is not "we forgot to test N=6":**
+
+> **At two seats, two DIFFERENT sentences name the SAME fighter**, emit the same events, and
+> produce the same state — so the difference between them **cannot express itself**, and no
+> assertion can be written that would fail.
+
+- *"resolve against the target"* and *"resolve against whoever it strikes"* — identical at N=2.
+  Every one of `sim.test.mjs`'s assertions passed throughout, both times.
+- *"the nearest opponent"* and *"everyone inside the arc"* — identical at N=2. `lollipop.Giant`
+  is `cone: 360` and its card promises *"hits the whole map"*; it hit **one** fighter.
+- shake with **no distance term** (`d0a42ea`): at N=2 **0.0%** of kicks land beyond the camera's
+  fade radius, so the missing term is unobservable; at N=6 it is **66.7%**, and two thirds of
+  every camera kick came from a fight you cannot see.
+
+**AND THE SECOND HALF, WHICH IS THE ONE THAT GETS MISSED** (`30e3360`): a player dying at six
+seats was pinned to their own corpse for up to `MATCH_DURATION_MS` = 150 000 ms. **The PINNING
+is a two-seat defect** — at N=2 "the local player is dead" and "the match is over" are nearly
+one sentence — **but the POLICY that replaces it is not a two-seat question at all.** Its
+control ran five wrong camera policies at both seat counts:
+
+    KB1 pinned to the local seat (the SHIPPED bug)   N=2 CAUGHT   N=6 CAUGHT
+    KB2 nearest living only, no killer rung          N=2 MISSED   N=6 CAUGHT
+    KB3 lowest living index                          N=2 MISSED   N=6 CAUGHT
+    KB4 no stickiness                                N=2 MISSED   N=6 CAUGHT
+    KB5 strand back to the local seat                N=2 CAUGHT   N=6 CAUGHT
+
+**3 of 5 wrong policies are completely invisible at two seats.** ⚠️ And the first version of that
+arm reported **4 of 5 caught at N=2** — because it compared `viewReason`, an **instrumentation
+field no player can see**, instead of the observable (*which fighter is the camera pointing
+at*). **A control that grades itself on a debug field grades the wrong thing**; both columns are
+now printed side by side so the difference is on the page.
+
+→ **Before trusting any corpus, ask at what N it was run.** Most of this repo's balance and
+behaviour instruments are 110 two-fighter matchups; **that entire tree is blind to this class by
+construction.** When a defect is fixed at two seats, ask separately whether the *replacement*
+has any two-seat expression at all.
+
+⚠️ Related trap at six seats: **placement and win rate are different quantities and they barely
+agree here** (`docs/TOOLS.md`'s `nf_ffa` row carries the correlation and the floors — one copy,
+and it is that one). Shrinking the Giant Lollipop's radius (`afad1ca`) made Lollipop **place
+better, 3.313 → 3.013, while its win rate FELL 13.3% → 7.3%**: it survives longer and converts
+less. **A six-seat pass steered by win rate names a different roster from one steered by
+placement.** Say which one you are steering by, before you steer.
