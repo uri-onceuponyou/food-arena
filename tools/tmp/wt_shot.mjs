@@ -50,6 +50,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import { frameStats, FRAME_FLOOR } from './settle.mjs';
 import { readFileSync } from 'node:fs';
 
 /** Decode to a flat RGBA raster. `sharp` is the only image dep this repo carries. */
@@ -160,6 +161,25 @@ async function shoot(page, base, st, pitch, t, outPath, chars, span) {
   await mkdir(outPath.replace(/\/[^/]*$/, ''), { recursive: true });
   const buf = await page.locator('canvas').first().screenshot({ timeout: 120_000 });
   await writeFile(outPath, buf);
+  // ── THE CAPTURE SIDECAR `tools/review.mjs` REFUSES A PACKET WITHOUT ────────
+  // Written from evidence, not from optimism: `painted` is the AND of three things
+  // this function actually observed — the preview declared itself ready, the rig
+  // override ran (it throws otherwise), and the frame clears `settle.mjs`'s flat-frame
+  // floor. A sidecar that says `painted: true` unconditionally is worse than no
+  // sidecar, because `--allow-unverified` at least tells the reader nothing is known.
+  const fs = await frameStats(buf);
+  await writeFile(`${outPath}.capture.json`, JSON.stringify({
+    tool: 'tools/tmp/wt_shot.mjs',
+    url: `${base}/preview.html?${q}`,
+    painted: fs.stdev >= FRAME_FLOOR,
+    why: fs.stdev >= FRAME_FLOOR ? [] : [`frame is FLAT: max-channel stdev ${fs.stdev} < ${FRAME_FLOOR}`],
+    previewReady: true,
+    viewWidthUnits: applied,
+    pitchDeg: pitch,
+    frozenT: t,
+    stats: fs,
+    at: new Date().toISOString(),
+  }, null, 2));
   return raster(buf);
 }
 
@@ -269,19 +289,104 @@ if (isMain) {
   }
 
   if (DRIFT) {
-    // Rule 4's drift control: the SAME url twice, independent page loads. Not "close" —
-    // EXACTLY ZERO, or a moving puddle has cost every A/B taken with this tool.
-    const a = await shoot(page, BASE, ST.water, 58, T, `${OUT}/${TAG}_drift_a.png`, CHARS, SPAN);
-    const p2 = await browser.newPage({ viewport: { width: 1300, height: 740 }, deviceScaleFactor: 1 });
-    const b = await shoot(p2, BASE, ST.water, 58, T, `${OUT}/${TAG}_drift_b.png`, CHARS, SPAN);
-    await p2.close();
-    let diff = 0;
-    const ch = a.channels;
-    for (let i = 0; i < a.data.length; i += ch) {
-      if (a.data[i] !== b.data[i] || a.data[i + 1] !== b.data[i + 1] || a.data[i + 2] !== b.data[i + 2]) diff++;
+    // Rule 4's drift control — and it is run REPEATEDLY on purpose.
+    //
+    // 🚨 A SINGLE ZERO IS NOT A FLOOR. The first three pairs this tool took came back
+    // at exactly 0 differing pixels and that number went into a commit message as if
+    // it were a property of the capture path. The fourth came back at 20 px, in a 5x4
+    // box at the TOP of the frame, 300 px from the pool — an ambient element the
+    // preview's `?t=` freeze does not reach. So the honest report is a DISTRIBUTION
+    // over n pairs plus the number that actually governs an A/B on this subject: the
+    // same diff restricted to the centre box the classifier already uses.
+    const reps = Number(arg('drift-reps', '4'));
+    const full = [], subj = [], pool = [], flipped = [], poolClean = [];
+    for (let i = 0; i < reps; i++) {
+      const a = await shoot(page, BASE, ST.water, 58, T, `${OUT}/${TAG}_drift_a.png`, CHARS, SPAN);
+      const p2 = await browser.newPage({ viewport: { width: 1300, height: 740 }, deviceScaleFactor: 1 });
+      const b = await shoot(p2, BASE, ST.water, 58, T, `${OUT}/${TAG}_drift_b.png`, CHARS, SPAN);
+      await p2.close();
+      const ch = a.channels, w = a.width, h = a.height;
+      const bx0 = Math.round(w * 0.29), bx1 = Math.round(w * 0.71);
+      const by0 = Math.round(h * 0.29), by1 = Math.round(h * 0.71);
+      // THREE numbers, because the first two answered the wrong question. A whole-frame
+      // count is dominated by ambient debris the freeze does not reach (a warm speck
+      // that exists in one load and not the other — cropped and LOOKED AT, it is a
+      // floating particle, not the pool). What an A/B on this subject needs is whether
+      // THE POOL'S OWN PIXELS moved, so the third arm diffs only pixels the classifier
+      // calls water in BOTH frames, and reports the classification flips separately so
+      // the exclusion is visible rather than quietly generous.
+      let d = 0, ds = 0, dp = 0, flips = 0;
+      const flipPts = [];
+      const diffPts = [];
+      const isPool = (buf, i) => {
+        const { h: hh, s: ss, v } = rgbToHsv(buf[i], buf[i + 1], buf[i + 2]);
+        return ss >= 0.24 && v >= 0.14 && hh >= ST.water.hue[0] && hh <= ST.water.hue[1];
+      };
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * ch;
+          const inA = isPool(a.data, i), inB = isPool(b.data, i);
+          if (inA !== inB) { flips++; flipPts.push(x, y); }
+          if (a.data[i] !== b.data[i] || a.data[i + 1] !== b.data[i + 1] || a.data[i + 2] !== b.data[i + 2]) {
+            d++;
+            if (x >= bx0 && x < bx1 && y >= by0 && y < by1) ds++;
+            if (inA && inB) { dp++; diffPts.push(x, y); }
+          }
+        }
+      }
+      // A pixel next to something that moved IN FRONT of the pool is that object's
+      // antialiased fringe, not the pool's own surface. Excluded within 4 px and
+      // reported separately, so the exclusion is a stated policy and not a fudge: if
+      // the pool itself ever moves, `poolClean` is nowhere near a flip and stays red.
+      let clean = 0;
+      for (let k = 0; k < diffPts.length; k += 2) {
+        let near = false;
+        for (let j = 0; j < flipPts.length && !near; j += 2) {
+          if (Math.abs(diffPts[k] - flipPts[j]) <= 4 && Math.abs(diffPts[k + 1] - flipPts[j + 1]) <= 4) near = true;
+        }
+        if (!near) clean++;
+      }
+      full.push(d); subj.push(ds); pool.push(dp); flipped.push(flips); poolClean.push(clean);
     }
-    console.log(`  DRIFT CONTROL two independent loads, water p58: ${diff} differing px of ${a.width * a.height}  ${diff === 0 ? 'EXACTLY ZERO' : 'NON-ZERO — the capture is not reproducible'}`);
-    rows.push({ tag: TAG, driftPx: diff, of: a.width * a.height });
+    console.log(`  DRIFT CONTROL ${reps} independent pairs, water p58, full frame: [${full.join(', ')}] px of ${1300 * 740}`);
+    console.log(`  DRIFT CONTROL ${reps} pairs, SUBJECT window (the centre box): [${subj.join(', ')}] px  ${subj.every((v) => v === 0) ? 'EXACTLY ZERO on the subject' : 'NON-ZERO ON THE SUBJECT — this capture cannot carry an A/B'}`);
+    console.log(`  DRIFT CONTROL ${reps} pairs, THE POOL'S OWN PIXELS: [${pool.join(', ')}] px  ${pool.every((v) => v === 0) ? 'EXACTLY ZERO — the puddle is frozen' : 'NON-ZERO — the puddle animation is not reproducible'}`);
+    console.log(`     (pixels that changed CLASSIFICATION, i.e. something moved in front of the pool: [${flipped.join(', ')}])`);
+    console.log(`  DRIFT CONTROL ${reps} pairs, POOL PIXELS >4 px FROM ANY SUCH OCCLUDER: [${poolClean.join(', ')}] px  ${poolClean.every((v) => v === 0) ? 'EXACTLY ZERO — the puddle surface itself is frozen' : 'NON-ZERO — the puddle animation is not reproducible'}`);
+    rows.push({ tag: TAG, driftFull: full, driftSubject: subj, driftPool: pool, driftPoolClean: poolClean, classFlips: flipped, of: 1300 * 740 });
+  }
+
+  if (has('clock')) {
+    // 🚨 THE ARM THAT ACTUALLY SETTLES IT. "Five of six pairs came back zero" is not
+    // proof a clock is frozen — it is consistent with a clock that is frozen AND with
+    // one that is live but sampled at nearly the same instant. So: MOVES and HOLDS.
+    //
+    //   HOLDS  two loads at the SAME `?t=` must be ~0 on the pool's own pixels.
+    //   MOVES  two loads at DIFFERENT `?t=` must be LARGE on the same pixels.
+    //
+    // If `puddleSeconds()` ever stops honouring `?t=` and falls back to
+    // `performance.now()`, HOLDS goes large. If the animation is dead — a uniform that
+    // never reaches the shader, which is the failure this repo calls "rendering and
+    // INVISIBLE" — MOVES goes to zero. One arm cannot fail for the other's reason.
+    const poolPx = (a, b) => {
+      const ch = a.channels; let n = 0;
+      for (let i = 0; i < a.data.length; i += ch) {
+        const A = rgbToHsv(a.data[i], a.data[i + 1], a.data[i + 2]);
+        const B = rgbToHsv(b.data[i], b.data[i + 1], b.data[i + 2]);
+        const inA = A.s >= 0.24 && A.v >= 0.14 && A.h >= ST.water.hue[0] && A.h <= ST.water.hue[1];
+        const inB = B.s >= 0.24 && B.v >= 0.14 && B.h >= ST.water.hue[0] && B.h <= ST.water.hue[1];
+        if (inA && inB && (a.data[i] !== b.data[i] || a.data[i + 1] !== b.data[i + 1] || a.data[i + 2] !== b.data[i + 2])) n++;
+      }
+      return n;
+    };
+    const h0 = await shoot(page, BASE, ST.water, 58, T, `${OUT}/${TAG}_clock_t0a.png`, CHARS, SPAN);
+    const h1 = await shoot(page, BASE, ST.water, 58, T, `${OUT}/${TAG}_clock_t0b.png`, CHARS, SPAN);
+    const m1 = await shoot(page, BASE, ST.water, 58, T + 0.37, `${OUT}/${TAG}_clock_t1.png`, CHARS, SPAN);
+    const holds = poolPx(h0, h1);
+    const moves = poolPx(h0, m1);
+    console.log(`  CLOCK HOLDS  t=${T} vs t=${T}      pool pixels changed: ${holds}`);
+    console.log(`  CLOCK MOVES  t=${T} vs t=${(T + 0.37).toFixed(2)}   pool pixels changed: ${moves}  ${moves > 200 * Math.max(holds, 1) ? 'the puddle clock IS ?t=' : 'INCONCLUSIVE'}`);
+    rows.push({ tag: TAG, clockHolds: holds, clockMoves: moves });
   }
 
   await writeFile(`${OUT}/${TAG}.json`, JSON.stringify(rows, null, 2));

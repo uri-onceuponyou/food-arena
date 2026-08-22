@@ -1552,6 +1552,19 @@ export function buildPuddleVisual(
   // a 32-segment disc is a perfect circle, and Uri read the pool as a circle because
   // it WAS one — at every contour, not just this one.
   const disc = mesh(lobedDiscGeometry(R, profile), bodyMat, 'puddle');
+  // 🚨 A FILM OF LIQUID ON THE FLOOR IS NOT A SHADOW CASTER, AND IT ALWAYS WAS ONE.
+  // `shared.ts`'s `mesh()` sets `castShadow = true` for everything it builds, which is
+  // right for a crate and wrong for a decal: the pool sits 0.15 m above the tile and
+  // the key light is at 39 deg elevation, so it was throwing 0.15*cot(39) = 0.185 m of
+  // hard shadow past its own edge — onto the floor it is lying flat on. Found by
+  // attributing a draw-call delta rather than by looking: `tools/tmp/wt_names.mjs`
+  // (patching `renderBufferDirect`, which every draw in the engine goes through)
+  // charged the wet rim TWO `MeshDepthMaterial` draws after the outline change and one
+  // before — the lobed ring's bounding sphere is 13% larger, so it reached a second
+  // light's shadow frustum. The number was a symptom; the caster was the bug.
+  // `receiveShadow` stays ON, deliberately: the whole `PUDDLE_RENDER_ORDER` note above
+  // exists so a fighter's contact decal reaches the pool's surface.
+  disc.castShadow = false;
   disc.rotation.x = -Math.PI / 2;
   disc.position.set(gp.x, PUDDLE_PLANE_Y, gp.z);
   disc.renderOrder = PUDDLE_RENDER_ORDER.body;
@@ -1583,6 +1596,10 @@ export function buildPuddleVisual(
   // that file is not this owner's to edit; this needs nobody's cooperation.
   surf.onBeforeRender = () => { surfUniforms.uPTime.value = puddleSeconds(); };
   surf.name = isGrease ? 'puddle_grease_surface__no_outline' : 'puddle_water_surface__no_outline';
+  // Not built through `mesh()`, so this is already false — restated because the two
+  // siblings now say it explicitly and a reader should not have to know which of the
+  // three took the default.
+  surf.castShadow = false;
   surf.rotation.x = -Math.PI / 2;
   surf.position.set(gp.x, PUDDLE_PLANE_Y, gp.z);
   // Was 2 — a tie with the character contact decal, and the tie-break is a depth sort
@@ -1608,6 +1625,7 @@ export function buildPuddleVisual(
     nonOccluding(rimMat),
     'puddle_wet_rim'
   );
+  trim.castShadow = false;
   trim.rotation.x = -Math.PI / 2;
   trim.position.set(gp.x, PUDDLE_PLANE_Y, gp.z);
   trim.renderOrder = PUDDLE_RENDER_ORDER.rim;
