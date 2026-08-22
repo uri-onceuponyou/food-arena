@@ -572,8 +572,25 @@ export const KPAL = {
   // ⚠️ These two are still OVERRIDDEN in `floor.ts` and reach the screen at zero pixels
   // from here. They are re-keyed anyway, for the reason this block already gives: the
   // day the override is retired the palette must already hold the right answer.
-  tileLight: '#78656C',
-  tileDark: '#715F66',
+  //
+  // ── ROUND 14: 0.158 WAS TOO FAR, AND THE PLATES ARE WHAT SAY SO ────────────
+  // Round 12's argument stands and its old wording is kept above; what it lacked was a
+  // measurement of the reference's OWN ground. `tools/tmp/v1_sat.mjs` over the six
+  // curated `gameplay_topdown` plates: their largest colour mass covers 34.5-71.6% of the
+  // frame at **HSV S 0.440-0.791**, and their whole-frame median S is 0.467-0.731. Ours
+  // was 47.4% at S 0.298, median 0.328 — **below all six on both**. The mass number is
+  // the load-bearing one: a high median alone cannot distinguish "one big saturated
+  // surface" from "many small saturated objects on a quiet ground", and those two
+  // prescribe opposite changes. Every plate is the first kind.
+  // HSV 0.158 -> 0.267 at UNCHANGED max channel (120 / 113) and hue within 0.7 deg. That
+  // is still 15% under the 0.312 Uri was looking at, and it is the smallest move that
+  // clears the plate floor rather than the middle of the band.
+  // ⚠️ Raising S at a fixed HSV VALUE necessarily lowers LUMA (105.6 -> 95.7, -9.3%),
+  // because HSV value is the max channel. Reported, not hidden — and it is the direction
+  // the plates sit in: their dominant masses are at V 0.372-0.958, median ~0.50, against
+  // ours at 0.715.
+  tileLight: '#785864',
+  tileDark: '#71535F',
   // The joint seen through the grout gaps. Holds the ~1.7:1 albedo ratio to the tile
   // that four contradictory critics were finally split down the middle on (see the
   // `subfloorDark` note in `floor.ts`) — the ratio is unchanged, only the chroma moves.
@@ -581,7 +598,9 @@ export const KPAL = {
   // its `subfloorDark` override — the ratio is what four critics argued about and it is
   // unchanged; only the chroma moves, with the tile it belongs to. Also overridden
   // downstream, also re-keyed for the same reason.
-  subfloor: '#473B3F',
+  // Round 14: same construction, new input. #785864 x 0.5917 = (71, 52, 59); authored
+  // luma ratio 95.7 / 56.5 = 1.693 against round 12's 1.707. Was '#473B3F'.
+  subfloor: '#47343B',
   border: '#4A2F3C',
 
   // The pantry plank pad. This was the arena's single worst blocking-vs-walkable

@@ -2113,14 +2113,26 @@ export function buildFloor(M: Materials): THREE.Group {
   // The one rule all four agree on and this cannot break: the joint must never be
   // brighter than the tile. Scaling a single colour by k < 1 cannot produce that.
   //
-  //   #69585E  now   rgb(105, 88, 94)  hue 338.8  HSV 0.162  luma 92.1
+  //   #69585E  was   rgb(105, 88, 94)  hue 338.8  HSV 0.162  luma 92.1   <- round 13
   //
   // This is the tile albedo #78656C scaled by 0.871 — hue and HSV saturation carried
   // across untouched (a uniform RGB scale preserves both exactly), which is this block's
   // own standing rule, *"only the chroma moves, with the tile it belongs to"*, applied to
   // value instead. Authored ratio 105.6 / 92.1 = **1.147**, against the plate's measured
   // 1.126 and critic 1's and critic 4's 1.2 / 1.25.
-  subfloorDark.color.set('#69585E');
+  //
+  // ── ROUND 14: THE CONSTRUCTION IS UNCHANGED; ONLY ITS INPUT MOVED ───────────
+  // The joint is still *"the tile albedo scaled by 0.871"* and that is the whole rule.
+  // Round 14 raised the tile's chroma (see `tileLightInst`), so this follows it, exactly
+  // as this block already says it must. Nothing here is a new decision.
+  //
+  //   #694D57  now   rgb(105, 77, 87)  hue 338.6  HSV 0.267  luma 83.7
+  //
+  // #785864 x 0.871 = (104.5, 76.6, 87.1). Authored ratio 95.7 / 83.7 = **1.144**,
+  // against round 13's 1.147 and the plate's 1.126 — preserved to 0.3%. The one rule all
+  // four critics agree on still holds by construction: k < 1 cannot make the joint
+  // brighter than the tile.
+  subfloorDark.color.set('#694D57');
   const base = mesh(
     new THREE.PlaneGeometry(wu(ARENA_W + 300), wu(ARENA_H + 300)),
     subfloorDark,
@@ -2514,15 +2526,77 @@ export function buildFloor(M: Materials): THREE.Group {
   //   SAT      HSV 0.312 -> 0.159 and 0.315 -> 0.159. **That is the whole change.**
   //
   //   #8A5F6F  was   rgb(138, 95,111)  hue 337.7  HSV 0.312  luma 105.3
-  //   #78656C  now   rgb(120,101,108)  hue 337.9  HSV 0.158  luma 105.6
+  //   #78656C  was   rgb(120,101,108)  hue 337.9  HSV 0.158  luma 105.6   <- round 12
   //   #825969  was   rgb(130, 89,105)  hue 336.6  HSV 0.315  luma  98.9
-  //   #715F66  now   rgb(113, 95,102)  hue 336.7  HSV 0.159  luma  99.3
+  //   #715F66  was   rgb(113, 95,102)  hue 336.7  HSV 0.159  luma  99.3   <- round 12
   //
   // The 1.7:1 light/dark ratio the tile field works to is preserved (it is a value ratio
   // and value did not move), and so is the ~6.5 luma step between the two shades that
   // makes the chequer read at all.
-  tileLightInst.color.set('#78656C');
-  tileDarkInst.color.set('#715F66');
+  //
+  // ── ROUND 14: THE CHROMA COMES BACK UP, PART WAY, AND HERE IS THE EVIDENCE ──
+  //
+  // Round 12 above is NOT reversed on its argument — it is reversed on its MAGNITUDE,
+  // and the old wording is kept per `CLAUDE.md`'s reversal rule. What round 12 never
+  // had is a measurement of where the reference plates' own GROUND sits. Round 14 took
+  // it (`tools/tmp/v1_sat.mjs`, 6 curated `gameplay_topdown` plates, HSV, whole frame
+  // and a HUD-trimmed sensitivity arm, 24/24 selftest):
+  //
+  //             frame median S      largest colour MASS
+  //   ours          0.328           47.4% of frame @ S 0.298
+  //   6 plates      0.467 - 0.731   34.5-71.6%     @ S 0.440 - 0.791
+  //
+  // **Ours is below all six on both statistics** — 1.43x short of the lowest plate on
+  // the median and 1.48x short on the mass. The MASS column is the one that decides the
+  // direction, and it was measured precisely because the median could not: a high median
+  // is equally consistent with "one big saturated surface" and "many small saturated
+  // objects over a quiet ground", and those two have OPPOSITE fixes. Every plate is the
+  // first kind. So the reference's stage really is saturated, and ours is the outlier.
+  //
+  // The magnitude is the SMALLEST move that clears "below all six", not the middle of
+  // the band. Measured live rather than guessed, because the authored -> rendered
+  // transfer was only known as prose (*"+0.10 to +0.15"*) and an additive and a
+  // multiplicative reading of the one known point disagree by 0.15 at the value being
+  // chosen — larger than the whole move. `tools/tmp/v1_tilesweep.mjs` overrides this
+  // pair live at seven values in one session, drift-controlled (SELF-PAIR byte-identical,
+  // ABLATION moves 50.6% of the frame, so the lever is the lever):
+  //
+  //   authored HSV S   0.158  0.220  0.260  0.300  0.340  0.380  0.420
+  //   frame median S   0.320  0.407  0.466  0.527  0.573  0.624  0.658
+  //
+  // 0.2667 lands the frame median at ~0.476 — just inside the plate band's floor of
+  // 0.467 — and it is still **15% below the 0.312 Uri was looking at when he asked for
+  // the floor to come down**, on a floor that no longer has 7,185 dispersed chips
+  // (round 12) or an unbroken orthogonal grid (round 13) on it. Those were three of the
+  // four things he objected to and they are gone by STRUCTURE, which is why the chroma
+  // does not have to carry the whole hierarchy argument on its own.
+  // ⚠️ The hierarchy claim is not assumed here, it is MEASURED and reported: `floorprobe`
+  // R, `arena-scan`'s 11 rails and the player-vs-surround saturation are all in the
+  // round report and the commit message, before and after.
+  //
+  // Held constant, so exactly one axis moves — same discipline as round 12:
+  //   V (max channel)  120 and 113, UNCHANGED to the byte. `shared.ts`'s
+  //                    `liftArenaValue` (V' = V^0.72, `kitchen.ts:1295`) is a UNIFORM
+  //                    RGB scale, so it carries hue and HSV S through untouched and
+  //                    moves only value — holding the authored max therefore holds the
+  //                    delivered value. ⚠️ This is why the live material reads #947D85
+  //                    and not the hex on the line below; a probe that overrides the
+  //                    colour has to apply the lift itself or its control arm is not
+  //                    the shipped frame.
+  //   HUE              337.9 -> 337.5 and 336.7 -> 336.0. Under a degree, against the
+  //                    ~4 deg the grade itself moves hue by, and inside the spread this
+  //                    four-colour family already had.
+  //   LUMA             105.6 -> 95.7 and 99.3 -> 90.2, i.e. -9.3% / -9.2%. Value is held
+  //                    in HSV, and HSV value is the MAX channel, so raising S at fixed
+  //                    max necessarily lowers luma. That is reported rather than hidden,
+  //                    and it is the direction the plates sit in: their dominant masses
+  //                    are at V 0.372-0.958, median ~0.50, against ours at 0.715.
+  //   LIGHT/DARK STEP  6.2 -> 5.5 luma, ratio 1.0624 -> 1.0610. Preserved to 0.1%.
+  //
+  //   #785864  now   rgb(120, 88,100)  hue 337.5  HSV 0.267  luma  95.7
+  //   #71535F  now   rgb(113, 83, 95)  hue 336.0  HSV 0.266  luma  90.2
+  tileLightInst.color.set('#785864');
+  tileDarkInst.color.set('#71535F');
   // ── ROUND 13: `vertexColors` IS NOW CORRECT, AND THE NOTE ABOVE IS NOT WRONG ──
   //
   // The block above forbids `material.vertexColors = true` and it was right for an
