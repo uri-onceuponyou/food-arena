@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import {
   EffectComposer, RenderPass, EffectPass, NormalPass,
   BloomEffect, SMAAEffect, VignetteEffect, SSAOEffect,
-  BlendFunction, Effect,
+  BlendFunction, Effect, EffectAttribute,
 } from 'postprocessing';
 import { CameraRig, SUPPORTED_ASPECT, type CameraRigOptions } from './camera';
 import { createLighting, MATCH_SHADOW_RADIUS_M, type LightingRig } from './lighting';
@@ -310,6 +310,300 @@ export class ToyGradeEffect extends Effect {
   /** 0 = remove luma by SCALE, 1 = remove it by SUBTRACTION as far as the gamut allows. */
   get toeChromaKeep(): number { return this.uniforms.get('toeChromaKeep')!.value as number; }
   set toeChromaKeep(v: number) { this.uniforms.get('toeChromaKeep')!.value = v; }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONTACT AO — ambient occlusion that costs ZERO extra draw calls
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Uri, item 4: *"Everything is lit at uniform intensity with no sense of depth or
+// weight. Add ambient occlusion so objects darken where they meet the floor and where
+// surfaces meet. … Keep the toon/cel look — this is about adding depth and grounding
+// within that style, not making it realistic."*
+//
+// ── WHY NOT `SSAOEffect`, WHICH IS ALREADY IN THIS FILE ─────────────────────────
+// It is configured, its acne is fixed, and `StageOptions.ao` turns it on. It is also
+// unshippable here for a reason that is a PRICE and not a doubt: `postprocessing`'s
+// SSAO needs a normal buffer, a normal buffer is a `NormalPass`, and a `NormalPass`
+// renders the whole scene a SECOND time. Measured by `tools/tmp/lc_probe.mjs --mode
+// cost` on the phone tier (`low`, 844x390 @DPR2 -> a 1055x487 buffer), shadow pass
+// forced on every arm so the rows are the same quantity:
+//
+//                     N=2            N=3            N=6
+//   shipped        422 draws      803 draws     1555 draws
+//   + SSAO         +310 (+72.9%)  +624 (+77.4%) +1255 (+80.6%)
+//
+// A six-fighter phone frame would go 1555 -> 2810 draws. Uri plays on an iPhone 15
+// Pro and `5aa4655` exists because 928 draws was too many. **A beautiful frame that
+// drops his framerate is a regression**, so the correct effect he cannot run loses to
+// an approximation he can.
+// ⚠️ And it could not have reached him anyway: `buildPost` gates SSAO on `tier.smaa`,
+// which is true on `high` only, so on a phone `ao: true` attaches NOTHING. Measured in
+// both directions by `lc_probe --mode aogate` — the positive control (the same page
+// with only `tier.smaa` forced true) does attach it, so the negative arm is a
+// measurement rather than a silent failure.
+//
+// ── WHAT THIS IS INSTEAD: A PLANE-INVARIANT SECOND DIFFERENCE OF 1/z ────────────
+// This effect declares `EffectAttribute.DEPTH`, so it runs inside the `EffectPass`
+// that already exists, reading the depth texture the composer already blits. Cost is
+// FILL ONLY: **+0 draw calls, +0 triangles, exactly**, plus `CAO_DIRS * 2` depth taps
+// per pixel and one depth blit per frame.
+//
+// The hard part of a depth-only AO is that it must not dim the floor. A naive
+// "neighbours that are nearer occlude me" estimator reads a TILTED PLANE as occluded,
+// because at 58 deg of camera pitch every ground pixel has a neighbour in front of it.
+// That is not a hypothetical failure: it is exactly what killed the last attempt in
+// this file — *"it produces a broad low-frequency dimming of the whole floor … the
+// third soft darkening layer that a critic read as one directionless blob and that
+// scored this element 3/10."*
+//
+// So the estimator is built on the one quantity that is EXACTLY LINEAR IN SCREEN SPACE
+// on a plane under perspective projection: **1/z**. (z itself is not — its second
+// difference is a function of the tilt, which is the whole bug above.) For a symmetric
+// pair of screen-space samples either side of a pixel,
+//
+//     t = (1/z_a - 1/z_c) + (1/z_b - 1/z_c)
+//
+// is identically zero on any plane at any tilt, POSITIVE where the surface is locally
+// concave or an occluder stands in front of one side, and negative on a convex ridge —
+// where it is clamped to zero, so a silhouette gets no bright halo. **The SUM is
+// clamped and the two halves are not**, which is load-bearing rather than tidy: clamping
+// the halves first breaks the cancellation on a grazing surface. See the shader.
+//
+// What that buys, in Uri's own two clauses:
+//   * *"darken where they meet the floor"* — a floor pixel beside a prop has the prop
+//     in front on one side and flat floor on the other: strongly positive.
+//   * *"where surfaces meet"* — an inner corner is concave on both sides: positive.
+//   * open floor, however tilted, however far — algebraically zero, so the frame's
+//     dominant surface is untouched and there is no directionless blob to read.
+//
+// ⚠️ THE RADIUS IS IN WORLD METRES AND IS PROJECTED PER PIXEL, not a pixel count. A
+// screen-space radius would make the contact band grow as a prop comes closer and
+// shrink in the lobby's much tighter framing, i.e. the same defect `lighting.ts`
+// records for a constant shadow-map `radius` and `140d054` records for a world-space
+// outline thickness. `caoProjScale` carries the projection's own 0.5*P00 / 0.5*P11, so
+// one authored metre is one metre at any depth, any FOV and any aspect.
+//
+// ⚠️ FIXED DIRECTIONS, NOT A ROTATED KERNEL. The usual trick is to rotate the sample
+// set per pixel and blur the noise out afterwards — but there is no blur pass here and
+// adding one would cost the draw call this design exists to avoid. Fixed directions
+// give a deterministic, noise-free result that needs no denoise, which is also why the
+// drift control comes back bit-identical.
+//
+// 🚨 NOTE FOR ANYONE EDITING THE COMMENTS BELOW THIS LINE: this shader lives inside a
+// JS TEMPLATE LITERAL. A single backtick terminates the string and 500s the dev server
+// for every agent in the repo. `TOY_GRADE_SHADER` carries the same warning and records
+// that it had bitten FIVE times; it bit a SIXTH the day this effect was written,
+// because the warning lived inside the OTHER shader and a new template literal started
+// life without it. `tsc` catches it instantly — the cost is entirely in running
+// anything else first. **No backticks below this line.**
+const CONTACT_AO_SHADER = /* glsl */`
+uniform float caoIntensity;
+uniform float caoRadius;
+uniform vec2  caoProjScale;
+uniform float caoBias;
+uniform float caoRange;
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  // Sky / cleared background. Nothing to occlude, and 1/z of the far plane is a
+  // rounding error away from zero, so the estimator would be reading noise.
+  if (depth >= 0.999999) { outputColor = inputColor; return; }
+
+  float zc = -getViewZ(depth);
+  // World radius -> UV offset at this depth. Floored at one texel: below that the
+  // taps land on the centre pixel and the whole effect returns exactly 0.0 while
+  // looking perfectly configured, which is this project's most common failure.
+  vec2 r = max(caoRadius * caoProjScale / zc, texelSize);
+  float invC = 1.0 / zc;
+  // (1/z_n - 1/z_c) * zc*zc / radius is (z_c - z_n) / radius to first order, i.e. a
+  // dimensionless "how many radii nearer is my neighbour". Written in 1/z so that the
+  // PAIR SUM is exact on a plane rather than merely small.
+  float k = (zc * zc) / caoRadius;
+
+  float occ = 0.0;
+  // Directions whose PAIR both landed on screen. A tap outside [0,1] is clamped to the
+  // edge texel by the sampler, so it returns a depth from the wrong place and the pair
+  // stops cancelling — which showed up as dark vertical streaks down the top ~17% of
+  // the frame, on geometry that has no occluder anywhere near it. Dropping the whole
+  // PAIR (never one side) is what keeps the plane invariance exact at the border.
+  float valid = 0.0;
+  for (int i = 0; i < CAO_DIRS; i++) {
+    // ── A SPIRAL, NOT A RING, AND IT IS WHAT KILLED THE INK HALO ────────────────
+    // Every direction sampled at the SAME radius makes the response saturate over the
+    // whole annulus within one radius of an occluder and then fall off a cliff at
+    // exactly that radius, quantised into CAO_DIRS angular steps. Rendered, that is a
+    // near-black blocky halo hugging every prop — worse than no AO, and no number in
+    // the sweep said so; the crop did. Walking the radius out with the index costs
+    // NOTHING (same tap count) and turns the cliff into a ramp, because a pixel at
+    // distance x from an occluder is reached only by the directions whose radius
+    // exceeds x.
+    float fi = (float(i) + 0.5) / float(CAO_DIRS);
+    // Golden angle rather than an even fan: the radii now all differ, so an even fan
+    // would lay the samples on one spoke pattern and show it as a star.
+    float ang = float(i) * 2.3999632;
+    vec2 dr = max(r * fi, texelSize);
+    vec2 d = vec2(cos(ang), sin(ang)) * dr;
+    vec2 ua = uv + d, ub = uv - d;
+    float ok = step(0.0, min(min(ua.x, ua.y), min(ub.x, ub.y)))
+             * step(max(max(ua.x, ua.y), max(ub.x, ub.y)), 1.0);
+    float za = max(-getViewZ(readDepth(ua)), 1e-4);
+    float zb = max(-getViewZ(readDepth(ub)), 1e-4);
+    // ── RANGE GATE — the fix for occlusion BLEEDING onto distant geometry ────────
+    // A screen-space estimator cannot tell "a barrel 40 cm away" from "a crate ten
+    // metres in front of a counter": both are simply nearer. Without this, a prop
+    // standing in front of a far wall painted a dark band across the WALL, following
+    // the prop's silhouette and belonging to nothing in the wall's own geometry — dark
+    // vertical streaks over the counters in the top ~17% of the frame. Two wrong
+    // diagnoses were rejected by measurement first, and both are recorded because each
+    // is the obvious one: dropping off-screen pairs moved it 0.1 pp, and un-clamping
+    // the two half-terms (which DID fix a real grazing-surface asymmetry, and is kept)
+    // moved it too little to see.
+    // Gated on the PAIR, never on one side: an asymmetric gate is exactly what breaks
+    // the cancellation this whole estimator is built on.
+    ok *= step(max(abs(zc - za), abs(zc - zb)), caoRange);
+    valid += ok;
+    // k is normalised by caoRadius and NOT by this ring's own radius, deliberately:
+    // the size filter below has to mean the same thing on every ring, or the inner
+    // rings re-detect the grout the outer ones were tuned to ignore.
+    //
+    // 🚨 THE SUM IS CLAMPED, THE TERMS ARE NOT, AND THAT IS THE WHOLE INVARIANCE.
+    // Clamping each side to +/-1 first looks harmless and destroys it on a GRAZING
+    // surface: a near-vertical face seen almost edge-on carries a depth gradient of
+    // many metres per radius, so one side saturates the clamp and the other does not,
+    // the pair stops cancelling, and the surface grows dark vertical streaks with no
+    // occluder anywhere near it. That was visible on the counter faces in the top ~17%
+    // of the frame and it is NOT a border artefact — dropping off-screen pairs (below)
+    // changed it by 0.1 pp, which is how the real cause was found.
+    float ta = (1.0 / za - invC) * k;
+    float tb = (1.0 / zb - invC) * k;
+    // smoothstep, not a subtract-and-rescale: it reaches both ends with zero
+    // derivative, so neither the size threshold nor full occlusion has an edge in it,
+    // and it does the clamping to [0,1] that the terms deliberately do not.
+    occ += ok * smoothstep(caoBias, 1.0, ta + tb);
+  }
+  // ── caoBias IS THE WHOLE DIFFERENCE BETWEEN A CONTACT PASS AND AN INK PASS ───────
+  // The response is in RADII: an occluder standing h metres off the surface scores
+  // about 2h/caoRadius and anything past one radius saturates at 1. So the deadband is
+  // a SIZE FILTER, and caoRadius and caoBias are ONE knob, not two — raising the radius
+  // lowers every small feature's score without touching a saturated one.
+  //
+  // That is the knob the arena floor needs. It is a Voronoi slab field and its grout is
+  // a real groove, so an ungated estimator is CORRECT and useless: it redrew the whole
+  // tile network in dark ink over 22.5% of the frame, turning an authored LIGHT seam
+  // dark — a redesign of a surface owned by src/arena/** smuggled in through the post
+  // chain, and the same defect ("a heavy black speckled fringe on every grout line")
+  // that killed the SSAO revival above. At radius 1.10 with a 0.30 deadband the grout
+  // is gone from the ablation delta map while the barrel, the counters, the crates and
+  // the fighters all keep a full contact band. The groove's own depth is NOT quoted
+  // here because it was never measured — what was measured is the sweep and the delta
+  // map, and the value is where those two agree.
+  //
+  // ⚠️ AN ABSOLUTE-METRE GATE WAS BUILT, MEASURED AND REJECTED, and it is recorded
+  // because it is the obvious idea. A uniform caoMinStep gated each tap on
+  // smoothstep(minStep, 2*minStep, abs(zc - zn)) — reject occluders standing less than
+  // ~10 cm off the surface. It cannot work, and the reason is the tilt: on a floor
+  // pitched 58 deg, abs(zc - zn) is dominated by the PLANE term, up to 0.53 radii, in
+  // the directions that run along the view's ground projection and ~0 across it. So the
+  // gate fired on the cross-view directions and passed on the along-view ones,
+  // suppressing the grout by only 31% (dMean 7.51 -> 5.19 at minStep 0.20) while
+  // costing real contact. Only a PLANE-INVARIANT quantity can be thresholded here, and
+  // ta + tb is the plane-invariant quantity — which is caoBias.
+  // Divided by the VALID count, not CAO_DIRS: at a frame border some pairs were
+  // dropped, and dividing by the full count there would fade the contact out toward the
+  // edges rather than leaving it alone. max(...,1.0) so a pixel with no valid pair
+  // returns exactly 0 rather than a NaN.
+  occ /= max(valid, 1.0);
+
+  float shade = 1.0 - clamp(occ * caoIntensity, 0.0, 1.0);
+  outputColor = vec4(inputColor.rgb * shade, inputColor.a);
+}
+`;
+
+/**
+ * Depth-only contact occlusion, merged into an `EffectPass` that already runs.
+ *
+ * ⚠️ `EffectPass` SORTS its effects by attribute descending
+ * (`effects.sort((a, b) => b.attributes - a.attributes)`), and `DEPTH` is 1 against
+ * `NONE`'s 0 — so this effect executes FIRST whatever order it is pushed in, ahead of
+ * bloom, the grade and the vignette. That is the order we want (occlusion is a
+ * lighting term; it belongs before the grade shapes the result) but it is the
+ * library's decision, not this file's, and a reader checking the `effects.push` order
+ * would conclude otherwise. `buildPost` asserts the realised order at build time.
+ */
+export class ContactAOEffect extends Effect {
+  // ⚠️ THESE DEFAULTS ARE THE SHIPPED VALUES, deliberately — `ToyGradeEffect` above
+  // carries a warning that ITS defaults are not what ships and that reading them as the
+  // live values was a trap for two rounds. Keeping the two in sync is the cheaper fix.
+  // `buildPost` still passes every one explicitly, and the measurements are on that call.
+  constructor(camera: THREE.PerspectiveCamera, {
+    intensity = 1.2, radius = 0.75, bias = 0.44, rangeRadii = 2.5, dirs = 6,
+  } = {}) {
+    super('ContactAOEffect', CONTACT_AO_SHADER, {
+      blendFunction: BlendFunction.SRC,
+      attributes: EffectAttribute.DEPTH,
+      defines: new Map<string, string>([['CAO_DIRS', String(Math.max(2, Math.round(dirs)))]]),
+      uniforms: new Map<string, THREE.Uniform>([
+        ['caoIntensity', new THREE.Uniform(intensity)],
+        ['caoRadius', new THREE.Uniform(radius)],
+        ['caoBias', new THREE.Uniform(bias)],
+        // Metres, derived from the radius rather than authored separately: the two are
+        // one geometric statement ("how far away can something still be MY occluder"),
+        // and an independent metre value would silently stop tracking a radius change.
+        ['caoRange', new THREE.Uniform(radius * rangeRadii)],
+        ['caoProjScale', new THREE.Uniform(new THREE.Vector2(1, 1))],
+      ]),
+    });
+    this.camera = camera;
+    this.rangeRadii = rangeRadii;
+    this.syncProjection();
+  }
+
+  private readonly camera: THREE.PerspectiveCamera;
+  /** `range / radius`. Held so the two stay coupled through a LIVE radius change. */
+  private readonly rangeRadii: number;
+
+  /**
+   * `0.5 * P00` and `0.5 * P11` — the factors that turn a view-space metre at unit
+   * depth into a UV offset. Re-read every frame rather than cached at construction:
+   * `setSize` rewrites the projection on every resize and on every aspect-band clamp,
+   * and a stale pair would silently scale the contact band by the aspect change.
+   */
+  private syncProjection(): void {
+    const e = this.camera.projectionMatrix.elements;
+    (this.uniforms.get('caoProjScale')!.value as THREE.Vector2).set(0.5 * e[0], 0.5 * e[5]);
+  }
+
+  override update(): void { this.syncProjection(); }
+
+  /** Strength of the darkening at full occlusion, 0..1. 0 is exactly the identity. */
+  get intensity(): number { return this.uniforms.get('caoIntensity')!.value as number; }
+  set intensity(v: number) { this.uniforms.get('caoIntensity')!.value = v; }
+  /**
+   * Reach of the contact band, in world METRES (a character is 2.1 m tall).
+   *
+   * ⚠️ Writing it also rewrites `range`, because the two are one geometric statement and
+   * a sweep that moved only this one would be measuring a different effect at every row
+   * — the exact shape of a knob that silently stops tracking its partner.
+   */
+  get radius(): number { return this.uniforms.get('caoRadius')!.value as number; }
+  set radius(v: number) {
+    this.uniforms.get('caoRadius')!.value = v;
+    this.uniforms.get('caoRange')!.value = v * this.rangeRadii;
+  }
+  /**
+   * Deadband on the plane-invariant response, in RADII — the size filter that separates
+   * a contact pass from an ink pass. See the shader; it is the knob with the closed
+   * form, and the one an absolute-metre gate could not replace.
+   */
+  get bias(): number { return this.uniforms.get('caoBias')!.value as number; }
+  set bias(v: number) { this.uniforms.get('caoBias')!.value = v; }
+  /**
+   * How far away, in world METRES, an occluder may be and still count. Above it the
+   * whole sample PAIR is dropped, which is what stops a prop painting its silhouette
+   * across a wall ten metres behind it. Set from `radius * rangeRadii`.
+   */
+  get range(): number { return this.uniforms.get('caoRange')!.value as number; }
+  set range(v: number) { this.uniforms.get('caoRange')!.value = v; }
 }
 
 /**
@@ -795,6 +1089,16 @@ export class Stage {
   private shadowCasterMinTexels: number;
   /** The colour grade, exposed so a probe can sweep it without a rebuild. */
   grade: ToyGradeEffect | null = null;
+  /**
+   * The depth-only contact occlusion, exposed for the same reason `grade` is: it must
+   * be ablatable on ONE frozen frame without a rebuild, because a rebuild changes the
+   * content and the A/B stops being paired.
+   * ⚠️ Ablate it by `intensity = 0` (which the shader makes an exact identity), never
+   * by `blendMode.opacity` — this effect is on `BlendFunction.SRC`, whose shader is
+   * literally `return src;` and never reads the opacity argument, so an opacity
+   * ablation is a GUARANTEED false zero (`8ca7a46` found exactly that on the grade).
+   */
+  contactAO: ContactAOEffect | null = null;
   /** The per-fighter contact decals. Null until a match frame asks for one. */
   private contactGroup: THREE.Group | null = null;
   private readonly contactTargets: THREE.Object3D[] = [];
@@ -1267,6 +1571,12 @@ export class Stage {
 
   private buildPost(gradeOnly: boolean): void {
     const tier = this.profile;
+    // A tier change disposes the composer and calls this again, so every effect handle
+    // this Stage publishes has to be dropped HERE and not only in `dispose()`. Left
+    // stale, `window.__stage.contactAO` would be a live object attached to a disposed
+    // pass: a probe would set `intensity = 0`, read a frame that did not change, and
+    // report the effect as inert. That is `docs/LESSONS.md` §1's class exactly.
+    this.contactAO = null;
     // Antialiasing, and WHICH kind, is decided here rather than at the SMAA pass.
     //
     // `antialias: true` on the renderer does nothing once a composer exists — the
@@ -1906,18 +2216,133 @@ export class Stage {
     });
     this.grade = grade;
 
-    // Barely-there vignette; the reference has essentially none.
+    // ── CONTACT AO — the ask in Uri's item 4 that was genuinely ABSENT. See
+    //    `ContactAOEffect` for why it is not `SSAOEffect`.
+    //
+    // Off in `gradeOnly`, which is `thumbs.ts`'s offscreen icon generator only. That
+    // path exists to buy the colour identity for none of the cost, and already drops
+    // bloom and SMAA for the same reason; an icon 96 px across has no contact band to
+    // resolve. The LOBBY is NOT this path — `charStage` builds the full chain — so a
+    // character judged at pitch 20 still gets exactly what the match gets, which is
+    // the invariant at the top of this file.
+    const contactAO = gradeOnly ? null : new ContactAOEffect(this.rig.camera, {
+      // ── radius 0.75 m · bias 0.44 · intensity 1.20 · 6 directions ──
+      //
+      // Swept live on ONE frozen frame per row (`tools/tmp/dp_ab.mjs`), so no row can be
+      // content drift: the shipped-first/shipped-last self-pair is BIT-IDENTICAL,
+      // `intensity = 0` restores an EXACT identity, and the known-bad arm (4.0 / 1.2 m /
+      // bias 0) moves the frame ~8x more than shipped. Hub station, 1600x900, whole
+      // frame; `radius` and `bias` move together because they are one size filter (see
+      // the shader), so the rows are labelled by the pair:
+      //
+      //   row                    dMean   dark%   thin%   vP10    <V.45   meanChroma
+      //   AO off                 0.000    0.00      —    0.608    6.06%    0.3644
+      //   r0.45 b0.73 i1.5       1.515    3.92    33.1   0.576    6.97%    0.3622
+      //   r0.60 b0.55 i1.3       1.690    5.23    26.7   0.573    7.18%    0.3619
+      //   r0.75 b0.44 i1.2       1.880    6.97    22.3   0.561    7.41%    0.3614  <- ships
+      //   r1.10 b0.30 i1.0       3.104   11.77    13.4   0.514    8.70%    0.3584
+      //
+      // 🚨 THE PRE-REGISTERED STOPPING RULE PICKED THE ROW THAT LOOKS WORSE, AND IT WAS
+      // OVERRULED BY THE PNG. The rule was *"the weakest setting that brings the frame's
+      // p10 of HSV V inside the six-plate band"* — the plates run 0.322-0.518 on the
+      // identical statistic and identical code (`dp_dark --mode plates`), and ONLY the
+      // 1.10 m row reaches it (0.514). That row also paints a prop's silhouette across
+      // geometry several metres behind it: at 1.10 m the kernel spans 5-9% of frame
+      // HEIGHT (0.5 * P11 = 1.635, so 1.10 m at 35 m is 0.051 UV = 46 px of 900), and
+      // the counters in the top of the frame grew dark vertical smudges belonging to
+      // nothing in their own geometry. 0.75 m is the widest row where that is gone.
+      // `docs/LESSONS.md` §6b, read backwards, is exactly this case: the metric and the
+      // defect are two different things. **The frame that ships is the one that looks
+      // right, and the rule it failed is reported rather than quietly widened.**
+      //
+      // ⚠️ SO THE HEADLINE TARGET IS *NOT* MET AND THAT IS THE HONEST RESULT: at the hub
+      // this pass takes p10 V from 0.608 to 0.561 against a plate ceiling of 0.518 — it
+      // closes 52% of the gap, not all of it. What is left is a LIGHTING question, not
+      // an occlusion one, and spending it here would have cost the look.
+      //
+      // AND IT DOES NOT SPEND CHROMA, which is the one thing this pass was forbidden to
+      // do: `meanChroma` 0.3644 -> 0.3614 (-0.0030 against `arena-scan`'s 0.020 drift
+      // tolerance) and HSV `meanSat` 0.4810 -> 0.4841, i.e. UP. A neutral multiply scales
+      // (max-min) linearly and leaves max/min alone, so it costs a little absolute chroma
+      // and buys a little saturation. Desaturation is falsified five times in `CLAUDE.md`
+      // and `4c35bac` had just bought this frame its ground chroma; handing that back
+      // would have been the whole cost of the change.
+      //
+      // ⚠️ RADIUS AND BIAS ARE ONE KNOB, NOT TWO. `caoBias` thresholds a response
+      // measured IN RADII, so halving the radius doubles every small feature's score:
+      // the pairs above hold `radius * bias` at 0.33 +/- 0.005 precisely so the size
+      // filter is constant down the sweep and only the REACH varies. Break that and the
+      // arena floor's grout groove climbs back over the deadband — the first build of
+      // this effect (0.36 m, bias 0.05) redrew the entire Voronoi tile network in dark
+      // ink over 22.5% of the frame, which is a redesign of a surface owned by
+      // `src/arena/**` smuggled in through the post chain.
+      //
+      // 6 DIRECTIONS ON EVERY TIER, including the phone. `tier.smaa` — the gate SSAO
+      // sits behind — is true on `high` alone, so gating this the same way would ship
+      // Uri's own request to every device except his. The cost is 12 depth taps of FILL
+      // per pixel and nothing else: draw calls and triangles are byte-identical with the
+      // effect on and off, at 1 and at 6 fighters, on the phone tier (449/759,396 and
+      // 1578/960,502, EXACTLY equal both arms). If it ever has to come down, `dirs` is
+      // the knob and it is one line — but a tier that renders a DIFFERENT contact falloff
+      // is a tier that has to be judged separately, and this file's opening invariant is
+      // that it does not do that.
+      intensity: 1.20, radius: 0.75, bias: 0.44, dirs: 6,
+    });
+    if (contactAO) this.contactAO = contactAO;
+
+    // ── The vignette — RE-PRICED, and the old wording kept per the reversal rule ──
+    //   *"Barely-there vignette; the reference has essentially none."*
+    // The second clause is still TRUE and is why this move is small: `lc_probe --mode
+    // plate` puts the six plates' corner/centre luma at 0.562 / 0.644 / 1.156 / 1.236 /
+    // 1.377 / 1.647 — FOUR OF SIX ARE BRIGHTER AT THE CORNER THAN AT THE CENTRE, so
+    // there is no reference case for a heavy vignette and none is taken.
+    //
+    // What moves is the first clause. postprocessing 6.39.4's default technique is
+    // `smoothstep(0.8, offset * 0.799, d * (darkness + offset))` with d = |uv - 0.5|,
+    // and GLSL's smoothstep runs DESCENDING when edge0 > edge1, so the curve is exactly
+    // the identity inside UV radius `offset * 0.799 / (darkness + offset)`:
+    //
+    //   offset/darkness   identity inside d=     of the half-diagonal   corner multiplier
+    //   0.42 / 0.20  old        0.5413                  0.765            0.8746 -> 0.9409
+    //   0.38 / 0.26  new        0.4744                  0.671            0.7840 -> 0.8953
+    //
+    // (the second corner figure is the ENCODED one: the multiply lands in linear light,
+    // and this closed form reproduces `8ca7a46`'s independently derived 0.5412 / 0.8746
+    // for the shipped pair to four decimals, which is why the new row is trusted.)
+    //
+    // So the shipped vignette was **5.9% at the exact corner and nothing at all inside
+    // UV radius 0.54** — it never reached the frame's sides, only its four corners. Uri
+    // asked for *"a subtle vignette"* on a build that already had one, which is the same
+    // evidence as `key.shadow.radius` being inert for its whole life: **the ask is not
+    // for the feature, it is for the feature to be visible.** The new pair is 10.5% at
+    // the corner and begins at 0.67 of the half-diagonal, so it reaches the sides.
+    // It is deliberately the smallest move that does that, because the plates say the
+    // direction has no headroom.
     const vignette = new VignetteEffect({
-      offset: 0.42,
-      darkness: 0.20,
+      offset: 0.38,
+      darkness: 0.26,
       blendFunction: BlendFunction.NORMAL,
     });
 
     const effects: Effect[] = [];
+    if (contactAO) effects.push(contactAO);
     if (ssao) effects.push(ssao);
     if (bloom) effects.push(bloom);
     effects.push(grade, vignette);
-    composer.addPass(new EffectPass(this.rig.camera, ...effects));
+    const fxPass = new EffectPass(this.rig.camera, ...effects);
+    // 🚨 THE ORDER ABOVE IS NOT NECESSARILY THE ORDER THAT RUNS. `EffectPass` sorts on
+    // `b.attributes - a.attributes`, so a `DEPTH` effect (1) is hoisted ahead of every
+    // `NONE` effect (0) whatever the push order. That happens to be exactly what this
+    // chain wants — occlusion is a lighting term and belongs before the grade — but it
+    // is the library's decision and the next reader would deduce it wrong from the
+    // pushes. Asserted rather than commented: `contactAO` must come out FIRST, and if
+    // the library ever changes its mind the chain still renders, it just stops being
+    // the chain that was measured, so this logs rather than throws.
+    if (contactAO && (fxPass as unknown as { effects: Effect[] }).effects?.[0] !== contactAO) {
+      console.warn('[stage] ContactAOEffect is no longer first in the EffectPass — '
+        + 'the grade now runs before occlusion, which is not the chain that was measured.');
+    }
+    composer.addPass(fxPass);
 
     // SMAA where it earns its fill; 4x MSAA (set on the composer above) everywhere
     // else. Not "no antialiasing" — a hyper-saturated toy palette against a dark
@@ -2333,6 +2758,7 @@ export class Stage {
     this.composer?.dispose();
     this.composer = null;
     this.grade = null;
+    this.contactAO = null;
 
     // ── The resource walk is GUARDED, and that is not paranoia ────────────────
     // Everything from here to `this.scene.clear()` is a best-effort tidy of a few
