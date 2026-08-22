@@ -1309,6 +1309,14 @@ interface PuddleSurfaceUniforms {
   uPBand: { value: THREE.Vector4 };
   /** x sky strength · y Fresnel exponent · z band strength · w crest gain. */
   uPFres: { value: THREE.Vector4 };
+  /** x foam amplitude · y foam cells across the disc.
+   *  ⚠️ THIS WAS A `vec4` CARRYING A CHOP AMPLITUDE AND FREQUENCY. Both chop versions
+   *  rendered as a pattern (rings, then a dot lattice) and the term was removed — see
+   *  the long note in the fragment. The uniform shrank with it rather than keeping two
+   *  dead slots: a uniform nothing reads is a uniform the next reader has to prove is
+   *  dead. The foam band's start in `vShore` is a shared CONSTANT in the shader, not a
+   *  slot here, because it is the same on both pools. */
+  uPFoam: { value: THREE.Vector2 };
   /** What the pool mirrors. */
   uPSky: { value: THREE.Color };
 }
@@ -1354,6 +1362,7 @@ uniform vec2  uPDrip;
 uniform vec4  uPRipple;
 uniform vec4  uPBand;
 uniform vec4  uPFres;
+uniform vec2  uPFoam;
 uniform vec3  uPSky;`)
     .replace('#include <map_fragment>', `#include <map_fragment>
 {
@@ -1397,7 +1406,17 @@ uniform vec3  uPSky;`)
 	vec2  faP    = vMapUv - uPDrip;
 	vec2  faDir  = vec2( cos( uPBand.x ), sin( uPBand.x ) );
 	float faOff  = sin( uPTime * uPBand.y ) * uPBand.z;
-	float faBand = smoothstep( uPBand.w, 0.0, abs( dot( faP, faDir ) - faOff ) ) * uPFres.z;
+	// ⚠️ DEPTH-TRACKED, and it was not. A critic on round 1: *"the bright band sits
+	// mid-shape rather than depth-tracked."* A specular band is a surface event and in
+	// strict physics does not care how deep the liquid under it is — but it was being
+	// slathered at full strength across the shore, where the pool is a film, and a film
+	// has almost nothing to rock. Scaled by the same \`faDepth\` the sky term uses, with a
+	// floor of 0.35 so the shore still catches some of it rather than going dead.
+	// \`faDepth\` used to be declared down with the reflection; it is HOISTED here because
+	// two terms now read it, and it is the same expression it always was.
+	float faDepth = 1.0 - 0.62 * pow( vShore, 1.6 );
+	float faBand = smoothstep( uPBand.w, 0.0, abs( dot( faP, faDir ) - faOff ) ) * uPFres.z
+		* ( 0.35 + 0.65 * faDepth );
 
 	// REFLECTION, and it is not a probe. On a flat pool the GRAZING half is the
 	// reflective half — the far edge of a real puddle mirrors the sky while the near
@@ -1423,7 +1442,6 @@ uniform vec3  uPSky;`)
 	// lifts by one constant and the render is a flat blob with a good outline
 	// (\`tools/tmp/wt_iter2/\`), which is a different failure from the bullseye and just
 	// as dead.
-	float faDepth = 1.0 - 0.62 * pow( vShore, 1.6 );
 	float faSky = uPFres.x * ( 0.34 + 0.66 * faF ) * faDepth * ( 0.62 + 0.38 * faWave * uPFres.w );
 
 	// The pool THINS at its edge, and thin liquid is bright liquid. One band just
@@ -1432,7 +1450,57 @@ uniform vec3  uPSky;`)
 	// shape with a rim" and "a shallow pool with a shore".
 	float faShore = smoothstep( 0.74, 0.99, vShore ) * uPBand.w * 1.15;
 
-	float faL = clamp( faBand + faSky + faRip + faShore, 0.0, 1.0 );
+	// HIGH FREQUENCY, and it is a REPORTED DEFECT rather than a garnish. A blind critic
+	// on round 1: *"the interior wave is the lowest-frequency element in a frame full of
+	// crisp mortar, so it reads out of focus."* Everything above this line is smooth —
+	// one long crest, one drifting band, one depth ramp — against a floor of hard tile
+	// seams, so the pool looks like a soft object in a sharp picture.
+	//
+	// 🚨 THE CHOP IS GONE. TWO VERSIONS OF IT, TWO DIFFERENT PATTERNS, BOTH WORSE THAN
+	// NOTHING — and the reason it kept failing is worth more than the term was.
+	//
+	// v1, kept per the reversal rule: *"a third wave at ~2.9x the base frequency ...
+	// riding \`vShore\` so they follow the outline like everything else."* Rendered
+	// (\`tools/tmp/wt_r2_after/after_water_p58.png\`) that is a CONTOUR MAP — eight crisp
+	// nested rings tracing the outline, a topographic survey of the pool. Round 1 had
+	// already written down that "a circle drawn inside the pool is still a circle"; this
+	// was the lobed version of exactly that, and naming a failure mode is not avoiding it.
+	//
+	// v2 made it DIRECTIONAL instead — two wavelets at incommensurate frequencies, which
+	// is what wind chop actually is. Rendered (\`tools/tmp/wt_iter8/i8_water_p58.png\`)
+	// two near-perpendicular sinusoids multiplied into a POLKA-DOT LATTICE across the
+	// whole pool. Two periodic functions of position interfere; that is what they do.
+	//
+	// The critic's complaint that produced this term — *"the interior wave is the lowest
+	// frequency element in a frame full of crisp mortar, so it reads out of focus"* — is
+	// real, and the DEPTH ALPHA above is what answers it. The pool now transmits the
+	// floor's own seams and tile grain, so the high-frequency detail inside the outline is
+	// the BED's, which is both sharper than anything a sinusoid was going to draw and the
+	// correct thing to be looking at through a liquid. Measured, not asserted
+	// (\`wt_vol.mjs\`, match camera, one mask taken from the before frame): bed detail
+	// surviving under the water pool 33.03% -> 38.25% of the bare floor's own, and the
+	// per-band Weber seam depth up 24% / 23% / 37% / 76% across the four inner bands.
+	// ⚠️ At the LOBBY camera the same numbers are FLAT — 0.2201 -> 0.2242 on band 0 and
+	// under a percent everywhere else. That is not a failure and it is not noise: at
+	// 20 degrees the view GRAZES, the sky reflection dominates the surface, and you
+	// cannot see the bottom of a real puddle at that angle either.
+	//
+	// FOAM stays. Round flecks in a narrow band inside the shoreline, on a value hash of
+	// the UV cell so they are FIXED IN THE POOL and do not crawl, twinkling on \`uPTime\`
+	// — which is \`?t=\` under every capture tool here, so the frame stays reproducible.
+	// It survived both chop failures because it is NOT periodic in position: a hash has
+	// no interference pattern to resolve into. Amplitude 0 on grease: grease does not
+	// foam, and the module header is explicit that the substance read is how a player
+	// knows which hazard he is standing in.
+	vec2  faCell = floor( vMapUv * uPFoam.y );
+	float faHash = fract( sin( dot( faCell, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 );
+	vec2  faSub  = fract( vMapUv * uPFoam.y ) - 0.5;
+	float faDot  = smoothstep( 0.34, 0.10, length( faSub ) );
+	float faFoam = step( 0.80, faHash ) * faDot * uPFoam.x
+		* ( 0.55 + 0.45 * sin( uPTime * 1.9 + faHash * 31.4 ) )
+		* smoothstep( 0.80, 1.0, vShore );
+
+	float faL = clamp( faBand + faSky + faRip + faFoam + faShore, 0.0, 1.0 );
 
 	// Source-over of the sky layer ON TOP of the authored texel, in un-premultiplied
 	// space. \`diffuseColor.rgb += sky * l\` with \`a += l\` is the obvious version and it
@@ -1473,6 +1541,9 @@ function puddleSurfaceMaterial(isGrease: boolean, map: THREE.Texture): { mat: TH
     uPRipple: { value: new THREE.Vector4(4.6, 0.30, 0.40, 0.16) },
     uPBand: { value: new THREE.Vector4(2.2, 0.06, 0.14, 0.20) },
     uPFres: { value: new THREE.Vector4(0.17, 2.2, 0.13, 0.6) },
+    // A whisper of chop and NO foam. Grease is viscous: it can be disturbed, it cannot
+    // break into flecks, and a foaming grease pool would read as water.
+    uPFoam: { value: new THREE.Vector2(0.0, 40.0) },
     // Grease does not mirror the sky, it catches the burner. `KPAL.flameCore` is the
     // warm light-catch this pool is actually lit by and is reserved chroma, so the
     // link cannot drift out from under it — the same argument the sheen streak above
@@ -1485,6 +1556,7 @@ function puddleSurfaceMaterial(isGrease: boolean, map: THREE.Texture): { mat: TH
     uPRipple: { value: new THREE.Vector4(16.0, 1.7, 0.35, 0.46) },
     uPBand: { value: new THREE.Vector4(0.9, 0.30, 0.25, 0.075) },
     uPFres: { value: new THREE.Vector4(0.34, 1.4, 0.34, 1.0) },
+    uPFoam: { value: new THREE.Vector2(0.30, 96.0) },
     uPSky: { value: new THREE.Color().setHex(PUDDLE_SKY_HEX, THREE.SRGBColorSpace) },
   };
   m.onBeforeCompile = (shader) => {
@@ -1494,6 +1566,141 @@ function puddleSurfaceMaterial(isGrease: boolean, map: THREE.Texture): { mat: TH
   };
   m.customProgramCacheKey = () => PUDDLE_PROGRAM_KEY;
   return { mat: m, uniforms };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A POOL IS A VOLUME, NOT A DECAL — depth-driven ALPHA and depth-driven ALBEDO
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Round 1 gave the pool a lobed outline, shore-following crests and a grazing-angle
+// sky reflection. A blind critic scored the result and still read the liquid as
+// *"a flat opaque DECAL rather than a volume"*. Measured on HEAD `0b8caec` before
+// acting on it — `tools/tmp/wt_vol.mjs`, water pool, match camera:
+//
+//     bed detail surviving under the pool      33.03% of the bare floor's own
+//     pool luma vs the floor it lies on        +60.18
+//     luma over ten shore-to-centre bins       171.9 · 174.7 · 182.9 · 181.1 · 177.7
+//                                              175.0 · 182.2 · 187.1 · 182.1 · 153.3
+//
+// Two of those are the defect and the third is the reason it reads as one. The pool
+// passes barely a THIRD of the floor's own high-frequency detail, so the mortar seams
+// running under it survive as faint creases that read as scratches ON the surface;
+// it is SIXTY luma brighter than the surface it is lying on, which is what a sticker
+// does and not what a film of liquid does; and the ten bins are flat, so the shape
+// has an edge and no interior.
+//
+// One idea, applied twice: EVERYTHING IS A FUNCTION OF DEPTH.
+//   - ALPHA. A pool is a film at its shore and deep in its middle. Where it is thin
+//     the floor is barely veiled and its seams, grout and tile grain read THROUGH —
+//     which is the only thing that can put the bed UNDER the liquid rather than
+//     printing a picture of a bed onto it.
+//   - ALBEDO. Depth absorbs, and it absorbs unevenly. The deep middle goes darker and
+//     more saturated along the direction the liquid's own colour already points
+//     (water toward cyan, grease toward amber), which is both the physics and the
+//     "darker, more saturated centre" a critic asked for in the same sentence.
+//
+// ⚠️ AND THE ALPHA IS EXACTLY WHY THE MEASUREMENT NEEDS A FIXED MASK. Every number
+// above is "inside the pool against outside it", and the obvious mask is a hue
+// classification of the frame in hand — which this change would SHRINK, because a
+// sheer shore blends toward the floor's magenta and leaves the water hue window. The
+// after arm would then be measured over a smaller region for a reason that has nothing
+// to do with what the change did. `wt_vol.mjs` classifies ONCE, on the before frame,
+// and applies that one mask to both arms; the geometry is untouched here, so it is the
+// same region in both.
+//
+// 🚨 NOTHING BELOW REACHES SIM STATE. `src/game/movement.ts` collides on
+// `hypot(fighter - hz) < hz.radius`, a scalar this file does not register and does not
+// read. This is alpha and colour on two decorative overlays.
+
+interface PuddleBodyUniforms {
+  /** x alpha at the shore · y alpha at the deepest point · z depth exponent ·
+   *  w how much of the deep tint to apply. */
+  uBDepth: { value: THREE.Vector4 };
+  /** Per-channel absorption at full depth. Water kills red hardest (which is what
+   *  makes deep water cyan); grease kills blue hardest (which is what makes deep
+   *  grease amber). A multiplier, so it darkens AND saturates in one term. */
+  uBDeep: { value: THREE.Vector3 };
+}
+
+/**
+ * ⚠️ ONE PROGRAM FOR BOTH BODIES, same argument as `PUDDLE_PROGRAM_KEY` above:
+ * `Material.customProgramCacheKey()` defaults to `onBeforeCompile.toString()`, so two
+ * materials carrying two closures compile two identical programs. Everything that
+ * differs between grease and water here is a UNIFORM, so the pinned key is honest —
+ * and `tools/tmp/wt_probe.mjs` asserts the two patched sources are byte-identical so
+ * that stops being a promise and becomes a check.
+ */
+const PUDDLE_BODY_PROGRAM_KEY = 'fa_puddle_body_v1';
+
+function patchPuddleBodyVertex(src: string): string {
+  return src
+    .replace('#include <common>', '#include <common>\nvarying float vBShore;\nattribute float aShore;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvBShore = aShore;');
+}
+
+function patchPuddleBodyFragment(src: string): string {
+  return src
+    .replace('#include <common>', `#include <common>
+varying float vBShore;
+uniform vec4 uBDepth;
+uniform vec3 uBDeep;`)
+    // AFTER `color_fragment`, which is where \`diffuseColor\` has finished being
+    // assembled from \`diffuse\`, \`opacity\`, the map and the vertex colours, and
+    // BEFORE the alpha test and the lighting — so this is the material's own albedo
+    // and alpha being changed, not a correction painted over a lit result.
+    .replace('#include <color_fragment>', `#include <color_fragment>
+{
+	// A paraboloid, not a cone: \`1 - r^2\` is the depth profile of a shallow dish and
+	// it puts most of the change in the OUTER half of the pool, where the shore is.
+	// A linear ramp spends its range in the middle, where nothing is happening.
+	float faDeep = 1.0 - vBShore * vBShore;
+	float faK = pow( faDeep, uBDepth.z );
+	diffuseColor.a = mix( uBDepth.x, uBDepth.y, faK );
+	diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * uBDeep, faK * uBDepth.w );
+}`);
+}
+
+/**
+ * The body disc's material: whatever the caller handed in, plus the depth patch.
+ *
+ * 🚨 THE PATCH GOES ON AFTER EVERY CLONE, AND THAT ORDER IS LOAD-BEARING.
+ * `Material.clone()` SILENTLY DROPS `onBeforeCompile` — `CLAUDE.md` #5 records 54
+ * clone sites that had lost the Fresnel rim that way, reaching 1.402% of pixels. The
+ * caller's chain is `nonOccluding(darkenedBody(mat))`, i.e. two clones, so patching
+ * the material handed in would compile a stock program and this whole section would
+ * be *rendering and invisible*. It is patched here, on the object that is actually
+ * drawn.
+ *
+ * ⚠️ A peer is live in `src/render/**` as this lands and `glossyMat` is theirs. Any
+ * `onBeforeCompile` or cache key already on the material is CHAINED rather than
+ * overwritten, so a rim/AO patch arriving in that file keeps working on this surface
+ * instead of being silently replaced by this one.
+ */
+function puddleBodyMaterial(isGrease: boolean, base: THREE.Material): THREE.Material {
+  const uniforms: PuddleBodyUniforms = isGrease ? {
+    // Grease is VISCOUS and it is opaque — a player reads which hazard he is standing
+    // in off exactly this. It thins at its shore like any spill, but from 0.62 rather
+    // than water's 0.26, and its deep tint is a mild warm one on a body that has
+    // already been pulled down 0.17 in lightness by `GREASE_BODY_L_DROP`.
+    uBDepth: { value: new THREE.Vector4(0.62, 0.96, 1.10, 1.0) },
+    uBDeep: { value: new THREE.Vector3(0.97, 0.88, 0.66) },
+  } : {
+    uBDepth: { value: new THREE.Vector4(0.26, 0.93, 0.85, 1.0) },
+    uBDeep: { value: new THREE.Vector3(0.52, 0.76, 0.98) },
+  };
+  const prevCompile = base.onBeforeCompile;
+  const prevKey = base.customProgramCacheKey;
+  base.onBeforeCompile = function (shader, renderer) {
+    prevCompile.call(this, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = patchPuddleBodyVertex(shader.vertexShader);
+    shader.fragmentShader = patchPuddleBodyFragment(shader.fragmentShader);
+  };
+  base.customProgramCacheKey = function () {
+    const prev = prevKey.call(this);
+    return `${prev}|${PUDDLE_BODY_PROGRAM_KEY}`;
+  };
+  return base;
 }
 
 export function buildPuddleVisual(
@@ -1523,7 +1730,9 @@ export function buildPuddleVisual(
   // that pulled both bodies down.
   // `nonOccluding` is what stops the pool depth-rejecting the fighter's own contact
   // decal — see the long note on `PUDDLE_RENDER_ORDER`.
-  const bodyMat = nonOccluding(isGrease ? darkenedBody(mat, GREASE_BODY_L_DROP) : mat);
+  // `puddleBodyMaterial` LAST, on the object that is drawn: the two calls it wraps are
+  // both clones, and `Material.clone()` drops `onBeforeCompile`.
+  const bodyMat = puddleBodyMaterial(isGrease, nonOccluding(isGrease ? darkenedBody(mat, GREASE_BODY_L_DROP) : mat));
 
   // Grounding — puddles previously had NO contact shadow at all, so they floated
   // free with no dark boundary separating them from the floor.
@@ -1625,6 +1834,19 @@ export function buildPuddleVisual(
     nonOccluding(rimMat),
     'puddle_wet_rim'
   );
+  // 🚨 THE WET RIM WAS AN OPAQUE INK OUTLINE AND THE SHEER SHORE IS WHAT EXPOSED IT.
+  // Traced out of the render rather than reasoned about: at the match camera the stroke
+  // is a flat `13,177,244` for 24 px, a near-primary cyan with no gradient in it, and
+  // it is byte-identical before and after the volume change — so once the body next to
+  // it stopped being an equally saturated fill, it stood alone as a hard border around
+  // a soft shape. That is the single most sticker-like element in the object and it is
+  // what a critic was naming as *"a constant cyan stroke"* around the pool.
+  // It is not deleted: a spill really does leave a defined wet edge, and the note below
+  // records why the edge must not dissolve into the tile. It is taken to 0.55 so it
+  // reads as a MENISCUS over the floor instead of an outline drawn around a decal.
+  // `nonOccluding` already returned a CLONE, so `M.waterRim` / `M.greaseRim` themselves
+  // are untouched and any future second call site keeps the material it was built with.
+  (trim.material as THREE.Material).opacity = 0.55;
   trim.castShadow = false;
   trim.rotation.x = -Math.PI / 2;
   trim.position.set(gp.x, PUDDLE_PLANE_Y, gp.z);

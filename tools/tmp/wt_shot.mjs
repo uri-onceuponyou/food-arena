@@ -235,7 +235,15 @@ async function selftest() {
 }
 
 // 🚨 IS-MAIN GUARD (AGENT-BRIEF §3): three tools here launched Chromium on import.
-const isMain = realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+// ⚠️ AND THE GUARD ITSELF THREW ON A LEGITIMATE IMPORT. `node -e "import(...)"` has no
+// `process.argv[1]`, so `realpathSync(undefined)` raised
+// `ENOENT: lstat '<cwd>/undefined'` — a tool that cannot be imported from a scratch
+// one-liner, reported as a missing file in the repo root. Wrapped rather than
+// rearranged: the guard's ANSWER is unchanged, it just no longer throws when asked.
+const isMain = (() => {
+  try { return realpathSync(process.argv[1] ?? '') === realpathSync(fileURLToPath(import.meta.url)); }
+  catch { return false; }
+})();
 if (isMain) {
   if (has('selftest')) await selftest();
 
@@ -282,8 +290,18 @@ if (isMain) {
     const ctrl = rows.find((r) => r.pitch === pitch && r.station === 'control').fraction;
     for (const key of ['grease', 'water']) {
       const f = rows.find((r) => r.pitch === pitch && r.station === key).fraction;
-      const pass = f > 0.02 && f > 20 * Math.max(ctrl, 1e-5);
-      console.log(`  subject-in-shot p${pitch} ${key}: ${(f * 100).toFixed(2)}% vs control ${(ctrl * 100).toFixed(3)}%  ${pass ? 'OK' : 'REFUSED'}`);
+      // ⚠️ THE 20x RATIO IS CALIBRATED AT ONE FRAMING AND IT SILENTLY WAS NOT SAID.
+      // The pool covers a fixed patch of GROUND, so its share of the centre box falls
+      // with the square of the ground span: at the shipped 578 wu framing it is
+      // (260/578)^2 = 0.202 of what it is at this tool's default 260, and the guard
+      // REFUSED a frame with the pool plainly centred in it (water 21.80% against a
+      // 1.463% control — 14.9x, under a flat 20x bar). The threshold is now scaled by
+      // the same geometry, so the guard means the same thing at every framing instead
+      // of being quietly wrong away from one. The ABSOLUTE floor is untouched, and at
+      // span 260 the requirement is still exactly 20x.
+      const need = 20 * Math.pow(260 / SPAN, 2);
+      const pass = f > 0.02 && f > need * Math.max(ctrl, 1e-5);
+      console.log(`  subject-in-shot p${pitch} ${key}: ${(f * 100).toFixed(2)}% vs control ${(ctrl * 100).toFixed(3)}%  (needs ${need.toFixed(1)}x at span ${SPAN})  ${pass ? 'OK' : 'REFUSED'}`);
       if (!pass) refused++;
     }
   }

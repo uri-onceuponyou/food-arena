@@ -103,7 +103,10 @@ export function readProfileConstants(src) {
 
 export function auditPatches(src) {
   const out = { faults: [], checked: 0 };
-  for (const name of ['patchPuddleVertex', 'patchPuddleFragment']) {
+  // FOUR patch functions, not two. The BODY pair landed in round 2 (depth-driven alpha
+  // and albedo) under its own pinned key, and a pinned key is a PROMISE that the two
+  // pools compile the same source — a promise nothing checked until it was listed here.
+  for (const name of ['patchPuddleVertex', 'patchPuddleFragment', 'patchPuddleBodyVertex', 'patchPuddleBodyFragment']) {
     const at = src.indexOf(`function ${name}(`);
     if (at < 0) { out.faults.push(`${name}: not found`); continue; }
     // Body = from the opening brace to the matching close, by brace depth.
@@ -130,6 +133,9 @@ export function auditPatches(src) {
   const key = src.match(/const PUDDLE_PROGRAM_KEY = '([^']+)'/);
   if (!key) out.faults.push('PUDDLE_PROGRAM_KEY: not a plain string literal');
   out.key = key ? key[1] : null;
+  const bkey = src.match(/const PUDDLE_BODY_PROGRAM_KEY = '([^']+)'/);
+  if (!bkey) out.faults.push('PUDDLE_BODY_PROGRAM_KEY: not a plain string literal');
+  out.bodyKey = bkey ? bkey[1] : null;
   return out;
 }
 
@@ -141,9 +147,18 @@ function selftest() {
   // NON-EMPTY FIRST. A regex that stops matching would otherwise audit nothing and
   // report clean — `[].every()` is true and so is "no faults over zero functions".
   const real = auditPatches(src);
-  ok('A0 NON-EMPTY  both patch functions were actually found', real.checked === 2, `checked=${real.checked}`);
+  ok('A0 NON-EMPTY  all four patch functions were actually found', real.checked === 4, `checked=${real.checked}`);
   ok('A1 HOLDS      the shipped source has no kind branching', real.faults.length === 0, real.faults.join(' | '));
-  ok('A2           the cache key is a literal', real.key !== null, `key=${real.key}`);
+  ok('A2           both cache keys are literals', real.key !== null && real.bodyKey !== null, `surf=${real.key} body=${real.bodyKey}`);
+  // MOVES on the BODY pair specifically — A3/A4 plant their bug in the surface pair, so
+  // without this the two new rows could be listed and never actually exercised.
+  const bad3 = src.replace(
+    'function patchPuddleBodyFragment(src: string): string {',
+    'function patchPuddleBodyFragment(src: string): string {\n  if (src.includes("x")) { const isGrease = 1; void isGrease; }'
+  );
+  const b3 = auditPatches(bad3);
+  ok('A5 MOVES      a planted per-kind branch in the BODY patch is CAUGHT',
+    b3.faults.some((f) => f.includes('patchPuddleBodyFragment')), b3.faults[0] ?? '(nothing)');
 
   // MOVES. Plant the exact bug: a per-kind `#define` inside the fragment patch.
   const bad = src.replace(
@@ -237,6 +252,17 @@ if (isMain) {
         return !!(a?.uniforms && b?.uniforms && a.uniforms.uPSky === b.uniforms.uPSky);
       })(),
       puddleProgs: progs.filter((k) => k.includes('fa_puddle_surface_v1')).length,
+      bodyProgs: progs.filter((k) => k.includes('fa_puddle_body_v1')).length,
+      bodyUniform: (() => {
+        // The BODY discs, by name — `mesh()` names them `puddle`.
+        const bodies = [];
+        s.scene.traverse((o) => { if (o.name === 'puddle' && o.material) bodies.push(o); });
+        return bodies.map((o) => {
+          const props = s.renderer.properties.get(o.material);
+          const u = props && props.uniforms ? props.uniforms.uBDepth : null;
+          return u ? [+u.value.x.toFixed(4), +u.value.y.toFixed(4)] : null;
+        });
+      })(),
       totalProgs: progs.length,
       sampleKeys: progs.slice(0, 2).map((k) => String(k).slice(0, 120)),
       hasShoreAttr: surfs.map((m) => !!m.geometry.getAttribute('aShore')),
@@ -252,6 +278,17 @@ if (isMain) {
   ok('B3           ...with different values (grease is not water)',
     JSON.stringify(live.sky[0]) !== JSON.stringify(live.sky[1]), `uPSky ${JSON.stringify(live.sky)}`);
   ok('B4           both surfaces carry the aShore attribute', live.hasShoreAttr.every(Boolean) && live.hasShoreAttr.length === 2, JSON.stringify(live.hasShoreAttr));
+  // 🚨 B5/B6 EXIST BECAUSE "IT IS THERE AND INVISIBLE" IS TRUE TWENTY TIMES IN THIS
+  // REPO, and a shader that never LINKS is the sharpest version of it: the round-2
+  // depth patch could have been dropped by `Material.clone()` and every render would
+  // still have changed, because three other things moved in the same commit. These
+  // read the compiled program list and the material's own uniform block.
+  ok('B5           exactly ONE program carries the BODY key — the depth patch LINKED',
+    live.bodyProgs === 1, `${live.bodyProgs} of ${live.totalProgs}`);
+  ok('B6 NON-EMPTY  both bodies hold a uBDepth, and the two kinds DIFFER',
+    live.bodyUniform.length === 2 && live.bodyUniform.every((v) => v !== null)
+    && JSON.stringify(live.bodyUniform[0]) !== JSON.stringify(live.bodyUniform[1]),
+    `uBDepth.xy ${JSON.stringify(live.bodyUniform)}`);
   ok('C1           97 vertices per surface (96 outline + centre)', live.vertsPerSurf.every((v) => v === 97), JSON.stringify(live.vertsPerSurf));
   console.log(`     pool drawables by name: ${live.poolMeshNames.join(', ')}`);
 
