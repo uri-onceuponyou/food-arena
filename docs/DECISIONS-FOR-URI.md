@@ -8,7 +8,7 @@ Answer any subset. Unanswered items stay on the stated assumption.
 
 ---
 
-## 🔴 OPEN RIGHT NOW — seven questions, seven one-line answers
+## 🔴 OPEN RIGHT NOW — eight questions, eight one-line answers
 
 **Rebuilt 2026-08-22 against `23f8ce7`, row by row, out of the source files.** Everything else on
 this page is history; these are the live ones. **Nothing is blocking** — every one has a default in
@@ -32,6 +32,7 @@ indistinguishable from a live one, and it is the row you act on.*
 | **§82** | **Your menus were drawing 17.3% of the pixels your phone has.** Fixed — the character portrait goes 458x202 -> **734x324** and the 2.40x upscale becomes 1.50x, for **zero extra draw calls**. ⚠️ **It is NOT the regression you reported** — that constant is byte-identical in all five deployed builds, including the one you praised. The cost is **+83.5 MB of GPU memory on home**, and whether an iPhone minds that **cannot be measured in this repo** | **menu cap 2** | **look at the character screen for one minute.** Sharper and stable -> done. Hot, stuttering, or a black screen -> drop `low`'s menu cap 2 -> 1.75 (one number) | one line — `budget: 'menu'` |
 | **§29(a)** | **Bush size — and this row got MORE expensive while nobody re-read it.** ⚠️ **The old row said *"inert"* and *"a re-layout once patches ship"*. The patches SHIPPED** (`b9bc00e`, extended `6631446`): **20 concealment patches, 110–130 wu across**, live in every match you play. The AI constraint is unchanged — `stepAI` has no search, sees 84 wu, so nothing may exceed ~168 wu | **20 patches, 110–130 wu** | **play a match and see whether you ever use one.** Every shipped size already obeys the constraint; what is open is whether they are worth their footprint | now a re-layout, not a free call |
 | **§71** | **Three icon subjects** — `boxBurger`, `stun`, `wrap` | as drawn | ⚠️ **"Leave it" is a real answer for all three** — every one ships beside its own text label. If you pick one, pick `wrap`: 0 of 30 judges, ten panels, and all three geometric options are closed by measurement | one drawing each |
+| **§88** | 🆕 **Making the roster grid obey your "small number of accents" cost you the ability to tell rarity tiers apart by colour.** The eleven cards carried six fills at five hues spread around the wheel — 211°/264°/47°/355°/186°. Collapsed to one cool family with rarity by value+chroma, which moved card-sheet hue concentration **R 0.216 → 0.631** and, more importantly, fixed something nobody had named: **7 of 11 cards had the CHARACTER DARKER THAN ITS OWN BACKGROUND** (mean polarity **−0.156 → +0.138**, and 9 of 11 backdrops out-chromaed the character, now 2). The cost is exact: **minimum adjacent-tier colour distance 52.4 → 5.0**, and an exhaustive enumeration of all 6,016 legal graded colours puts the ceiling inside the new constraints at **6.2** — more separation means leaving the family | **collapsed family + a 2px rarity ring** on landscape phone, where the collapse left four tiers with no other signal | **leave it — and here is the argument, because it is not obvious.** You answered **§26** that rarity means *acquisition* rarity and nothing else, and `rarityCostMultiplier` is 1.0 on every tier. A loud per-tier hue advertises a power hierarchy **that does not exist in this game**. Quiet tiers are the honest reading, and the ring keeps them legible | the constant is six hex values in `rules.ts`; the ring is one rule in `characterSelect.ts` |
 
 ### ✅ Answered since the last sheet — do not re-decide these
 
@@ -6072,3 +6073,59 @@ before there were numbers for it: *"the two most valuable bug reports on this pr
 simply playing it — clicks not firing, and the character not facing the cursor. Both were invisible
 to `tsc`, to the assertions, and to every screenshot."* The scoring loop is for things a human
 cannot hold still enough to compare. **It is not for deciding whether the game looks good.**
+
+---
+
+## 88. The roster grid: what the palette collapse bought and what it cost
+
+**Answered by default and running. This entry exists so the cost is on the record, not to block.**
+
+Your item 3 was *"palette scattered with no hierarchy — muted desaturated base, a small number of
+accents, reserve high saturation for characters."* The roster grid was the loudest surviving
+instance: **eleven cards, six fill colours, five of them chromatic at roughly 211° / 264° / 47° /
+355° / 186°** — near-evenly spaced around the colour wheel, which is the definition of no family.
+
+⚠️ **A previous agent reported this as "11 cards, 11 saturated hues" and I corrected it to six before
+anyone acted on it.** The fills are keyed by *rarity*, and the eleven characters distribute across
+six tiers as 2/2/1/2/2/2. The substance held; the count was out by about 2×.
+
+### The defect underneath was not the one in the brief
+
+Measuring the cards before changing them found something nobody had named, and it is the **same**
+defect `b945147` had just fixed in the lobby:
+
+| | before | after |
+|---|---|---|
+| mean figure/ground polarity | **−0.156** | **+0.138** |
+| cards where the FIGURE IS DARKER than its own ground | **7 of 11** | **0 of 11** |
+| cards where the backdrop OUT-CHROMAS the character | **9 of 11** | **2 of 11** |
+| card-sheet hue concentration `R` | 0.216 | **0.631** |
+| worst fill-vs-white contrast | 1.36:1 | 3.55:1 |
+
+Null arm stated before the numbers: two loads of the unchanged tree, distinct file hashes, identical
+on all eleven columns → ±0.01 effective hues, ±0.1 pp top-1 share, ±0.001 `R`. The hue move is
+**415× that floor**.
+
+### Two costs, neither bought back by gaming the metric
+
+1. **Adjacent-tier separation collapsed: minimum ΔE 52.4 → 5.0.** This is the real one — it is
+   whether you can tell Rare from Epic at a glance. All **6,016** legal graded colours were
+   enumerated and the ceiling *inside the new constraints* is **6.2**, so this is not a tuning
+   miss; more separation means leaving the family. Mitigated with a 2px ring drawn from
+   `RARITY_COLORS` on landscape phone, where the collapse left four tiers with no other signal.
+2. **Colour-loud area fell 59.7% → 50.1%**, against a reference figure of 57.9% we had been *above*.
+   Deliberately **not** bought back: "loud" is HSL-gated, and the only two ways to raise it are
+   pushing fill chroma back above the character's or darkening the frame to game the statistic.
+   On **absolute chroma** the same change reads as concentration rather than loss — mean 0.402 →
+   0.259 while gini held (0.438 → 0.427) and the top 5/10/20% all **rose**.
+
+### Why "leave it" is the recommendation
+
+**§26 is the reason.** You answered that rarity means acquisition rarity and nothing else, and
+`rarityCostMultiplier` has been 1.0 on every tier since `68cac7a`. A card that shouts its tier in a
+unique hue is advertising a power hierarchy this game does not have. **Quiet tiers are the honest
+reading of your own answer** — and the ring keeps them readable for the case where you just want to
+know what you own.
+
+**What would change my mind:** you look at the roster and cannot tell the tiers apart, or you tell me
+rarity is going to start meaning something. The second reopens §26, not this.
