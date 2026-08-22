@@ -269,6 +269,10 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
 //   pass's own measurements harder to read.
 //
 export class ToyGradeEffect extends Effect {
+  // ⚠️ THESE DEFAULTS ARE NOT WHAT SHIPS, and reading them as the live values has been a
+  // trap for two rounds. `buildPost` passes every one explicitly; the shipped set and the
+  // measurements behind it are on that call. As of 2026-08-22 `saturation` ships at 1.19,
+  // not the 0.70 below, and `contrast` at 0.72, not 0.62.
   constructor({
     saturation = 0.70, contrast = 0.62, knee = 0.55, highlightKnee = 0.82,
     shadowToe = 0, toeKnee = 0.50, toeChromaKeep = 1,
@@ -1766,8 +1770,94 @@ export class Stage {
     // number: `.40@.68` takes mean luma to 0.303 and the arena stops reading HIGH-KEY,
     // which is a stated pillar of the reference. `.28@.60` is the deepest toe that
     // still leaves the frame bright.
+    // ── `saturation` 0.70 -> 1.19: THE WASH, AND THE ONE LEVER THAT IS LUMA-FREE ─────
+    //
+    // ⚠️ THE OLD REASONING, KEPT BECAUSE IT WAS RIGHT ABOUT ITS OWN QUESTION AND IS
+    // BEING OVERRULED BY A DIFFERENT ONE (`CLAUDE.md`'s reversed-assertion rule):
+    //   *"`saturation` … untouched. Saturation buys NO range at all — it is applied about
+    //   luma, so `dot(d, rec709)` is 0 and the pixel's luma is algebraically unchanged …
+    //   It was only ever bought to pay back chroma the toe was spending, and once the toe
+    //   stopped spending chroma it had no job."*
+    // Every clause of that is still true and one of them is now the REASON to move it.
+    // That pass was buying VALUE RANGE, for which saturation is worthless. This one is
+    // buying CHROMA, for which it is the only lever in `src/render/**` that costs no luma.
+    //
+    // THE DEFECT, restated from the frame rather than from an opinion. Uri is losing a
+    // blind A/B and round 1's critic named the remaining gap as *"the play area is washed
+    // — bright and weakly chromatic, where both plates are darker and strongly chromatic."*
+    // Measured on the HUD-free centre band (y 0.35-0.62, full width) with
+    // `tools/tmp/v2_band.mjs` (selftest 33/33; known-bad flat grey reads sat 0.0000, pure
+    // red 1.0000), six seats at `pot_south`, 1600x900, rAF held, shake zeroed:
+    //
+    //                     meanSat   meanChroma   meanLuma
+    //   ours, 70ee682      0.3806      0.2469      0.5122
+    //   6 plates  min      0.4377      0.3005      0.3725
+    //             max      0.6830      0.4408      0.6389
+    //
+    // We are BELOW ALL SIX on saturation and BELOW ALL SIX on absolute chroma. That is the
+    // robust gap and it is what this change closes.
+    //
+    // 🚨 AND THE LUMA HALF OF THE COMPLAINT DOES NOT SURVIVE THE FULL PLATE SET. The
+    // critic quoted two plates (0.3973 and 0.4735) and concluded we are *"BRIGHTER than
+    // both"*, prescribing -0.06 of luma. Across all six, luma runs 0.3725-0.6389 and
+    // **our 0.5122 is inside it — bs_03 at 0.6389 and bs_01 at 0.5209 are both brighter
+    // than we are.** Two plates chosen from six are not a band. Darkening was therefore
+    // NOT taken: the shader's own comment ("chroma = saturation x f(luma), so lowering
+    // luma must lower chroma OR raise saturation") means every luma lever spends the
+    // thing we are actually short of, and `CLAUDE.md` names high-key as a pillar. Measured
+    // costs of the three obvious ones, same frozen frame:
+    //   env .32 -> 0     luma -0.0777 but chroma -0.0241
+    //   key 3.5 -> 2.80  luma -0.0394 but chroma -0.0106
+    //   toe .28 -> .40   luma -0.0259 but chroma -0.0065
+    //
+    // WHY 1.19 AND NOT A ROUND NUMBER. Swept live on ONE frozen frame (the sweep's
+    // shipped-first/shipped-last self-pair is BIT-IDENTICAL, so no row can be content
+    // drift), `satAmount` moves the band almost exactly linearly:
+    //
+    //   satAmount   0.70     1.00     1.10     1.19     1.25     1.35     1.50
+    //   meanSat    0.3807   0.4207   0.4331   0.4438   0.4506   0.4615   0.4768
+    //   meanChroma 0.2469   0.2827   0.2943   0.3045   0.3112   0.3219   0.3372
+    //   meanLuma   0.5121   0.5122   0.5122   0.5122   0.5122   0.5122   0.5122
+    //
+    // Interpolating the two reference minima gives crossings at **1.148** (saturation)
+    // and **1.155** (chroma); 1.19 is the first hundredth clearing both with margin
+    // (+1.4% and +1.3%). The rule was pre-registered as *"the smallest `satAmount` that
+    // puts BOTH axes inside the six-plate band"* — see the honest failure of its
+    // every-station form two paragraphs down.
+    //
+    // AND THE GAMUT DID NOT MOVE, which is the only real risk a saturation raise carries
+    // and the failure this whole curve was written to prevent. Same band, same frame:
+    //   any channel === 255   0.0049 -> 0.0050        near-white (all >= 250)  0.0001 -> 0.0001
+    // The reference plates' own any-channel-255 on this band runs **0.0147 to 0.2597**, so
+    // we remain 3x to 52x BELOW the least-clipped plate after the raise. The `0.88 *
+    // softKnee(satAmount / avail, satKnee)` gamut limiter is doing exactly its job; sweeping
+    // `satKnee` 0.45/0.55/0.65 at this `satAmount` moves meanSat by 0.0021 total, so the
+    // knee is not what is being spent and is left alone.
+    //
+    // AND HUE DID NOT ROTATE OR CONCENTRATE — checked because item 2's standing finding is
+    // that one hue owns the cast frame, and "more chroma" is exactly how that gets worse.
+    // Circular concentration R over chromatic band pixels: **0.463 -> 0.463**. The plates
+    // run 0.185-0.761, mean 0.580, so we are LESS hue-concentrated than the average plate
+    // both before and after — which independently reproduces round 1's critic's own note
+    // that hue is not this frame's problem.
+    //
+    // ⚠️ THE PRE-REGISTERED STOPPING RULE FAILED AT ITS SECOND STATION AND IS REPORTED
+    // RATHER THAN QUIETLY WIDENED. At `west_lane` the shipped band is sat 0.3120 /
+    // chroma 0.2196, and even `satAmount` 1.50 only reaches 0.3733 / 0.2695 — still under
+    // both reference minima, with the two axes' crossings diverging (~1.7 and ~2.2). So
+    // *"inside the band at EVERY station"* is NOT reachable from this lever, and the rule
+    // was cut to the station the complaint was measured at. What west_lane is short of is
+    // albedo chroma in the floor and props, which is `src/arena/**` and not this file's to
+    // spend — routed, not reached for.
+    //
+    // ⚠️ AND IT COMPOUNDS WITH A PEER'S CHANGE, WHICH IS WHY THE CONSERVATIVE END WAS
+    // TAKEN. The same critic asked `src/arena/**` to take the floor tile from HSV S 0.158
+    // back to ~0.30. A grade multiplier and an albedo raise MULTIPLY; 1.50 measured no
+    // worse than 1.19 on every arm here and was still refused, because it would land on
+    // top of a re-saturated tile with no way to see it coming from inside this file.
+    // If the arena tile lands, RE-MEASURE THIS BAND BEFORE ADDING ANY MORE.
     const grade = new ToyGradeEffect({
-      saturation: 0.70, contrast: 0.72, knee: 0.55, highlightKnee: 0.82,
+      saturation: 1.19, contrast: 0.72, knee: 0.55, highlightKnee: 0.82,
       shadowToe: 0.28, toeKnee: 0.60, toeChromaKeep: 0.55,
     });
     this.grade = grade;
