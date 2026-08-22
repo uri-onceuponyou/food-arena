@@ -1004,8 +1004,13 @@ function shadeVfxObject(object: THREE.Object3D): void {
  * **And it is structural, not a tuning miss.** `shadeVfxGeometry` bakes its ramp into
  * a `color` ATTRIBUTE, and the lobe geometries are module-scope singletons shared by
  * every instance (`hamburger.ts:splatBlobGeo`, `soup.ts:splatGeos`,
- * `donut.ts:arcGeos`; the census below reads 33 geometries across 125 meshes in an
- * eleven-case sweep). A baked vertex colour is therefore IDENTICAL on every instance
+ * `donut.ts:arcGeos`; ⚠️ **this line said "33 geometries across 125 meshes in an
+ * ELEVEN-case sweep" and both halves were inherited rather than read — `fx_flat`'s
+ * sheet is TWELVE cases since the `ctrl.*` holds arm was added, and it reports
+ * `FX_SHADE_STATS` `{geometries: 34, meshes: 125}`. Kept visible: a count written from
+ * memory is wrong here at about a coin-flip rate, and this one shipped in a commit
+ * message too, where `--amend` cannot reach it.** The census reads **34 geometries
+ * across 125 meshes over twelve cases**). A baked vertex colour is IDENTICAL on every instance
  * *by construction* and can never encode where a lobe sits inside the burst. No value
  * of `FX_KEY_AMP` or `FX_EDGE_AMP` reaches it.
  *
