@@ -1,0 +1,43 @@
+[
+  { "id": "shipped", "kind": "ref", "colors": {} },
+
+  { "id": "KB-grey", "kind": "control",
+    "colors": { "menu_wall": "#6E6E6E", "menu_ground": "#6E6E6E" } },
+  { "id": "KB-maxsat", "kind": "control",
+    "colors": { "menu_wall": "#0000FF" } },
+
+  { "id": "S25L18", "kind": "candidate", "colors": { "menu_wall": "#223139", "menu_ground": "#1E2931" } },
+  { "id": "S25L23", "kind": "candidate", "colors": { "menu_wall": "#2C3F49", "menu_ground": "#26343F" } },
+  { "id": "S25L28", "kind": "candidate", "colors": { "menu_wall": "#364C59", "menu_ground": "#2E3F4D" } },
+  { "id": "S35L18", "kind": "candidate", "colors": { "menu_wall": "#1E323E", "menu_ground": "#1A2935" } },
+  { "id": "S35L23", "kind": "candidate", "colors": { "menu_wall": "#26404F", "menu_ground": "#213544" } },
+  { "id": "S35L28", "kind": "candidate", "colors": { "menu_wall": "#2E4E60", "menu_ground": "#284053" } },
+  { "id": "S45L18", "kind": "candidate", "colors": { "menu_wall": "#193343", "menu_ground": "#162A39" } },
+  { "id": "S45L23", "kind": "candidate", "colors": { "menu_wall": "#204255", "menu_ground": "#1C3549" } },
+  { "id": "S45L28", "kind": "candidate", "colors": { "menu_wall": "#275068", "menu_ground": "#224159" } },
+
+  { "id": "PLINTH-ONLY-P2", "kind": "candidate",
+    "colors": { "menu_plinth_body": "#4A5F6E", "menu_plinth_rim": "#778B98",
+                "menu_plinth_rim_top": "#778B98", "menu_plinth_recess": "#4A5F6E",
+                "menu_plinth_top": "#AEBCC6" } },
+  { "id": "PLINTH-ONLY-P4", "kind": "candidate",
+    "colors": { "menu_plinth_body": "#3F5462", "menu_plinth_rim": "#6D8290",
+                "menu_plinth_rim_top": "#6D8290", "menu_plinth_recess": "#3F5462",
+                "menu_plinth_top": "#9FB1BE" } },
+
+  { "id": "D1", "kind": "candidate",
+    "colors": { "menu_wall": "#26404F", "menu_ground": "#213544",
+                "menu_plinth_body": "#3F5462", "menu_plinth_rim": "#6D8290",
+                "menu_plinth_rim_top": "#6D8290", "menu_plinth_recess": "#3F5462",
+                "menu_plinth_top": "#9FB1BE" } },
+  { "id": "D2", "kind": "candidate",
+    "colors": { "menu_wall": "#2E4E60", "menu_ground": "#284053",
+                "menu_plinth_body": "#3F5462", "menu_plinth_rim": "#6D8290",
+                "menu_plinth_rim_top": "#6D8290", "menu_plinth_recess": "#3F5462",
+                "menu_plinth_top": "#9FB1BE" } },
+  { "id": "D3", "kind": "candidate",
+    "colors": { "menu_wall": "#204255", "menu_ground": "#1C3549",
+                "menu_plinth_body": "#3F5462", "menu_plinth_rim": "#6D8290",
+                "menu_plinth_rim_top": "#6D8290", "menu_plinth_recess": "#3F5462",
+                "menu_plinth_top": "#9FB1BE" } }
+]

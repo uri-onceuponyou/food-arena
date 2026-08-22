@@ -101,18 +101,74 @@ import type { CharacterId } from '../../game/rules';
  * canvas's CSS background for the frame before WebGL first presents, and what
  * `opening.ts` fades its masked ellipse into. Keyed to the wall so a seam cannot show.
  */
-const PORTRAIT_BG = 0x1d5a80;
+// WAS `0x1d5a80` / `'#1d5a80'` until the palette-hierarchy pass. Kept visible per house
+// style: the value is not arbitrary, it is KEYED TO THE WALL so no seam can show, so it
+// has to move whenever `CYC_COLOR` moves. It is a slightly lighter, slightly bluer
+// relative of the wall albedo, and it stays that.
+const PORTRAIT_BG = 0x2f5266;
 /** The same colour as a CSS string, so no screen has to re-type the hex. */
-export const PORTRAIT_BG_CSS = '#1d5a80';
+export const PORTRAIT_BG_CSS = '#2f5266';
 
 /**
  * Cyclorama albedo. Lighter than the floor on purpose — see the header note on the
- * 0.6x factor. Deliberately a saturated azure rather than a desaturated one:
+ * 0.6x factor.
+ *
+ * ── WAS `#1D5576`, AND THE REASON GIVEN FOR IT HAS BEEN MEASURED FALSE HERE ──────
+ * The old comment read: *"Deliberately a saturated azure rather than a desaturated one:
  * `docs/LESSONS.md` §8 measured that the reference reserves HUE, not saturation, and
  * that adding COOL chroma lowers the warm band's share more cheaply than removing warm
- * chroma does. This stage is now the largest cool surface in the menus.
+ * chroma does. This stage is now the largest cool surface in the menus."* Kept above
+ * the change, per house style, because it is still true about the ARENA'S warm/cool
+ * budget and was simply never a statement about THIS frame's hierarchy.
+ *
+ * `tools/tmp/pc_pal.mjs --lobby` split this panel by element class and the reserved
+ * set came last on both metrics it reports:
+ *
+ *              area%   meanS   meanC        the character is the LEAST saturated
+ *   backdrop   41.0    0.963   0.463        thing in its own frame, and the plinth
+ *   ground     30.9    0.960   0.458        OUT-CHROMAS the subject it exists to
+ *   props      12.1    0.911   0.645        present, 0.645 against 0.442, wearing
+ *   characters 15.8    0.688   0.442        the character's own hue band (34 vs 40)
+ *
+ * "the largest cool surface in the menus" was the whole problem: it was also the
+ * loudest. 41% of the panel at meanC 0.463 is not a backdrop, it is a second subject.
+ *
+ * ── WHAT MOVED, AND WHAT DELIBERATELY DID NOT ───────────────────────────────────
+ * CHROMA came down; HUE and VALUE did not. `tools/tmp/lp_sweep.mjs` ran a 9-rung
+ * saturation x value grid in one page load (rendered figures, not authored ones):
+ *
+ *   authored          wall meanS  meanC  meanL     home_metrics blue-field pass
+ *   #1D5576 shipped      0.963    0.463  0.240     96.2%
+ *   #2C3F49 S25/L23      0.690    0.205  0.149     24.5%   <- WOULD HAVE BROKEN IT
+ *   #364C59 S25/L28      0.716    0.285  0.200     76.5%
+ *   #2E4E60 S35/L28      0.866    0.354  0.204     88.2%   <- shipped
+ *   #275068 S45/L28      0.928    0.401  0.216     90.9%
+ *
+ * 🚨 AND THE FIRST TWO COLUMNS DISAGREE, WHICH IS THE POINT. Rendered HSL saturation
+ * on this wall is NOT independently controllable from its value: `s = d/(max+min)` and
+ * the tone curve crushes the wall's red channel to ~2/255 at any luma it is usable at,
+ * so a near-black navy and an electric azure both score ~0.9. Every rung that pulled
+ * `meanS` under the character's 0.688 did it by going nearly black (meanL 0.149), and
+ * that is not "muted", it is unlit. CHROMA behaves properly and is what the eye reads
+ * as colourfulness, so chroma is what this was tuned on — stated here because the
+ * census's headline number ("93.3% of the panel above s >= 0.60") is measured on the
+ * saturation that does NOT behave, and reading it as "the panel is garish" is wrong.
+ *
+ * 🚨 THE VALUE WAS HELD ON PURPOSE. Desaturating a dark blue by lifting its red
+ * channel RAISES its luma — the ladder's grey rungs took the wall from meanL 0.240 to
+ * 0.408 — and luma is exactly what the figure/ground polarity in this file's header is
+ * made of. A washed-out wall would have traded the defect for the one `docs/LESSONS.md`
+ * §13 already paid to fix. At `#2E4E60` the wall renders meanL 0.204 against the
+ * character's 0.474: polarity +0.270, BETTER than the +0.234 it replaced.
+ *
+ * 🚨 AND THE BLUE-FIELD COLUMN IS NOT DECORATION. `home_metrics.mjs` only counts a
+ * pixel as backdrop at `b > r+20 && b >= 70 && g > r`, and the two darkest rungs drop
+ * 75% of the wall out of its own metric — the trap the floor's comment below has warned
+ * about since it was written, hit for real by a candidate that measured beautifully on
+ * everything else. It was pre-screened offline on the sweep PNGs before any constant
+ * moved.
  */
-const CYC_COLOR = '#1D5576';
+const CYC_COLOR = '#2E4E60';
 /** Floor albedo — deeper than the wall, so the horizon separates two materials rather
  *  than two brightnesses of one.
  *
@@ -129,18 +185,61 @@ const CYC_COLOR = '#1D5576';
  *
  *  against the shipped match's body 0.541 / frame 0.325 / polarity +0.216.
  *
- *  The floor is `0B3F63` and not the swept `0D3D4B` on purpose: the same luma with the
- *  blue channel 24 points higher. `home_metrics.mjs` identifies a backdrop pixel as
- *  b > r+20 AND b >= 70 AND g > r, and at this value a teal floor sits within a few
- *  counts of that threshold — a floor that measures correctly today and drops out of
- *  its own metric on the next character is not a floor, it is a trap. Deeper blue also
- *  spends HUE rather than VALUE, which is the direction `docs/LESSONS.md` §8 says is
- *  cheaper. */
-const FLOOR_COLOR = '#093F73';
+ *  The floor is not the swept `0D3D4B` on purpose: the same luma with the blue channel
+ *  24 points higher. `home_metrics.mjs` identifies a backdrop pixel as b > r+20 AND
+ *  b >= 70 AND g > r, and at this value a teal floor sits within a few counts of that
+ *  threshold — a floor that measures correctly today and drops out of its own metric on
+ *  the next character is not a floor, it is a trap. Deeper blue also spends HUE rather
+ *  than VALUE, which is the direction `docs/LESSONS.md` §8 says is cheaper.
+ *
+ *  ⚠️ THAT PARAGRAPH NAMED A COLOUR THIS FILE HAS NEVER HELD. It read *"the floor is
+ *  `0B3F63`"* while the constant below said `093F73` — two hex strings, transposed
+ *  digits, and the prose one is not in the tree and never was. Nothing checks a colour
+ *  quoted inside a comment, which is exactly why it sat there. The rule the paragraph
+ *  states is real and load-bearing and it caught a candidate during this pass; the
+ *  literal was noise. Removed rather than corrected — the constant is one line below
+ *  and cannot drift from itself.
+ *
+ *  ── WAS `#093F73` until the palette-hierarchy pass ─────────────────────────────
+ *  Same reasoning as `CYC_COLOR` above, same ladder, same rendered-not-authored
+ *  figures: meanC 0.458 -> 0.275, meanS 0.960 -> 0.785, meanL 0.240 -> 0.184. It stays
+ *  DEEPER than the wall, which is what makes the horizon a boundary between two
+ *  materials instead of two brightnesses of one, and it stays comfortably inside
+ *  `home_metrics`'s blue-field test. */
+const FLOOR_COLOR = '#284053';
 
-const PEDESTAL_BODY = '#8A4E15';
-const PEDESTAL_RIM = '#C07A23';
-const PEDESTAL_TOP = '#F4C55E';
+/**
+ * The podium, and it used to be GOLD: `#8A4E15` / `#C07A23` / `#F4C55E`.
+ *
+ * 🚨 IT WAS THE SINGLE LOUDEST OBJECT IN THE FRAME AND IT WEARS THE HERO'S OWN HUE.
+ * `pc_pal --lobby` measured the plinth at meanC 0.645 against the character's 0.442, at
+ * hue 34 deg against the character's 40 — six degrees apart. A podium exists to PRESENT
+ * a subject; this one out-chromaed it by half again and did so in the same colour, so
+ * the hero's feet and legs dissolved into the thing they were standing on. That is not
+ * a saturation problem, it is a figure/ground problem wearing a saturation costume, and
+ * it is the largest single item in Uri's *"nothing leads and nothing recedes"*.
+ *
+ * So the podium moved OUT of the accent band entirely and into the room's own hue
+ * family: cool stone, hue 200 deg, meanC 0.269. Measured on `lp_sweep`'s plinth-only
+ * rungs, which change nothing else in the scene:
+ *
+ *                        props meanC   props hue   subject leads on chroma?
+ *   gold, shipped            0.645        34         no  — plinth leads by 0.203
+ *   warm stone `#6B5F52`     0.277        36         yes — but 3 deg of hue separation
+ *   cool stone, this         0.269       200         yes — 160 deg of hue separation
+ *
+ * The warm-stone rung is kept in that table because it is the tempting one: it fixes
+ * the chroma number completely and leaves the hue collision exactly where it was. Two
+ * things were wrong and only one of them was about how loud the podium is.
+ *
+ * VALUE WAS SPENT RATHER THAN SAVED. The top face renders at meanL 0.478 — brighter
+ * than the character's 0.474 — so the hero still stands on a lit stage and the feet
+ * still read against it. What changed is that the stage is no longer competing for the
+ * same hue: it separates by VALUE and by HUE now instead of by chroma.
+ */
+const PEDESTAL_BODY = '#3F5462';
+const PEDESTAL_RIM = '#6D8290';
+const PEDESTAL_TOP = '#9FB1BE';
 
 /** Radius of the cyclorama, in metres.
  *
@@ -606,6 +705,14 @@ class MenuCharacterStage implements CharacterStage {
     rimTop.position.y = PLINTH_H;
     rimTop.receiveShadow = true;
     rimTop.userData.noOutline = true;
+    // NAMED, and the name is the only reason it is measurable. Every diagnostic that
+    // splits this frame by element class keys on the ancestry path: `tools/tmp/pc_pal.mjs`
+    // matches `menu_plinth` for the PROPS class. These two meshes shipped anonymous, so
+    // `pc_pal --tree` reported them as "UNCLASSIFIED AND VISIBLE" and their pixels went
+    // into no class and no total — the plinth was measured with two of its five pieces
+    // missing. An unnamed mesh is not a small omission in a name-keyed instrument; it is
+    // invisible to it, which is the same failure mode as the one the census exists to find.
+    rimTop.name = 'menu_plinth_rim_top';
     this.stage.scene.add(rimTop);
 
     // The wall of the recess itself — 2.5 cm of it, from the gold face up to the rim.
@@ -619,6 +726,7 @@ class MenuCharacterStage implements CharacterStage {
     recess.position.y = (PLINTH_H + PLINTH_TOP_Y) / 2;
     recess.receiveShadow = true;
     recess.userData.noOutline = true;
+    recess.name = 'menu_plinth_recess';   // see the note on `rimTop.name` above
     this.stage.scene.add(recess);
 
     // The face the hero stands on. Deliberately deep enough to overlap the body below
@@ -636,7 +744,12 @@ class MenuCharacterStage implements CharacterStage {
 
     // Contact under the FEET, on the podium's face. Warm core so it multiplies the
     // gold down in value without pulling it toward grey.
-    const foot = shadowDecal(1.9, [92, 62, 30], 2);
+    // WAS `[92, 62, 30]` — a warm brown core, chosen when the face under it was gold so
+    // that the multiply took VALUE without pulling the gold toward grey. The face is
+    // cool stone now, and a warm multiply over it would do the one thing the original
+    // comment existed to prevent: shift the hue instead of the value. Same idea, same
+    // luma, moved into the face's own hue family.
+    const foot = shadowDecal(1.9, [44, 70, 88], 2);
     foot.position.y = PLINTH_TOP_Y + 0.004;
     foot.scale.set(1, 1, 0.72);
     foot.name = 'menu_foot_decal';
