@@ -31,20 +31,42 @@
  *    PHOTOGRAPHED THE SKY and reported PASS because it checked the rig was reachable
  *    and never that the subject was in frame.
  *
- *   HUD-PRESENT   `.hud-fighter` count EQUALS the seat count asked for. Not ">0":
- *                 `hud.setCharacters` builds one row per seat, so a seat count the app
- *                 quietly ignored is exactly the failure a ">0" test cannot see, and
- *                 `wt_draws` records that `__matchDebug.state.fighters` was `undefined`
- *                 while the draw counts plainly differed by seat.
- *   PILL-IN-SHOT  at least one floating name+health pill is positioned INSIDE the
- *                 viewport. A HUD root full of nodes parked at (-9999, -9999) is a
- *                 non-empty HUD that appears in no photograph.
- *   SUBJECT       the pool's hue occupies a real share of the frame, against the SAME
- *                 bare-floor control `wt_shot.mjs` uses.
- *   NON-EMPTY     every classified set is asserted non-empty BEFORE any ratio is taken.
- *                 `[].every()` is true and `0/0` is NaN, and both read as a pass.
- *   PAINTED       `settle.mjs`'s flat-frame floor, recorded in the sidecar
- *                 `tools/review.mjs` refuses a packet without.
+ * ⚠️ **THE HUD ARMS WERE POINTED AT NOTHING, AND THEY RAN FOR A SESSION LOOKING GREEN.**
+ * Two separate defects, both found by re-deriving rather than by any check:
+ *
+ *   1. `document.querySelector('.hud') ?? document.body` — **there is no `.hud` in
+ *      `src/`.** `hud.ts` builds `.hud-root`. The selector never matched, the fallback
+ *      swallowed the miss, and `hudCoverage` reported the coverage of the ENTIRE
+ *      DOCUMENT BODY under the name "HUD covers x% of frame". It could not have gone to
+ *      zero on a HUD-less page, because a HUD-less page still has a body.
+ *   2. `[class*="float"]` is a SUBSTRING match, so it also matched each pill's four
+ *      children (`-pill`, `-emoji`, `-bar`, `-fill`). The recorded `pillsOnScreen: 5` at
+ *      six seats was **one pill counted five times**, not five fighters' pills — and the
+ *      committed `wt_r3_play/after_water.png` shows exactly one, which is the true
+ *      number: at six seats the other five pills are `display:none` because their
+ *      fighters have no projected point.
+ *
+ * Both arms now live in `tools/tmp/hs_hudguard.mjs`, which checks every selector is a
+ * token `src/ui/hud.ts` really writes BEFORE a browser is opened, refuses to fall back
+ * to anything, and is validated by `--known-bad-live` against three sabotages planted on
+ * a real running match. `--selftest` there validates the LOGIC; `--known-bad-live`
+ * validates where the tool is POINTED, which a selftest never can.
+ *
+ *   ROOT/ROWS/PILLS  `hs_hudguard` arms A–I. `.hud-fighter` count EQUALS the seat count
+ *                    asked for (not ">0": a seat count the app quietly ignored is exactly
+ *                    the failure a ">0" test cannot see); ≥1 pill DISPLAYED and ≥1
+ *                    displayed pill INSIDE the viewport, with the filtered set asserted
+ *                    NON-EMPTY first.
+ *   SUBJECT          the pool's hue occupies a real share of the frame, against the SAME
+ *                    bare-floor control `wt_shot.mjs` uses.
+ *   NON-EMPTY        every classified set is asserted non-empty BEFORE any ratio is taken.
+ *                    `[].every()` is true and `0/0` is NaN, and both read as a pass.
+ *   PAINTED          `settle.mjs`'s flat-frame floor, recorded in the sidecar
+ *                    `tools/review.mjs` refuses a packet without.
+ *
+ * ⚠️ AND THE ORDER CHANGED: all of this is asserted BEFORE `writeFile(png)`. It used to
+ * run afterwards and merely increment a refusal count, so a frame the tool had rejected
+ * still sat on disk where a packet builder could pick it up.
  *
  * ⚠️ THIS IS A LIVE MATCH, NOT A FROZEN PREVIEW, so it is NOT bit-reproducible the way
  * `wt_shot --drift` is — `?t=` does not exist on this route. That is stated rather than
@@ -63,6 +85,7 @@ import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { frameStats, FRAME_FLOOR } from './settle.mjs';
 import { rgbToHsv, centreHueFraction } from './wt_shot.mjs';
+import { hudProbeFn, HUD_SELECTORS, judgeHud, printChecks, hudSidecar, rectCoverage } from './hs_hudguard.mjs';
 
 const argv = process.argv.slice(2);
 const arg = (k, d = null) => { const i = argv.indexOf('--' + k); return i >= 0 ? argv[i + 1] : d; };
@@ -98,18 +121,11 @@ function stations(repo) {
  * is in the picture" is a MEASURED share rather than a node count — the round-2 critic
  * called the plates' nameplates "dominant mid-frame furniture", and a node count cannot
  * tell you whether ours is furniture or a hairline.
+ *
+ * ⚠️ Now a thin alias over `hs_hudguard.rectCoverage`. It was a second copy of the same
+ * loop; §A below is kept pointed at this name so the alias itself is exercised.
  */
-export function hudCoverage(rects, w, h) {
-  if (!rects.length) throw new Error('wt_hudshot: no HUD rects — nothing to measure over');
-  const grid = new Uint8Array(w * h);
-  let n = 0;
-  for (const r of rects) {
-    const x0 = Math.max(0, Math.floor(r.x)), x1 = Math.min(w, Math.ceil(r.x + r.width));
-    const y0 = Math.max(0, Math.floor(r.y)), y1 = Math.min(h, Math.ceil(r.y + r.height));
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const p = y * w + x; if (!grid[p]) { grid[p] = 1; n++; } }
-  }
-  return { px: n, frac: +(n / (w * h)).toFixed(5) };
-}
+export const hudCoverage = rectCoverage;
 
 const LAUNCH_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
   '--enable-webgl', '--ignore-gpu-blocklist', '--disable-gpu-sandbox'];
@@ -132,35 +148,47 @@ async function shoot(page, base, st, seats, settleMs, outPath, tag) {
   // inside the countdown, "where nothing moves", as a vacuous control.
   await page.waitForTimeout(settleMs);
 
-  const dom = await page.evaluate(() => {
-    const rows = Array.from(document.querySelectorAll('.hud-fighter'));
-    const pills = Array.from(document.querySelectorAll('[class*="float"]'))
-      .filter((n) => n instanceof HTMLElement)
-      .map((n) => n.getBoundingClientRect())
-      .filter((r) => r.width > 0 && r.height > 0);
-    const root = document.querySelector('.hud') ?? document.body;
-    const all = Array.from(root.querySelectorAll('*'))
-      .filter((n) => n instanceof HTMLElement && n.offsetParent !== null)
-      .map((n) => n.getBoundingClientRect())
-      .filter((r) => r.width > 1 && r.height > 1 && r.width < innerWidth * 0.98);
-    return {
-      hudFighters: rows.length,
-      pillsTotal: pills.length,
-      pillsOnScreen: pills.filter((r) => r.x + r.width > 0 && r.y + r.height > 0 && r.x < innerWidth && r.y < innerHeight).length,
-      rects: all.map((r) => ({ x: r.x, y: r.y, width: r.width, height: r.height })),
-      w: innerWidth, h: innerHeight,
-    };
-  });
+  // ⚠️ THE PROBE THAT USED TO LIVE HERE WAS POINTED AT NOTHING, IN TWO PLACES.
+  //
+  //   (a) `document.querySelector('.hud') ?? document.body`. **There is no element with
+  //       the class token `hud` anywhere in `src/`** — `hud.ts` builds `.hud-root`. The
+  //       selector never matched, the `?? document.body` fallback swallowed the miss,
+  //       and `hudCoverage` measured EVERY VISIBLE ELEMENT IN THE DOCUMENT under the
+  //       name "HUD covers x% of frame". A HUD-less page has a body too, so the number
+  //       could never have gone to zero: the fallback guarantees a non-empty set
+  //       regardless of the truth, which is `[].every()` in a different costume.
+  //   (b) `[class*="float"]` is a SUBSTRING match on the class attribute, so it also
+  //       matched `hud-float-pill`, `-emoji`, `-bar` and `-fill` — the pill's own
+  //       children. The recorded `pillsOnScreen: 5` at six seats was **one pill and its
+  //       four descendants**, not five fighters' pills. Confirmed on the pixels: the
+  //       committed `wt_r3_play/after_water.png` shows exactly one floating pill.
+  //
+  // Both are why the probe now lives in `hs_hudguard.mjs`, which checks every selector
+  // is a token `src/ui/hud.ts` really writes before the browser is even opened.
+  const dom = await page.evaluate(hudProbeFn, HUD_SELECTORS);
+  const guard = judgeHud(dom, { seats });
+  const cov = guard.coverage;
+
+  // 🚨 ASSERTED BEFORE THE PNG EXISTS. The old order wrote the file and *then* counted
+  // refusals, so a frame the tool had rejected still sat on disk where a packet builder
+  // could pick it up. A refused frame must not exist.
+  if (!guard.ok) {
+    console.log(`  🚨 ${tag} ${st.name}: hs_hudguard REFUSED this frame — NOT SAVED`);
+    printChecks(guard, '     ');
+    throw new Error(`wt_hudshot: HUD absent or incomplete at ${st.name} — refusing to save a frame a critic would score as having no interface`);
+  }
 
   await mkdir(outPath.replace(/\/[^/]*$/, ''), { recursive: true });
   // A PAGE screenshot, not a canvas one: the HUD is DOM. (`locator('canvas').screenshot()`
   // is a page capture clipped to the canvas box and would work too, but the intent is
   // clearer this way and the canvas fills the viewport.)
   const buf = await page.screenshot({ timeout: 120_000 });
+  const fs = await frameStats(buf);
+  if (fs.stdev < FRAME_FLOOR) {
+    throw new Error(`wt_hudshot: frame is FLAT (stdev ${fs.stdev} < ${FRAME_FLOOR}) at ${st.name} — refusing to save`);
+  }
   await writeFile(outPath, buf);
   const img = await raster(buf);
-  const fs = await frameStats(buf);
-  const cov = hudCoverage(dom.rects, dom.w, dom.h);
   await writeFile(`${outPath}.capture.json`, JSON.stringify({
     tool: 'tools/tmp/wt_hudshot.mjs',
     // `tools/review.mjs` prints `provenance.label` on its VERIFIED line and every
@@ -170,17 +198,31 @@ async function shoot(page, base, st, seats, settleMs, outPath, tag) {
     // the image traceable.
     label: `${tag} · ${st.name} · ${seats} seats`,
     url,
-    painted: fs.stdev >= FRAME_FLOOR,
-    why: fs.stdev >= FRAME_FLOOR ? [] : [`frame is FLAT: max-channel stdev ${fs.stdev} < ${FRAME_FLOOR}`],
+    painted: true,
+    why: [],
     previewReady: true,
-    hudFighters: dom.hudFighters,
-    pillsOnScreen: dom.pillsOnScreen,
+    // The block `hs_hudguard --verify` reads. A packet built from frames without it is
+    // a packet nothing ever checked for a HUD.
+    hud: hudSidecar(dom, guard),
+    hudFighters: dom.rows,
+    // ⚠️ RENAMED, and the old name is kept here as the reason. This used to be
+    // `pillsOnScreen` and counted a substring match that included each pill's four
+    // children, so six seats read "5" when ONE pill was displayed. Same field, honest
+    // number, different name so a reader comparing sidecars across commits sees that
+    // the quantity changed rather than that the HUD got worse.
+    pillsShownInShot: hudSidecar(dom, guard).pillsInShot,
     hudCoverageFrac: cov.frac,
     seats, station: st.name, settleMs,
     stats: fs,
     at: new Date().toISOString(),
+    // Same class of defect as the `label` note above, and found the same way: this
+    // sidecar wrote `at`, and `tools/review.mjs`'s VERIFIED line prints
+    // `sidecar.takenAt` — so every packet built from one has read "at undefined" in the
+    // one place an orchestrator checks provenance. Both keys are written; `at` stays so
+    // existing readers of this tool's own output do not break.
+    takenAt: new Date().toISOString(),
   }, null, 2));
-  return { img, dom, cov, fs, url };
+  return { img, dom, cov, fs, url, guard };
 }
 
 async function selftest() {
@@ -243,12 +285,16 @@ if (isMain) {
     const r = await shoot(page, BASE, ST[key], SEATS, SETTLE, `${OUT}/${TAG}_${key}.png`, TAG);
     shots[key] = r;
     const cls = centreHueFraction(r.img, ST[key].hue);
-    rows.push({ tag: TAG, station: key, seats: SEATS, hudFighters: r.dom.hudFighters, pillsOnScreen: r.dom.pillsOnScreen, hudCoverageFrac: r.cov.frac, centreHue: +cls.fraction.toFixed(5), painted: r.fs.stdev >= FRAME_FLOOR });
-    console.log(`${TAG} ${key.padEnd(8)} hud-fighter rows ${r.dom.hudFighters}  pills on screen ${r.dom.pillsOnScreen}/${r.dom.pillsTotal}  HUD covers ${(r.cov.frac * 100).toFixed(2)}% of frame  centre-hue ${(cls.fraction * 100).toFixed(2)}%  ${r.fs.stdev >= FRAME_FLOOR ? 'painted' : 'FLAT'}`);
-    // HUD-PRESENT, asserted as EQUALITY with the seat count.
-    if (r.dom.hudFighters !== SEATS) { console.log(`  🚨 HUD ROW COUNT ${r.dom.hudFighters} != seats ${SEATS} — the seat count was not honoured, or the HUD did not mount`); refused++; }
-    if (r.dom.pillsOnScreen < 1) { console.log('  🚨 NO floating pill inside the viewport — a non-empty HUD that appears in no photograph'); refused++; }
-    if (r.fs.stdev < FRAME_FLOOR) { console.log('  🚨 frame is FLAT'); refused++; }
+    const hud = hudSidecar(r.dom, r.guard);
+    rows.push({ tag: TAG, station: key, seats: SEATS, hudFighters: hud.rows, pillsShownInShot: hud.pillsInShot, hudCoverageFrac: r.cov.frac, centreHue: +cls.fraction.toFixed(5), painted: true });
+    // ⚠️ HUD-PRESENT, PILL-IN-SHOT and PAINTED are no longer re-asserted here. They were
+    // three hand-rolled `if`s reading fields off a probe record, and when the probe was
+    // fixed they silently read `undefined` and refused a frame the guard had just
+    // PASSED — `undefined !== 6` is true, so a stale reader fails LOUD in one direction
+    // and would have failed SILENT in the other (`undefined < 1` is false: the pill arm
+    // would have gone green on a missing field). `hs_hudguard` owns those arms now and
+    // `shoot()` throws before the PNG is written, so reaching this line means they passed.
+    console.log(`${TAG} ${key.padEnd(8)} hud-fighter rows ${hud.rows}/${SEATS}  pills shown & in shot ${hud.pillsInShot}/${hud.pillsTotal}  HUD covers ${(r.cov.frac * 100).toFixed(2)}% of frame  centre-hue ${(cls.fraction * 100).toFixed(2)}%  painted`);
   }
   // SUBJECT-IN-SHOT, against the bare-floor control in the SAME hue window — which is
   // the arm `wt_shot` gets wrong at the lobby camera, where its control is classified in

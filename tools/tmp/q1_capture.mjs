@@ -52,7 +52,7 @@
  *     node tools/tmp/q1_capture.mjs --url '{URL}' --out shots/q1/cap --seed-profile
  */
 
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 
 function parseArgs(argv) {
@@ -212,6 +212,21 @@ if (args.preflight || args['known-bad']) {
 
 const { chromium } = await import('playwright');
 const { settleScreen, captureSettled } = await import('./settle.mjs');
+// ── 🚨 THE HUD WAS IN EVERY FRAME THIS TOOL EVER TOOK, BY LUCK, AND NOTHING CHECKED ──
+// This tool drives the SHIPPED route (`/?player=…`), not `preview.html`, and
+// `captureSettled` screenshots the PAGE rather than `locator('canvas')` — so the DOM HUD
+// has always been composited in. Verified on the pixels of `shots/q1/cap/
+// match_donut_taco_00.png`, which carries both nameplates, both HP bars, the clock, the
+// zone strip, two floating pills, a weapon slot and the radar.
+//
+// That was never ASSERTED. A regression that unmounted the HUD, or a future edit that
+// switched this to a canvas-clipped screenshot, would have produced a silently
+// interface-less packet with every existing arm still green — and the canonical rubric
+// folds "interface polish" into the single score, so that panel scores zero in that
+// category by construction. The guard now runs on every candidate BEFORE it is kept, and
+// its verdict is written into the sidecar `hs_hudguard --verify` reads.
+const { assertHudInFrame, hudSidecar, judgeHud, hudProbeFn, HUD_SELECTORS, printChecks } =
+  await import('./hs_hudguard.mjs');
 
 const LAUNCH_ARGS = [
   '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
@@ -352,6 +367,21 @@ async function shootMatch(browser, PLAYER, ENEMY, tag) {
     return !c || c.style.display === 'none';
   }, null, { timeout: 120_000 });
 
+  // FAIL FAST, and AFTER the countdown. A frame taken during the countdown has full HP
+  // on every bar and a clock that has not moved — `CLAUDE.md` records a wrong-base demo
+  // staged inside the countdown, "where nothing moves", as a vacuous control. The same
+  // logic applies to a known-good: a HUD checked before the match starts is checked in
+  // the one state where the pills cannot be wrong.
+  {
+    const { res } = await assertHudInFrame(page, { enforce: false });
+    console.log('   ── hs_hudguard, before any candidate is kept ──');
+    printChecks(res, '   ');
+    if (!res.ok) {
+      await page.close();
+      throw new Error('q1_capture: the shipped route did not produce a complete HUD — every candidate from this run would score zero on interface polish. Refusing to capture.');
+    }
+  }
+
   const held = new Set();
   const KEYS = { up: 'KeyW', down: 'KeyS', left: 'KeyA', right: 'KeyD' };
   const setKeys = async (mx, my) => {
@@ -417,13 +447,35 @@ async function shootMatch(browser, PLAYER, ENEMY, tag) {
 
     const eligible = p.alive && e.alive && bothOn && d >= D_MIN && d <= D_MAX && vfxDelta > 0;
     if (eligible) {
+      // 🚨 PROBED BEFORE THE SHUTTER, not after. `captureSettled` writes the PNG itself,
+      // so a candidate judged afterwards is a refused frame already sitting on disk
+      // where a packet builder can pick it up.
+      // eslint-disable-next-line no-await-in-loop
+      const hudDom = await page.evaluate(hudProbeFn, HUD_SELECTORS);
+      const hudRes = judgeHud(hudDom);
+      if (!hudRes.ok) {
+        console.log('   candidate SKIPPED — hs_hudguard refused the HUD in this frame:');
+        printChecks(hudRes, '     ');
+        // eslint-disable-next-line no-await-in-loop
+        await page.waitForTimeout(70);
+        continue;
+      }
       const name = `match_${tag}_${String(n++).padStart(2, '0')}.png`;
       // eslint-disable-next-line no-await-in-loop
       const res = await captureSettled(page, {
         path: `${OUT}/${name}`, label: `match action ${n}`, tool: 'q1_capture',
         wait: false, enforce: false,
       });
+      // Merge the guard's verdict into the sidecar `captureSettled` just wrote. Additive:
+      // every existing field is preserved, and `hs_hudguard --verify <dir>` refuses any
+      // packet whose frames lack this block.
+      try {
+        const sc = `${OUT}/${name}.capture.json`;
+        const prev = JSON.parse(readFileSync(sc, 'utf8'));
+        writeFileSync(sc, JSON.stringify({ ...prev, hud: hudSidecar(hudDom, hudRes) }, null, 2));
+      } catch (e) { console.log(`   ⚠️ could not annotate sidecar for ${name}: ${String(e).slice(0, 120)}`); }
       candidates.push({
+        hud: hudSidecar(hudDom, hudRes),
         file: name,
         painted: res.painted,
         stats: res.stats,
@@ -479,6 +531,29 @@ async function main() {
   const total = report_.runs.reduce((s, r) => s + r.candidates.length, 0);
   console.log(`\n${total} action candidates -> ${OUT}`);
   await browser.close();
+
+  // ── THE PACKET MAY NOT BE HUD-LESS, AND THIS IS CHECKED BY DEFAULT ──────────
+  // Not "by remembering". The per-candidate guard above already refused anything
+  // interface-less, so this is the belt to that brace — it also catches a directory that
+  // picked up frames from an older, unguarded run of this same tool.
+  // ⚠️ `verifyPacket` asserts the directory is NON-EMPTY first: `[].every()` is `true`,
+  // so a run that produced zero candidates would otherwise "pass" its own audit.
+  const { verifyPacket } = await import('./hs_hudguard.mjs');
+  const pngs = readdirSync(OUT).filter((f) => f.endsWith('.png')).sort().map((f) => {
+    const sc = join(OUT, `${f}.capture.json`);
+    let sidecar = null;
+    try { sidecar = JSON.parse(readFileSync(sc, 'utf8')); } catch { sidecar = null; }
+    return { file: f, sidecar };
+  });
+  const v = verifyPacket(pngs);
+  console.log('\n── hs_hudguard --verify (packet audit) ──');
+  const bad = printChecks(v, '  ');
+  if (bad) {
+    console.error(`\n🔴 ${OUT} CONTAINS ${bad} FRAME(S) THAT NOTHING CHECKED FOR A HUD. Do not build a critic packet from it.`);
+    process.exitCode = 3;
+  } else {
+    console.log(`\n✅ every frame in ${OUT} carries a HUD the guard accepted`);
+  }
 }
 
 await main().catch((e) => { console.error(e); process.exitCode = 1; });
