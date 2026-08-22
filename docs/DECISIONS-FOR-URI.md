@@ -8,28 +8,65 @@ Answer any subset. Unanswered items stay on the stated assumption.
 
 ---
 
-## 🔴 OPEN RIGHT NOW — six questions, six one-line answers
+## 🔴 OPEN RIGHT NOW — seven questions, seven one-line answers
 
-**As of `63407e8`, 2026-08-12; §81 added 2026-08-19; §82 added 2026-08-20.** Everything else on this
-page is history; these are the live ones. **Nothing is blocking** — every one has a default in force
-and running.
+**Rebuilt 2026-08-22 against `23f8ce7`, row by row, out of the source files.** Everything else on
+this page is history; these are the live ones. **Nothing is blocking** — every one has a default in
+force and running.
+
+🚨 **THE SHEET THIS REPLACES WAS DATED `63407e8`, 01:14 ON 2026-08-12, AND THREE OF ITS SIX ROWS
+WERE ALREADY DEAD — TWO OF THEM BEFORE THAT SAME DAY ENDED.** It told you *"if you only answer one
+thing: §66"* when you had answered §66 on 2026-08-12 and the lobby had shipped at **18:05 that
+afternoon** (`2d4840e`, `src/ui/screens/lobby.ts`); it asked for a phone model you had already given
+(§74: iPhone 15 Pro, iOS 26.5.2, two captures); and its §81 row asked you to shrink a 400 wu radius
+you shrank on 2026-08-21 (`afad1ca`). **Rows were added to it and never re-read.** Kept above the
+new table because it is the same failure this page exists to prevent: *a stale row is
+indistinguishable from a live one, and it is the row you act on.*
 
 | # | question | in force | what I'd do | cost to reverse |
 |---|---|---|---|---|
-| **§82** | 🆕 **Your menus were drawing 17.3% of the pixels your phone has.** Fixed — the character portrait goes 458x202 -> **734x324** and the 2.40x upscale becomes 1.50x, for **zero extra draw calls**. ⚠️ **It is NOT the regression you reported** — that constant is byte-identical in all five deployed builds, including the one you praised. The cost is **+83.5 MB of GPU memory on home**, and whether an iPhone minds that **cannot be measured in this repo** | **menu cap 2** | **look at the character screen for one minute.** Sharper and stable -> done. Hot, stuttering, or a black screen -> drop `low`'s menu cap 2 -> 1.75 (one number) | one line — `budget: 'menu'` |
-| **§81** | 🆕 **Lollipop's super reaches 400 wu and cannot be dodged.** Your §80 lever 1 says shrink it. The four LYING weapon cards are already fixed; this is the one number behind them that nobody may move unasked | **400 wu** | **shrink it — but it costs Lollipop −26.4 pp paired, and §77 forbids paying that back by re-tuning five other characters.** So it needs your call, not mine | one constant + the 26.4 pp |
-| **§66** | 🔴 **Six-player has NO way in.** Where does the button live? How are the other five chosen? What level are five bots? | QA URL only | **Answer (1) and I'll wire it — ~15 lines.** A "Brawl" tile on home, five bots at your own level, is the smallest coherent version | it is new UI; nothing existing changes |
-| **§58** | ✅ **ANSWERED 2026-08-12 — and by PLAYING it, not by reading this page.** Uri hit the defect in a live match and specified the replacement schedule. **→ §72.** The recommendation on this row was *"keep 30 s"* and it was **WRONG**: it treated the trigger as a tuning choice when the 30 s trigger was **truncating the ring schedule**, which is a bug | — | — | landed in §72 |
+| **§83** | 🆕 🔴 **Your §80 said a super must be dodgeable. There is now exactly one decision left between that answer and the game.** Shrinking the Giant made a wind-up affordable for the first time: the same derivation that returned **5400 ms — 77.1% of the weapon's own cooldown, a dead button** — at 400 wu returns **2300 ms (32.9%)** at 157.22. At 2300 ms the escapable band is **−24.94 wu** — the slowest fighter in the roster clears the **whole** disc during the wind-up | **`castMs` 0 — no wind-up at all** | **add it — but it lands on Lollipop, which §81 already made the weakest character at two seats, and §77 forbids paying that back by re-tuning anyone else** | one field on one weapon |
+| **§84** | 🆕 🔴 **Everyone dying is now a reachable ending.** At six seats the slower game produced **28 total wipes in 360 matches where there were 0**, and mean survivors at the end went **1.00 → 0.92**. Nothing is broken — all 360 still resolved, 360 KOs, 0 timeouts — the endgame just got long enough for a simultaneous last-two kill | **allowed, undesigned** | **decide what a wipe IS.** Today `lastFighterStanding` calls it *"a defensible outcome rather than a designed one"*. Draw? Last-to-die wins? Or leave it | a rule in `state.ts`, plus whatever the result card must say |
+| **§85** | 🆕 🔴 **Both balance answers you gave made the roster MORE polarised, and I did not hide it.** §75's speed drop took settled matchups **23 → 37 (`smart2`) and 44 → 58 (`chase`) — +14 on BOTH policies** — while both aggregates sat inside the ~9 pp floor and **97 of 110 paired cells moved, max 87.5 pp**. §81's shrink then made **Lollipop the weakest character in the game at two seats** (60.6% → **25.0%** `smart2`, next lowest 29.5%) | **not compensated** | **leave it, and take the next balance pass as a pass** — a re-tune aimed at these two numbers is exactly what §77 withholds permission for, and both were priced before they landed | a roster pass, not a constant |
+| **§86** | 🆕 **Water Bottle's Mega promises to launch him and now declines to.** The displacement primitive shipped (`a975567`) and four of its five authored numbers stayed. The fifth was killed by its own single-variable ablation: `selfLaunch` cost that character **−9.0 pp (`smart2`) / −11.2 pp (`chase`)** — both policies, same sign, outside the floor — on the character §77 already records as 37 pp below its neighbour | **reverted; the card's claim left open on purpose** | **leave it reverted.** The next experiment is a *clamp* (carry the launch only as far as the nearest opponent) rather than a smaller number — halving 42 → 21 did not rescue it | one field; the class of the card's fault is already the better one (WRONG-VALUE, not MISSING) |
+| **§82** | **Your menus were drawing 17.3% of the pixels your phone has.** Fixed — the character portrait goes 458x202 -> **734x324** and the 2.40x upscale becomes 1.50x, for **zero extra draw calls**. ⚠️ **It is NOT the regression you reported** — that constant is byte-identical in all five deployed builds, including the one you praised. The cost is **+83.5 MB of GPU memory on home**, and whether an iPhone minds that **cannot be measured in this repo** | **menu cap 2** | **look at the character screen for one minute.** Sharper and stable -> done. Hot, stuttering, or a black screen -> drop `low`'s menu cap 2 -> 1.75 (one number) | one line — `budget: 'menu'` |
+| **§29(a)** | **Bush size — and this row got MORE expensive while nobody re-read it.** ⚠️ **The old row said *"inert"* and *"a re-layout once patches ship"*. The patches SHIPPED** (`b9bc00e`, extended `6631446`): **20 concealment patches, 110–130 wu across**, live in every match you play. The AI constraint is unchanged — `stepAI` has no search, sees 84 wu, so nothing may exceed ~168 wu | **20 patches, 110–130 wu** | **play a match and see whether you ever use one.** Every shipped size already obeys the constraint; what is open is whether they are worth their footprint | now a re-layout, not a free call |
 | **§71** | **Three icon subjects** — `boxBurger`, `stun`, `wrap` | as drawn | ⚠️ **"Leave it" is a real answer for all three** — every one ships beside its own text label. If you pick one, pick `wrap`: 0 of 30 judges, ten panels, and all three geometric options are closed by measurement | one drawing each |
-| **§33** | **Your phone model + iOS version, and a fresh 10-second capture** | unknown | **This is the only experiment that turns "−47.9% on desktop" into a real number on your device** | — |
+
+### ✅ Answered since the last sheet — do not re-decide these
+
+| # | your answer | where it landed |
+|---|---|---|
+| **§75** | *"All characters are moving too fast"*, then **_"drop the bots as well. same rate."_** | **both halves shipped.** (a) diminishing returns `8a2d0de` — the chain lock goes **83.3% → 33.7%**. (b) `fd83a5c` — `PLAYER_SPEED` 0.12 → 0.09 and both AI speeds ×0.75, every ratio held. Price in **§85** |
+| **§81** | *"…the answer is almost, but it shouldn't catch everything in the map."* | `afad1ca` — `REACH.ultimateSlam` **400 → 157.22**, and it is **no longer a number**: it is `GUARANTEED_VISIBLE_RADIUS − BODY_LENGTH`, so it follows the camera. Slam/arena diagonal **11.6% → 4.6%** |
+| **§66** | *"We need the lobby where the gameplay is set… assign bots… the actual connection to multiplayer will be done later."* | `2d4840e`, **2026-08-12** — `src/ui/screens/lobby.ts`, routed in `shell.ts`, entered from home. 2–6 seats, bots at `enemyLevelFor`, the multiplayer seat ships **`disabled` with its reason on the control** |
+| **§33** | **iPhone 15 Pro · iOS 26.5.2**, two Safari captures | §74 — max frame interval **618.33 ms → 33.33 ms**, severe stalls 5 → **0** |
+| **§26** | *"as far as i understand in all other games it means nothing besides the rarity to obtain it."* | `68cac7a`, **2026-08-05** — `rarityCostMultiplier` is **1.0 on every tier**, verified in `tuning.ts`. ⚠️ **The history row below said *"costs 4.5× to level"* and *"needs you"* for SEVENTEEN DAYS after it stopped being true**, while §26's own body three thousand lines down said *"Do not re-decide it"*. Rarity is acquisition rarity. Done |
+| **§58** | superseded by **§72** — you specified the schedule from play | `MATCH_DURATION_MS` **150 s**, `FOG_HOLD_MS` 25 s, `FOG_CLOSE_MS` 120 s, sudden death at 135 s |
 
 **If you only do one thing: play it for ten minutes.** The two most valuable bug reports this project
-has ever had came from exactly that, and both were invisible to every gate here. It has changed a lot
-since you last played — the map is 4× bigger, the controls moved off the play area, and the frame is
-**54% cheaper**.
+has ever had came from exactly that, and both were invisible to every gate here. **Everything on
+this list landed AFTER the last thing you reported from playing:** the whole game is
+**25% slower**, dying now hands you a **spectator camera** that follows your killer instead of
+pinning you to your corpse for 150 s, a **melee ultimate hits everyone in its arc** rather than one
+fighter, you can **body-block a shot**, and the Giant Lollipop no longer reaches from off screen.
 
-**If you only answer one thing: §66.** It is the only one holding real work back, and it unblocks two
-finished things that are currently unreachable (the payout curve and the result card).
+**If you only answer one thing: §83.** It is one field on one weapon, and it is the last step between
+your own §80 (*"you should be able to dodge a super"*) and a game where that is true.
+
+### ⚠️ And one thing that is not a decision — but you should know it before you judge anything
+
+🚨 **THE BLIND CRITIC WE SCORE AGAINST HAS DRIFTED, AND YOUR EYE HAS NOT.** Four drift controls
+were re-scored this session on **byte-identical 2026-08-05 pixels** — the same sheets, referenced,
+not rebuilt — and **all four came back 0.5–1.0 points LOWER**. Three of the four clear the 0.566
+resolution floor. That is the same size as the gap those rounds exist to measure, so **any
+before/after quoted across 2026-08-05 → now is confounded**, and several are.
+
+⚠️ **Candidate, not settled** — at the σ measured today (0.649, CI [0.526, 0.819]) only one arm
+survives, and at the CI's upper end none do. It is being reported at its real strength rather than
+at the strength that would be convenient. **The practical consequence for you: when the critic and
+your eye disagree right now, your eye is the less drifted instrument.** That is not flattery; it is
+the measurement.
 
 ---
 
@@ -46,17 +83,17 @@ row is in the numbered sections below.
 | **15** | Should a fleeing enemy shoot at you? | — | ✅ **DONE — it aims at you now** | landed |
 | **16** | Soup lost its red band, egg went cream, cast p95 is +0.027 over reference | shipped | **look at it — these are looks, not measurements** | per-character, self-contained |
 | **17** | Music during matches · `hurt()` masking what hit you | silence · full level | **both are yours; the roster brightening is already going** | one line each |
-| **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | inert, built | ✅ **ANSWERED — Uri: *"add bushes, but make it relevant to kitchen. For example plates you can hide under."*** Sim mechanic shipped inert; **→ now §29** | done |
+| **18** | Arena has half the cover density of the reference — the fix is **bushes**, a gameplay mechanic | **placed and live** | ✅ **ANSWERED — Uri: *"add bushes, but make it relevant to kitchen. For example plates you can hide under."*** ⚠️ **This row said *"inert, built"* until 2026-08-22; the patches went in on 2026-08-11.** **→ now §29** | done |
 | **19** | Back out of a live match abandons it silently · mid-match reload restarts it | abandon · restart | **two small feel calls** | one line each |
 | **22** | **Character levels 1–15** | — | ✅ **DONE — shipped, and the flat curve is VERIFIED (1.9pp drift)** | landed |
 | **23** | ⚠️ PvP makes `PLAYER_MAX_HP` ≠ `ENEMY_MAX_HP` **unfair by definition** | 100 vs 90 | **your §12 dial has a shelf life** | a roadmap item |
 | **24** | Rarity vs level | — | ✅ **DONE — tier spread 20.7pp → 4.0pp, below the noise floor** | landed |
-| **26** | ⚠️ **Rarity now buys NOTHING and costs 4.5× to level** | genre-faithful default | **needs you — rarity has no job left** | one multiplier, or a kit pass |
+| **26** | Rarity vs levelling cost | **1.0× on every tier** | ✅ **ANSWERED AND SHIPPED (`68cac7a`) — *"it means nothing besides the rarity to obtain it"*.** ⚠️ **This row read *"Rarity now buys NOTHING and costs 4.5× to level · needs you"* until 2026-08-22 — the cost half was false, `LEVEL_UP.rarityCostMultiplier` is 1.0 across all six tiers, and §26's own body already said *"Do not re-decide it"*.** Cyber costs the same 44,770 as Normal | done |
 | **28** | 🆕 Hamburger's heal 25 → **18 HP**, after the measuring instrument was fixed | 18 | **measured to ±3 HP; the exact integer is a feel call.** ⚠️ And the constraint has moved off Hamburger onto **Legendary at the bottom** — the next balance pass is a Sushi pass | one constant |
-| **29** | 🆕 **Concealment is BUILT and inert.** Three calls before it ships | off | ⚠️ **(a) bush size is now an AI constraint — ~168wu max, big hero bushes are OFF — STILL OPEN, awaiting your read of the size screenshot** · (b) ✅ **DONE — fully hidden, verified on pixels** · (c) ✅ **DONE — attacking BREAKS the plate and reveals you for 500 ms (`f0e7aed`), and §35's projectile leak closed with it** | (a) is a re-layout once patches ship; (b)(c) landed |
+| **29** | **Concealment — three calls.** ⚠️ **This row said *"BUILT and inert · off"* until 2026-08-22; it has been LIVE since `b9bc00e` (2026-08-11)** | **20 patches, 110–130 wu** | ⚠️ **(a) bush size — STILL OPEN, but no longer free: the patches are placed, so this is a re-layout now rather than a blank sheet.** Every shipped size obeys the ~168 wu AI-denial ceiling · (b) ✅ **DONE — fully hidden, verified on pixels** · (c) ✅ **DONE — attacking BREAKS the plate and reveals you for 500 ms (`f0e7aed`), and §35's projectile leak closed with it** | (a) **is** the re-layout now; (b)(c) landed |
 | **25** | ⚠️ **The 7+ bar is now calibrated** — the critic never scores shipped Brawl Stars above 9 | 7+ | **your bar is sound; the measurements under it were not** | — |
 | **20** | Characters are proportioned narrower and drawn smaller than the reference | as-is | **stance widening is going ahead; the sheet is for your eye** | revertible per character |
-| **1** | Match length | 45 s | **keep** — 35–45 s are all safe now | one constant |
+| **1** | Match length | **150 s** | ✅ **SUPERSEDED by §72** — you specified 2:30 from play, and it reversed this row's whole question. ⚠️ **Until 2026-08-22 this row read *"45 s · keep — 35–45 s are all safe now"*, ten days after the clock moved to 150 s.** Kept verbatim here because it is the exact row the sheet at the top was rebuilt to stop: the number was wrong, the recommendation was wrong, and nothing in the repo could see either | landed in §72 |
 | **10** | Two icons unreadable at 20px | as drawn | **change the subject**, not the drawing | a design call |
 | **11** | Longer legs — every silhouette changed | longer | **keep** — legs now exist at all | 2 constants + 1 row/archetype |
 | **5** | Floor hue as the blocking cue | restored | **keep** — two sources agreed it was a defect | six constants |
@@ -70,6 +107,10 @@ row is in the numbered sections below.
 | **9** | Feel — ranges, wind-ups, weight | as built | **cannot be screenshotted** — needs you playing | — |
 | **51** | 🆕 **The mobile app — which wrapper?** | nothing chosen | **the bundle already survives a third base (4/4, with both known-bad controls failing), so this is a wrapper pick + one `index.html` line.** ⚠️ `file://` is measured UNBOOTABLE — it needs a scheme | a wrapper is swappable; no `src/` change either way |
 | **52** | 🆕 **Multiplayer transport — authoritative server, lockstep, or rollback?** | nothing chosen, nothing shipped | **authoritative, with prediction of your own fighter — host peer first.** The number: a six-human tick costs **2.66 µs** (0.016% of real time, ~6,260 matches/core), so the CPU lockstep saves is free, while the bit-identical floats it *requires* span **32 impl-approximated call sites** across three browser engines. Full evidence in `docs/NETCODE.md` | no `src/` change either way; the sim already takes one input per slot |
+
+⚠️ **The two lines below are the OLD footer of the OLD table. They are history, not instructions —
+the live pair is at the top of this page.** Kept because the second one is the original specimen of
+this page's failure mode: it pointed at #6 for days after #6 was resolved.
 
 **If you only do one thing:** play it for ten minutes. The two most valuable bug reports this
 project has ever had came from exactly that, and both were invisible to every gate here.
@@ -1522,7 +1563,26 @@ recorded so nobody rediscovers it as a surprise.
 
 ---
 
-## 29. Concealment is BUILT and inert — three calls before it can ship
+## 29. Concealment — SHIPPED AND LIVE. (a) is the only call left, and it is no longer free.
+
+### ⚠️ UPDATE 2026-08-22 — this section's premise expired on 2026-08-11 and nobody re-read it
+
+**The heading used to say *"Concealment is BUILT and inert — three calls before it can ship"*, and
+the paragraph below still says *"switched off: no arena ships a concealment region."* That was true
+when written and has been false since `b9bc00e` (2026-08-11, extended in `6631446`).**
+
+`src/arena/kitchen.ts` places **20 concealment patches** — ten mirrored pairs, `plate_stack` /
+`tray_rack` / `crate_stack` — sized **110, 110, 110, 110, 120, 120, 120, 120, 120, 130 wu**. Every
+one is inside the ~168 wu ceiling that (1) below derives, and every one is in the match you play
+today.
+
+**What that changes for you:** (b) and (c) are answered and shipped. **(a) is still open, but its
+price moved** — the old row said *"the mechanic is inert until an arena declares regions, so all
+three answers are still cheap"*. The regions are declared. **(a) is a re-layout now.** The question
+is no longer *how big should a patch be* — the constraint answered that — it is **whether you ever
+use one in a real match**, which is a thing to play, not a thing to read.
+
+---
 
 You approved this in §18: *"add bushes — but make it relevant to kitchen. For example plates you
 can hide under."* The **sim mechanic exists now** (`1c140c0`) and is **switched off**: no arena ships
@@ -5091,7 +5151,43 @@ Four things, and the fourth is the one with a trap in it:
 
 ---
 
-## 75. ✅ ANSWERED — the status LOCK, and movement speed. Both from playing, both measured.
+## 75. ✅ ANSWERED, AND NOW SHIPPED — both halves. The status LOCK, and movement speed.
+
+### ✅ BOTH LANDED. What follows was the proposal; this is what actually happened.
+
+| half | landed | the number |
+|---|---|---|
+| **(a) diminishing returns** — `[1, 0.5, 0.25, 0]` inside an 8 s window | **`8a2d0de`**, 2026-08-12 | the worst chain lock (`Noodle`) goes **83.3% → 33.7%** |
+| **(b) `PLAYER_SPEED` 0.12 → 0.09** | **`fd83a5c`**, 2026-08-21 | and **the bots came with it** ↓ |
+
+**(b) sat measured and unlanded for nine days, blocked on ONE question only you could answer** —
+whether the bots slow down too. You answered it on 2026-08-21:
+
+  > *"75 - drop the bots as well. same rate."*
+
+So all three speeds moved by the same 0.75: `PLAYER_SPEED` 0.12 → 0.09, `AI_CHASE_SPEED`
+0.07 → 0.0525, `AI_FLEE_SPEED` 0.085 → 0.06375. **The answer was the RATIO, not the number** —
+dropping only the player would have taken the player/bot gap 1.71× → 1.29×, which is a balance
+change wearing a feel change's clothes. Both ratios are held.
+
+### 🔴 What it cost, stated where you will see it rather than in a commit message
+
+* **Every projectile is a third harder to dodge.** Weapon speeds did **not** move, so the evade
+  window — the time to clear your own hit radius — went **210 → 280 ms (+33.3%)**. Verified on the
+  shipped constants, not quoted: `HIT_RADIUS_VS_PLAYER / PLAYER_SPEED` = 280.00 ms exactly.
+* **The roster got MORE polarised, on both AI policies.** Settled matchups (one side winning ≥95%
+  of 32 seeds) **23 → 37** on `smart2` and **44 → 58** on `chase` — **+14 on both**. Both
+  aggregates moved inside the ~9 pp floor and say nothing; **97 of 110 paired cells moved, max
+  87.5 pp**, and that is exact. **→ §85.**
+* **28 total wipes in 360 six-player matches, where there were 0.** **→ §84.**
+* **One thing that did NOT move, and the brief that asked said it would:** the status lock. It is a
+  function of durations and cooldowns with no speed term at all, so Cheese still reads the 76.9%
+  published below. What a stun costs you in *ground* went **down**, 240 → 180 wu.
+* **And the camera did not move either.** `PLAYER_SPEED` appears twice in the guaranteed-radius
+  derivation and cancels: a slower fighter needs proportionally longer to cross its own hit radius,
+  so the reaction distance it must be shown is unchanged.
+
+---
 
 **Uri, 2026-08-12, after playing the new schedule:**
 
@@ -5141,7 +5237,11 @@ your own 42 wu body in 0.35 s, which is the twitchiness he is describing. At 90:
 mid 1.11 s, map crossing 23 s → 31 s — **which the 150 s clock (§72) now easily affords, and did
 not before.**
 
-### ⚠️ What implementing this must not get wrong
+### ⚠️ What implementing this must not get wrong — *written before it shipped; kept as the record*
+
+*(All of it is now landed — `8a2d0de` for (a), `fd83a5c` for (b). The list below is what the
+implementation was held to, not outstanding work. One item is worth re-reading anyway: the roster
+range quoted in it was **already stale when written**, and the correction is inline.)*
 
 * **It needs per-fighter, per-effect application state**, so it lands in `state.ts:Fighter` beside
   `status`, **never on the shared `Weapon` records** — `CHARACTERS` is a module-level `Record` and
@@ -5501,7 +5601,7 @@ bearing" went unnoticed. Baseline today is **0 of 36**. State the bearing covera
 
 ---
 
-## 81. 🆕 Four weapon cards were LYING ABOUT A NUMBER. The cards moved, not the numbers — and here is what that parks.
+## 81. ✅ (a) ANSWERED — the Giant now follows the CAMERA. Four weapon cards were LYING ABOUT A NUMBER; the cards moved, not the numbers — and (a), the one thing that parked, you have since decided.
 
 **Uri, playing it, 2026-08-19:** *"the 4th weapon doesn't even look similar to what it is stated it
 does. We need to review the weapons descriptions and to make sure that the actual weapon reflects it
@@ -5539,6 +5639,35 @@ past 3000 and **both cards go red the same minute**; the known-bad `KB11` drives
 
 ### ⛔ WHAT THIS PASS DELIBERATELY DID NOT DO — three things, all parked for you
 
+### ✅ (a) ANSWERED AND SHIPPED — `afad1ca`, 2026-08-21. The paragraph below is what you overruled.
+
+> **Uri:** *"If the question is whether the giant should catch everything in the visible screen, the
+> answer is almost, but it shouldn't catch everything in the map."*
+
+**`REACH.ultimateSlam` is no longer a number.** It is `GUARANTEED_VISIBLE_RADIUS − BODY_LENGTH` =
+**157.22 wu**, so it follows the camera rather than the arena, and *"almost"* is exactly one body
+length of visible clearance at the edge of the disc.
+
+| | was | now |
+|---|---|---|
+| slam radius | 400.00 wu | **157.22 wu** |
+| share of the guaranteed-visible disc | 200.8% | **78.9%** |
+| share of the arena diagonal | 11.6% | **4.6%** |
+| × the next longest weapon | 2.86× | **1.12×** |
+
+**The bill, paid and not compensated (§77):** Lollipop went **60.6% → 25.0%** on `smart2` and
+49.8% → 15.6% on `chase`, which makes it **the weakest character in the game at two seats** (next
+lowest 29.5%). ⚠️ **And it went the OTHER way at six seats** — mean placement **3.313 → 3.013
+(better)** while its win rate **fell 13.3% → 7.3%**. Those are different quantities and they barely
+agree here (Spearman ρ 0.282); it survives longer and converts less. **→ §85.**
+⚠️ **That 25.0% has NOT been re-measured since `fd83a5c` moved 97 of 110 matchups the next day.**
+It is the best number in the tree and it predates the speed change. Do not treat it as current.
+
+**And it opened a door that had been arithmetically shut:** the same wind-up derivation that
+returned 4100 ms (59% of the cooldown) at 400 wu now returns a wind-up worth having. **→ §83.**
+
+---
+
 **(a) 🔴 `lollipop.Giant`'s 400 wu radius is still 2.86× the next longest weapon in the game, and it
 is still undodgeable.** §80's lever 1 says shrink it. `rules.ts` prices the shrink already measured:
 
@@ -5547,7 +5676,10 @@ range 400 -> 200 (= FAIR_PLAY.radiusUnits, no wind-up)   lollipop 59.2% -> 32.8%
 range 200 + castMs 2050 (the derived tell)               lollipop 59.2% ->  1.4%   -57.8 pp
 ```
 ⚠️ Aggregate moved −1.2 / −1.3 pp — **inside the ~9 pp floor** — while **20 of 110 paired matchups
-moved, max 100.0 pp, EXACT.** *The aggregate is not evidence here.* **In force: 400, unchanged.**
+moved, max 100.0 pp, EXACT.** *The aggregate is not evidence here.* ~~**In force: 400, unchanged.**~~
+⚠️ **REVERSED 2026-08-21 — in force is `GUARANTEED_VISIBLE_RADIUS − BODY_LENGTH` = 157.22.** The old
+sentence is kept because the price it predicted was a genuine cross-check: it forecast −26.4 pp for
+400 → 200, and 400 → 157.22 came in at −35.6, the same curve one rung further.
 The card was written as a *relative* claim (*"the widest area in the game"*) precisely so that it
 **stays true after you take lever 1** — 200 wu would still be the widest — and still goes red if some
 other weapon ever out-reaches it. **Reversing costs one constant; the −26.4 pp is the real bill and
@@ -5582,11 +5714,14 @@ Bait. The gate classes that span as COSMETIC, so it is invisible to the technica
 axis is a separate pass. **Not touched here** — changing the subject of a card is a design call, not
 a number fix. **One line if you want it.**
 
-### ⚠️ One out-of-set defect found and NOT fixed — it needs the `src/ui/**` owner
+### ✅ One out-of-set defect found, routed — and FIXED
 
-`src/ui/screens/characterSelect.ts:73` — `reachLabel()` returns the string **`'Whole map'`** for any
-`range >= REACH.ultimateSlam`. That is `lollipop.Giant`, and it is the same false claim the card just
-stopped making, in a second place. **One word.** Reported rather than edited: a peer owns that file.
+`src/ui/screens/characterSelect.ts` — `reachLabel()` returned the string **`'Whole map'`** for any
+`range >= REACH.ultimateSlam`. That is `lollipop.Giant`, and it was the same false claim the card had
+just stopped making, in a second place. Reported rather than edited, because a peer owned that file —
+**and the owner took it: the label is now `'Widest'`**, a relative claim, so it survived §81(a)'s
+shrink without anyone having to remember it. That is the whole argument for routing rather than
+reaching across a file boundary.
 
 
 ---
@@ -5699,3 +5834,241 @@ antialiasing off any future tier that wrote 0. Option 3 above is the reason to t
   wide a tile is ~85 CSS px ~ 255 device px, so 416 > 255 and the tile is **downsampled, not
   upscaled**. It is a real defect on desktop and tablet, where the tile clamps to 180 CSS px. Not
   your bug.
+
+---
+
+## 83. 🔴 A Giant wind-up is now AFFORDABLE — §80 is one field away from being true
+
+**This is the only thing standing between your own §80 answer and the game.** You said it on
+2026-08-18:
+
+  > *"You should be able to dodge a super."*
+
+At the time that was unreachable arithmetic. `Weapon.castMs`'s roster-wide rule is
+`roundUp50(range / slowestHumanSpeed × 1000 + 300)`, and at a 400 wu radius it returned a wind-up
+**longer than half the weapon's own cooldown** — the record in `sim.test.mjs` §33(o) said so in as
+many words: *"There is no duration at which that weapon is both dodgeable and pressable."*
+
+**Your §81(a) answer changed the input, and the same rule now returns a usable number.** Re-derived
+from the shipped constants on `23f8ce7`, not quoted from a commit message:
+
+| | at 400 wu | **at 157.22 wu (shipped)** |
+|---|---|---|
+| the rule returns | 5400 ms | **2300 ms** |
+| …as a share of the weapon's own 7000 ms cooldown | **77.1% — a dead button** | **32.9%** |
+| escapable band `range − slowestSpeed × cast` | −27.68 wu, but unadoptable | **−24.94 wu** |
+| escape window, fastest / slowest fighter | — | 1746.89 / 1985.10 ms |
+
+**The second row is what moved, not the third.** The band was always going to be negative once a
+wind-up existed at all; what made one impossible was the **price**. A super that spends 77% of its
+own cycle winding up is a button nobody presses, which is §77's own objection. At 32.9% it is a
+telegraph. ⚠️ **So do not read the old refusal as *"the Giant can't be dodged"* — it was *"no
+duration works"*, and that is the sentence that expired.**
+
+**And the third row still says the thing that matters:** a *negative* band means the **slowest
+fighter in the roster clears the whole disc** inside the wind-up. Not "can react" — clears it. That
+is the acceptance test §80 asks for, met with room, on the one weapon in the game that has never
+passed it.
+
+**Assumed, in force right now: `castMs` 0 — the Giant Lollipop has NO wind-up.** It resolves on the
+tick it is cast. That is not an oversight; it is the refusal above, and `sim.test.mjs` now asserts
+**both halves** — that the weapon has no wind-up, *and* that the door which was arithmetically shut
+is open — so the row goes red the day somebody converts it.
+
+### ❓ What I need from you, and why I did not just do it
+
+**Add the wind-up, or leave it.** I did not take it, for one reason: **it lands on the character
+§81(a) just made the weakest in the game at two seats** (§85), and §77 explicitly withholds
+permission to pay that back by re-tuning five other characters. A wind-up is a nerf. Stacking a
+second nerf on the roster's floor without asking is exactly the thing §77 exists to stop.
+
+⚠️ **And one counter-intuitive fact, so the obvious instinct does not undo it: a LONGER wind-up is
+MORE dodgeable, not less.** Escaping means clearing the reach *before* the cast resolves, so the
+wind-up is the escape budget. Do not shorten it to "make it fair".
+
+**Cost to reverse: one field on one weapon** (`lollipop.Giant.castMs`), plus whatever the balance
+re-measure says. **Cost of leaving it: §80 stays an answer nobody acted on**, and the game's only
+`cone: 360` weapon — it is the only one in the roster — stays a button that **resolves on the tick
+it is pressed**, with no window to react in at all.
+
+---
+
+## 84. 🔴 EVERYONE CAN NOW DIE. 28 total wipes in 360 six-player matches, where there were 0.
+
+**Not a bug, and not something I would paper over without asking.** §75's speed drop lengthened
+matches, which pushed more of them into the endgame, where the last two fighters can kill each
+other on the same tick.
+
+Measured at six seats, paired on identical rosters, seats and phases (`nf_ffa --n 6 --rosters 60`,
+360 matches, all AI):
+
+| | before `fd83a5c` | after |
+|---|---|---|
+| total wipes (nobody survives) | **0** | **28** |
+| mean survivors at the end | 1.00 | **0.92** |
+| total deaths | 1800 | 1828 |
+| matches that resolved | 360/360 | **360/360** — 360 KOs, 0 timeouts, 0 unresolved |
+
+**Nothing is broken.** Every match still ends and still scores. `state.ts:lastFighterStanding`
+already describes this state, and the wording is the point: *"a defensible outcome rather than a
+designed one."*
+
+### ⚠️ First, the part that is NOT broken, because it changes what the question is
+
+**The ranking already works.** Placement does not come out of the sim's final state — every dead
+fighter ends bit-identical — it comes out of the **death event stream**, and
+`roster.ts:resolvePlaces` orders it *"knocked out LATER places BETTER"*. `mp_join.mjs` §D2 builds a
+total wipe by hand and the ranking comes back **reverse-elimination order**. So in a wipe **everyone
+still gets a place and still gets paid the right amount.** Nothing is silently dropping money.
+
+**What is undefined is what the game SAYS.** `combat.ts` declares the winner from
+`lastFighterStanding`, which returns somebody only while exactly one fighter is up, and the block is
+gated on `phase === 'playing'`. So a wipe resolves as a knockout with a declared winner and **zero
+survivors**.
+
+### ❓ What I need from you
+
+**Decide what a wipe IS to the player.** Three coherent answers, and I have no basis to pick:
+
+| | what it means | cost |
+|---|---|---|
+| **leave it** | the last fighter to die is the winner, and the card says nothing special | zero — it is what happens today |
+| **name it** | the card says *"everyone went down"* and still awards 1st on death order | one string on the result card |
+| **nobody wins** | a wipe is a draw: the top placement is vacated, and the payout with it | a rule in `state.ts` **and** an economy branch — this is the expensive one |
+
+⚠️ **The third is a bigger change than it reads.** It is the only one that makes "we both died" a
+result you can be handed, and the only one that can pay a player less than the seat they finished in.
+
+**Assumed in force: the first.** 7.8% of six-player matches now end with nobody standing.
+
+---
+
+## 85. 🔴 BOTH YOUR BALANCE ANSWERS MADE THE ROSTER MORE POLARISED — priced, reported, not paid back
+
+This is the honest bill for §75(b) and §81(a). Neither number was hidden inside an aggregate, and
+neither was compensated, because §77 says not to.
+
+### §75(b) — the speed drop. **+14 settled matchups on BOTH policies.**
+
+A *settled* matchup is one side winning ≥95% of 32 seeds — a fight whose result is decided before it
+starts. `roster_lab --seeds 32`, 7,040 matches, paired against a detached worktree of `f1e6c03`:
+
+| policy | settled | aggregate | roster range | first contact | play |
+|---|---|---|---|---|---|
+| `smart2` | **23 → 37 (+14)** | 67.4 → 65.7 (−1.7) | 42.7 → **50.5 pp** | 20.1 → 23.7 s | 22.0 → 25.3 s |
+| `chase` | **44 → 58 (+14)** | 42.1 → 48.2 (+6.1) | 63.3 → **75.6 pp** | 20.1 → 23.7 s | 20.6 → 24.3 s |
+
+🚨 **Read the settled column, not the aggregate.** Both aggregates sit inside the ~9 pp resolution
+floor and are worth nothing, while the paired per-matchup deltas — exact, on identical seeds — say
+**97 of 110 cells moved on `smart2`, max 87.5 pp, mean |Δ| 16.1 pp**, and 74 of 110 on `chase`.
+Quoting the aggregate here would have read as *"barely anything changed"*, and that is how a
+character has already left this game unnoticed.
+
+### §81(a) — the shrink. **Lollipop is now the weakest character in the game at two seats.**
+
+| policy | lollipop strength | next lowest | roster range |
+|---|---|---|---|
+| `smart2` | 60.6% → **25.0%** (−35.6) | waterbottle 29.5% | 33.1 → 38.0 pp |
+| `chase` | 49.8% → **15.6%** (−34.2) | 33.4% | 56.1 → 63.3 pp |
+
+⚠️ **And it went the OTHER way at six seats.** Mean placement **3.313 → 3.013 — better** — while its
+win rate **fell 13.3% → 7.3%**. Those are different quantities that barely agree here (Spearman
+ρ 0.282); damage dealt fell 167.3 → 157.9, damage taken rose 177.4 → 206.5, kills fell 0.86 → 0.47.
+**It survives longer and converts less.** The mechanism was not isolated, and that is stated rather
+than guessed at.
+
+⚠️ **The 25.0% predates the speed drop by one day.** It was measured on the tree before `fd83a5c`,
+which then moved 97 of 110 matchups. It is the best number in the tree and it is **not current** —
+quoted here because omitting it would be worse, flagged because a stale figure that nobody flags is
+how this page went wrong in the first place.
+
+### ❓ What I need from you — and my recommendation is to do nothing
+
+**Assumed in force: no compensation.** Nobody was re-tuned to make these tables look calmer.
+
+**I would leave it, and take the next balance pass as a pass** rather than as five apologies. Every
+individual fix here — raise Lollipop, shorten a stun, lengthen a cooldown — moves a *global*
+constant across eleven characters or hands one character a number the others did not earn, and §77's
+standing instruction is that supers may be **redesigned** but the roster may not be quietly
+re-levelled underneath a feel change you asked for.
+
+**Cost to reverse: a roster pass, not a constant.** And the thing that would actually change the
+answer is a mechanic — §83's wind-up is one — not a tuning point.
+
+---
+
+## 86. `waterbottle.Mega` DECLINES TO AUTHOR A SELF-LAUNCH — the one number its own measurement refused
+
+Displacement landed this session (`a975567`): weapons can now **knock back**, **lure** and
+**self-launch** — a class of thing the sim could not express at all, so it is still **absent on 29
+of 33 weapons**, and **five ability cards were promising it anyway** (`egg.Tackle`,
+`hotdog.Ketchup`, `sushi.Catch`, `sushi.Seaweed`, `waterbottle.Mega`). Five numbers were authored.
+**Four shipped. One was killed by its own single-variable ablation** (`7582619`).
+
+    waterbottle strength      smart2    chase
+    with    selfLaunch 42      24.1%    27.2%
+    with    selfLaunch 21      23.4%    28.4%    <- HALVING DOES NOT RESCUE IT
+    WITHOUT selfLaunch         33.1%    38.4%
+    cost of the field         -9.0pp  -11.2pp    both policies, same sign, outside the floor
+
+It is the **only** one of the five where both driver policies agree in sign *and* the magnitude
+clears the ~9 pp floor — and it lands on the character §77 already records as 37 pp below its
+nearest neighbour, while §79/§80/§83 are an in-flight programme to fix exactly that.
+
+**The mechanism is worth more than the number: a displacement costs its OWNER.** A self-launch
+carries you *past* the fighter you just hit, and then you spend a second turning around. A knockback
+pushes your target out of your own melee reach. Neither is a bug; both are what the cards promise.
+
+**Assumed in force: reverted.** The card's claim — *"launches himself up"* — is deliberately left
+**open** rather than reworded, and it is now a better class of wrong: the mechanic **exists**, so the
+fault reads WRONG-VALUE instead of MISSING. Rewording it would have retired a roadmap item by editing
+the sentence that names it.
+
+### ❓ What needs you, and it is small
+
+**Do you want Water Bottle's Mega to launch him at all?** If yes, the next experiment is a **clamp**,
+not a smaller number — carry the launch only as far as the nearest opponent, which is the clamp
+`lure` already has, so a tackle **closes** instead of overshooting. **Cost: one field.** I did not
+attempt it, because tuning until the aggregate looks calm is precisely what §77 withholds permission
+for.
+
+⚠️ **One instrument fact worth knowing before anyone re-prices this:** `lure` is **bit-identical at
+two seats** — the anchor is the victim's own position, and at N=2 the victim *is* the only opponent,
+so the sim writes nothing. All 20 sushi matchups ran bit-identical against a lure-ablated tree while
+3 of 11 six-seat rosters diverged. **No 110-cell instrument in this repo can price `lure` at all.**
+
+---
+
+## 87. ⚠️ THE INSTRUMENT WE SCORE AGAINST HAS DRIFTED. Your eye has not.
+
+**Not a decision. A thing you should know before you read any score in this repo.**
+
+The blind critic round re-scored four **drift controls** this session — panels built from
+**byte-identical 2026-08-05 pixels**, referenced rather than rebuilt, so nothing about the game
+could have changed underneath them. **All four came back lower:**
+
+| arm | then | now | Δ | vs the 0.566 floor |
+|---|---|---|---|---|
+| `drift_base_arena` | 5.17 | 4.167 | **−1.003** | clears |
+| `drift_cr1_arena` | 5.00 | 4.167 | **−0.833** | clears |
+| `drift_base_cast` | 4.33 | 3.500 | **−0.830** | clears |
+| `drift_cr1_cast` | 3.83 | 3.500 | −0.330 | inside |
+
+**All four move the same way on pixels that cannot have changed**, and the size of the move —
+roughly **0.5 to 1.0 points** — is the same size as the gap those rounds exist to measure. So **any
+before/after this project has quoted across 2026-08-05 → now is confounded by it**, and several are.
+
+⚠️ **Reported as a CANDIDATE, at its real strength rather than a convenient one.** At the σ measured
+today (0.649, CI [0.526, 0.819]) rather than the published 0.50, the floor rises to 0.734 and only
+`base_arena` survives; at the CI's upper end, 0.919, none of them do. Three of four clearing a floor
+is suggestive, not settled.
+
+### What this means for you, plainly
+
+**When the critic and your eye disagree right now, your eye is the less drifted instrument.**
+
+That is not a compliment, it is the measurement — and this project's own record already agreed
+before there were numbers for it: *"the two most valuable bug reports on this project came from you
+simply playing it — clicks not firing, and the character not facing the cursor. Both were invisible
+to `tsc`, to the assertions, and to every screenshot."* The scoring loop is for things a human
+cannot hold still enough to compare. **It is not for deciding whether the game looks good.**
