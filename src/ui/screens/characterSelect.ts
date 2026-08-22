@@ -1103,6 +1103,41 @@ const CSS = `
      The name stays: nothing else on the card encodes identity. */
   .fa-chars .chars-card-rarity { display: none; }
 
+  /* ── AND THE RING IS WHAT PAYS FOR DROPPING THE CHIP ─────────────────────────
+     The comment above says the card BACKGROUND already says what the chip said, and
+     that was true while the six fills were six unrelated hues. It stopped being true
+     when they collapsed into one family (see 'RARITY_CARD_COLORS'): the fills now
+     differ by VALUE and CHROMA inside one hue, and the minimum ADJACENT-tier dE on
+     the graded on-card colours is 5.0 (Rare vs Epic) where it used to be 52.4.
+
+     Side by side in a grid that still reads. Alone it is thin — and this is the ONE
+     viewport with no second signal, because '.chars-card-rarity' is display:none
+     exactly here. Neon and Cyber were already covered by '.is-animated' 's
+     '--rarity-glow'; Normal, Rare, Epic and Legendary had nothing, and they are
+     precisely the four tiers with the tightest dE.
+
+     So the six-way distinction goes back to a 2px ring in 'RARITY_COLORS' — the
+     still-six-hue palette, at a few hundred pixels instead of a full card. That is
+     the "small number of accents" half of Uri's item 3 rather than a violation of it:
+     hue carries rarity at ACCENT area, the fill stays in one family, and it costs
+     ZERO layout height, which is the entire reason the chip was dropped at 86x74.
+
+     🚨 THE RING GOES ON '.chars-card-gloss', NOT ON THE CARD, AND THAT COST A ROUND.
+     The obvious form is 'inset 0 0 0 2px var(--rarity)' in the CARD's own box-shadow.
+     It renders — and it is INVISIBLE, which is CLAUDE.md rule 4 for the nineteenth
+     time. An inset box-shadow paints on the element's own background layer, and
+     '.chars-card-render' is an absolutely-positioned full-bleed child at 'inset: 0',
+     so the render covers the ring on every card that HAS a render. That is all eleven
+     of them; it would have been visible only on the placeholder state nobody sees.
+     A pixel diff said 221,455 subpixels had changed and a 6x crop showed the two
+     frames identical inside the card border — the change was real and the ring was
+     under the portrait. The gloss is the sibling AFTER the render in DOM order, also
+     inset:0, also z-index auto, so it paints above it and is already the layer this
+     card uses for things that must sit over the artwork. */
+  .fa-chars .chars-card:not(.chars-card--locked) .chars-card-gloss {
+    box-shadow: inset 0 0 0 2px var(--rarity, transparent);
+  }
+
   /* ── THE ABILITIES LIST WAS 28 CSS PX TALL ────────────────────────────────────
      Measured at 852x393 with 'tools/tmp/ud_defects.mjs' (471x84 DEVICE px at DPR 3,
      which is the number the per-element audit reported):
