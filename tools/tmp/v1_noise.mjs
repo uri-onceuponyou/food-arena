@@ -78,6 +78,8 @@ const HUE_TOL = Number(arg('hue-tol', 25));
 const SAT_FLOOR = Number(arg('sat-floor', 0.10));
 const DARK_TOL = Number(arg('dark-tol', 0.06));
 const SMALL = Number(arg('small', 2000));
+/** px. Below this a "component" is hue flicker, not an object — see `components()`. */
+const MIN_COMP = Number(arg('min-comp', 8));
 const W = 1600, H = 900;
 const LAUNCH = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
   '--enable-webgl', '--ignore-gpu-blocklist', '--disable-gpu-sandbox'];
@@ -154,8 +156,30 @@ export function surfaceHues(px, n, { bins = 36, peakFrac = 0.25 } = {}) {
   return clusters.sort((a, b2) => b2.weight - a.weight);
 }
 
-/** 4-connected component sizes over a Uint8Array mask. Iterative — no recursion depth. */
-export function components(mask, w, h) {
+/**
+ * 4-connected component sizes over a Uint8Array mask. Iterative — no recursion depth.
+ *
+ * `min` drops components below a pixel budget, and it is NOT a cosmetic filter.
+ *
+ * 🚨 THE SECOND TIME THIS FILE'S FIRST ANSWER WAS CONFIDENTLY WRONG, AND THE ONE THAT
+ * WOULD HAVE BEEN REPORTED AS A REGRESSION. Run against the round-9/12 tree the metric
+ * came back WORSE — off-tile hue 6.394% -> 11.697%, components 2,497 -> 3,862 — on a
+ * frame that has 80% fewer chips and is visibly five times cleaner (read the PNG; it is
+ * not close). The cause is in the numbers next to it: **median component size fell from
+ * 2 px to 1 px** while `pxInSmall`, the pixels actually inside speckle-sized components,
+ * FELL 69,325 -> 48,359 at the same station. Hue is numerically unstable as saturation
+ * approaches zero, and this round took the tile field from HSV 0.312 to 0.158 — so the
+ * tile's own grain started crossing the hue tolerance one pixel at a time and the
+ * detector counted each flicker as an object.
+ *
+ * A ground chip is **3.4-6.2 wu** across and `preview.html?piece=floor` frames
+ * `SHIPPED_SPAN` (490 wu) across 1600 px = 3.27 px/wu, so the smallest chip in the tree
+ * lands at ~11 px across, ~90 px of area. **8 px is an order of magnitude below the
+ * smallest real object and an order above pixel flicker**, which is what makes it a
+ * threshold rather than a knob. Both arms are re-measured with it; the pre-fix numbers
+ * are reported as the instrument defect they are, not quietly replaced.
+ */
+export function components(mask, w, h, min = 1) {
   const seen = new Uint8Array(w * h);
   const sizes = [];
   const stack = new Int32Array(w * h);
@@ -171,9 +195,37 @@ export function components(mask, w, h) {
       if (y > 0 && mask[p - w] && !seen[p - w]) { seen[p - w] = 1; stack[top++] = p - w; }
       if (y < h - 1 && mask[p + w] && !seen[p + w]) { seen[p + w] = 1; stack[top++] = p + w; }
     }
-    sizes.push(size);
+    if (size >= min) sizes.push(size);
   }
   return sizes;
+}
+
+/** Separable box blur, 3 passes ≈ Gaussian. Radius in px. */
+export function blur(src, w, h, r) {
+  if (r < 1) return Float32Array.from(src);
+  let a = Float32Array.from(src), b = new Float32Array(w * h);
+  const cl = (v, m) => Math.min(m - 1, Math.max(0, v));
+  for (let pass = 0; pass < 3; pass++) {
+    for (let y = 0; y < h; y++) {
+      let acc = 0;
+      for (let x = -r; x <= r; x++) acc += a[y * w + cl(x, w)];
+      for (let x = 0; x < w; x++) {
+        b[y * w + x] = acc / (2 * r + 1);
+        acc += a[y * w + cl(x + r + 1, w)] - a[y * w + cl(x - r, w)];
+      }
+    }
+    [a, b] = [b, a];
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let y = -r; y <= r; y++) acc += a[cl(y, h) * w + x];
+      for (let y = 0; y < h; y++) {
+        b[y * w + x] = acc / (2 * r + 1);
+        acc += a[cl(y + r + 1, h) * w + x] - a[cl(y - r, h) * w + x];
+      }
+    }
+    [a, b] = [b, a];
+  }
+  return a;
 }
 
 /** The census for one RGB buffer. Returns both arms plus the reference colour it used. */
@@ -195,14 +247,44 @@ export function census(px, w, h, opts = {}) {
   const medL = sorted[n >> 1];
   for (let i = 0; i < n; i++) if (lum[i] < medL - darkTol) dark[i] = 1;
 
+  // ── THE SATURATION-FREE ARM, AND WHY IT HAD TO EXIST ────────────────────────
+  //
+  // 🚨 `hueOff` COVERAGE IS NOT COMPARABLE ACROSS A CHANGE THAT MOVES THE SURFACE'S OWN
+  // SATURATION, AND NO THRESHOLD FIXES THAT. Hue is an angle on a circle whose radius is
+  // saturation; as a surface approaches neutral its hue stops carrying information, so
+  // more of it lands far from any cluster for reasons that have nothing to do with what
+  // is lying on it. Measured across exactly that change here: the component count and
+  // `pxInSmall` both fell ~45% (they count OBJECTS) while `hueOff` coverage rose 6.1% ->
+  // 11.2% (it counts ANGLE). The size floor removed the pixel-flicker half of that; the
+  // rest is structural. Reported as a limit of the metric rather than tuned away.
+  //
+  // `feat` is the same question asked in LUMA, which does not have that failure mode:
+  // pixels whose luma departs from a local blur by more than 0.035 — the same threshold
+  // and roughly the same kernel `groundFeat` uses, so it is the quantity this layer was
+  // originally built to move — then size-floored and component-labelled. **This is the
+  // arm to quote for a before/after that spans a palette change.**
+  const featTol = opts.featTol ?? 0.035;
+  const bl = blur(lum, w, h, opts.featRadius ?? 5);
+  const feat = new Uint8Array(n);
+  for (let i = 0; i < n; i++) if (Math.abs(lum[i] - bl[i]) > featTol) feat[i] = 1;
+
+  const minComp = opts.minComp ?? MIN_COMP;
   const roll = (mask) => {
-    const sizes = components(mask, w, h);
+    const all = components(mask, w, h, 1);
+    const sizes = all.filter((s) => s >= minComp);
     let cov = 0;
     for (let i = 0; i < n; i++) if (mask[i]) cov++;
+    const kept = sizes.reduce((a, b) => a + b, 0);
     const smalls = sizes.filter((s) => s < small);
     return {
-      coveragePct: +((cov / n) * 100).toFixed(3),
+      // Coverage is recomputed over the components that SURVIVE the size floor, so the
+      // headline number and the component count describe the same set. Reporting raw
+      // coverage beside filtered components is how the two can move in opposite
+      // directions and neither be wrong.
+      coveragePct: +((kept / n) * 100).toFixed(3),
+      coverageRawPct: +((cov / n) * 100).toFixed(3),
       components: sizes.length,
+      componentsBelowFloor: all.length - sizes.length,
       componentsUnder: smalls.length,
       medianSize: sizes.length ? sizes.slice().sort((a, b) => a - b)[sizes.length >> 1] : 0,
       largest: sizes.length ? Math.max(...sizes) : 0,
@@ -211,7 +293,7 @@ export function census(px, w, h, opts = {}) {
   };
   return {
     surfaces: surfaces.map((s) => s.hue), refHue: surfaces[0].hue,
-    medianLuma: +medL.toFixed(4), hueOff: roll(hueOff), dark: roll(dark),
+    medianLuma: +medL.toFixed(4), hueOff: roll(hueOff), dark: roll(dark), feat: roll(feat),
   };
 }
 
@@ -319,6 +401,50 @@ function selftest() {
     Math.abs(c2.hueOff.coveragePct - c1.hueOff.coveragePct) < 0.6 && c2.hueOff.components === 1,
     `${c1.hueOff.coveragePct}%/${c1.hueOff.components} vs ${c2.hueOff.coveragePct}%/${c2.hueOff.components}`);
 
+  // §C4 THE SATURATION-FREE ARM MUST BE EXACTLY THAT.
+  // Take the stamped frame and DESATURATE the whole thing toward its own luma — the
+  // change this round makes to the tile. `hueOff` is allowed to move (it is an angle on
+  // a shrinking circle and that is the documented limit); `feat` must NOT, because
+  // nothing about the objects lying on the floor changed.
+  const desat = Uint8Array.from(noisy);
+  for (let i = 0; i < w * h; i++) {
+    const L = 0.2126 * desat[i * 3] + 0.7152 * desat[i * 3 + 1] + 0.0722 * desat[i * 3 + 2];
+    for (let k = 0; k < 3; k++) desat[i * 3 + k] = Math.round(L + (desat[i * 3 + k] - L) * 0.5);
+  }
+  const cd = census(desat, w, h);
+  ck('DESATURATED: `feat` recovers the SAME object count (it is luma, not angle)',
+    cd.feat.components === c1.feat.components, `${cd.feat.components} vs ${c1.feat.components}`);
+  ck('CONTROL: `feat` sees the objects at all (else the arm above is 0 === 0)',
+    c1.feat.components > 0, `${c1.feat.components}`);
+
+  // §C3 🚨 THE ARM THAT CAUGHT THE INSTRUMENT THE SECOND TIME: SALT NOISE.
+  // Single off-hue pixels are what a low-saturation tile's own grain produces, and
+  // before the size floor the detector counted every one as an object — 3,862
+  // "components" on a frame with 1,418 chips in it. The floor must remove them AND must
+  // still recover every real disc, or it has just traded one wrong answer for another.
+  const salted = Uint8Array.from(noisy);
+  let salt = 0;
+  for (let i = 0; i < w * h; i += 37) { // 3,243 isolated pixels, none adjacent
+    salted[i * 3] = 130; salted[i * 3 + 1] = 122; salted[i * 3 + 2] = 91; salt++;
+  }
+  const cs = census(salted, w, h);
+  ck('SALT: isolated off-hue pixels are NOT counted as objects', cs.hueOff.components === CHIPS,
+    `${cs.hueOff.components} vs ${CHIPS} real discs, ${salt} salt pixels planted`);
+  // Not `>= salt`: a small share of the planted pixels land INSIDE an existing disc and
+  // are absorbed by it rather than becoming their own component (measured 51 of 3,244).
+  // The claim is that the drop is REPORTED and accounts for essentially all of them.
+  ck('SALT: and the tool SAYS how many it dropped rather than hiding them',
+    cs.hueOff.componentsBelowFloor >= salt * 0.95,
+    `${cs.hueOff.componentsBelowFloor} below floor of ${salt} planted`);
+  ck('SALT: coverage is computed over the SURVIVING components, so it does not rise either',
+    Math.abs(cs.hueOff.coveragePct - c1.hueOff.coveragePct) < 0.05
+    && cs.hueOff.coverageRawPct > c1.hueOff.coverageRawPct,
+    `filtered ${cs.hueOff.coveragePct}% vs ${c1.hueOff.coveragePct}%, raw ${cs.hueOff.coverageRawPct}%`);
+  // CONTROL: the floor must not be so high that it eats a real chip. A chip at shipped
+  // framing is ~90 px; the smallest disc stamped here is ~28 px and still survives.
+  ck('CONTROL: the size floor does not eat a real disc', c1.hueOff.components === CHIPS,
+    `${c1.hueOff.components}`);
+
   // §C2 🚨 THE ARM THAT CAUGHT THE INSTRUMENT. A frame that is half rose tile and half
   // blue service decking is a REAL station here (`ne_0`), and against a single circular
   // mean it read 99.169% hue-off. Both surfaces must be recognised; the chips stamped on
@@ -366,6 +492,47 @@ function selftest() {
 // ─────────────────────────────────────────────────────────────────────────────
 // the run
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * Re-census PNGs already on disk.
+ *
+ * This is what makes an instrument fix affordable: when the detector was found to be
+ * counting hue flicker, BOTH arms could be re-measured on the **same bytes** they were
+ * captured from rather than re-photographed on two worktrees, so the fix cannot smuggle
+ * in a capture difference. `--from-shots <dir> --tag <before|after>` reads
+ * `<dir>/<tag>_<station>.png`.
+ */
+async function fromShots() {
+  const dir = resolve(SHOTS);
+  const { readdirSync } = await import('node:fs');
+  const files = readdirSync(dir).filter((f) => f.startsWith(`${TAG}_`) && f.endsWith('.png')).sort();
+  if (files.length === 0) throw new Error(`no ${TAG}_*.png under ${dir} — nothing to re-census`);
+  const report = { tag: TAG, source: dir, hueTol: HUE_TOL, satFloor: SAT_FLOOR, darkTol: DARK_TOL, small: SMALL, minComp: MIN_COMP, stations: [] };
+  for (const f of files) {
+    const { data, info } = await sharp(join(dir, f)).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    const c = census(data, info.width, info.height, { minComp: MIN_COMP });
+    const id = f.slice(TAG.length + 1, -4);
+    report.stations.push({ id, file: f, w: info.width, h: info.height, ...c });
+    console.log(`  ${id.padEnd(8)} FEAT ${String(c.feat.coveragePct).padStart(6)}% / ${String(c.feat.components).padStart(4)} comp   `
+      + `hueOff ${String(c.hueOff.coveragePct).padStart(6)}% / ${String(c.hueOff.components).padStart(4)} comp `
+      + `(${c.hueOff.componentsBelowFloor} below floor)  dark ${String(c.dark.coveragePct).padStart(6)}% / ${String(c.dark.components).padStart(4)} comp`);
+  }
+  const mean = (fn) => +(report.stations.reduce((a, s) => a + fn(s), 0) / report.stations.length).toFixed(3);
+  report.mean = {
+    featPct: mean((s) => s.feat.coveragePct), featComponents: mean((s) => s.feat.components),
+    featPxInSmall: mean((s) => s.feat.pxInSmall),
+    hueOffPct: mean((s) => s.hueOff.coveragePct), hueOffComponents: mean((s) => s.hueOff.components),
+    hueOffPxInSmall: mean((s) => s.hueOff.pxInSmall),
+    darkPct: mean((s) => s.dark.coveragePct), darkComponents: mean((s) => s.dark.components),
+  };
+  console.log(`\n  MEAN over ${report.stations.length} stations: ${JSON.stringify(report.mean)}`);
+  if (OUT) {
+    mkdirSync(dirname(resolve(OUT)), { recursive: true });
+    writeFileSync(resolve(OUT), JSON.stringify(report, null, 2));
+    console.log(`  wrote ${OUT}`);
+  }
+  return 0;
+}
+
 async function main() {
   const arena = JSON.parse(readFileSync(join(ROOT, 'tools/arena.gameplay.json'), 'utf8'));
   const stations = deriveStations(arena, Number(arg('stations', 6)));
@@ -409,4 +576,5 @@ async function main() {
 }
 
 if (has('selftest')) process.exit(selftest());
+else if (has('from-shots')) process.exit(await fromShots());
 else process.exit(await main());
