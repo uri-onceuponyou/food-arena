@@ -170,13 +170,81 @@ const CSS = `
 /* ── Backdrop ─────────────────────────────────────────────────────────────── */
 /* Owned by the SHELL, not by any screen, so navigating never re-paints or flashes
    the background — only the content above it changes. */
+/* ── ONE HUE FAMILY, AND IT USED TO BE THREE ──────────────────────────────────
+   WAS: radial #FFD98C, ramp #F4A300 -> #E85D2C -> #C1272D, base #C1272D.
+   Kept above the change per house style, because the VALUE structure below is
+   unchanged and was not the problem.
+
+   Those four stops sit at hue 39 / 40 / 17 / 358 degrees. That is a 42-degree arc
+   that crosses THREE of the 30-degree bins pc_pal's hue statistics count in, and
+   this is the backdrop of EVERY menu — the shell paints it once and never repaints
+   it, so it is the largest single chromatic surface in the product. Uri, item 3:
+   "nothing leads and nothing recedes."
+
+   Measured on the character-select page (pc_pal --conc, 320x180, loud gate
+   s >= 0.60), against the 13 reference menu plates:
+
+                        ours     plates
+     LOUD effHues       5.39      3.27      how many hues share the accent budget
+     LOUD top1 share    34.8%     64.6%     how much the leading hue leads by
+     LOUD R             0.283     0.590     circular concentration, 1 = one hue
+     loud area          61.6%     57.9%
+
+   🚨 THE LAST ROW IS WHY THIS RAMP IS STILL SATURATED. We are within 4 pp of the
+   plates on HOW MUCH of the frame is loud and at HALF their concentration — so the
+   defect is WHERE the saturation is spread, not how much of it there is.
+   Desaturating this would have "fixed" the row that was never broken, and
+   CLAUDE.md's art direction has falsified desaturation as a remedy five times.
+   So the stops keep their saturation and their value and give up only their SPREAD:
+   every one now sits inside ONE 30-degree bin.
+
+   WHICH BIN IS NOT A FREE CHOICE, AND THE FIRST ATTEMPT PICKED THE WRONG ONE.
+   Round 1 of this change moved the ramp to hue 20-32 -- the 0-30 bin -- on the
+   reasoning that the page's chroma-weighted mean hue reads 20 degrees, so that
+   must be where the mass is. It is not, and dumping the LOUD bin histogram
+   instead of the mean said so immediately. Character-select, chroma-weighted
+   share of the loud budget, before -> after that attempt:
+
+       0- 30 deg    22.4%  ->  28.8%
+      30- 60 deg    34.9%  ->  29.2%     <- the leader, and it was being drained
+     180-210 deg    23.9%  ->  23.0%     <- the 3D stage, deliberately a second family
+
+   The backdrop had been straddling both warm bins, and moving all of it into the
+   SMALLER one levelled them: top1 fell 34.9% -> 29.2% and effHues rose 5.21 ->
+   5.30, both well outside their floors, on a change whose whole purpose was to
+   move them the other way. A mean hue is a vector average over a bimodal
+   distribution and it lands in the trough between the two modes -- it points at
+   where there is LEAST, and reading it as "where the mass is" is what picked the
+   losing bin. The histogram is one extra line of output and it is the only form
+   of this statistic worth acting on.
+
+   So: hue 36-40, the 30-60 bin, consolidating the warm family into the bin that
+   already led it rather than splitting it into two equal ones.
+
+   ⚠️ THE FRAME HAS TWO FAMILIES ON PURPOSE AND WILL NOT REACH THE PLATES' 64.6%.
+   The 180-210 band is the lobby stage, made cool in the commit before this one so
+   the warm hero reads against it -- that is the same figure/ground separation
+   LESSONS §13 paid for, and spending it to win a hue statistic would be trading a
+   defect Uri can see for a number he cannot. What IS available is fam2, the two
+   ADJACENT bins that make one family: 57.3% of the loud budget is already warm,
+   and consolidating it is what this stop list is for.
+
+   ⚠️ FLOORS, from a null arm — the same tree captured on two page loads:
+   LOUD effHues +/-0.02, LOUD top1 +/-0.2 pp, LOUD R +/-0.004, loud area +/-0.6 pp,
+   ALL R +/-0.017. The ALL:R floor is the loose one and a move in it under ~0.02 is
+   not a move.
+
+   NOTE, no backticks anywhere above: this whole stylesheet is ONE TypeScript template
+   literal, so a backtick in a CSS comment closes it and the file stops parsing. tsc
+   reported it as three syntax errors 100 lines away. menu_accept parses all 88 modules
+   on every run specifically to catch this. */
 .fa-bg {
   position: absolute;
   inset: 0;
   background:
     radial-gradient(circle at 50% -8%, #FFD98C 0%, transparent 46%),
-    linear-gradient(160deg, #F4A300 0%, #E85D2C 45%, #C1272D 100%);
-  background-color: #C1272D;
+    linear-gradient(160deg, #F4A300 0%, #E89D2C 45%, #C18327 100%);
+  background-color: #C18327;
 }
 /* Comic halftone. 'multiply' keeps it a texture rather than a grey film. */
 .fa-dots {

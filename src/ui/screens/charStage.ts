@@ -747,9 +747,19 @@ class MenuCharacterStage implements CharacterStage {
     // WAS `[92, 62, 30]` — a warm brown core, chosen when the face under it was gold so
     // that the multiply took VALUE without pulling the gold toward grey. The face is
     // cool stone now, and a warm multiply over it would do the one thing the original
-    // comment existed to prevent: shift the hue instead of the value. Same idea, same
-    // luma, moved into the face's own hue family.
-    const foot = shadowDecal(1.9, [44, 70, 88], 2);
+    // comment existed to prevent: shift the hue instead of the value.
+    //
+    // ⚠️ AND THE FIRST REPLACEMENT, `[44, 70, 88]`, OVERCORRECTED — measurably. A
+    // multiply decal's colour is a MULTIPLIER, so its own chroma is imposed on whatever
+    // it lands on, and 44/70/88 carries chroma 0.173. Over gold that was invisible;
+    // over a near-neutral stone face it manufactured saturated slate where a shadow
+    // should be, and the plinth's measured meanC came back at 0.392 when the sweep that
+    // chose the stone had predicted 0.269. The sweep was not wrong — it retints
+    // `material.color` on seven named meshes and this decal is not one of them, so the
+    // 0.123 gap is entirely the decal I changed afterwards and did not re-measure.
+    // A shadow should take VALUE and leave hue alone, which means a multiplier that is
+    // nearly neutral: this one carries chroma 0.055, a third of the last.
+    const foot = shadowDecal(1.9, [58, 64, 72], 2);
     foot.position.y = PLINTH_TOP_Y + 0.004;
     foot.scale.set(1, 1, 0.72);
     foot.name = 'menu_foot_decal';
