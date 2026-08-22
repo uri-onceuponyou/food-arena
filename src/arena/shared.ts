@@ -1064,6 +1064,18 @@ export const KPAL = {
   concealCloth: '#E9DCC0',
   /** Traced on the region's true edge. Tan, not amber — well clear of `greaseRim`. */
   concealClothRim: '#C29A5E',
+  /**
+   * The pot rack's STRUCTURE — rails, slats, poles, feet, hanger stems.
+   *
+   * ⚠️ **IT STARTS ON THE RIM'S EXACT VALUE AND IS A SEPARATE ENTRY ANYWAY.** The two
+   * objects want opposite things from the renderer, so sharing one entry would mean a
+   * future retune of either silently moved the other — and the rim is a gameplay
+   * legibility surface (`DECISIONS §29a`: standing 5 wu outside the bound is the
+   * difference between hidden and shot), while the rack is set dressing. Keeping the
+   * value identical for now is what makes this round's A/B single-variable: the ONLY
+   * thing that changed about the canopy is which material class draws it.
+   */
+  concealRack: '#C29A5E',
   /** Stacked plates. The brightest thing in the family, so the cluster reads at 58°. */
   concealPlate: '#F7F1E4',
   /** The band around a plate stack and the trays — the family's warm chroma. */
@@ -1366,7 +1378,23 @@ export function buildMaterials() {
     // else on the floor on purpose — a plate stack has to catch a highlight to read as
     // crockery rather than as another pale decal.
     concealCloth: toonMat({ color: KPAL.concealCloth, ramp: RAMP_SOFT(), roughness: 0.72, map: utilityMatTex }),
+    // ── 🚨 THE RIM STAYS UNLIT. THE RACK NEVER SHOULD HAVE BEEN. ─────────────
+    // The rim is `flatMat` for the same reason `greaseRim`/`waterRim` above are: a
+    // boundary the player reads "hidden or shot" off has to hold ONE value rather than
+    // pick up a key-light gradient across the patch.
+    //
+    // ⚠️ **THAT REASONING GOT APPLIED TO THE WHOLE CANOPY BY ACCIDENT.** `c701f70`
+    // authored every rail, slat, pole, foot and hanger stem into this same bucket — the
+    // cheapest way to keep the patch at four draws — so the biggest new object in the
+    // arena was drawn by a `MeshBasicMaterial` and had **zero light response**. Measured
+    // on `tools/tmp/cz_after_final/p1_58.png`: the frame held luma **SD 1.16** (range
+    // 172.1–192.3) over 1.95% of the frame while the pots hanging off that same rack sat
+    // at **SD 10.71** (94.3–137.4) — 9.2x more shading — and 13.6% of its pixels were a
+    // 1–4 level spread that is entirely post/AA. It read as a wireframe debug volume.
+    // A rack is a lit solid: no top-vs-side value break, no shadow onto its own legs and
+    // no falloff along a rail is not a style, it is a missing material.
     concealClothRim: flatMat(KPAL.concealClothRim),
+    concealRack: toonMat({ color: KPAL.concealRack, roughness: 0.45 }),
     concealPlate: toonMat({ color: KPAL.concealPlate, roughness: 0.28 }),
     concealTrayWarm: toonMat({ color: KPAL.concealTrayWarm, roughness: 0.5 }),
 
@@ -2237,7 +2265,11 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
   // the line width is absolute and does not thicken with the patch. Merged into ONE
   // geometry — see the draw-call note below.
   const RIM = 0.09;
+  // `frameParts` is the RIM ONLY from here on — four bars on the true bound, unlit.
+  // The canopy's structure goes to `rackParts`, which is a lit material and therefore a
+  // second mesh; the two cannot share a buffer. That is the one draw this round spends.
   const frameParts: THREE.BufferGeometry[] = [];
+  const rackParts: THREE.BufferGeometry[] = [];
   for (const [sx, sz, w, d] of [
     [0, dM / 2 - RIM / 2, wM, RIM],
     [0, -(dM / 2 - RIM / 2), wM, RIM],
@@ -2275,11 +2307,17 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
   ];
   //
   // ── ⚠️ MERGED PER MATERIAL, AND THE FIRST DRAFT WAS NOT ─────────────────────
-  // Eleven stacks of 2-7 discs is 47 meshes per patch; six patches is 282, plus a cloth
-  // and four rim bars each. Measured on the unmerged draft with `tools/perf.mjs --mode
-  // counts`: **draw calls 868 -> 1,177, i.e. +309 — a 36% rise for one feature**, on a
-  // game whose owner plays it on a phone. Merging by material takes each patch to FOUR
-  // draws (cloth, rim, plates, trays) and the whole feature to 24. It is safe here for
+  // Eleven stacks of 2-7 discs is 47 meshes per patch. Measured on the unmerged draft
+  // with `tools/perf.mjs --mode counts`: **draw calls 868 -> 1,177, i.e. +309 — a 36%
+  // rise for one feature**, on a game whose owner plays it on a phone.
+  // ⚠️ **THE TWO COUNTS THAT USED TO FOLLOW HERE WERE STALE AND ARE KEPT FOR THE REASON:**
+  // *"six patches is 282 [meshes] ... merging takes each patch to FOUR draws and the whole
+  // feature to 24."* Both were true when written and the arena has since gone to **20**
+  // patches (`grep -c 'addConceal(concealGroup' src/arena/kitchen.ts`, re-derived
+  // 2026-08-22 — ten sites plus their point-symmetric partners), and each patch is now
+  // FIVE meshes, not four. Today: 20 x 5 = **100 meshes for the feature**, of which only a
+  // handful are ever in frustum — the measured draw delta is at the bottom of this
+  // function, where it can be checked. It is safe to merge here for
   // the same reason `kitchen.ts`'s `outlineGroup(..., { merge: true })` is: every part
   // going into one buffer already shares one material, so nothing about the shading
   // changes. The discs keep their world positions because each geometry is `translate`d
@@ -2357,10 +2395,10 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
     [railX, 0, RAIL, rD],
     [-railX, 0, RAIL, rD],
   ] as const) {
-    frameParts.push(new THREE.BoxGeometry(w, RACK_T, d).translate(sx, railY, sz));
+    rackParts.push(new THREE.BoxGeometry(w, RACK_T, d).translate(sx, railY, sz));
   }
   for (const u of [-0.34, 0.34]) {
-    frameParts.push(new THREE.BoxGeometry(SLAT, RACK_T, rD).translate(u * (rW / 2), railY, 0));
+    rackParts.push(new THREE.BoxGeometry(SLAT, RACK_T, rD).translate(u * (rW / 2), railY, 0));
   }
 
   // ── Four poles, at the corners and NOT in the middle ────────────────────────
@@ -2373,8 +2411,8 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
   for (const sx of [-railX, railX]) {
     for (const sz of [-railZ, railZ]) {
       const h = railY + RACK_T / 2 - FLOOR_Y.decal;
-      frameParts.push(roundedBox(POST, h, POST, 0.05).translate(sx, FLOOR_Y.decal + h / 2, sz));
-      frameParts.push(puck(POST * 0.85, 0.10, 12).translate(sx, FLOOR_Y.fine + 0.05, sz));
+      rackParts.push(roundedBox(POST, h, POST, 0.05).translate(sx, FLOOR_Y.decal + h / 2, sz));
+      rackParts.push(puck(POST * 0.85, 0.10, 12).translate(sx, FLOOR_Y.fine + 0.05, sz));
     }
   }
 
@@ -2407,7 +2445,7 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
     const pot = puck(r * short, h, 16).translate(x, RACK_Y - drop + h / 2, z);
     (warm ? trayParts : plateParts).push(pot);
     const stemH = Math.max(0.02, drop - h);
-    frameParts.push(new THREE.BoxGeometry(0.05, stemH, 0.05).translate(x, RACK_Y - stemH / 2, z));
+    rackParts.push(new THREE.BoxGeometry(0.05, stemH, 0.05).translate(x, RACK_Y - stemH / 2, z));
   }
 
   // ── The valance — a continuous roofline, which is what a silhouette needs ───
@@ -2424,19 +2462,40 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
     clothParts.push(roundedBox(w, VAL_DROP, d, 0.03).translate(sx, RACK_Y - VAL_DROP / 2, sz));
   }
 
-  // ── FOUR DRAWS PER PATCH, EXACTLY AS BEFORE ────────────────────────────────
-  // The canopy adds 36 parts — four rails, two slats, four poles, four feet, nine pots,
-  // nine stems and four valance panels — and **not one new MESH**, because every part was
-  // authored into one of the four material buckets that already existed. `perf.mjs
-  // --mode counts` confirms it: `meshes 858` before and after, at both 2 and 6 seats.
+  // ── FIVE MESHES PER PATCH, AND THE FIFTH IS THIS ROUND'S WHOLE COST ────────
+  // ⚠️ **KEPT, BECAUSE IT WAS TRUE AND IS NOT ANY MORE.** This block was headed *"FOUR
+  // DRAWS PER PATCH, EXACTLY AS BEFORE"* and said the canopy added *"not one new MESH,
+  // because every part was authored into one of the four material buckets that already
+  // existed"*. That is exactly what made the rack unlit: the only bucket whose colour
+  // suited a rack was `concealClothRim`, and that bucket is `flatMat`. Buying a lit
+  // material costs a fifth buffer, because a mesh has ONE material.
+  //
+  // Measured this round on detached worktrees of `0b8caec` (before) and the commit this
+  // comment ships in (after), `tools/perf.mjs --mode counts`, four arms:
+  //
+  //     --device mobile, 2 seats    429 -> 431 draws  (+2, +0.47%)   773,684 -> 773,300 tris
+  //     --device mobile, 6 seats    429 -> 431 draws  (+2, +0.47%)   773,684 -> 773,300 tris
+  //     desktop,         2 seats    492 -> 493 draws  (+1, +0.20%)   993,503 -> 993,071 tris
+  //     desktop,         6 seats    492 -> 493 draws  (+1, +0.20%)   993,503 -> 993,071 tris
+  //
+  // **+20 MESHES BUT ONLY +2 DRAWS**, because 18 of the 20 patches are frustum-culled at
+  // shipped framing. **TRIANGLES WENT DOWN**, and the number says why rather than being
+  // asserted: the rim stopped casting (below), and 4 bars x 12 tris = 48 tris/patch, so
+  // -384 is exactly 8 patches in the mobile shadow frustum and -432 exactly 9 on desktop.
+  // **Zero new shader programs** — `programs.created` is 28 mobile / 35 desktop in BOTH
+  // arms, because `applyRimLight` gives every rim-patched standard material one shared
+  // `customProgramCacheKey`, so a new `toonMat` bucket links nothing new at boot.
   // `CLAUDE.md` rule 10 — draw counts are EXACT, and Uri plays on a phone that `5aa4655`
   // took from 928 draws to 423.
   //
-  // ⚠️ **THAT IS NOT THE SAME AS COSTING NOTHING, AND THE MESH COUNT IS WHY IT LOOKS LIKE
-  // IT IS.** Measured, `--device mobile`, the tier the phone actually gets:
-  // **423 -> 431 draws (+8, +1.89%)** and **755,292 -> 773,796 triangles (+2.45%)**,
-  // identical at 2 and at 6 seats. Desktop: 484 -> 494 (+10, +2.07%). The split between
-  // frustum and shadow is ablated at `cloth.castShadow` below.
+  // ⚠️ **THE CANOPY ITSELF WAS NOT FREE EITHER.** `c701f70` measured, `--device mobile`,
+  // the tier the phone actually gets: **423 -> 431 draws (+8, +1.89%)** and
+  // **755,292 -> 773,796 triangles (+2.45%)**, identical at 2 and at 6 seats; desktop
+  // 484 -> 494 (+10, +2.07%). ⚠️ **Those four numbers are a RECORD OF THAT COMMIT, not a
+  // baseline for this file** — the tree has moved (`d16fcec` added a `ContactAO` pass, so
+  // the same mobile scene now starts from 429, not 423) and re-quoting them as "before"
+  // would manufacture a regression out of somebody else's work. The split between frustum
+  // and shadow is ablated at `cloth.castShadow` below.
   const cloth = mesh(mergeGeometries(clothParts, false)!, M.concealCloth, 'conceal_cloth');
   // Still `false`, and now for a second reason. It was false because a 0.02 m linen lying
   // on the floor casts nothing; the valance merged into the same buffer DOES hang at
@@ -2461,10 +2520,31 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
   // was established rather than assumed.
   cloth.castShadow = false;
   g.add(cloth);
+  // ── THE RIM — still one flat bar-frame on the true bound, and no longer a CASTER ──
+  // It was `castShadow = true` only because it shared a buffer with the poles. Four
+  // 0.02 m bars lying on the floor cast nothing a player can see (the same argument
+  // `cloth.castShadow` makes above), and every caster is a draw in the shadow pass.
   const frame = mesh(mergeGeometries(frameParts, false)!, M.concealClothRim, 'conceal_rim');
-  frame.castShadow = true;
+  frame.castShadow = false;
+  // ⚠️ **KEPT AND CORRECTED.** This line used to sit on the MERGED rim+canopy mesh, and
+  // there it was **vacuous** — a `MeshBasicMaterial` cannot receive a shadow whatever it
+  // says, so an assertion about the rack's shading was being made by a line that could
+  // not be false. It stays `false` here for a reason that CAN be false: this mesh is
+  // still unlit, and the rim's job is one steady value on the region's exact bound.
   frame.receiveShadow = false;
   g.add(frame);
+
+  // ── THE RACK — the lit half, and the whole of this round's change ────────────
+  // `castShadow` carries the poles and rails, whose ground shadow is most of what says
+  // "this is off the floor" at 58° (see the ablation under `cloth.castShadow`).
+  // `receiveShadow` is the half that was IMPOSSIBLE before: the rack takes the shadow of
+  // its own rails and pots across its own legs, which is exactly the cue measured as
+  // absent — no top-vs-side value break on any pole, no shadow from the rack onto its
+  // own legs, no key-light falloff along a rail.
+  const rack = mesh(mergeGeometries(rackParts, false)!, M.concealRack, 'conceal_rack');
+  rack.castShadow = true;
+  rack.receiveShadow = true;
+  g.add(rack);
   g.add(mesh(mergeGeometries(plateParts, false)!, M.concealPlate, 'conceal_plates'));
   g.add(mesh(mergeGeometries(trayParts, false)!, M.concealTrayWarm, 'conceal_trays'));
   return g;

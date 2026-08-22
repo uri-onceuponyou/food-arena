@@ -54,7 +54,10 @@ for (let i = 0; i < ids.length; i++) {
   const svg = `<svg width="${W}" height="${HDR}"><rect width="${W}" height="${HDR}" fill="#14161c"/>` +
     `<text x="10" y="23" font-family="monospace" font-size="17" fill="#f2b134">${id}</text>` +
     `<text x="150" y="23" font-family="monospace" font-size="15" fill="#9aa4b2">pitch ${row.pitch}  ·  ${String(row.note).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</text>` +
-    `<text x="${CW - 170}" y="23" font-family="monospace" font-size="15" fill="#7fd1ae">BEFORE c471efe</text>` +
+    // ⚠️ **THIS WAS THE LITERAL `c471efe` FOR A ROUND.** A sheet is read by a critic who
+    // cannot see the tree, so a hardcoded SHA on a re-run silently mislabels which commit
+    // the left column is — the `--ref`-pinned-A/B failure (`AGENT-BRIEF §3`) with pictures.
+    `<text x="${CW - 200}" y="23" font-family="monospace" font-size="15" fill="#7fd1ae">BEFORE ${String(args.beforesha ?? '(unlabelled)')}</text>` +
     `<text x="${W - 190}" y="23" font-family="monospace" font-size="15" fill="#7fd1ae">AFTER  ${String(args.sha ?? '')}</text></svg>`;
   layers.push({ input: Buffer.from(svg), left: 0, top: i * (CH + HDR) });
 }
