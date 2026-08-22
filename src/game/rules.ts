@@ -3413,14 +3413,80 @@ export const RARITY_COLORS: Record<Rarity, string> = {
   Cyber: '#00E5B0',
 };
 
-/** Card background colours behind the roster art. Neon/Cyber animate a black zigzag. */
+/**
+ * Card background colours behind the roster art. Neon/Cyber animate a black zigzag.
+ *
+ * ONE HUE FAMILY, RARITY BY VALUE AND CHROMA — not by hue. Uri, item 3: "muted
+ * desaturated base, small number of accents, reserve high saturation for characters".
+ *
+ * ⚠️ THE OLD PALETTE IS KEPT BELOW because it is the measurement, not a relic:
+ *
+ *     Normal '#BEBEBE'  Rare '#4A90D9'  Epic  '#9B6FDE'
+ *     Legendary '#FFD84D'  Neon '#E63946'  Cyber '#3FD1E0'
+ *
+ * Six fills over eleven cards, five of them chromatic, at 211/264/47/355/186 degrees
+ * — spread almost evenly around the wheel, so the grid had no family at all. What it
+ * cost, measured on the shipped roster (`tools/tmp/chars_metrics.mjs`, desktop, the
+ * baked `ThumbMeta.bg` and the keyed figure pixels of all eleven cards):
+ *
+ *   - MEAN FIGURE/GROUND POLARITY -0.156. SEVEN of eleven cards drew the character
+ *     DARKER than the backdrop presenting it: sushi -0.398, waterbottle -0.389,
+ *     hotdog -0.341, hamburger -0.289, lollipop -0.267, donut -0.243, burrito -0.019.
+ *   - THE BACKDROP OUT-CHROMAED THE CHARACTER ON NINE OF ELEVEN. Mean figure chroma
+ *     0.370; the fills graded to 0.827 (Rare), 0.886 (Legendary, Neon), 0.961 (Cyber).
+ *
+ * That is the same defect `b945147` fixed in the lobby — "the character was the LEAST
+ * saturated thing in its own frame" — left standing on the roster grid, which is the
+ * screen whose entire job is presenting characters.
+ *
+ * 🚨 AND THE AUTHORED HEX IS NOT THE COLOUR ON THE CARD. `thumbs.ts` sets this as
+ * `stage.scene.background` and renders the thumbnail THROUGH the post chain, so the
+ * grade gets it: measured, it moves HSV saturation by up to +0.261 and luma by up to
+ * +0.138 (Cyber #3FD1E0 landed on screen as `#05EAFA`). Authoring against the hex is
+ * authoring against the wrong number. Every value below was solved for its GRADED
+ * result by `tools/tmp/rg_cardgrade.mjs`, which ports `ToyGradeEffect` at the SHIPPED
+ * uniforms and reproduces all six old readbacks to within 1/255.
+ *
+ *   tier        authored -> ON CARD    hue  chroma   luma   white-contrast
+ *   Normal      #80888D     #758B99    203   0.141   0.245   3.55:1
+ *   Rare        #7A828C     #6B819D    214   0.196   0.213   4.00:1
+ *   Epic        #737C88     #5F7798    215   0.224   0.179   4.59:1
+ *   Legendary   #6F7487     #5C699D    228   0.255   0.148   5.30:1
+ *   Neon        #676C83     #4F5C9A    230   0.294   0.116   6.31:1
+ *   Cyber       #5B647B     #3A518C    223   0.322   0.087   7.68:1
+ *
+ * Rarity is now THREE monotone ramps inside one family — value down, chroma up, hue
+ * leaning teal->indigo — instead of six unordered hues. Rarity is an ORDERED concept
+ * (the drop tables in `tuning.ts` are ordered) and six scattered hues could not express
+ * order at all; a value ladder can. ⚠️ It says RARER, not STRONGER — `DECISIONS §26`
+ * has rarity granting no power and that is Uri's open question, not something this
+ * palette may quietly answer.
+ *
+ * Why THIS family: it is not a new one. The lobby stage was made cool at 180-210 in
+ * `b945147` so the warm hero reads against it, and the hero plate beside this grid is
+ * already deep navy. The cast is overwhelmingly warm — eleven yellow/orange/tan foods —
+ * so a cool ground is the same figure/ground trade the lobby already paid for, and
+ * these fills land in the band that family already occupies rather than opening a third.
+ *
+ * Every graded chroma is below the 0.370 mean figure chroma, and every graded luma is
+ * below the LOWEST per-card figure luma (soup, 0.240), so polarity is positive on all
+ * eleven cards with margin rather than on four.
+ *
+ * ⚠️ THE SIX-WAY DISTINCTION IS NOT CARRIED BY THIS CONSTANT ALONE and must not be.
+ * `.chars-card-rarity` paints `RARITY_COLORS` — a separate, still-six-hue palette — as
+ * a chip with an ink stroke, and that is the accent budget Uri's "small number of
+ * accents" allows. The chip is dropped only on landscape phone, where this ladder's
+ * 0.0297 minimum luma step is what keeps the tiers apart; that step is 1.5x the old
+ * palette's own worst gap (Epic 0.236 vs Neon 0.215 = 0.0204), so the tell got BETTER
+ * on the exact viewport that has to rely on it.
+ */
 export const RARITY_CARD_COLORS: Record<Rarity, string> = {
-  Normal: '#BEBEBE',
-  Rare: '#4A90D9',
-  Epic: '#9B6FDE',
-  Legendary: '#FFD84D',
-  Neon: '#E63946',
-  Cyber: '#3FD1E0',
+  Normal: '#80888D',
+  Rare: '#7A828C',
+  Epic: '#737C88',
+  Legendary: '#6F7487',
+  Neon: '#676C83',
+  Cyber: '#5B647B',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
