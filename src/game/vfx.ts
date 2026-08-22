@@ -819,20 +819,65 @@ const SPARK_COLOR = new THREE.Color('#FFE79A');
 /** The scene's own warm key, normalised. Imported, never retyped — see above. */
 const FX_KEY_DIR = KEY_OFFSET.clone().normalize();
 /**
- * Darkest and brightest multipliers applied to a VFX body.
+ * ── ⚠️ THIS WAS A SINGLE KEY-DIRECTION RAMP, AND ON HALF THE LAYER IT DID NOTHING
+ * VISIBLE. The old wording is kept because WHY it failed is the useful part: ──────
  *
- * **They sum to 2.0 on purpose and that is a contract, not a coincidence**: it makes
- * the treatment mean-preserving over a sphere, so nothing here can be mistaken for the
- * "make it bigger / brighter" lever that `209e270` measured at a 0.230 rank
- * correlation. Change one and change the other, or state the new mean.
+ *   *"Darkest and brightest multipliers applied to a VFX body. They sum to 2.0 on
+ *   purpose and that is a contract, not a coincidence: it makes the treatment
+ *   mean-preserving over a sphere."*
+ *
+ *   const FX_SHADE_LO = 0.70;
+ *   const FX_SHADE_HI = 1.30;
+ *
+ * True, correctly implemented, and it moved `fx_flat`'s `flatShare` DOWN on all
+ * eleven cases (median **-9.45 pp**, `maskPx` median delta exactly **0**). It also
+ * barely changed the PICTURE on the element the critic actually resolved at 4x — the
+ * scattered splat chunks — and reading the PNG is the only thing that caught it
+ * (`CLAUDE.md` #3; `LESSONS §6b` read backwards is the same shape one level over).
+ *
+ * **The mechanism is that a key ramp is a function of the NORMAL, and a squashed blob
+ * seen from above has almost no normal variation to offer.** `splatBlobGeo` is an
+ * icosahedron `.scale(1, 0.4, 1)`-ed, so every face the 58-degree camera can see
+ * points near +Y; `dot(n, key)` is ~0.71 across all of them and the ramp delivers a
+ * near-constant 1.21. Flat again, for a completely different reason than before.
+ *
+ * So there are TWO terms now, and they answer two different halves of the complaint:
+ *
+ *   KEY   `1 + FX_KEY_AMP * dot(n, key)` — a lit side, a terminator and a dark side.
+ *         This is the CORE. It is what a curved surface facing the camera needs, and
+ *         it is what a squashed one cannot use.
+ *   EDGE  `1 - FX_EDGE_AMP * (r / R)^2`, r being the vertex's distance from the
+ *         geometry's own centre. This is the SHAPED EDGE and the FALLOFF. It is
+ *         constant on a true sphere (every vertex is at R) so it cancels there and
+ *         costs nothing, and it is the whole treatment on a flattened blob, where the
+ *         pole sits at 0.4R and the equator at R.
+ *
+ * The EDGE term is also the answer to the *"~15 individually-readable overlapping
+ * primitives"* half, and the reason is measured elsewhere in this file:
+ * `buildGlazeMarkTexture` records at length that **a BRIGHT rim on overlapping marks
+ * stacks into concentric contour rings while a DARK one draws a single contour around
+ * the union.** Darkening each blob toward its own silhouette is that finding applied
+ * to geometry instead of to a texture.
+ *
+ * 🚨 **AND MEAN-PRESERVATION IS NOW ENFORCED RATHER THAN DERIVED.** `LO + HI = 2` was
+ * an identity that holds *for a sphere's normals* and for nothing else — on the
+ * squashed blob above, or on any geometry with a lopsided vertex distribution, it
+ * quietly stopped being true. The factors are now normalised by their own mean over
+ * the geometry's vertices, so the vertex-mean is **exactly 1.0 for every geometry, by
+ * construction**. Nothing here can brighten or darken anything on average; it can only
+ * redistribute. That is what keeps this off the "make it bigger/brighter" lever
+ * `209e270` measured at a 0.230 rank correlation with legibility.
  */
-const FX_SHADE_LO = 0.70;
-const FX_SHADE_HI = 1.30;
+const FX_KEY_AMP = 0.38;
+const FX_EDGE_AMP = 0.45;
 /**
  * A mean unit normal this long means every normal agrees, i.e. the geometry is FLAT.
  * A sphere reads ~0.00, a `CircleGeometry` reads exactly 1.00, and `splatBlobGeo`
  * (an icosahedron squashed to 0.4 in Y) reads 0.00 — which is why the class is
  * measured off the normals rather than guessed from the constructor.
+ *
+ * FLAT only means "the KEY term has nothing to say"; the EDGE term applies to
+ * everything, and on a flat decal it is the entire treatment.
  */
 const FX_FLAT_NORMAL_AGREEMENT = 0.995;
 
@@ -868,30 +913,34 @@ function shadeVfxGeometry(geo: THREE.BufferGeometry): boolean {
     flat = Math.hypot(ax / n, ay / n, az / n) >= FX_FLAT_NORMAL_AGREEMENT;
   }
 
-  if (flat) {
-    // Radial ramp in the geometry's own extent. `r` is a 3D distance, which for a flat
-    // sheet IS the in-plane radius, so this needs no basis and no assumption about
-    // which axis the sheet lies in — `splatGeo` is built in XY and rotated at the mesh,
-    // `wardGeo` is built already flat, and both come out right.
-    geo.computeBoundingSphere();
-    const bs = geo.boundingSphere;
-    const cx = bs ? bs.center.x : 0;
-    const cy = bs ? bs.center.y : 0;
-    const cz = bs ? bs.center.z : 0;
-    const R = Math.max(bs ? bs.radius : 1, 1e-6);
-    for (let i = 0; i < n; i++) {
-      const r = Math.min(1, Math.hypot(pos.getX(i) - cx, pos.getY(i) - cy, pos.getZ(i) - cz) / R);
-      // Quadratic in r, whose area-mean over a disc is exactly 0.5 — the same
-      // mean-preserving property the solid branch has, for the same reason.
-      const k = FX_SHADE_HI + (FX_SHADE_LO - FX_SHADE_HI) * r * r;
-      col[i * 3] = k; col[i * 3 + 1] = k; col[i * 3 + 2] = k;
-    }
-  } else {
-    for (let i = 0; i < n; i++) {
-      const d = nrm!.getX(i) * FX_KEY_DIR.x + nrm!.getY(i) * FX_KEY_DIR.y + nrm!.getZ(i) * FX_KEY_DIR.z;
-      const k = FX_SHADE_LO + (FX_SHADE_HI - FX_SHADE_LO) * (d * 0.5 + 0.5);
-      col[i * 3] = k; col[i * 3 + 1] = k; col[i * 3 + 2] = k;
-    }
+  // `r` is a 3D distance from the geometry's own centre, which for a flat sheet IS the
+  // in-plane radius — so the EDGE term needs no basis and no assumption about which
+  // axis a decal lies in. `splatGeo` is built in XY and rotated at the mesh, `wardGeo`
+  // is built already flat, and both come out right.
+  geo.computeBoundingSphere();
+  const bs = geo.boundingSphere;
+  const cx = bs ? bs.center.x : 0;
+  const cy = bs ? bs.center.y : 0;
+  const cz = bs ? bs.center.z : 0;
+  const R = Math.max(bs ? bs.radius : 1, 1e-6);
+
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    const r = Math.min(1, Math.hypot(pos.getX(i) - cx, pos.getY(i) - cy, pos.getZ(i) - cz) / R);
+    const edge = 1 - FX_EDGE_AMP * r * r;
+    const key = flat
+      ? 1
+      : 1 + FX_KEY_AMP * (nrm!.getX(i) * FX_KEY_DIR.x + nrm!.getY(i) * FX_KEY_DIR.y + nrm!.getZ(i) * FX_KEY_DIR.z);
+    const raw = Math.max(0, key * edge);
+    col[i * 3] = raw;
+    sum += raw;
+  }
+  // Normalise to a vertex-mean of EXACTLY 1.0. See `FX_KEY_AMP` — this is enforced, not
+  // derived from an identity that only held for a sphere.
+  const norm = sum > 1e-9 ? n / sum : 1;
+  for (let i = 0; i < n; i++) {
+    const k = col[i * 3] * norm;
+    col[i * 3] = k; col[i * 3 + 1] = k; col[i * 3 + 2] = k;
   }
 
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -3799,7 +3848,11 @@ export class VfxLayer {
     // `vertexColors` is set, because the reverse would draw one frame of black. The
     // matching reset lives in `allocWedge`, next to the `map` reset it is the sibling
     // of.
-    shadeVfxGeometry(geo);
+    // Counted, like every other reach — a census that omits the one element every
+    // weapon draws would report a smaller number than the treatment's real footprint,
+    // and `fx_flat`'s §G asserts on that number.
+    if (shadeVfxGeometry(geo)) FX_SHADE_STATS.geometries++;
+    if (!w.mat.vertexColors) FX_SHADE_STATS.materials++;
     w.mat.vertexColors = true;
     w.mat.needsUpdate = true;
     w.mat.color.set(color).lerp(WHITE, 0.05);
