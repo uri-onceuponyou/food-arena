@@ -1801,7 +1801,21 @@ export class Stage {
     // critic quoted two plates (0.3973 and 0.4735) and concluded we are *"BRIGHTER than
     // both"*, prescribing -0.06 of luma. Across all six, luma runs 0.3725-0.6389 and
     // **our 0.5122 is inside it — bs_03 at 0.6389 and bs_01 at 0.5209 are both brighter
-    // than we are.** Two plates chosen from six are not a band. Darkening was therefore
+    // than we are.** Two plates chosen from six are not a band.
+    //
+    // 🚨 AND THE COMMIT THAT LANDED THIS PARAGRAPH GOT THAT COUNT WRONG IN ITS OWN TITLE.
+    // `fa4857f` is titled *"...is false against FOUR of the other six"*. It is **TWO**:
+    // of the four plates the critic did not quote, bs_01 (0.5209) and bs_03 (0.6389) are
+    // brighter than us and bs_05 (0.4423) and bs_06 (0.3725) are darker. The four in that
+    // title is the size of the UNQUOTED SET, not the size of the falsifying set, and the
+    // body of the same commit states it correctly three lines below the title. `--amend`
+    // is banned and it is pushed, so the title stays wrong forever and this is the only
+    // correction there can be — which is precisely the point of the ban, and precisely
+    // what `70ee682` had to do to `140d054` nine hours earlier, in a commit whose whole
+    // subject was a figure nobody re-derived. **A count written in the same breath as the
+    // argument it supports is the one that goes unchecked**, because the argument is
+    // sound either way: two plates or four, the critic's generalisation is dead.
+    // Darkening was therefore
     // NOT taken: the shader's own comment ("chroma = saturation x f(luma), so lowering
     // luma must lower chroma OR raise saturation") means every luma lever spends the
     // thing we are actually short of, and `CLAUDE.md` names high-key as a pillar. Measured
