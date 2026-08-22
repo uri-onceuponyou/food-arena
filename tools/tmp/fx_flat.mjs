@@ -425,6 +425,23 @@ const CASES = [
   { id: 'proj.soup.Splash', kind: 'proj', cid: 'soup', key: 'Splash' },
   { id: 'proj.donut.Candy', kind: 'proj', cid: 'donut', key: 'Candy' },
   { id: 'proj.waterbottle.Cap', kind: 'proj', cid: 'waterbottle', key: 'Cap' },
+  /**
+   * 🚨 **THE HOLDS ARM, AND IT IS A DIFFERENT KIND OF ROW FROM EVERY ONE ABOVE.**
+   *
+   * `hamburger.Smash` has NO entry in `vfx/weapons/index.ts`'s registry — the file's
+   * own header lists `'Smash'`, `'Lettuce'` and `'Onion'` as unconverted — so
+   * `spawnImpactBurst` takes the GENERIC path: a `'primary'` anchor and no bespoke
+   * hook at all. `vfx.ts`'s union treatment opens its scope only around a bespoke
+   * `impact()` call, so this row must come back **EXACTLY** unchanged by it.
+   *
+   * That is the one arm that can catch the scope LEAKING — a `pendingUnion` left open
+   * would capture the next transient spawned anywhere in the match, and every other
+   * row in this file would still look like a clean improvement while it happened.
+   * `fx_ab.mjs` asserts it and excludes it from the median, exactly as it does the
+   * `figures` reference arm; a row that cannot move must not be averaged with rows
+   * that can.
+   */
+  { id: 'ctrl.generic.hamburger.Smash', kind: 'impact', cid: 'hamburger', key: 'Smash' },
 ];
 
 async function fireCase(page, c, sliceMs, seed) {
@@ -731,10 +748,37 @@ async function main() {
         bad(`§G REACH: the shading reached ${reachEnd.geometries} geometries / ${reachEnd.materials} materials — a treatment that touches nothing looks exactly like one that did not help`);
       }
     }
+    /**
+     * §H — the UNION treatment's own reach census, on the same argument as §G above
+     * and read off the same module. ABSENT on any tree that predates it, which is
+     * correct and is why this is not a gate on the BEFORE arm.
+     *
+     * `members` and `mats` are the two that matter. `mats` counts only materials with
+     * `transparent: true`, because an `opacity` write to an opaque material is ignored
+     * by the renderer — a peer's ablation carried three false zeros of exactly that
+     * shape last session, one of them a knob declared and never read because the blend
+     * function was `SRC`. `inert` and `coresStarved` are printed rather than asserted:
+     * a scope with one member IS supposed to be inert, and knowing how often that
+     * happens is the point.
+     */
+    const unionEnd = await page.evaluate(async () => {
+      try {
+        const m = await import('/src/game/vfx.ts');
+        return m.FX_UNION_STATS ? { ...m.FX_UNION_STATS } : null;
+      } catch (e) { return { err: String(e) }; }
+    });
+    log(`FX_UNION_STATS (after the run): ${unionEnd ? JSON.stringify(unionEnd) : 'ABSENT — this tree predates the union treatment'}`);
+    if (unionEnd && !unionEnd.err) {
+      if (!(unionEnd.scopes > 0)) bad('§H REACH: zero union scopes opened — no bespoke impact fired, so every union number below is vacuous');
+      if (!(unionEnd.members > 0)) bad('§H REACH: zero union members collected — the treatment reached nothing');
+      if (!(unionEnd.mats > 0)) bad('§H REACH: zero TRANSPARENT materials collected — every member is opaque and the alpha term is a silent no-op');
+      if (!(unionEnd.cores > 0)) bad('§H REACH: zero cores allocated — the "one hot centre" half never drew');
+      if (unionEnd.scopes === unionEnd.inert) bad('§H REACH: every scope was INERT — a union of one is the per-lobe case this exists to get past');
+    }
     await writeFile(`${OUT}/${LABEL}.p${PITCH}.json`, JSON.stringify({
       base: BASE, label: LABEL, pitch: PITCH, viewport: [W, H],
       delta: DELTA, erode: ERODE, blur: BLUR, flatEps: FLAT_EPS, seed: SEED, slice: SLICE,
-      reach, reachEnd, results,
+      reach, reachEnd, unionEnd, results,
     }, null, 1));
     log(`\nwrote ${OUT}/${LABEL}.p${PITCH}.json`);
   } finally {

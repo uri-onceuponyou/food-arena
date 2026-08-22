@@ -1,0 +1,39 @@
+{
+ "base": "http://localhost:51074",
+ "label": "before",
+ "viewport": [
+  390,
+  844
+ ],
+ "seed": 777,
+ "slice": 160,
+ "rows": [
+  {
+   "seats": 2,
+   "idle": 323,
+   "busy": 371,
+   "hidden": 323,
+   "back": 371,
+   "liveSlots": 2,
+   "vfxChildren": 138
+  },
+  {
+   "seats": 3,
+   "idle": 323,
+   "busy": 371,
+   "hidden": 323,
+   "back": 371,
+   "liveSlots": 3,
+   "vfxChildren": 146
+  },
+  {
+   "seats": 6,
+   "idle": 323,
+   "busy": 371,
+   "hidden": 323,
+   "back": 371,
+   "liveSlots": 6,
+   "vfxChildren": 170
+  }
+ ]
+}

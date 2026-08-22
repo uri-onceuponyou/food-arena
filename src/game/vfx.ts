@@ -985,6 +985,309 @@ function shadeVfxObject(object: THREE.Object3D): void {
 }
 
 /**
+ * ── UNION SHADE — the core, the shaped edge and the falloff belong to the WHOLE
+ *    MASS, and `shadeVfxGeometry` above CANNOT REACH THEM. ────────────────────────
+ *
+ * The block above shades a lobe against ITS OWN centre. That is the right treatment
+ * for one object and the wrong one for twenty-five overlapping ones: it gives every
+ * lobe a bright middle and a dark silhouette, so a pile of them reads as N separately
+ * cored bubbles rather than as one explosion. Measured on the shipped `0b8caec` tree
+ * by `tools/tmp/fx_flat.mjs`, and the three columns agree:
+ *
+ *   · `segRatio` (interior contour energy against the union's own outer contour)
+ *     ROSE on 10 of 11 cases when the per-lobe ramp landed — more internal contour,
+ *     which is the segmentation the treatment was meant to remove.
+ *   · `falloffR` — *"has a core, stated as a number"* — moved a median of EXACTLY
+ *     -0.0000. Five better, five worse, one flat.
+ *   · `stepRatio` — lobes HIGH, one mass LOW — moved +0.0172, the wrong way.
+ *
+ * **And it is structural, not a tuning miss.** `shadeVfxGeometry` bakes its ramp into
+ * a `color` ATTRIBUTE, and the lobe geometries are module-scope singletons shared by
+ * every instance (`hamburger.ts:splatBlobGeo`, `soup.ts:splatGeos`,
+ * `donut.ts:arcGeos`; the census below reads 33 geometries across 125 meshes in an
+ * eleven-case sweep). A baked vertex colour is therefore IDENTICAL on every instance
+ * *by construction* and can never encode where a lobe sits inside the burst. No value
+ * of `FX_KEY_AMP` or `FX_EDGE_AMP` reaches it.
+ *
+ * So this is the same treatment one level up, on the quantity the per-lobe one cannot
+ * see: **each member's distance to the BURST CENTRE**, evaluated per frame against the
+ * union's own live radius.
+ *
+ *   ALPHA   `1 - UNION_ALPHA_FALLOFF * u^2`, `u` = member distance / union radius.
+ *           The union stops terminating in a chain of hard opaque arcs; the outer
+ *           lobes fade toward the floor instead. This is the "shaped edge and
+ *           falloff" half, and it is also what collapses the per-lobe contours
+ *           `segRatio` counts, because a lobe at 0.45 alpha carries 0.45 of its own
+ *           rim contrast.
+ *   CORE    one additive `glowTex` sprite at the impact point, its radius a fraction
+ *           of the union's LIVE radius and its colour the weapon's lerped hard toward
+ *           white. This is the "one hot centre" half.
+ *
+ * ── WHY THE CORE IS A SEPARATE ELEMENT AND NOT "BRIGHTEN THE INNER LOBES" ────────
+ *
+ * Because on this roster there ARE no inner lobes. Read the 4x crops: `hamburger`'s
+ * seven chunks start on the rim of the target's own footprint (`rim = CHARACTER_RADIUS
+ * * 0.45`) and travel OUTWARD, `lollipop.Smash` is a ring, `egg.Shards` is scattered
+ * debris. At the 160 ms the critic looked at, the centre of every bespoke impact is
+ * the VICTIM, not the effect — and the subordinate anchor under it passes
+ * `skipFlash: true`, which removes the one element `burst()` has that is a core.
+ * *"No bright core"* is not a description of a weak core; it is literally true.
+ *
+ * ── WHY THIS IS NOT THE "MAKE IT BIGGER" LEVER `209e270` PRICED AT 0.230 ─────────
+ *
+ * The alpha term only ever SUBTRACTS, and it subtracts most at the silhouette, which
+ * is where area is measured. The core's radius is a fraction of the union's own, so it
+ * cannot extend the footprint — it redistributes brightness inside a silhouette this
+ * change can only shrink. `wi_guard` arms A/E are the ratchet on that and are run at
+ * both pitches.
+ *
+ * ⚠️ **`flatShare` IS NOT A VALID ACCEPTANCE COLUMN FOR THIS AND IT IS THE ONE THE
+ * BRIEF QUOTES.** It thresholds at `|grad luma| < 0.5`, so ANY non-constant ramp moves
+ * it by construction and it cannot fail. Judge on `segRatio`, `stepRatio` and
+ * `falloffR`, which have no cut in them.
+ */
+/**
+ * Raw rim weight: a lobe at the union's rim keeps `1 - this` of its own alpha, BEFORE
+ * the mean-preservation below.
+ *
+ * ── ⚠️ THE FIRST VERSION APPLIED THIS RAW AND IT WAS A DIMMER SWITCH, NOT A FALLOFF ──
+ *
+ * Measured, single-variable, `UNION_CORE_OPACITY = 0` so only this term was live:
+ *
+ *     impact.egg.Shards       maskPx  1,275 -> 714, interior 216 -> 18  (VACUOUS)
+ *     impact.hamburger.Tomato maskPx  2,994 -> 2,974                    (-0.7%)
+ *
+ * **Nothing where it was wanted, damage where it was not**, and the mechanism is
+ * geometric rather than a bad constant. A radial ramp over members can only produce a
+ * gradient if the members are radially DISTRIBUTED, and on this roster they are on a
+ * SHELL: `hamburger.ts` puts all seven chunks at `rim + (0.5..1.25) * sizeFactor`,
+ * `lollipop.Smash` is a ring, `egg.Shards` throws everything outward from one radius.
+ * With every `u` equal, every `w` is equal — so the raw form delivers a flat 0.45x
+ * multiply, which is *"make it dimmer"*, the exact lever `209e270` priced at a 0.230
+ * rank correlation with legibility.
+ *
+ * So the weights are normalised to a member-mean of EXACTLY 1.0, the same discipline
+ * `shadeVfxGeometry` had to adopt one level down and for the same reason. A shell then
+ * becomes an exact NO-OP — which is the correct answer for a shell, not a compromise —
+ * and a genuinely graded mass gets its gradient with no net alpha lost.
+ */
+const UNION_ALPHA_FALLOFF = 0.55;
+/**
+ * Core sprite RADIUS as a fraction of the union's live radius — it must stay INSIDE
+ * the mass, because a core that reaches the silhouette is a lid, not a centre.
+ *
+ * ── ⚠️ THESE THREE NUMBERS WERE 0.38 / 0.62 / 0.85 AND THE LOBBY CAMERA REFUSED
+ *    THEM. The old wording is kept because WHAT it got wrong is the useful part: ────
+ *
+ *   *"a CORE is the thing the rest of the mass falls away from, so it has to be the
+ *   brightest thing in the effect."*
+ *
+ * True of the effect, and this sprite is composited over the VICTIM (`depthTest:
+ * false`, see the pool). At the 20-degree lobby framing — the detector, per
+ * `CLAUDE.md` #3 — `impact.hamburger.Tomato`'s 4x crop showed the fighter's own
+ * mid-body visibly PALER and less saturated through the core. This project has
+ * falsified "fix it by desaturating" four times and already records that *"an effect
+ * that hides the thing it is giving feedback about has stopped being feedback"*. The
+ * metric sheet could not see it: `falloffR` improved on that case at pitch 58 while it
+ * was happening.
+ *
+ * Retuned to a smaller, dimmer, less-white core, and re-read at BOTH pitches.
+ */
+const UNION_CORE_RADIUS_K = 0.30;
+/** How far the core's weapon colour is lerped toward white. `burst()`'s own flash uses
+ * 0.30 for the same composite-over-the-victim reason; this stays above it because a
+ * core has to out-read the mass, and below the 0.62 the lobby camera rejected. */
+const UNION_CORE_WHITE = 0.45;
+const UNION_CORE_OPACITY = 0.55;
+/**
+ * The core's own life, in seconds, INDEPENDENT of how long the mass lasts.
+ *
+ * A core is a POP, not a dwell: `burst()`'s primary flash runs 0.16-0.24 s and the
+ * ground decal deliberately outlives it *"so it reads as a mark LEFT BEHIND"*. Tying
+ * the core to `scope.maxLife` (0.55-0.75 s on this roster) would keep a bright additive
+ * sprite sitting on the victim for the whole dwell, which is the *"effect that hides
+ * the thing it is giving feedback about"* this file already has a scar from.
+ */
+const UNION_CORE_LIFE_S = 0.34;
+/** `(1 - t)^this` — slightly faster than linear. */
+const UNION_CORE_FADE = 1.1;
+/**
+ * Metres. Ceiling on the union radius, and it is load-bearing rather than defensive.
+ *
+ * 🚨 **THE FIRST VERSION TOOK THE RADIUS AS THE MAX MEMBER DISTANCE AND `egg.Shards`
+ * WASHED THE ENTIRE FRAME WHITE — `maskPx` 1,275 -> 984,015 at pitch 58, 1,385 ->
+ * 572,757 at pitch 20.** The cause is in `unionMemberPoint`'s note: several hooks
+ * spawn a Group left at the layer ORIGIN whose children carry absolute coordinates, so
+ * "the member's position" read ~36 m from the impact and the core was sized to it.
+ * That probe is fixed. The ceiling stays anyway, because a max over members has no
+ * upper bound by construction and the next hook to fly one lobe a long way would do
+ * the same thing again — and it would do it as a *plausible* wash rather than an
+ * obvious one, which is worse (`CLAUDE.md` rule 4).
+ *
+ * 0.85 * `CHARACTER_HEIGHT` = 1.785 m, from this file's own sizing argument: the burst
+ * is sized so *"at typical weapon damage the burst's largest opaque element is about
+ * ONE character height across"*.
+ */
+const UNION_MAX_RADIUS_M = CHARACTER_HEIGHT * 0.85;
+/**
+ * Which member distance the union radius is taken at, 0..1 — **not the max**.
+ *
+ * The max is one flying fleck's worth of noise away from being wrong on every frame,
+ * and it is the statistic that failed above. A high quantile is the same number for a
+ * compact mass and ignores the one straggler that has already left it.
+ */
+const UNION_RADIUS_Q = 0.8;
+/** Cores are NOT stolen from a live burst when the pool is empty (unlike
+ * `allocParticle`, which steals the closest-to-death slot): a core that vanishes
+ * mid-burst is worse than a burst with no core. Starvation is COUNTED instead —
+ * see `FX_UNION_STATS.coresStarved`. */
+const UNION_CORE_POOL_SIZE = 12;
+/** A "union" of one object is that object, and the per-lobe ramp already owns it.
+ * Below this the scope is INERT and counted as such. */
+const UNION_MIN_MEMBERS = 2;
+/** Metres. Floors the radius the falloff normalises by, so a burst whose members are
+ * all still stacked on the impact point yields `u ~ 0` (weight ~ 1, a no-op) instead
+ * of dividing by ~0 and slamming every member to the rim weight. */
+const UNION_MIN_RADIUS_M = 0.05;
+
+/**
+ * QA-only census of what the union treatment actually reached, for the same reason
+ * `FX_SHADE_STATS` exists: `CLAUDE.md` rule 6, and a peer's three false zeros in one
+ * ablation. **A treatment that silently reaches nothing looks exactly like a treatment
+ * that did not help.** `opaqueSkipped` is the one to watch — an alpha term applied to
+ * a material with `transparent: false` is a silent no-op, and it is counted rather
+ * than assumed away. Never read by game logic.
+ */
+export const FX_UNION_STATS = {
+  scopes: 0, inert: 0, members: 0, mats: 0, opaqueSkipped: 0, cores: 0, coresStarved: 0,
+  /**
+   * How many times a material was reached by a SECOND member inside one frame.
+   *
+   * 🚨 **THIS COUNTER EXISTS BECAUSE THE COMMENT IT REPLACED WAS WRONG, AND THE
+   * MEASUREMENT IS THE ONLY REASON ANYONE KNOWS.** The first version weighted
+   * `mat.opacity` with a straight multiply and this file claimed the aliasing that
+   * `hamburger.ts:materialPool` and its three siblings produce *"adds no exposure it
+   * did not already have, because the hooks' own per-frame writes alias in exactly the
+   * same way"*. **The hooks' writes are ABSOLUTE (`mat.opacity = f(t)`) and mine was
+   * MULTIPLICATIVE, and those two do not alias the same way at all**: N aliased
+   * members took `w^N`. Measured on `egg.Shards` at pitch 58, `maskPx` **1,275 -> 18**
+   * — the effect all but erased, and it read as a plausible small burst rather than as
+   * a crash. The base is now per MATERIAL and per FRAME, so a second member writes
+   * `base * w` and not `(base * w) * w`; last writer wins, which IS what the hooks do.
+   */
+  aliasTouches: 0,
+};
+
+/** One pooled additive core sprite. */
+interface UnionCoreSlot {
+  sprite: THREE.Sprite;
+  mat: THREE.SpriteMaterial;
+  busy: boolean;
+}
+
+/** One impact burst's union — the members a single bespoke `impact()` hook spawned,
+ * the point they were spawned around, and the core drawn at it. */
+interface UnionScope {
+  cx: number; cy: number; cz: number;
+  members: THREE.Object3D[];
+  life: number;
+  /** The longest member lifetime in the scope, so the core outlives the mass by
+   * exactly nothing. Grown as members arrive. */
+  maxLife: number;
+  core: UnionCoreSlot | null;
+  color: string;
+}
+
+/** The transparent materials one union member draws with. */
+interface UnionMemberState {
+  mats: (THREE.Material & { opacity: number })[];
+}
+
+/**
+ * Per-MATERIAL alpha bookkeeping — see `updateUnionScopes` for why the base has to be
+ * remembered per material and re-based once per frame rather than per member.
+ */
+interface UnionMatState {
+  /** The frame this material's `base` was last refreshed on. */
+  frame: number;
+  /** The opacity the HOOK last authored, before any union weighting. */
+  base: number;
+  /** The exact value this file last wrote, so a hook's own write is distinguishable
+   * from our own on a float comparison that cannot be off by an ulp. */
+  written: number;
+}
+
+/**
+ * Collect the TRANSPARENT materials under `object`, deduped.
+ *
+ * Opaque materials are excluded and counted: `opacity` on a `transparent: false`
+ * material is ignored by the renderer, so including them would put a silent no-op
+ * inside the treatment and inflate `FX_UNION_STATS.mats` with work that reaches
+ * nothing.
+ */
+function collectUnionMaterials(object: THREE.Object3D): UnionMemberState {
+  const mats: (THREE.Material & { opacity: number })[] = [];
+  const seen = new Set<string>();
+  object.traverse((o) => {
+    const withMat = o as THREE.Mesh | THREE.Sprite;
+    const raw = (withMat as THREE.Mesh).material;
+    if (!raw) return;
+    const list = Array.isArray(raw) ? raw : [raw];
+    for (const m of list) {
+      if (!m) continue;
+      if (!m.transparent) { FX_UNION_STATS.opaqueSkipped++; continue; }
+      if (seen.has(m.uuid)) continue;
+      seen.add(m.uuid);
+      mats.push(m as THREE.Material & { opacity: number });
+    }
+  });
+  FX_UNION_STATS.mats += mats.length;
+  return { mats };
+}
+
+/**
+ * Where a union member actually IS on screen, as the mean offset of the things it
+ * draws.
+ *
+ * 🚨 **`object.position` IS NOT THAT, AND BELIEVING IT WAS COST A WHOLE-FRAME
+ * WHITEOUT.** Two spawn patterns coexist in `vfx/weapons/**` and both are legitimate:
+ *
+ *   · a positioned MESH — `hamburger.ts`'s chunks, `soup.ts`'s lozenges. Here
+ *     `object.position` is the answer.
+ *   · a GROUP LEFT AT THE ORIGIN whose children carry ABSOLUTE layer coordinates —
+ *     `egg.ts:spawnFractureStar` builds `new THREE.Group()`, never touches its
+ *     position, and writes `spoke.position.set(bx + dx * mid, ...)` in `onUpdate`.
+ *     Here `object.position` is (0, 0, 0), i.e. the middle of the ARENA, and reading
+ *     it put a member ~36 m from the impact.
+ *
+ * So the offsets are accumulated down the chain to whatever actually renders. It is a
+ * translation-only sum, deliberately: a `getWorldPosition` would be exact but reads
+ * `matrixWorld`, which the renderer has not updated yet when this runs (it updates at
+ * render time, AFTER `updateEffects`), so it would be a frame stale — and the rotations
+ * in this layer sit on the LEAF meshes, where they do not move the leaf's own origin.
+ *
+ * Returns false when the member draws nothing visible, which is a real state (a group
+ * whose children are all `visible = false`) and must not be counted as "at the centre".
+ */
+function unionMemberPoint(object: THREE.Object3D, out: THREE.Vector3): boolean {
+  let n = 0;
+  out.set(0, 0, 0);
+  const walk = (o: THREE.Object3D, ax: number, ay: number, az: number): void => {
+    const x = ax + o.position.x;
+    const y = ay + o.position.y;
+    const z = az + o.position.z;
+    if (!o.visible) return;
+    const drawn = (o as unknown as { isMesh?: boolean; isSprite?: boolean });
+    if (drawn.isMesh || drawn.isSprite) { out.x += x; out.y += y; out.z += z; n++; }
+    for (const c of o.children) walk(c, x, y, z);
+  };
+  walk(object, 0, 0, 0);
+  if (n === 0) return false;
+  out.multiplyScalar(1 / n);
+  return true;
+}
+
+/**
  * Keep `pool` (id -> mesh) in sync with `items` (id-bearing sim records): create a
  * mesh for any new id via `create`, refresh every live mesh via `update`, and remove
  * meshes whose id no longer appears in `items`.
@@ -2368,7 +2671,44 @@ export class VfxLayer {
      * pre-existing one.
      */
     telegraphOwner?: FighterId;
+    /**
+     * The impact burst this transient is a member of, if it was spawned inside a
+     * bespoke `impact()` hook — see the `UNION SHADE` block. `undefined` for every
+     * other transient in the file, which is every cast, telegraph and trail beat.
+     */
+    union?: UnionScope;
   }> = [];
+  /** Live impact unions (`UNION SHADE`). Short list — one entry per bespoke impact
+   * currently on screen, so it is the same order of magnitude as `transientEffects`
+   * divided by the members per burst. */
+  private readonly unionScopes: UnionScope[] = [];
+  /** The scope `spawnTransientObject` attaches new members to, non-null only for the
+   * duration of one synchronous `bespoke(ctx)` call. Cleared in a `finally` so a hook
+   * that throws cannot capture every subsequent transient in the match. */
+  private pendingUnion: UnionScope | null = null;
+  private readonly unionCores: UnionCoreSlot[] = [];
+  /**
+   * Per-member alpha bookkeeping, keyed by the member object itself.
+   *
+   * A `WeakMap` and not a field on the transient record because the scope holds
+   * OBJECTS (it has to: the union radius is a function of their live positions) and
+   * this keeps the two indexed by the same thing. Entries die with the object.
+   */
+  private readonly unionMemberState = new WeakMap<THREE.Object3D, UnionMemberState>();
+  /** See `UnionMatState`. Keyed by the MATERIAL because that is the thing two members
+   * can share — `hamburger.ts:materialPool` and its three siblings hand the same
+   * instance to different lobes on purpose. */
+  private readonly unionMatState = new WeakMap<THREE.Material, UnionMatState>();
+  /** Monotonic tick counter, incremented once per `updateUnionScopes`. The only thing
+   * it has to do is differ from the previous frame's value. */
+  private unionFrame = 0;
+  /** Scratch reused every frame by `updateUnionScopes`: this runs inside the render
+   * loop, so the distance pass and its quantile sort reuse buffers rather than
+   * allocating a pair of arrays per burst per frame. */
+  private readonly unionPointScratch = new THREE.Vector3();
+  private readonly unionCentreScratch = new THREE.Vector3();
+  private readonly unionDistScratch: number[] = [];
+  private readonly unionSortScratch: number[] = [];
   /**
    * Live cast telegraphs, keyed by the CASTER's `Fighter.id`.
    *
@@ -2584,6 +2924,41 @@ export class VfxLayer {
         vx: 0, vy: 0, vz: 0, gravity: 0,
         startScale: 1, endScale: 1, startOpacity: 1, endOpacity: 0, fadeEase: 1, aspect: 1,
       });
+    }
+
+    // UNION SHADE cores. Same `glowTex` and the same additive blend as the particle
+    // pool's flash — this is deliberately the effect `burst()` already draws for a
+    // GENERIC hit and that the subordinate anchor drops with `skipFlash: true`, put
+    // back at the union's scale instead of at `k`'s.
+    //
+    // `renderOrder` 9, one BELOW the particles: the core is what the debris is lit
+    // against, so shards and streaks have to composite over it, not under it.
+    for (let i = 0; i < UNION_CORE_POOL_SIZE; i++) {
+      const mat = new THREE.SpriteMaterial({
+        map: this.glowTex,
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        // 🚨 `depthTest: false`, AND IT IS THE DIFFERENCE BETWEEN THIS ELEMENT
+        // EXISTING AND NOT. The core is drawn at `IMPACT_HEIGHT` on the point that was
+        // hit — i.e. INSIDE the victim — so with depth testing on, the victim's own
+        // body rejects it and the "hot centre" delivers ZERO pixels. Measured: with the
+        // alpha term ablated to 0 so only the core was live, every column of
+        // `impact.egg.Shards` came back BIT-IDENTICAL to the tree without it — 1275 /
+        // 3.2% / 40.73 / 7.746 / 0.769 / 1.303. A perfectly plausible sprite,
+        // configured, allocated, counted by `FX_UNION_STATS.cores`, and invisible.
+        // `CLAUDE.md` rule 4, and this file already carries two measurements of the
+        // same class ("shipped 37 px | depthTest off 179 px", "44 px | 620 px").
+        depthTest: false,
+        blending: THREE.AdditiveBlending,
+      });
+      const sprite = new THREE.Sprite(mat);
+      sprite.name = 'vfx_union_core';
+      sprite.visible = false;
+      sprite.renderOrder = 9;
+      this.group.add(sprite);
+      this.unionCores.push({ sprite, mat, busy: false });
     }
 
     for (let i = 0; i < WEDGE_POOL_SIZE; i++) {
@@ -3269,11 +3644,17 @@ export class VfxLayer {
         if (eff.telegraphOwner !== undefined && this.castTelegraphs.get(eff.telegraphOwner) === eff.object) {
           this.castTelegraphs.delete(eff.telegraphOwner);
         }
+        this.detachUnionMember(eff);
         this.transientEffects.splice(i, 1);
         continue;
       }
       eff.onUpdate?.(eff.life / eff.maxLife, eff.life);
     }
+
+    // UNION SHADE, and the order is load-bearing: every member's own `onUpdate` has
+    // already run for this frame, so the alpha weighting below is applied to freshly
+    // authored values and the union radius is read off positions that are current.
+    this.updateUnionScopes(dtSeconds);
   }
 
   /** `ctx.spawnTransient` for every `WeaponVfx` hook (see `vfx/weapons/types.ts`):
@@ -3292,7 +3673,210 @@ export class VfxLayer {
     // unconditional rather than asking each author to opt in.
     shadeVfxObject(object);
     this.group.add(object);
-    this.transientEffects.push({ object, life: 0, maxLife: Math.max(0.001, lifetimeSeconds), onUpdate, telegraphOwner });
+    // UNION SHADE: the same choke-point argument one level up. A hook spawns its lobes
+    // one at a time and knows nothing about the mass they add up to, so membership is
+    // collected HERE, for the duration of one `bespoke(ctx)` call, rather than asked of
+    // eleven weapon files.
+    const union = this.pendingUnion;
+    if (union) {
+      union.members.push(object);
+      this.unionMemberState.set(object, collectUnionMaterials(object));
+      union.maxLife = Math.max(union.maxLife, Math.max(0.001, lifetimeSeconds));
+      FX_UNION_STATS.members++;
+    }
+    this.transientEffects.push({
+      object, life: 0, maxLife: Math.max(0.001, lifetimeSeconds), onUpdate, telegraphOwner,
+      union: union ?? undefined,
+    });
+  }
+
+  /** Open a `UNION SHADE` scope around one bespoke `impact()` call. */
+  private openUnionScope(origin: { x: number; z: number }, color: string): void {
+    this.pendingUnion = {
+      cx: origin.x, cy: IMPACT_HEIGHT, cz: origin.z,
+      members: [], life: 0, maxLife: 0, core: null, color,
+    };
+  }
+
+  /**
+   * Close the scope opened by `openUnionScope` and decide whether it is a union at
+   * all. A hook that spawned nothing (or one object) is left INERT and counted:
+   * `[].every()` is true and an empty scope would sail through every assertion below
+   * while doing nothing, which is `CLAUDE.md` rule 6's vacuity class exactly.
+   */
+  private closeUnionScope(): void {
+    const scope = this.pendingUnion;
+    this.pendingUnion = null;
+    if (!scope) return;
+    FX_UNION_STATS.scopes++;
+    if (scope.members.length < UNION_MIN_MEMBERS) { FX_UNION_STATS.inert++; return; }
+    const core = this.unionCores.find((c) => !c.busy) ?? null;
+    if (core) {
+      core.busy = true;
+      core.sprite.visible = true;
+      core.sprite.position.set(scope.cx, scope.cy, scope.cz);
+      core.sprite.scale.set(UNION_MIN_RADIUS_M, UNION_MIN_RADIUS_M, 1);
+      core.mat.color.set(scope.color).lerp(WHITE, UNION_CORE_WHITE);
+      core.mat.opacity = 0;
+      scope.core = core;
+      FX_UNION_STATS.cores++;
+    } else {
+      FX_UNION_STATS.coresStarved++;
+    }
+    this.unionScopes.push(scope);
+  }
+
+  /** Drop a member out of its union — called wherever a transient leaves the layer,
+   * so the union radius is never computed off an object that is no longer drawn. */
+  private detachUnionMember(eff: { object: THREE.Object3D; union?: UnionScope }): void {
+    if (!eff.union) return;
+    const i = eff.union.members.indexOf(eff.object);
+    if (i >= 0) eff.union.members.splice(i, 1);
+  }
+
+  private releaseUnionCore(scope: UnionScope): void {
+    if (!scope.core) return;
+    scope.core.busy = false;
+    scope.core.sprite.visible = false;
+    scope.core.mat.opacity = 0;
+    scope.core = null;
+  }
+
+  /**
+   * Advance every live union: recompute its radius from its members' CURRENT
+   * positions, weight each member's alpha by where it sits inside that radius, and
+   * drive the core off the same number.
+   *
+   * ── WHY THE RADIUS IS PER-FRAME AND NOT TAKEN AT SPAWN ──────────────────────────
+   *
+   * `impactAnchor`'s header records that `vfx.ts` *"cannot see the sculpt"* — at the
+   * instant the anchor spawns, the only signals are how many objects arrived and how
+   * big they are BEFORE their first `onUpdate`, and most hooks animate scale and
+   * position from ~0. That is true, and it is a statement about the SPAWN INSTANT.
+   * A per-frame reader is not under it: by the time this runs the hook has already
+   * moved its lobes to where they actually are. The union's extent is measured, never
+   * modelled, and it costs one distance per member per frame.
+   *
+   * ── WHY THE LAST VALUE WE WROTE IS REMEMBERED ──────────────────────────────────
+   *
+   * A hook typically writes `mat.opacity = f(t)` every frame, so weighting is a
+   * multiply on a value that is freshly authored each time. But some members have no
+   * `onUpdate` at all, and on those a naive `*=` compounds to zero over a few frames.
+   * So the base is recovered instead: if the material still holds EXACTLY the number
+   * this function last wrote, the hook did not touch it and the previous base stands;
+   * otherwise the current value IS the new base. Exact because both sides are the same
+   * double, and correct in both regimes without asking which one a member is in.
+   *
+   * ── ⚠️ AND THE BASE IS PER MATERIAL, NOT PER MEMBER. THE OLD WORDING IS KEPT
+   *    BECAUSE IT WAS WRONG AND MEASUREMENT IS THE ONLY THING THAT SAID SO: ────────
+   *
+   *   *"Members that share one pooled material (`hamburger.ts:materialPool` and the
+   *   three like it) alias, and the last writer in a frame wins. That is unchanged
+   *   from today — the hooks' own per-frame `mat.opacity` writes alias in exactly the
+   *   same way and for the same reason — so this adds no exposure it did not already
+   *   have."*
+   *
+   * **The hooks' writes are ABSOLUTE and this one is MULTIPLICATIVE, and that is the
+   * whole difference.** `mat.opacity = f(t)` twice leaves `f(t)`. `mat.opacity *= w`
+   * twice leaves `w^2`, and with N members on one pooled material, `w^N`. Measured:
+   * `egg.Shards` went `maskPx` **1,275 -> 18** at pitch 58 and **1,385 -> 106** at
+   * pitch 20 — an effect all but erased, presenting as a small burst rather than as a
+   * crash, which is `CLAUDE.md` rule 4's *"rendering and plausibly wrong"*.
+   *
+   * The base therefore lives on the MATERIAL and is refreshed at most once per frame
+   * (`UnionMatState`), so every member computes `base * w` from the same base and the
+   * last one wins — which is what the old wording claimed and what the code now does.
+   * `FX_UNION_STATS.aliasTouches` counts the collisions so this stays a measured fact.
+   */
+  private updateUnionScopes(dtSeconds: number): void {
+    this.unionFrame++;
+    for (let i = this.unionScopes.length - 1; i >= 0; i--) {
+      const scope = this.unionScopes[i];
+      scope.life += dtSeconds;
+      if (scope.members.length === 0 || scope.life >= scope.maxLife) {
+        this.releaseUnionCore(scope);
+        this.unionScopes.splice(i, 1);
+        continue;
+      }
+
+      // Distances first, then the radius, then the weights — the quantile needs the
+      // whole set before any member can be weighted, so this cannot be one pass.
+      const dists = this.unionDistScratch;
+      dists.length = 0;
+      for (const m of scope.members) {
+        if (!unionMemberPoint(m, this.unionPointScratch)) { dists.push(-1); continue; }
+        dists.push(this.unionPointScratch.distanceTo(
+          this.unionCentreScratch.set(scope.cx, scope.cy, scope.cz),
+        ));
+      }
+      const live = this.unionSortScratch;
+      live.length = 0;
+      for (const d of dists) if (d >= 0) live.push(d);
+      // NON-VACUITY, and it is not theoretical here: every member of a burst can be
+      // mid-`onUpdate`-hidden, and a quantile over an empty array is `undefined`.
+      // `[].every()` is true and so is every assertion taken over nothing.
+      if (live.length === 0) continue;
+      live.sort((a, b) => a - b);
+      const q = live[Math.min(live.length - 1, Math.floor(live.length * UNION_RADIUS_Q))];
+      const radius = THREE.MathUtils.clamp(q, UNION_MIN_RADIUS_M, UNION_MAX_RADIUS_M);
+
+      // MEAN-PRESERVATION, computed over the members that will actually be weighted —
+      // not over `scope.members`, which includes any that draw nothing this frame.
+      // Dividing by a mean taken over a different set is how a "redistribution" quietly
+      // becomes a net gain or loss.
+      let wSum = 0; let wN = 0;
+      for (let k = 0; k < scope.members.length; k++) {
+        const d = dists[k];
+        if (d < 0) continue;
+        const st = this.unionMemberState.get(scope.members[k]);
+        if (!st || st.mats.length === 0) continue;
+        const u = Math.min(1, d / radius);
+        wSum += 1 - UNION_ALPHA_FALLOFF * u * u;
+        wN++;
+      }
+      if (wN === 0) continue;
+      const wNorm = wSum > 1e-9 ? wN / wSum : 1;
+
+      for (let k = 0; k < scope.members.length; k++) {
+        const d = dists[k];
+        if (d < 0) continue;
+        const st = this.unionMemberState.get(scope.members[k]);
+        if (!st || st.mats.length === 0) continue;
+        const u = Math.min(1, d / radius);
+        const w = (1 - UNION_ALPHA_FALLOFF * u * u) * wNorm;
+        for (const mat of st.mats) {
+          const cur = mat.opacity;
+          let rec = this.unionMatState.get(mat);
+          if (!rec) { rec = { frame: -1, base: cur, written: NaN }; this.unionMatState.set(mat, rec); }
+          if (rec.frame !== this.unionFrame) {
+            // First member to reach this material this frame. If it still holds
+            // EXACTLY what we last wrote, the hook did not author it and the old base
+            // stands; otherwise the current value IS the new base.
+            rec.base = rec.written === cur ? rec.base : cur;
+            rec.frame = this.unionFrame;
+          } else {
+            FX_UNION_STATS.aliasTouches++;
+          }
+          // ALWAYS off `rec.base`, never off `mat.opacity` — that is the whole of the
+          // fix, and `w^N` is what happens without it. Clamped at 1 because a
+          // mean-preserving weight is > 1 for the inner members by construction, and
+          // an `opacity` above 1 is not a brighter material, it is undefined.
+          const out = Math.min(1, rec.base * w);
+          rec.written = out;
+          mat.opacity = out;
+        }
+      }
+
+      const core = scope.core;
+      if (core) {
+        const t = Math.min(1, scope.life / UNION_CORE_LIFE_S);
+        const d = 2 * radius * UNION_CORE_RADIUS_K;
+        core.sprite.position.set(scope.cx, scope.cy, scope.cz);
+        core.sprite.scale.set(d, d, 1);
+        core.mat.opacity = UNION_CORE_OPACITY * Math.pow(1 - t, UNION_CORE_FADE);
+        if (t >= 1) this.releaseUnionCore(scope);
+      }
+    }
   }
 
   // ── Spawn API — called from match.ts's event handling ─────────────────────────
@@ -3584,6 +4168,11 @@ export class VfxLayer {
       }
       this.group.remove(eff.object);
       disposeOwnedMaterials(eff.object);
+      // A telegraph beat is never an impact-union member today (a scope opens only
+      // around `spawnImpactBurst`'s bespoke call). Detached anyway, because "this
+      // removal path cannot see a member" is a fact about today's call graph and a
+      // stale member left in a scope would drag its union radius outward forever.
+      this.detachUnionMember(eff);
       this.transientEffects.splice(i, 1);
     }
   }
@@ -3934,7 +4523,17 @@ export class VfxLayer {
         characterId: source.characterId,
         spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
       };
-      bespoke(ctx);
+      // UNION SHADE — every lobe this hook spawns becomes a member of ONE mass, and
+      // the core/edge/falloff treatment is applied to that mass rather than to each
+      // lobe. See the block above `FX_UNION_STATS`. `finally`, because a hook that
+      // throws must not leave the scope open: the next transient spawned anywhere in
+      // the match would silently join a dead burst.
+      this.openUnionScope(origin, color);
+      try {
+        bespoke(ctx);
+      } finally {
+        this.closeUnionScope();
+      }
     }
   }
 
@@ -4892,6 +5491,14 @@ export class VfxLayer {
       disposeOwnedMaterials(eff.object);
     }
     this.transientEffects.length = 0;
+    // UNION SHADE. Every member just left the scene above, so a surviving scope would
+    // hold references to removed objects and keep a core sprite lit over an empty
+    // arena. `pendingUnion` is cleared for the pathological case of a restart landing
+    // inside a bespoke hook — it cannot happen on today's call graph, and a scope that
+    // outlives its own match is exactly the kind of thing that stops being impossible.
+    for (const scope of this.unionScopes) this.releaseUnionCore(scope);
+    this.unionScopes.length = 0;
+    this.pendingUnion = null;
     // Cleared AFTER the loop above, which is where the meshes actually leave the scene:
     // this map is an index into `transientEffects`, not a second owner of anything.
     this.castTelegraphs.clear();
@@ -4951,6 +5558,7 @@ export class VfxLayer {
     this.wedgeGradientTex.dispose();
     this.telegraphRimTex.dispose();
     for (const p of this.particles) p.mat.dispose();
+    for (const c of this.unionCores) c.mat.dispose();
     for (const w of this.wedges) w.mat.dispose();
     for (const r of this.rings) r.mat.dispose();
     this.wedgeGeoCache.forEach((g) => g.dispose());
