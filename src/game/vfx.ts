@@ -57,6 +57,11 @@ import { CHARACTERS } from './rules';
 import type { CharacterId, Weapon } from './rules';
 import { CHARACTER_HEIGHT, CHARACTER_RADIUS, groundPos, wu } from '../units';
 import { flatMat } from '../render/toon';
+// The scene's own warm key direction, for the VFX body shading below. Imported
+// rather than retyped so a change to the rig cannot leave the effects lit from a
+// direction the cast is not — `render/lighting.ts` owns the value, this file only
+// reads it.
+import { KEY_OFFSET } from '../render/lighting';
 // Per-weapon bespoke VFX extension point (see `vfx/weapons/types.ts` for the full
 // `WeaponVfx` contract). `getWeaponVfx()` returns `undefined` for any weapon with no
 // bespoke entry — every call site below falls back to this file's existing generic
@@ -712,6 +717,224 @@ const INK = new THREE.Color('#241a33');
  */
 const SPARK_COLOR = new THREE.Color('#FFE79A');
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// VOLUME SHADING — why this whole layer renders as flat colour, and what fixes it
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Uri, from gameplay: *"projectiles and explosions still look very flat and not like
+// what they are supposed to."* Four blind critics, independently and on different
+// frames: *"a flat, uniformly-saturated blob with no internal gradient or shading, so
+// it reads as a pasted sticker rather than a lit in-world effect"*; *"at 4x zoom the
+// red damage VFX resolves into ~15 individually-readable overlapping translucent
+// sphere primitives ... no bright core, no shaped edge, no falloff."*
+//
+// ── THE MECHANISM, MEASURED, AND IT IS ONE LINE ────────────────────────────────
+//
+// A census of every material this layer and `vfx/weapons/**` construct, 2026-08-22 on
+// `c471efe`:
+//
+//     src/vfx/weapons/*.ts    62 x MeshBasicMaterial    6 x SpriteMaterial
+//     src/game/vfx.ts          6 x MeshBasicMaterial    4 x SpriteMaterial
+//
+// **Zero lit materials. Not one.** `MeshBasicMaterial` is unlit by definition: every
+// fragment of a mesh drawn with it is the same colour, whatever the geometry is doing.
+// So `hamburger.ts`'s `splatBlobGeo` — an `IcosahedronGeometry(r, 0)` — renders as a
+// solid RED HEXAGON, and `shots/fx/before/*.4x.png` shows five of them scattered round
+// the character like confetti. That is the "pasted sticker", exactly, and it is not a
+// taste gap: it is a 3D primitive being drawn with no shading term at all.
+//
+// The same frame's fighters are `toonMat` `MeshStandardMaterial` with a Fresnel rim.
+// `tools/tmp/fx_flat.mjs` measures both, in the identical frame, by the identical code,
+// on masks built by the identical ablation. The column that separates them is
+// `segRatio` — mean |grad luma| over the mask's strict INTERIOR divided by the same
+// statistic on its own boundary band, dimensionless so it survives a change of camera,
+// framing or hue:
+//
+//     figures (lit geometry, same frame)                  3.234
+//     eleven shipped VFX cases                      0.158-1.574   (ten of eleven < 1.0)
+//
+// A lit body carries **3.2x** the gradient inside it as it does at its edge. These
+// effects carry LESS THAN HALF. All contour, no body — which is what a sticker is.
+//
+// ⚠️ **AND THE CRITIC'S OWN MECHANISM DOES NOT SURVIVE MEASUREMENT.** *"No internal
+// gradient or shading"* is false: interior luma sd is 20.22 and a third of the interior
+// sits in a smooth band. The structure is PLATEAUS from overlapping constant-coloured
+// lobes, not an absence of variation. Symptom right, mechanism wrong — so the fix is
+// not "add variation", it is "make each lobe a shaded volume".
+//
+// ── WHAT THIS IS NOT ───────────────────────────────────────────────────────────
+//
+// 🚨 **IT IS NOT "MAKE IT BIGGER", AND THAT IS THE TRAP THIS ITEM CARRIES.** `209e270`
+// measured area's rank correlation with legibility at **0.230** against the weapon's
+// own lightness at **-0.738**, and these effects already cover 21.5% of the frame. So
+// the shading below is **MEAN-PRESERVING BY CONSTRUCTION**: `dot(n, key) * 0.5 + 0.5`
+// has mean exactly 0.5 over a sphere's normals, and `LO + (HI - LO) * that` with
+// `LO + HI = 2` therefore has mean exactly 1.0. It redistributes value inside a
+// silhouette without moving the silhouette, without moving the mean, and without
+// adding a single primitive. `fx_flat`'s `maskPx` column is the check.
+//
+// It is also **not lighting**. No light is added, no material type changes, no shader
+// is patched (`Material.clone()` silently drops `onBeforeCompile`, which cost this
+// project 54 clone sites and 1.402% of the frame — `CLAUDE.md` rule 5). The shading is
+// baked into the GEOMETRY as a `color` attribute, so it survives `clone()`, costs
+// nothing per frame, and is computed once per geometry for the life of the page.
+//
+// ── WHY THE KEY DIRECTION IS IMPORTED AND NOT CHOSEN ───────────────────────────
+//
+// `render/lighting.ts:KEY_OFFSET` is the scene's actual warm key. An effect lit from a
+// direction the cast is not lit from reads as a decal even when it is shaded, and a
+// number typed in here would go stale the first time that file moves. `CLAUDE.md` #3 is
+// the other half: this is a WORLD-SPACE direction, so it is correct at the lobby's
+// pitch 20 and the match's 58 alike — a screen-space cheat would look right at one and
+// wrong at the other.
+//
+// ── THE TWO CLASSES, DETECTED RATHER THAN ASSUMED ──────────────────────────────
+//
+//   SOLID  a sphere, an icosahedron, a cone. Normals disagree, so a key ramp gives it
+//          a lit side, a terminator and a dark side — a core and a falloff.
+//   FLAT   a decal, a disc, a ring. Every normal is parallel, so a key ramp is a
+//          UNIFORM TINT on it and delivers no structure whatever. These get a radial
+//          ramp in their own plane instead: bright centre, dark edge.
+//
+// The test is the length of the MEAN normal, which is 1 only when they all agree and
+// ~0 on a sphere. Assuming the class from the geometry's constructor name would have
+// been wrong for `splatBlobGeo`, which is an icosahedron `.scale(1, 0.4, 1)`-ed flat
+// and is still a solid.
+//
+// ── AND WHY A MAPPED MATERIAL IS SKIPPED ───────────────────────────────────────
+//
+// A material with a `map` already carries authored internal structure — every texture
+// builder above is a `createRadialGradient` or a `createLinearGradient`. Multiplying a
+// second falloff onto `buildProjectileHaloTexture`'s carefully-derived 0.44/0.62/0.82
+// stops would double a treatment that was measured, not guessed. The defect class is
+// specifically the UNMAPPED constant fill, so that is exactly the set treated.
+//
+// ⚠️ This skip is also what keeps the material/geometry pairing SAFE. A material with
+// `vertexColors: true` drawn against a geometry that has no `color` attribute renders
+// BLACK. Every mesh that enters this layer passes through `shadeVfxObject` before it is
+// added, and that function shades the GEOMETRY first and the material second — so a
+// material can only ever be flipped after the geometry it is being drawn with is ready,
+// and any later mesh reusing that material is shaded on its own way in.
+
+/** The scene's own warm key, normalised. Imported, never retyped — see above. */
+const FX_KEY_DIR = KEY_OFFSET.clone().normalize();
+/**
+ * Darkest and brightest multipliers applied to a VFX body.
+ *
+ * **They sum to 2.0 on purpose and that is a contract, not a coincidence**: it makes
+ * the treatment mean-preserving over a sphere, so nothing here can be mistaken for the
+ * "make it bigger / brighter" lever that `209e270` measured at a 0.230 rank
+ * correlation. Change one and change the other, or state the new mean.
+ */
+const FX_SHADE_LO = 0.70;
+const FX_SHADE_HI = 1.30;
+/**
+ * A mean unit normal this long means every normal agrees, i.e. the geometry is FLAT.
+ * A sphere reads ~0.00, a `CircleGeometry` reads exactly 1.00, and `splatBlobGeo`
+ * (an icosahedron squashed to 0.4 in Y) reads 0.00 — which is why the class is
+ * measured off the normals rather than guessed from the constructor.
+ */
+const FX_FLAT_NORMAL_AGREEMENT = 0.995;
+
+/**
+ * QA-only census of what the treatment actually reached.
+ *
+ * `CLAUDE.md` rule 6, and a peer found **three false zeros in one ablation** last
+ * session — including a knob that was declared and never read because the blend
+ * function ignored it. A treatment that silently reaches nothing looks exactly like a
+ * treatment that did not help, so the count is published and `fx_flat --selftest`
+ * asserts it is non-zero. Never read by game logic.
+ */
+export const FX_SHADE_STATS = { geometries: 0, materials: 0, meshes: 0, skippedMapped: 0 };
+
+/**
+ * Bake a body-shading ramp into `geo` as a `color` attribute. Idempotent and cached on
+ * the geometry, so a shared module-level geometry pays for it once per page.
+ *
+ * Returns whether it did any work — the caller counts it (see `FX_SHADE_STATS`).
+ */
+function shadeVfxGeometry(geo: THREE.BufferGeometry): boolean {
+  if (geo.userData.__fxShaded) return false;
+  const pos = geo.getAttribute('position');
+  if (!pos) { geo.userData.__fxShaded = true; return false; }
+  const nrm = geo.getAttribute('normal');
+  const n = pos.count;
+  const col = new Float32Array(n * 3);
+
+  let flat = true;
+  if (nrm && nrm.count === n) {
+    let ax = 0; let ay = 0; let az = 0;
+    for (let i = 0; i < n; i++) { ax += nrm.getX(i); ay += nrm.getY(i); az += nrm.getZ(i); }
+    flat = Math.hypot(ax / n, ay / n, az / n) >= FX_FLAT_NORMAL_AGREEMENT;
+  }
+
+  if (flat) {
+    // Radial ramp in the geometry's own extent. `r` is a 3D distance, which for a flat
+    // sheet IS the in-plane radius, so this needs no basis and no assumption about
+    // which axis the sheet lies in — `splatGeo` is built in XY and rotated at the mesh,
+    // `wardGeo` is built already flat, and both come out right.
+    geo.computeBoundingSphere();
+    const bs = geo.boundingSphere;
+    const cx = bs ? bs.center.x : 0;
+    const cy = bs ? bs.center.y : 0;
+    const cz = bs ? bs.center.z : 0;
+    const R = Math.max(bs ? bs.radius : 1, 1e-6);
+    for (let i = 0; i < n; i++) {
+      const r = Math.min(1, Math.hypot(pos.getX(i) - cx, pos.getY(i) - cy, pos.getZ(i) - cz) / R);
+      // Quadratic in r, whose area-mean over a disc is exactly 0.5 — the same
+      // mean-preserving property the solid branch has, for the same reason.
+      const k = FX_SHADE_HI + (FX_SHADE_LO - FX_SHADE_HI) * r * r;
+      col[i * 3] = k; col[i * 3 + 1] = k; col[i * 3 + 2] = k;
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      const d = nrm!.getX(i) * FX_KEY_DIR.x + nrm!.getY(i) * FX_KEY_DIR.y + nrm!.getZ(i) * FX_KEY_DIR.z;
+      const k = FX_SHADE_LO + (FX_SHADE_HI - FX_SHADE_LO) * (d * 0.5 + 0.5);
+      col[i * 3] = k; col[i * 3 + 1] = k; col[i * 3 + 2] = k;
+    }
+  }
+
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.userData.__fxShaded = true;
+  return true;
+}
+
+/**
+ * Turn a VFX material's vertex-colour multiply on. Skips anything already carrying a
+ * `map` — see the block above for why that skip is what makes the pairing safe.
+ */
+function shadeVfxMaterial(mat: THREE.Material): boolean {
+  const m = mat as THREE.MeshBasicMaterial;
+  if (m.vertexColors) return false;
+  if (m.map) { FX_SHADE_STATS.skippedMapped++; return false; }
+  m.vertexColors = true;
+  m.needsUpdate = true;
+  return true;
+}
+
+/**
+ * Give every unmapped mesh under `object` a shaded body. Called on the way INTO the
+ * VFX layer, never per frame.
+ *
+ * Sprites are deliberately untouched: every sprite in this layer is mapped (glow,
+ * shard, streak, star, soft disc, halo), so their falloff is already authored in a
+ * texture, and a `Sprite`'s geometry is shared by three itself.
+ */
+function shadeVfxObject(object: THREE.Object3D): void {
+  object.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!(mesh as unknown as { isMesh?: boolean }).isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    // Geometry FIRST, unconditionally, so a material can never be flipped ahead of the
+    // attribute it will read.
+    if (mats.some((m) => m && !(m as THREE.MeshBasicMaterial).map)) {
+      if (shadeVfxGeometry(mesh.geometry)) FX_SHADE_STATS.geometries++;
+      FX_SHADE_STATS.meshes++;
+    }
+    for (const m of mats) if (m && shadeVfxMaterial(m)) FX_SHADE_STATS.materials++;
+  });
+}
+
 /**
  * Keep `pool` (id -> mesh) in sync with `items` (id-bearing sim records): create a
  * mesh for any new id via `create`, refresh every live mesh via `update`, and remove
@@ -730,6 +953,12 @@ function syncPool<T extends { id: number }>(
     let obj = pool.get(item.id);
     if (!obj) {
       obj = create(item);
+      // On the way IN, once per object, never per frame — see `shadeVfxObject`. This is
+      // the sim-owned half (projectiles, splats, trail marks); `spawnTransientObject` is
+      // the other. Splats and trail marks are mapped (`buildGlazeMarkTexture`) and so are
+      // skipped by the map rule, which is deliberate: their internal structure was
+      // authored and measured in `b967242`'s rim-polarity pass and must not be doubled.
+      shadeVfxObject(obj);
       group.add(obj);
       pool.set(item.id, obj);
     }
@@ -3008,6 +3237,11 @@ export class VfxLayer {
     onUpdate?: (progress: number, elapsedSeconds: number) => void,
     telegraphOwner?: FighterId,
   ): void {
+    // Every bespoke `WeaponVfx` effect in `vfx/weapons/**` arrives here — this is the
+    // choke point that makes the treatment complete without eleven weapon files having
+    // to know it exists, exactly as `castMuzzle`/`impactAnchor` made the shared BEATS
+    // unconditional rather than asking each author to opt in.
+    shadeVfxObject(object);
     this.group.add(object);
     this.transientEffects.push({ object, life: 0, maxLife: Math.max(0.001, lifetimeSeconds), onUpdate, telegraphOwner });
   }
@@ -3545,6 +3779,28 @@ export class VfxLayer {
     // read as a distinct coloured MARK sitting under/around the white flash, not
     // another white shape that optically fuses with it.
     w.mat.map = null;
+    // ── THE ANCHOR'S OWN CORE AND FALLOFF ────────────────────────────────────────
+    //
+    // This decal is the shared impact anchor's ONE area-bearing element — `wi_guard`'s
+    // own header records that the recipe has "no random area-bearing element left — no
+    // shards, no streaks, and a star decal whose only randomness is a rotation" — so
+    // every weapon in the game draws it, and until now it drew as a **flat fill**, in
+    // this function's own words two lines up. That is precisely the *"no bright core,
+    // no shaped edge, no falloff"* a critic resolved at 4x, on the single element with
+    // the widest reach in the layer.
+    //
+    // `shadeVfxGeometry` gives it a radial ramp in its own plane — bright at the hit
+    // point, falling to 0.70 at the star's tips. Mean-preserving (see the block above
+    // `FX_SHADE_LO`), so the mark's AREA and average value are unchanged and this
+    // cannot be mistaken for the "make it bigger" lever `209e270` measured at a 0.230
+    // rank correlation with legibility.
+    //
+    // ⚠️ Order matters and is not stylistic: the geometry is shaded BEFORE
+    // `vertexColors` is set, because the reverse would draw one frame of black. The
+    // matching reset lives in `allocWedge`, next to the `map` reset it is the sibling
+    // of.
+    shadeVfxGeometry(geo);
+    w.mat.vertexColors = true;
     w.mat.needsUpdate = true;
     w.mat.color.set(color).lerp(WHITE, 0.05);
     w.mat.opacity = w.startOpacity;
@@ -4541,6 +4797,16 @@ export class VfxLayer {
     if (!slot) slot = this.wedges.reduce((a, b) => (a.life / a.maxLife >= b.life / b.maxLife ? a : b));
     if (slot.mat.map !== this.wedgeGradientTex) {
       slot.mat.map = this.wedgeGradientTex;
+      slot.mat.needsUpdate = true;
+    }
+    // ── AND THE SAME RESET FOR THE VERTEX-COLOUR MULTIPLY, FOR THE SAME REASON ────
+    // The star decal below turns it ON (see `spawnImpactStarDecal`), the melee arc
+    // wants it OFF because its structure is already in `wedgeGradientTex`'s apex→rim
+    // gradient — and a `vertexColors: true` material drawn against a geometry with no
+    // `color` attribute renders BLACK, so leaking this one is worse than leaking the
+    // map. Reset beside the map it belongs with, rather than in a second place.
+    if (slot.mat.vertexColors) {
+      slot.mat.vertexColors = false;
       slot.mat.needsUpdate = true;
     }
     return slot;
