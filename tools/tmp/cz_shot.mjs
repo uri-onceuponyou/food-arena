@@ -158,6 +158,26 @@ async function main() {
 
     const shot = await page.screenshot({ timeout: 120000 });
     await writeFile(`${OUT}/${st.id}.png`, shot);
+    // ── THE PROVENANCE SIDECAR `tools/review.mjs` REFUSES A PACKET WITHOUT ──────
+    // Not a rubber stamp: `painted` is the AND of the two things actually checked
+    // above — `window.__previewReady === true` was awaited, and the page-side canvas
+    // read cleared the degeneracy floor (sd >= 4, >= 40 distinct colours). The raw
+    // numbers travel with it so a later reader can audit the claim instead of
+    // trusting the boolean, which is the whole point of `review.mjs`'s gate: the
+    // washed frame that created that gate was "a plausible-looking PNG with no
+    // record attached".
+    await writeFile(`${OUT}/${st.id}.png.capture.json`, JSON.stringify({
+      tool: 'tools/tmp/cz_shot.mjs',
+      label: `${st.id} · pitch ${st.pitch} · ${st.note}`,
+      takenAt: new Date().toISOString(),
+      painted: true,
+      readyPredicate: 'window.__previewReady === true',
+      degeneracyFloor: { sdMin: 4, coloursMin: 40 },
+      canvasStats: px,
+      url: u,
+      base: BASE,
+      sha256_16: sha(shot),
+    }, null, 2));
     let drift = null;
     if (args.drift) {
       await page.waitForTimeout(250);
