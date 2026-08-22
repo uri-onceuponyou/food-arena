@@ -54,7 +54,28 @@ await esbuild.build({
   logLevel: 'silent',
 });
 writeFileSync(join(out, 'package.json'), '{"type":"module"}');
-const { toonMat, glossyMat, flatMat, cloneToon, applyRimLight } = await import(
+// ⚠️ `RIM_STRENGTH` IS IMPORTED, NOT RETYPED, AND THAT IS A FIX FOR A REAL FAILURE.
+// Three assertions below (C3 / T4 / T15) hard-coded the literal `0.28`, which was the
+// shipped default when they were written. `f77a9d7` moved the rim's peak to 1.40 (a
+// narrower, brighter Fresnel — the term was measured as a whole-body WASH at 2.6/0.28)
+// and all three went red on a change that was working exactly as designed. Old wording
+// kept per CLAUDE.md's reversed-assertion rule:
+//     `naive.userData.rim.strength === 0.28`
+//     `s1.uniforms.rimStrength.value === 0.28`
+// What those rows are FOR is "the value the source was built with is the value the
+// clone ends up with" — a statement about propagation, not about any particular number.
+// Binding to the exported constant says that and cannot go stale. The rows that DO care
+// about a specific number are the override rows (T16/T17), which pass their own.
+//
+// ⚠️ ROUTED, NOT ADDED: the spec now also carries `power`, and `cloneToon` reads it to
+// rebuild the term — so a spec that silently stopped carrying it would hand every clone
+// the module default instead of the source's. Two rows (`rim.power === RIM_POWER` on the
+// plain clone, `s1.uniforms.rimPower.value === RIM_POWER` on the cloneToon) cover that
+// and were written and PASSED. They are not here because the count is pinned at **33**
+// in `docs/TOOLS.md`'s gate table, `gatecount` compares the two, and that table is
+// EXECUTABLE — `docs/AGENT-BRIEF.md` §1 puts it outside the additive release valve. Two
+// assertions and one table cell, for whoever owns that file.
+const { toonMat, glossyMat, flatMat, cloneToon, applyRimLight, RIM_STRENGTH } = await import(
   pathToFileURL(bundle).href
 );
 rmSync(out, { recursive: true, force: true });
@@ -95,7 +116,7 @@ ok('C1 plain .clone() DROPS onBeforeCompile — the bug', !patched(naive),
    'three.clone() now carries the patch; this whole helper may be redundant');
 ok('C2 plain .clone() still yields a live-looking material', naive.isMeshStandardMaterial === true);
 ok('C3 the rim SPEC survives a plain clone (it is JSON-safe userData)',
-   naive.userData.rim && naive.userData.rim.strength === 0.28);
+   naive.userData.rim && naive.userData.rim.strength === RIM_STRENGTH);
 // The corpse: userData is deep-JSON-copied, so a rendered source poisons its clones.
 const rendered = toonMat({ color: '#405060' });
 const liveShader = compile(rendered);
@@ -112,7 +133,7 @@ ok('T2 clone emits the Fresnel GLSL',
    () => s1.fragmentShader.includes('gl_FragColor.rgb += rimColor * rim'));
 ok('T3 clone declares the uniforms it uses',
    () => s1.fragmentShader.includes('uniform float rimStrength') && s1.fragmentShader.includes('uniform vec3 rimColor'));
-ok('T4 inherited strength is the source\'s', () => s1.uniforms.rimStrength.value === 0.28);
+ok('T4 inherited strength is the source\'s', () => s1.uniforms.rimStrength.value === RIM_STRENGTH);
 ok('T5 inherited colour round-trips exactly', () => s1.uniforms.rimColor.value.getHex() === 0xbfe4ff);
 ok('T6 clone publishes its OWN rimUniforms handle', () => c1.userData.rimUniforms === s1.uniforms);
 ok('T7 clone is a distinct material', c1 !== src && c1.uuid !== src.uuid);
@@ -134,7 +155,7 @@ ok('T14 cloneToon does NOT silently turn the rim on', () => !patched(cloneToon(b
 ok('T15 rim:true forces one on at the defaults', () => {
   const f = cloneToon(bare, { rim: true });
   const s = compile(f);
-  return !!s && s.uniforms.rimStrength.value === 0.28;
+  return !!s && s.uniforms.rimStrength.value === RIM_STRENGTH;
 });
 
 // Overrides.
