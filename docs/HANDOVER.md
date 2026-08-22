@@ -114,8 +114,45 @@ document** — run `arena-scan --baseline` and read it.
 
 ### 🧱 Buildable now, nothing blocking
 
-* **HP/damage ×20 rescale** — Uri asked for it explicitly ("damage in the 100s, HP in the 1000s…
-  make it interesting, look at reference"). Specced, **zero implemented**.
+* **HP/damage rescale — and it is NOT ×20, and it is NOT "buildable now".** Uri asked for it
+  explicitly (*"damage in the 100s, HP in the 1000s… make it interesting, look at reference"*).
+  🚨 **THIS LINE SAID "Specced, zero implemented" AND BOTH HALVES WERE MISLEADING.** Kept visible
+  per house style.
+  * **There is no spec in `docs/`.** The word *"rescale"* appears in exactly one place across every
+    document — this line. The spec is **10 committed tools, 3,412 lines**, under `tools/tmp/sd*`
+    (`sda_scale` the planter with three sabotage known-bads, `sda_bitid` the quotient comparator,
+    `sdc_lattice` the design lattice, `sda_accept` the presentation acceptance test, `sdb_res`,
+    `sda_res`, `sda_why`, `sdb_acc`, `sd_lab`, `sd_feelevent`). They were swept in by a bulk
+    tool-commit at a session close and **referenced by zero documents since** — the exact
+    `AGENT-BRIEF.md` failure mode `CLAUDE.md`'s reading table warns about, at 3,412 lines.
+  * **The spec's answer is k ∈ [25, 42], not ×20.** `sdc_lattice` §3 solves Uri's own two
+    constraints: *"damage ≥ 100"* needs **k ≥ 25** per press, *"HP ≤ 4 digits"* needs **k ≤ 42**.
+    ⚠️ And **per-PELLET display is infeasible at every k** — a multi-pellet weapon cannot show
+    three-figure numbers per pellet and keep HP under four digits.
+  * **"Bit-identical" is only true at LEVEL 1.** Measured at six seats: k=25 at L1 is **0/11 on
+    survivor set, death order and tick count** once the arena hazard is scaled with everything
+    else — but at L15 it is **11/11 winners, 2/11 survivor sets, 4/11 death orders**. The residual
+    is not rounding (`--round-policy preserve` measures identically); it is **IEEE-754
+    non-associativity**, `(d*k)*m` vs `k*(d*m)`, differing in **44 of 225 cells, worst 1.137e-13**,
+    which a chaotic sim amplifies into a different death order. **The honest invariant is "exact at
+    L1, bounded by 1.1e-13 above it".**
+  * 🚨 **AND IT IS BLOCKED BY OWNERSHIP, NOT BY DESIGN.** `sda_accept`'s live regex census finds
+    **20 presentation sites in 14 files** whose response curves are damage-denominated. Its
+    known-bad arm — coefficients left untouched — goes **20/20 pinned at the 100% ceiling**: every
+    hit becomes max shake, max hit-stop, max knockback, max particles, max damage-number tier, max
+    audio weight. **Landing `rules.ts` alone ships exactly that.** 6 of the 20 sites are unowned
+    (`hud.ts` ×2, `match.ts` ×3, `sounds.ts` ×1); **14 are in `vfx.ts` and `vfx/weapons/*`**.
+    → **Needs ONE owner holding `rules.ts` + `vfx.ts` + `vfx/weapons/**` + `match.ts` + `hud.ts` +
+    `sounds.ts` at once.** The transform is mechanical (divide each curve's damage coefficient by an
+    exported `HP_SCALE`); `sda_accept` and `hp_bitid6 --scale-arena` prove both halves.
+  * ⚠️ Two traps found while establishing the control, both live: **`tools/arena.gameplay.json`
+    hardcodes the central hazard's `damage: 8`** while the shipped game derives it from `POT.damage`
+    (`kitchen.ts`), so a `rules.ts`-only rescale leaves every offline instrument running the pot at
+    1/k strength — stale-but-legal, invisible to every legality check **and invisible at two seats**,
+    because nobody stands in the middle of a 2800×2000 map when there are two of them. And
+    **`tune()` bands do not survive a rescale**: `register()` validates *overrides* against
+    `min`/`max` but never the authored default, so a rescaled constant ships fine and then the admin
+    panel refuses every legitimate override.
 * **13 weapon faults across 7 cards** — `vision-block`, `summon-entity`, `merge-entities`,
   `ground-effect-damage`, `projectile-grows`, `status-strength`, 2 ranged `multi-target`.
   `waterbottle.Mega` carries four.
