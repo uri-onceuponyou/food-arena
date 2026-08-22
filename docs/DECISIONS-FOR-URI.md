@@ -8,7 +8,7 @@ Answer any subset. Unanswered items stay on the stated assumption.
 
 ---
 
-## 🔴 OPEN RIGHT NOW — eight questions, eight one-line answers
+## 🔴 OPEN RIGHT NOW — nine questions, nine one-line answers
 
 **Rebuilt 2026-08-22 against `23f8ce7`, row by row, out of the source files.** Everything else on
 this page is history; these are the live ones. **Nothing is blocking** — every one has a default in
@@ -33,6 +33,7 @@ indistinguishable from a live one, and it is the row you act on.*
 | **§29(a)** | **Bush size — and this row got MORE expensive while nobody re-read it.** ⚠️ **The old row said *"inert"* and *"a re-layout once patches ship"*. The patches SHIPPED** (`b9bc00e`, extended `6631446`): **20 concealment patches, 110–130 wu across**, live in every match you play. The AI constraint is unchanged — `stepAI` has no search, sees 84 wu, so nothing may exceed ~168 wu | **20 patches, 110–130 wu** | **play a match and see whether you ever use one.** Every shipped size already obeys the constraint; what is open is whether they are worth their footprint | now a re-layout, not a free call |
 | **§71** | **Three icon subjects** — `boxBurger`, `stun`, `wrap` | as drawn | ⚠️ **"Leave it" is a real answer for all three** — every one ships beside its own text label. If you pick one, pick `wrap`: 0 of 30 judges, ten panels, and all three geometric options are closed by measurement | one drawing each |
 | **§88** | 🆕 **Making the roster grid obey your "small number of accents" cost you the ability to tell rarity tiers apart by colour.** The eleven cards carried six fills at five hues spread around the wheel — 211°/264°/47°/355°/186°. Collapsed to one cool family with rarity by value+chroma, which moved card-sheet hue concentration **R 0.216 → 0.631** and, more importantly, fixed something nobody had named: **7 of 11 cards had the CHARACTER DARKER THAN ITS OWN BACKGROUND** (mean polarity **−0.156 → +0.138**, and 9 of 11 backdrops out-chromaed the character, now 2). The cost is exact: **minimum adjacent-tier colour distance 52.4 → 5.0**, and an exhaustive enumeration of all 6,016 legal graded colours puts the ceiling inside the new constraints at **6.2** — more separation means leaving the family | **collapsed family + a 2px rarity ring** on landscape phone, where the collapse left four tiers with no other signal | **leave it — and here is the argument, because it is not obvious.** You answered **§26** that rarity means *acquisition* rarity and nothing else, and `rarityCostMultiplier` is 1.0 on every tier. A loud per-tier hue advertises a power hierarchy **that does not exist in this game**. Quiet tiers are the honest reading, and the ring keeps them legible | the constant is six hex values in `rules.ts`; the ring is one rule in `characterSelect.ts` |
+| **§89** | 🆕 🔴 **Most of your cast has no readable face at the camera the game is PLAYED at, and the one cast-wide fix breaks the LOBBY.** At gameplay scale on the 58° camera: **egg, donut and waterbottle show no face at all**; hotdog and pizza show a dark smudge; only hamburger, taco and lollipop read. The cause is geometric, not artistic — the face sits low on a domed head and **the head's own upper mass occludes it from above**. Hot dog is FIXED as a proof (`3f064fc`, match sclera **44 → 81 px, +84%**, and the lobby improved too, **+22.5%** — a real geometric fix improves both). ⚠️ **The rig has NO HEAD-PITCH AXIS**: `rig.ts`'s `head.rotation.set(0, headTurn, headTilt)` is yaw and *roll*; X is hard-zeroed | **per-character geometry, one at a time** | 🔴 **decide the cast-wide lever, because it is a POSE change to the view your reject sheets come from.** A chin-up head pitch of −0.30 rad **visibly rescues 8 of 11 at the match camera** — and at the lobby **soup loses its broth entirely** (the bowl reads empty) and **all 11 read as looking skyward**. Both sheets are captured and waiting. A smaller angle (−0.12 to −0.15) was never rendered | a new axis in the rig + a per-character override, versus ~2 constants per character done individually |
 
 ### ✅ Answered since the last sheet — do not re-decide these
 
@@ -6129,3 +6130,69 @@ know what you own.
 
 **What would change my mind:** you look at the roster and cannot tell the tiers apart, or you tell me
 rarity is going to start meaning something. The second reopens §26, not this.
+
+---
+
+## 89. The cast has no face at 58°, and the cheap fix costs the lobby
+
+**Not blocking. Hot dog is fixed and shipped; the cast-wide question is yours.**
+
+Three separate critics, on three separate tracks aimed at the *environment*, ended their final round
+pointing at the characters. This is what was underneath.
+
+### The defect is a RATIO that inverts between your two cameras
+
+Not an area — a ratio. Visible pixels by part, ablated through the shipped render path, outlines
+excluded:
+
+| part | lobby (20°) | match (58°) |
+|---|---|---|
+| sclera (the white) | 2,423 px | 44 px |
+| lash (the dark hood) | 1,697 px | 107 px |
+| **sclera : lash** | **1.43 : 1** | **0.41 : 1** |
+
+A hood over the top of a sphere presents its **full area** to a camera looking down, while the sclera
+it covers **recedes**. So the eye is white-dominant where you inspect characters and dark-dominant
+where you play — it reads as a smudge. **Nothing was wrong with the drawing.** Roughly 90 lines of
+sclera, pupil, catchlight and lid tuning were all judged at 20° and none of it survived to 58°.
+
+**Hot dog is fixed** (`3f064fc`): the eye moved out from under the hood (`EYE_DY` 0.115R → 0.150R,
+turning the eye normal 17.6° → 23.2°) and the lash lifted 30%. Match sclera **44 → 81 px (+84%)**,
+and the lobby went **+22.5%** rather than paying for it — which is the test rule 3 sets for a real
+geometric fix: *"a change that only looks right at 58° is a cheat."* Both pitches were rendered and
+looked at. Deltas are **exact**; the null arm reproduced bit-for-bit first.
+
+### It generalises, and here is the cast
+
+| reads clearly at 58° | a dark smudge | **no face at all** |
+|---|---|---|
+| hamburger, taco, lollipop | hotdog *(now fixed)*, pizza | **egg, donut, waterbottle** |
+
+Every failure has the same shape: the face sits low on a domed head, and the dome occludes it from
+above.
+
+### 🔴 The decision: one lever for the whole cast, or eleven small fixes
+
+The cast-wide lever is a **chin-up head pitch**, tested live without editing a source file:
+
+* At **−0.30 rad it visibly rescues 8 of 11** at the match camera.
+* At the **lobby it fails**: soup loses its broth entirely — the bowl reads empty — and **all eleven
+  read as looking skyward.**
+
+That is a pose change to the exact view your reject sheets come from, so it is not mine to take.
+⚠️ And it is not a one-line change even if you want it: **the rig has no head-pitch axis at all.**
+`rig.ts` does `head.rotation.set(0, headTurn, headTilt)` — those are yaw and **roll**; the X slot is
+hard-zeroed. Adding pitch means adding an axis.
+
+**What I would do, absent an answer:** keep going per-character, the way hot dog went — it is slower
+but it costs the lobby nothing and it is already proven on one character. **What would change that:**
+you say the skyward look is acceptable, or you want a smaller angle tried first (−0.12 to −0.15 was
+never rendered).
+
+### One more thing that is yours, not a bug
+
+The hot dog's **teal end caps are intentional** — `rgb(0,229,176)` is `RARITY_COLORS.Cyber`, a
+deliberate emissive accent. A critic flagged them as a max-saturation green fringe on a red
+character, which is a fair aesthetic objection but not a defect. They are **1,187 px at the lobby and
+17 px at match**, so this is a lobby question. Whether that accent belongs on that character is a
+design call.

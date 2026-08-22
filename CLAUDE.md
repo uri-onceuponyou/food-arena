@@ -74,8 +74,15 @@ Not style preferences. Every one exists because breaking it cost hours.
    description instead of an image is this project's most common failure.
 
    🚨 **THERE ARE TWO SHIPPED CAMERAS, AND THEY EXPOSE DIFFERENT DEFECTS. USE BOTH.**
-   `src/ui/screens/charStage.ts:451` is **`pitchDeg: 20`** — the lobby, close and shallow, where Uri
-   looks at a character and where every one of his reject sheets came from.
+   `src/ui/screens/charStage.ts` — **grep `pitchDeg: 20`**, in the `new Stage({ … camera: { … } })`
+   literal — is the lobby, close and shallow, where Uri looks at a character and where every one of
+   his reject sheets came from.
+
+   ⚠️ **THIS SAID `:451` AND IT HAD DRIFTED TO `:550`** — found 2026-08-23 by an agent that grepped
+   instead of trusting the citation. **The paragraph below it worked out that lines rot and to cite
+   the SYMBOL instead, and then the fix was applied to `camera.ts` and NOT to the line above it.**
+   A rule that names its own remedy and then exempts the case sitting next to it is worth more as a
+   warning than the citation was as a shortcut.
    `src/render/camera.ts` — **grep `opts.pitchDeg ?? 58`**, in `CameraRig`'s constructor —
    defaults the **match** to **58**, steep and far.
 
