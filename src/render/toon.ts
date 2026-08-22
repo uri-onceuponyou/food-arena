@@ -542,9 +542,29 @@ export const OUTLINE_INK = '#241a33';
  *
  * 🚨 **A WORLD-SPACE THICKNESS CANNOT SERVE TWO CAMERAS, AND THIS GAME SHIPS TWO.**
  * The hull expands a fixed number of METRES, so its width in PIXELS is whatever the
- * camera distance makes it. At the match camera a fighter measures ~90 px of a 900 px
- * frame — about 0.023 m per pixel — so **0.004 m is 0.17 px: the character ink line
- * does not exist at the framing the game is played at.** At the lobby camera the same
+ * camera distance makes it.
+ *
+ * ⚠️ **THIS PARAGRAPH SAID "~90 px ... 0.17 px" AND I DID NOT MEASURE EITHER.** The old
+ * wording is kept because the error is the instructive part: 90 px was read off a
+ * different frame by eye, and the figure it produced then travelled into a commit
+ * message, where `--amend` is banned and the log is a primary source. The measured
+ * bounding boxes on the frames this change was actually judged on
+ * (`shots/v2/b2/v2-report.json`, six seats at `pot_south`, 1600x900) are **sushi 114 px
+ * and soup 167 px** of a 900 px frame — 0.0184 and 0.0126 m per pixel at
+ * `CHARACTER_HEIGHT = 2.1`. So the shipped ink line was
+ *
+ *     0.004 m  =  0.22 px on sushi  ..  0.32 px on soup
+ *
+ * **Still sub-pixel, so the conclusion is unchanged and the number was wrong by 1.9x.**
+ * That is the whole lesson: the conclusion surviving is exactly why nobody re-checks the
+ * figure. `docs/AGENT-BRIEF.md` §2b — *"a count written from memory is wrong here at
+ * roughly coin-flip rate, whoever it came from"*, and this one was mine.
+ *
+ *   *"At the match camera a fighter measures ~90 px of a 900 px frame — about 0.023 m
+ *   per pixel — so 0.004 m is 0.17 px: the character ink line does not exist at the
+ *   framing the game is played at."*
+ *
+ * At the lobby camera the same
  * character is roughly ten times bigger on screen, so the same constant draws a line
  * ten times heavier there, which is the "sticker" failure the note above is describing.
  * One number was being asked to be both, and it could only ever be right at one
@@ -648,8 +668,8 @@ function outlineMaterial(
     // ── SCREEN path: the same expansion carried one transform further, into CLIP
     // space, where a displacement of `t * w` is a constant fraction of the frame at
     // ANY depth. That is the whole difference: the world path draws a line whose
-    // pixel width is a function of camera distance (0.17 px on a fighter at the match
-    // camera, ~10x that on the same fighter in the lobby), the screen path draws the
+    // pixel width is a function of camera distance (0.22-0.32 px on a fighter at the
+    // match camera, ~10x that on the same fighter in the lobby), the screen path draws the
     // same width at both. Both paths are compiled from this one function so they
     // cannot drift; the world path's three lines are byte-for-byte what shipped.
     //
@@ -818,7 +838,8 @@ export function outlineGroup(
  *
  * Every character's `build()` ended with a bare `outlineGroup(this.root)`, which took
  * `OUTLINE_THIN`'s **metres** and therefore drew a line whose pixel width was a function
- * of camera distance — 0.17 px on a fighter at the match camera, roughly ten times that
+ * of camera distance — 0.22-0.32 px on a fighter at the match camera (MEASURED bboxes,
+ * see `OUTLINE_THIN`), roughly ten times that
  * on the same fighter in the lobby. That is not a value that can be tuned right; it is a
  * unit that cannot be right at two distances, and it had been tuned twice in opposite
  * directions by rounds looking at different cameras.
