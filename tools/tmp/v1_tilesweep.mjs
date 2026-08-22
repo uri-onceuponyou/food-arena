@@ -70,6 +70,18 @@ const pot = (gameplay.hazards ?? []).find((h) => h.kind === 'damage' && h.x === 
 if (!pot) { console.error('could not find the centre pot hazard in tools/arena.gameplay.json'); process.exit(2); }
 const POTR = pot.radius;
 const PX = Math.round(CX + 1.684 * POTR), PY = Math.round(CY);
+// 🚨 AND THE FOG RADIUS IS DERIVED TOO — THIS LINE SHIPPED A 1x LITERAL AND `al_guard`
+// CAUGHT IT. The first version copied `matcover.mjs`'s URL literal verbatim: 850, which is
+// the **1x map's** maxSafeRadius; the map has been 2800x2000 since `6631446` and the real
+// figure is 1720.465. It is the exact class `CLAUDE.md` warns about — the 1x playfield is
+// the NW quadrant of the x4 one, so a stale scalar is still a LEGAL scalar and no
+// legality check can see it. This file's own header boasted about deriving the station
+// while the radius beside it was retyped.
+// ⚠️ It did not move the SHAPE of the sweep — all seven arms shared one radius and the
+// station is 160 wu from centre, far inside 850 — but the fixture was wrong and a wrong
+// fixture keeps its numbers perfectly.
+const FOG = gameplay.maxSafeRadius;
+if (!Number.isFinite(FOG)) { console.error('could not derive maxSafeRadius from tools/arena.gameplay.json'); process.exit(2); }
 
 // Candidate albedos. Constructed by holding the MAX CHANNEL (HSV value) and the HUE and
 // moving only S — the exact single-variable change the round-2 critic prescribed. The
@@ -118,7 +130,7 @@ await page.addInitScript(() => {
   window.requestAnimationFrame = (cb) => { if (held !== null) { held = cb; return -1; } return real(cb); };
   window.__v1Raf = { stop() { if (held === null) held = false; }, start() { const cb = held; held = null; if (typeof cb === 'function') real(cb); } };
 });
-await page.goto(`${BASE}/?player=hamburger&enemy=donut&px=${PX}&py=${PY}&fogRadius=850&simSpeed=0.02&pointerLock=0`,
+await page.goto(`${BASE}/?player=hamburger&enemy=donut&px=${PX}&py=${PY}&fogRadius=${FOG}&simSpeed=0.02&pointerLock=0`,
   { waitUntil: 'networkidle', timeout: 60000 });
 await page.waitForFunction('window.__gameReady === true', null, { timeout: 60000 });
 await page.waitForTimeout(1500);
@@ -130,6 +142,18 @@ const setup = await page.evaluate(() => {
   const stage = window.__stage;
   if (!stage) return { error: 'no window.__stage' };
   if (stage.renderer.setAnimationLoop) stage.renderer.setAnimationLoop(null);
+  // Stash the ORIGINAL colours as FLOATS, per material uuid. RESTORE writes these back
+  // rather than re-deriving the lift offline: `liftArenaValue` writes un-quantised floats
+  // and this file's `lift()` rounds to 8 bits, so a re-derived restore lands a hair away
+  // and the guard reports DIFFERS forever. A guard that always fires gets switched off
+  // (`3230abf`), and this one has already earned its keep — it is what caught the lift.
+  window.__v1Orig = [];
+  stage.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    if (o.name === 'floor_stones_light' || o.name === 'floor_stones_dark' || o.name === 'floor_base') {
+      window.__v1Orig.push({ name: o.name, r: o.material.color.r, g: o.material.color.g, b: o.material.color.b });
+    }
+  });
   // Zero the shake: `CameraRig.update()` re-randomises it on EVERY render.
   const rig = stage.rig;
   for (const k of ['shake', 'shakeAmp', 'shakeMag', 'trauma', 'shakeStrength']) if (typeof rig?.[k] === 'number') rig[k] = 0;
@@ -157,7 +181,16 @@ async function shoot(setColors) {
     const targets = [];
     stage.scene.traverse((o) => { if (o.isMesh && (o.name === 'floor_stones_light' || o.name === 'floor_stones_dark')) targets.push(o); });
     const echo = [];
-    if (setColors) {
+    if (setColors === 'restore') {
+      const orig = window.__v1Orig;
+      stage.scene.traverse((o) => {
+        if (!o.isMesh) return;
+        const e = orig.find((x) => x.name === o.name);
+        if (!e) return;
+        o.material.color.setRGB(e.r, e.g, e.b); o.material.needsUpdate = true;
+        echo.push({ name: o.name, set: 'ORIGINAL', readBack: '#' + o.material.color.getHexString().toUpperCase() });
+      });
+    } else if (setColors) {
       for (const o of targets) {
         const hex = o.name === 'floor_stones_light' ? setColors.light : setColors.dark;
         o.material.color.set(hex); o.material.needsUpdate = true;
@@ -257,10 +290,9 @@ for (const S of VALUES) {
 }
 
 // ── RESTORE: get back to the shipped pair and require byte-identity with arm 0 ──
-const shipped = liftedPair(0.158);
-const back = decode(await shoot({ light: lift('#78656C'), dark: lift('#715F66'), joint: lift('#69585E') }));
+const back = decode(await shoot('restore'));
 const restored = Buffer.compare(base.px, back.px) === 0;
-console.log(`  RESTORE    back to the shipped pair: ${restored ? 'BYTE-IDENTICAL to the control' : '*** DIFFERS — later arms carried earlier ones ***'}`);
+console.log(`  RESTORE    original floats written back: ${restored ? 'BYTE-IDENTICAL to the control' : '*** DIFFERS — later arms carried earlier ones ***'}`);
 
 writeFileSync(join(OUT, 'sweep.json'), JSON.stringify({ station: [PX, PY], selfPair: identical, ablationShare: ablShare, restored, rows }, null, 2));
 console.log(`\n  wrote ${join(OUT, 'sweep.json')} and ${rows.length} PNGs`);
