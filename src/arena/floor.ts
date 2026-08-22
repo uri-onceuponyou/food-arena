@@ -771,6 +771,16 @@ function buildLaneWear(M: Materials, rimMat: THREE.Material): THREE.Group {
  * four tiles meet, it doesn't sit in the middle of a flat tile face — so each mark's
  * centre is now snapped to the nearest grid intersection (a multiple of `tile`) with
  * only a small jitter, instead of floating at a free continuous radius.
+ *
+ * 🚨 ROUND 13 VOIDED THE ARGUMENT ABOVE WITHOUT MOVING ONE LINE OF THIS FUNCTION, AND
+ * THAT IS RECORDED HERE RATHER THAN LEFT FOR THE NEXT READER TO TRIP OVER. There is no
+ * grid of tile intersections any more — the ground is a Voronoi tessellation, so
+ * `Math.round(freeX / tile) * tile` now lands on an arbitrary point that is as likely to
+ * be the middle of a stone as a joint. The CALL IS DELIBERATELY UNCHANGED: it still
+ * produces the same spatial distribution it always did, and moving it would have put a
+ * second pixel change into a round whose whole value is a clean paired A/B on ONE
+ * property. Snapping to a real cell vertex needs the tessellation handed to this
+ * function — **routed as follow-up, not silently half-done.**
  */
 function buildHazardSplatterApron(M: Materials, tile: number): THREE.Group {
   const g = new THREE.Group();
@@ -1633,6 +1643,219 @@ function buildMatEdgeWear(
   return g;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// AN IRREGULAR TESSELLATION — convex-polygon helpers
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// These exist for one reason: `docs/LESSONS.md`-grade evidence that the ground plane
+// reads as a drawn GRID rather than a paved surface. Measured on the shipped tree
+// (`tools/tmp/v1_joint.mjs`, three derived stations, both cameras): a straight line at
+// some angle lies on joint pixels for **100.00% of its traverse of the crop** — i.e.
+// every joint line runs unbroken from one frame edge to the other. That is what
+// `(i, j) -> a lattice` guarantees and no amount of per-tile jitter can remove, because
+// the jitter is ±0.63° on a cell whose neighbours share its exact row and column.
+//
+// A Voronoi cell over a jittered site grid cannot produce such a line: every joint
+// bends at every vertex. The measured target is not a taste call either — the same
+// instrument on a reference plate's open ground reads **maxLineCoverage well under 1**
+// and, more importantly, a joint contrast of **11.36 luma / ratio 1.126** against ours
+// at 32.84-47.86 / 1.55-1.80.
+//
+// All of it is convex, which is what makes it cheap and safe: a Voronoi cell is the
+// intersection of half-planes, so Sutherland-Hodgman never needs the general case, and
+// an edge-offset inset of a convex polygon keeps its vertex count.
+
+/** A point on the ground plane, in WORLD UNITS (x right, y down the map). */
+interface GPt { x: number; y: number }
+
+/** Shoelace. Positive is counter-clockwise in (x, y). */
+function polyArea(p: GPt[]): number {
+  let a = 0;
+  for (let i = 0, n = p.length; i < n; i++) {
+    const q = p[(i + 1) % n];
+    a += p[i].x * q.y - q.x * p[i].y;
+  }
+  return a / 2;
+}
+
+/** Sutherland-Hodgman: the part of a CONVEX polygon where `nx*x + ny*y <= d`. */
+function clipHalf(p: GPt[], nx: number, ny: number, d: number): GPt[] {
+  // Most of a site's 24 candidate neighbours do not reach its cell at all. Returning
+  // the input untouched when nothing is cut is what keeps this loop from allocating
+  // ~500k short-lived vertex objects at arena build time.
+  let cut = false;
+  for (let i = 0; i < p.length; i++) if (nx * p[i].x + ny * p[i].y - d > 0) { cut = true; break; }
+  if (!cut) return p;
+  const out: GPt[] = [];
+  for (let i = 0, n = p.length; i < n; i++) {
+    const a = p[i], b = p[(i + 1) % n];
+    const sa = nx * a.x + ny * a.y - d;
+    const sb = nx * b.x + ny * b.y - d;
+    if (sa <= 0) out.push(a);
+    if ((sa < 0 && sb > 0) || (sa > 0 && sb < 0)) {
+      const t = sa / (sa - sb);
+      out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+  }
+  return out;
+}
+
+/**
+ * Drop vertices closer than `eps` to the one before them, cutting the corner.
+ *
+ * Clipping 24 half-planes off a rectangle routinely leaves edges a fraction of a world
+ * unit long, and an edge-offset inset of a polygon with such an edge blows up: the two
+ * offset lines meet far outside the shape and the whole cell is rejected as degenerate.
+ * Measured on the shipped constants, WITHOUT this step: **394 of 3,500 cells (11.3%)
+ * were dropped**, and because slivers cluster where the jitter crowds sites, they were
+ * dropped in CONTIGUOUS patches — which renders as a hole in the floor with the
+ * subfloor plane visible through it. That is what the first render of this pass showed,
+ * and no numeric check in this file would have reported it; reading the PNG did.
+ *
+ * Cutting a corner off a convex polygon can only make it SMALLER, so this can never
+ * make two neighbouring stones overlap — it can only widen a joint locally by up to
+ * `eps`, which is what a hand-laid floor looks like anyway.
+ */
+function polyClean(p: GPt[], eps: number): GPt[] {
+  const out: GPt[] = [];
+  for (let i = 0, n = p.length; i < n; i++) {
+    const a = p[i], b = out.length ? out[out.length - 1] : p[n - 1];
+    if (Math.hypot(a.x - b.x, a.y - b.y) > eps) out.push(a);
+  }
+  while (out.length >= 3 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) <= eps) out.pop();
+  return out;
+}
+
+/**
+ * Offset every edge of a CCW convex polygon inward by `d` and re-intersect.
+ *
+ * Returns `null` rather than a broken polygon when the inset eats the shape — a small
+ * Voronoi sliver inset by half a joint width genuinely has no interior, and the
+ * alternative (emitting the self-intersected result) is a black bow-tie on the floor.
+ * ⚠️ The convexity re-check is not decoration: an inset that has *just* collapsed still
+ * has positive area for one more step, and area alone would pass it.
+ */
+function polyInset(p: GPt[], d: number): GPt[] | null {
+  const n = p.length;
+  if (n < 3) return null;
+  const nrm: GPt[] = [];
+  const off: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = p[i], b = p[(i + 1) % n];
+    const ex = b.x - a.x, ey = b.y - a.y;
+    const L = Math.hypot(ex, ey);
+    if (L < 1e-9) return null;
+    // CCW polygon: the interior is LEFT of each directed edge, so the inward normal is
+    // the left normal. Offsetting the edge line by `d` along it moves it inward.
+    const ix = -ey / L, iy = ex / L;
+    nrm.push({ x: ix, y: iy });
+    off.push(ix * a.x + iy * a.y + d);
+  }
+  const out: GPt[] = [];
+  for (let i = 0; i < n; i++) {
+    const k = (i - 1 + n) % n;
+    const det = nrm[k].x * nrm[i].y - nrm[k].y * nrm[i].x;
+    if (Math.abs(det) < 1e-9) return null;
+    out.push({
+      x: (off[k] * nrm[i].y - off[i] * nrm[k].y) / det,
+      y: (nrm[k].x * off[i] - nrm[i].x * off[k]) / det,
+    });
+  }
+  const a0 = polyArea(p), a1 = polyArea(out);
+  if (a1 <= 0 || a1 >= a0) return null;
+  // 🚨 THE FIRST VERSION OF THIS TEST WAS `area > 0 && still convex` AND IT PASSED 917
+  // CELLS UNDER AN INSET LARGER THAN EVERY CELL'S INRADIUS — kept above with the reason.
+  // An over-inset polygon folds through itself and can come back out convex with
+  // positive area, so both halves of that test are satisfiable by a shape that does not
+  // exist. The correct test is the definition: every inset vertex must satisfy EVERY
+  // offset edge-line. Caught by `tools/tmp/v1_tess.mjs` arm C, whose whole job is to
+  // make `skipped > 0` reachable — without it "0 degenerate cells" was unfalsifiable.
+  for (let i = 0; i < n; i++) {
+    for (let e = 0; e < n; e++) {
+      if (nrm[e].x * out[i].x + nrm[e].y * out[i].y < off[e] - 1e-6) return null;
+    }
+  }
+  return out;
+}
+
+/** Accumulator for one merged stone field. One per shade, so it stays 2 draw calls. */
+interface StoneBuf { pos: number[]; nrm: number[]; uv: number[]; col: number[]; idx: number[]; v: number; cells: number }
+
+function newStoneBuf(): StoneBuf { return { pos: [], nrm: [], uv: [], col: [], idx: [], v: 0, cells: 0 }; }
+
+/**
+ * One stone: a flat top face, a shallow rolled bevel, and a short skirt.
+ *
+ * `outline` is the stone's widest silhouette (the cell inset by half the joint width);
+ * `top` is `outline` inset again by the bevel. Both arrive CCW and are emitted CW,
+ * because world (x, y) maps to three (x, ·, z) and a CCW ground polygon in (x, y)
+ * produces a DOWNWARD face normal there — verified by hand on a unit triangle rather
+ * than discovered by rendering an invisible floor.
+ */
+function emitStone(
+  buf: StoneBuf, outline: GPt[], top: GPt[], yTop: number, yBev: number, yBot: number,
+  bevelUp: number, bevelOut: number, r: number, g: number, b: number
+): void {
+  const n = outline.length;
+  const o: GPt[] = [], t: GPt[] = [];
+  for (let i = n - 1; i >= 0; i--) { o.push(outline[i]); t.push(top[i]); }
+  // Per-vertex outward direction: the bisector of the two adjacent edge normals. For a
+  // CW polygon the interior is to the RIGHT of each edge, so the outward normal is the
+  // LEFT one.
+  const out: GPt[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = o[(i - 1 + n) % n], c = o[i], e = o[(i + 1) % n];
+    const e1x = c.x - a.x, e1y = c.y - a.y, L1 = Math.hypot(e1x, e1y) || 1;
+    const e2x = e.x - c.x, e2y = e.y - c.y, L2 = Math.hypot(e2x, e2y) || 1;
+    let vx = -e1y / L1 + -e2y / L2, vy = e1x / L1 + e2x / L2;
+    const L = Math.hypot(vx, vy);
+    if (L < 1e-6) { vx = 0; vy = 1; } else { vx /= L; vy /= L; }
+    out.push({ x: vx, y: vy });
+  }
+  let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
+  for (const q of o) { if (q.x < minx) minx = q.x; if (q.x > maxx) maxx = q.x; if (q.y < miny) miny = q.y; if (q.y > maxy) maxy = q.y; }
+  const sxw = Math.max(1e-6, maxx - minx), syw = Math.max(1e-6, maxy - miny);
+  const base = buf.v;
+  const push = (q: GPt, y: number, nx: number, ny: number, nz: number) => {
+    buf.pos.push(wu(q.x), y, wu(q.y));
+    buf.nrm.push(nx, ny, nz);
+    buf.uv.push((q.x - minx) / sxw, (q.y - miny) / syw);
+    buf.col.push(r, g, b);
+    buf.v++;
+  };
+  for (let i = 0; i < n; i++) push(t[i], yTop, 0, 1, 0);                                  // ring 0 — top face
+  for (let i = 0; i < n; i++) push(t[i], yTop, out[i].x * bevelOut, bevelUp, out[i].y * bevelOut); // ring 1
+  for (let i = 0; i < n; i++) push(o[i], yBev, out[i].x * bevelOut, bevelUp, out[i].y * bevelOut); // ring 2
+  for (let i = 0; i < n; i++) push(o[i], yBev, out[i].x, 0, out[i].y);                    // ring 3 — skirt
+  for (let i = 0; i < n; i++) push(o[i], yBot, out[i].x, 0, out[i].y);                    // ring 4
+  for (let i = 1; i < n - 1; i++) buf.idx.push(base, base + i, base + i + 1);
+  for (let ring = 1; ring <= 3; ring += 2) {
+    const U = base + ring * n, L = base + (ring + 1) * n;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      buf.idx.push(U + i, L + i, L + j, U + i, L + j, U + j);
+    }
+  }
+  buf.cells++;
+}
+
+function stoneMesh(buf: StoneBuf, mat: THREE.Material, name: string): THREE.Mesh {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(buf.pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(buf.nrm, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(buf.uv, 2));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(buf.col, 3));
+  geo.setIndex(buf.idx);
+  geo.computeBoundingSphere();
+  geo.computeBoundingBox();
+  const m = new THREE.Mesh(geo, mat);
+  m.name = name;
+  m.receiveShadow = true;
+  m.castShadow = false;
+  noOutline(m);
+  return m;
+}
+
 export function buildFloor(M: Materials): THREE.Group {
   const g = new THREE.Group();
   noOutline(g);
@@ -1857,8 +2080,47 @@ export function buildFloor(M: Materials): THREE.Group {
   // ratio all four critics were arguing about is untouched, and the joint is still darker
   // and no warmer than the tile, which is the one thing that must never invert.
   //   #513841  was   rgb( 81, 56, 65)  hue 338.4  HSV 0.309  luma 62.0
-  //   #473B3F  now   rgb( 71, 59, 63)  hue 338.6  HSV 0.169  luma 61.8
-  subfloorDark.color.set('#473B3F');
+  //   #473B3F  was   rgb( 71, 59, 63)  hue 338.6  HSV 0.169  luma 61.8
+  //
+  // ── ROUND 13: THE FOUR-CRITIC DEADLOCK IS OVER, BECAUSE THE PLATE WAS MEASURED ──
+  //
+  // Everything above is four critics arguing about a ratio with no reference number in
+  // the room, which is why it oscillated 2.5 -> 1.2 -> 2.5-3.3 -> 1.25 and settled on a
+  // MIDPOINT (~1.6:1) that nobody had asked for. `tools/tmp/v1_joint.mjs` measures the
+  // quantity they were all describing — mean luma of joint pixels against mean luma of
+  // face pixels, on a rendered frame, with the low-frequency lighting bake divided out —
+  // and running it on a reference plate's open ground ends the argument:
+  //
+  //                              deltaLuma   ratio
+  //     reference plate open ground   11.36   1.126   (bs_01, crop 10,150,140,145;
+  //                                                    stable to 0.00 across bg radii
+  //                                                    56 / 40 / 28)
+  //     ours, p58 open_mid            47.86   1.799
+  //     ours, p58 pot_apron           40.36   1.674
+  //     ours, p58 wall_south          32.84   1.548
+  //
+  // Our grout is **3.55x the reference's joint contrast** on the three-station mean.
+  // That is not a taste gap and it is not inside anybody's floor.
+  //
+  // 🚨 THE SUPERSEDED WORDING ABOVE IS KEPT AND ONE PART OF IT IS NOW KNOWN TO HAVE BEEN
+  // MISREAD. Critic 3's *"PHYSICALLY INVERTED"* is quoted above as an argument against
+  // ~1.15:1 — it was not. Its own measurement is in this file: *"the seam at ~#8a8078
+  // against tiles at L121-130"*. #8a8078 is luma **129.5**, i.e. the seam was BRIGHTER
+  // than the tiles it separated. Critic 3 was objecting to a genuine inversion, not to a
+  // shallow ratio, so its evidence never contradicted critics 1 and 4 at all, and the
+  // midpoint was a compromise between a real constraint and a misquoted one.
+  //
+  // The one rule all four agree on and this cannot break: the joint must never be
+  // brighter than the tile. Scaling a single colour by k < 1 cannot produce that.
+  //
+  //   #69585E  now   rgb(105, 88, 94)  hue 338.8  HSV 0.162  luma 92.1
+  //
+  // This is the tile albedo #78656C scaled by 0.871 — hue and HSV saturation carried
+  // across untouched (a uniform RGB scale preserves both exactly), which is this block's
+  // own standing rule, *"only the chroma moves, with the tile it belongs to"*, applied to
+  // value instead. Authored ratio 105.6 / 92.1 = **1.147**, against the plate's measured
+  // 1.126 and critic 1's and critic 4's 1.2 / 1.25.
+  subfloorDark.color.set('#69585E');
   const base = mesh(
     new THREE.PlaneGeometry(wu(ARENA_W + 300), wu(ARENA_H + 300)),
     subfloorDark,
@@ -1910,9 +2172,52 @@ export function buildFloor(M: Materials): THREE.Group {
   //      camera moves. 40wu (2m) reads as ~22 tiles at shipped zoom and ~10 at the
   //      closest plausible camera, which is the range that survives both. Still an
   //      exact divisor of ARENA_W and ARENA_H, so no partial tile at any edge.
+  //   6. SHAPE, round 13, and this is the one nobody had measured. Every argument above
+  //      is about the tile's SIZE; a fresh critic named the property none of them
+  //      touched — *"a regular orthogonal grid of identical squares whose lines run
+  //      unbroken to every frame edge, where the reference is an irregular polygonal
+  //      tessellation of varied cell size and orientation."* It also said, correctly,
+  //      that scale is NOT the differentiator, and the numbers agree: ours ~6.4% of
+  //      frame width against the plate's ~5.1%. So `TILE` does not move. It stops being
+  //      a tile edge and becomes a Voronoi SITE SPACING, which preserves the cell scale
+  //      five rounds of argument above arrived at while destroying the lattice.
+  //
+  //      🚨 THE TWO COMMENTS THIS REPLACES WERE BOTH THE 1x MAP'S NUMBERS, GREEN THE
+  //      WHOLE TIME — the same class as the chip field's "~1750 chips" in round 9.
+  //      They read `const cols = ARENA_W / TILE; // 35, exact` and `rows ... // 25`.
+  //      `6631446` took the arena to 2800x2000, so they have been **70 and 50** — 3,500
+  //      tiles, not 875 — since that commit, without one line of this file changing.
+  //      The block below therefore also said "~2,240 instances", which was never right
+  //      either. **A count derived from `ARENA_W` cannot be written down.**
   const TILE = 40;
-  const cols = ARENA_W / TILE; // 35, exact
-  const rows = ARENA_H / TILE; // 25, exact
+  /** Site jitter as a fraction of `TILE`. At 0 this degenerates back to a lattice. */
+  const TILE_SITE_JITTER = 0.40;
+  /**
+   * Fraction of sites removed so their area is absorbed by the neighbours — this is
+   * where *"varied cell size"* comes from, and it is cheaper than a second site grid.
+   * Never two adjacent (see the drop pass), or one hole becomes a stone four times the
+   * size of its neighbours and reads as a missing tile rather than a big flagstone.
+   */
+  const TILE_DROP_P = 0.40;
+  /**
+   * wu. The mortar gap, applied as a half-width inset on each stone. The lattice it
+   * replaces ran `wu(TILE) * 0.962`, i.e. 1.52wu; the reference plate's joints are
+   * measurably WIDER in area share than ours (jointShare 0.167 against our 0.078) and
+   * far lower in contrast, so this goes up while the contrast comes down. Those two
+   * move together on purpose: a wide DARK joint is a lattice with thicker lines.
+   */
+  const JOINT_W = 1.6;
+  /** wu. Horizontal roll on the stone's top edge — see `TILE_BEVEL`'s history below. */
+  const BEVEL_IN = 2.2;
+  /** m. Vertical drop across that roll: atan(0.014 / wu(0.95)) = 16.4 deg, a soft ramp. */
+  const BEVEL_DROP = 0.012;
+  /**
+   * wu. Vertices closer together than this are merged before the insets — see
+   * `polyClean`. Swept offline on `tools/tmp/v1_tess.mjs` rather than guessed:
+   * 0 -> 394 degenerate cells, 1.5 -> 84, 2.5 -> 1, **3.0 -> 0**, 4.0 -> 0. Taken to the
+   * first value that reaches zero, because every degenerate cell is a visible hole.
+   */
+  const TILE_CLEAN = 3.0;
   // Gap ratio 0.95 — a wider joint than the 0.965 the previous loop settled on. That
   // nudge was made to fight a BRIGHT orange seam, i.e. it was compensating for the
   // joint colour rather than fixing it. With the joint now dark (`subfloorDark` plus
@@ -1952,11 +2257,22 @@ export function buildFloor(M: Materials): THREE.Group {
   // light edge and still ramps into the groove, without turning every tile into a
   // pillow. Verified separately as invisible at shipped camera distance either way,
   // so this is purely a close-range quality call.
-  const TILE_H = 0.06;
-  const TILE_BEVEL = 0.028;
-  const TILE_CENTRE_Y = FLOOR_Y.tile + 0.015 - TILE_H / 2; // keeps the top face at +0.015
-  const tileGeo = roundedBox(wu(TILE) * 0.962, TILE_H, wu(TILE) * 0.962, TILE_BEVEL, 4);
-  const total = cols * rows;
+  // Round 13: `TILE_BEVEL` was the `roundedBox` corner radius and is gone with the box.
+  // The roll survives as `BEVEL_IN` / `BEVEL_DROP` above, and the round-4 argument it
+  // encodes survives with it: a shallow ramp catches a light edge without turning every
+  // stone into a pillow. It is now 16.4 deg off horizontal rather than a quarter-round,
+  // which is *softer* than what it replaces — deliberately, because the joint it ramps
+  // into is no longer a dark line that needs a hard lip to be read as a groove.
+  const TILE_H = 0.026;
+  // The top face still sits at exactly +0.015: `shared.ts` places every prop's contact
+  // shadow at y = 0.019 on that assumption, and raising it would re-bury every contact
+  // shadow in the arena. Unchanged from the instanced field, and the reason is unchanged.
+  const Y_TOP = FLOOR_Y.tile + 0.015;
+  const Y_BOT = Y_TOP - TILE_H;
+  // The bevel-band normal: `bevelOut` horizontal, `bevelUp` vertical, normalised.
+  const bevLen = Math.hypot(wu(BEVEL_IN), BEVEL_DROP);
+  const BEV_UP = wu(BEVEL_IN) / bevLen;
+  const BEV_OUT = BEVEL_DROP / bevLen;
   // Capacity is the full tile count on BOTH meshes (not half each) — the noise-driven
   // split below is never exactly 50/50, and allocating each InstancedMesh generously
   // is free (a few unused instance slots) versus silently dropping tiles once a
@@ -1972,8 +2288,29 @@ export function buildFloor(M: Materials): THREE.Group {
   // attribute this tile geometry doesn't have; that attribute reads as unbound
   // (0,0,0) in WebGL, which multiplied every tile to solid black — a prior round lost
   // time to exactly this.
-  const tileLightInst = cloneToon(M.tileLight);
-  const tileDarkInst = cloneToon(M.tileDark);
+  // ── ROUND 13: THE STONE FIELD DECLINES THE FRESNEL RIM ──────────────────────
+  //
+  // `toonMat` puts a rim on everything unless asked not to, and `cloneToon` carries it
+  // across, so this field has always had one. On a lattice of near-flat tiles with a
+  // near-black joint it was invisible — a few pale speckles on a seam. Give every stone
+  // a continuous bevel ring and take the joint's darkness away and it becomes what the
+  // shallow camera shows: **a bright pale-blue line along the far edge of every stone.**
+  // `pow(1 - dot(N, V), 2.6)` peaks exactly where a bevel tilts away from the eye, which
+  // at the lobby's 20 deg is the whole far half of every stone's roll.
+  //
+  // That is a direct violation of what this round is for — the critic's third action is
+  // *"drop joint contrast AND keep the joint in the tile's own hue"*, and a blue-white
+  // rim on the joint is the same defect with the opposite sign. `toonMat`'s own note
+  // says the rim is for silhouette separation and to *"set false for flat decals"*; a
+  // ground plane has no silhouette to separate and every rim it spends is chroma
+  // competing with the cast that is supposed to stand out against it.
+  //
+  // ⚠️ FOUND BY READING THE PNG, NOT BY A NUMBER. `v1_joint`'s contrast arm reads the
+  // joint getting QUIETER while this was happening, because a bright line and a dark
+  // line are both "not the face" — `deltaLuma` is a magnitude. It is exactly the §6b
+  // shape: the metric moved the right way and a new defect walked in underneath it.
+  const tileLightInst = cloneToon(M.tileLight, { rim: false });
+  const tileDarkInst = cloneToon(M.tileDark, { rim: false });
   // Mid-value warm ceramic, ~40% darker and noticeably less yellow than `KPAL`'s
   // #EAD3A8/#D8B586. These numbers are measured, not eyeballed: `tools/_measure_light`
   // puts the four curated gameplay plates at mean HSV value 0.56-0.76 (sat 0.39-0.59),
@@ -2186,12 +2523,22 @@ export function buildFloor(M: Materials): THREE.Group {
   // makes the chequer read at all.
   tileLightInst.color.set('#78656C');
   tileDarkInst.color.set('#715F66');
-  const lightMesh = new THREE.InstancedMesh(tileGeo, tileLightInst, total);
-  const darkMesh = new THREE.InstancedMesh(tileGeo, tileDarkInst, total);
-  lightMesh.receiveShadow = true;
-  darkMesh.receiveShadow = true;
-  noOutline(lightMesh);
-  noOutline(darkMesh);
+  // ── ROUND 13: `vertexColors` IS NOW CORRECT, AND THE NOTE ABOVE IS NOT WRONG ──
+  //
+  // The block above forbids `material.vertexColors = true` and it was right for an
+  // `InstancedMesh`: three enables the per-VERTEX `USE_COLOR` path off that flag, the
+  // tile geometry had no `color` attribute, and an unbound attribute reads (0,0,0) in
+  // WebGL — every tile went solid black. Kept above with the reason, per `CLAUDE.md`.
+  // **What changed is not the rule, it is the geometry.** The stone field is a merged
+  // `BufferGeometry` now, so there is no `instanceColor` to ride and the per-cell tint
+  // has to travel on a real `color` attribute — which `stoneMesh` builds. The flag is
+  // therefore mandatory here for exactly the reason it was forbidden there.
+  const lightBuf = newStoneBuf();
+  const darkBuf = newStoneBuf();
+  tileLightInst.vertexColors = true;
+  tileDarkInst.vertexColors = true;
+  tileLightInst.needsUpdate = true;
+  tileDarkInst.needsUpdate = true;
 
   // Chokepoint wear — high-traffic geometry (the four hub lane-mouths, the
   // prep-station gaps, the barrel lane, the service counters, the stove islands)
@@ -2312,27 +2659,96 @@ export function buildFloor(M: Materials): THREE.Group {
   const tileRand = () => { tileSeed = (tileSeed * 16807) % 2147483647; return tileSeed / 2147483647; };
   const noiseColor = new THREE.Color();
 
-  let li = 0, di = 0;
-  const m4 = new THREE.Matrix4();
-  const tPos = new THREE.Vector3();
-  const tQuat = new THREE.Quaternion();
-  const tScale = new THREE.Vector3();
-  const tEuler = new THREE.Euler();
   // Arena half-diagonal, for the broad edge falloff below.
   const halfDiag = Math.hypot(ARENA_W, ARENA_H) / 2;
-  for (let i = 0; i < cols; i++) {
-    for (let j = 0; j < rows; j++) {
-      const wx = i * TILE + TILE / 2;
-      const wy = j * TILE + TILE / 2;
 
-      // Sub-degree yaw, ±1.5% scale, ±1.5mm height. See point 4 in the block comment
-      // above — this is what stops the joint lines reading as a laser-straight lattice.
-      tEuler.set(0, (tileRand() - 0.5) * 0.022, 0); // ±0.63°
-      tQuat.setFromEuler(tEuler);
-      const s = 0.985 + tileRand() * 0.03;
-      tScale.set(s, 1, s);
-      tPos.set(wu(wx), TILE_CENTRE_Y + (tileRand() - 0.5) * 0.003, wu(wy));
-      m4.compose(tPos, tQuat, tScale);
+  // ── THE SITE FIELD ──────────────────────────────────────────────────────────
+  //
+  // ⚠️ `SITE_COLS`/`SITE_ROWS` are DERIVED and are deliberately not written down. The
+  // two lines this replaced said "35, exact" and "25, exact" and had been wrong since
+  // `6631446`. See the note beside `TILE`.
+  const SITE_COLS = Math.round(ARENA_W / TILE);
+  const SITE_ROWS = Math.round(ARENA_H / TILE);
+  const nSites = SITE_COLS * SITE_ROWS;
+  const siteX = new Float64Array(nSites);
+  const siteY = new Float64Array(nSites);
+  const alive = new Uint8Array(nSites).fill(1);
+  const J = TILE * TILE_SITE_JITTER;
+  for (let j = 0; j < SITE_ROWS; j++) {
+    for (let i = 0; i < SITE_COLS; i++) {
+      const k = j * SITE_COLS + i;
+      siteX[k] = i * TILE + TILE / 2 + (tileRand() - 0.5) * 2 * J;
+      siteY[k] = j * TILE + TILE / 2 + (tileRand() - 0.5) * 2 * J;
+    }
+  }
+  // The drop pass — where "varied cell size" comes from. A dropped site's area is
+  // absorbed by its neighbours, so a few stones come out roughly double. Refusing to
+  // drop next to an already-dropped site caps that at double: two adjacent holes make a
+  // stone ~3x its neighbours, which stops reading as a big flagstone and starts reading
+  // as a missing tile — the exact defect this whole field exists to avoid.
+  for (let j = 0; j < SITE_ROWS; j++) {
+    for (let i = 0; i < SITE_COLS; i++) {
+      if (tileRand() >= TILE_DROP_P) continue;
+      let near = false;
+      for (let dj = -1; dj <= 1 && !near; dj++) {
+        for (let di = -1; di <= 1; di++) {
+          const ii = i + di, jj = j + dj;
+          if (ii < 0 || jj < 0 || ii >= SITE_COLS || jj >= SITE_ROWS) continue;
+          if (!alive[jj * SITE_COLS + ii]) { near = true; break; }
+        }
+      }
+      if (!near) alive[j * SITE_COLS + i] = 0;
+    }
+  }
+  // Every cell starts as the whole playfield and is clipped down, so the stones stop
+  // exactly at the arena edge with no partial-tile fringe — the property the old
+  // "exact divisor of ARENA_W" argument was buying, kept without the divisor.
+  const arenaRect: GPt[] = [
+    { x: 0, y: 0 }, { x: ARENA_W, y: 0 }, { x: ARENA_W, y: ARENA_H }, { x: 0, y: ARENA_H },
+  ];
+  let cellsSkipped = 0;
+  for (let j = 0; j < SITE_ROWS; j++) {
+    for (let i = 0; i < SITE_COLS; i++) {
+      const k = j * SITE_COLS + i;
+      if (!alive[k]) continue;
+      const kx = siteX[k], ky = siteY[k], kq = kx * kx + ky * ky;
+      let poly: GPt[] = arenaRect;
+      // 5x5 neighbourhood: with the jitter and the drop pass a cell can reach ~1.7 TILE
+      // from its site, and a bisector against a neighbour at distance d cuts at d/2, so
+      // every site within ~3.4 TILE can bind. The 5x5 ring reaches 3.8 TILE with jitter.
+      for (let dj = -2; dj <= 2 && poly.length >= 3; dj++) {
+        const jj = j + dj;
+        if (jj < 0 || jj >= SITE_ROWS) continue;
+        for (let di = -2; di <= 2; di++) {
+          const ii = i + di;
+          if (ii < 0 || ii >= SITE_COLS) continue;
+          const m = jj * SITE_COLS + ii;
+          if (m === k || !alive[m]) continue;
+          const mx = siteX[m], my = siteY[m];
+          poly = clipHalf(poly, 2 * (mx - kx), 2 * (my - ky), mx * mx + my * my - kq);
+          if (poly.length < 3) break;
+        }
+      }
+      if (poly.length >= 3) poly = polyClean(poly, TILE_CLEAN);
+      const outline = poly.length >= 3 ? polyInset(poly, JOINT_W / 2) : null;
+      if (!outline) { cellsSkipped++; continue; }
+      // ⚠️ A FAILED BEVEL MUST NOT COST THE STONE. `BEVEL_IN` is wide enough that the
+      // smallest cells cannot take it, and the first version of this line skipped those
+      // cells outright — 47 to 167 of them depending on the width, i.e. 47 to 167 HOLES
+      // in the floor with the subfloor showing through. Measured on `v1_tess`, and the
+      // whole point of that replica: the parameter that makes the joint softest is also
+      // the one that punches the most holes, and nothing in the render says which.
+      // A stone with a narrower roll is correct; a missing stone is not.
+      let top = polyInset(outline, BEVEL_IN);
+      if (!top) top = polyInset(outline, BEVEL_IN * 0.45);
+      if (!top) top = outline; // no roll at all — the ring quads collapse to zero area
+      const bevelDrop = top === outline ? 0 : BEVEL_DROP;
+      // Every field below was written against a grid cell's CENTRE. The stone's own
+      // centroid is the same quantity for an irregular cell, and using the SITE instead
+      // would put the sample off-centre by up to the jitter.
+      let wx = 0, wy = 0;
+      for (const q of outline) { wx += q.x; wy += q.y; }
+      wx /= outline.length; wy /= outline.length;
 
       const b = blotch(wx, wy);
       const wear = wearAt(wx, wy);
@@ -2423,16 +2839,25 @@ export function buildFloor(M: Materials): THREE.Group {
         mult * (1 - cool * 0.03),
         mult * (1 + cool * 0.08)
       );
-      if (isDark) { darkMesh.setColorAt(di, noiseColor); darkMesh.setMatrixAt(di++, m4); }
-      else { lightMesh.setColorAt(li, noiseColor); lightMesh.setMatrixAt(li++, m4); }
+      emitStone(
+        isDark ? darkBuf : lightBuf, outline, top, Y_TOP, Y_TOP - bevelDrop, Y_BOT,
+        BEV_UP, BEV_OUT, noiseColor.r, noiseColor.g, noiseColor.b
+      );
     }
   }
-  lightMesh.count = li;
-  darkMesh.count = di;
-  lightMesh.instanceMatrix.needsUpdate = true;
-  darkMesh.instanceMatrix.needsUpdate = true;
-  lightMesh.instanceColor!.needsUpdate = true;
-  darkMesh.instanceColor!.needsUpdate = true;
+  // 🚨 NON-EMPTY BEFORE ANYTHING IS BUILT FROM IT (`CLAUDE.md` rule 6). Every failure
+  // mode in the block above — a degenerate cell, an inset that ate the shape, a
+  // half-plane loop that clipped everything away — produces FEWER cells, silently, and
+  // the end state of "silently fewer" is zero. A floor with no stones is a subfloor
+  // plane, which renders perfectly well and looks like a deliberate flat ground.
+  if (lightBuf.cells + darkBuf.cells === 0) {
+    throw new Error('floor: the stone field produced no cells — the tessellation is broken');
+  }
+  if (cellsSkipped > nSites * 0.15) {
+    console.warn(`floor: ${cellsSkipped} of ${nSites} stone cells were degenerate and skipped`);
+  }
+  const lightMesh = stoneMesh(lightBuf, tileLightInst, 'floor_stones_light');
+  const darkMesh = stoneMesh(darkBuf, tileDarkInst, 'floor_stones_dark');
   g.add(lightMesh, darkMesh);
 
   // ── REMOVED round-2 (loop 3): the 94 dark "grout AO" strips ─────────────────
