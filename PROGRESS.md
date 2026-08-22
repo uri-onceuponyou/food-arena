@@ -730,3 +730,104 @@ this kind before spending rounds on it.
 - **Blindness is imperfect.** A critic who recognises Brawl Stars is identifying the
   reference by IP, not judging it on quality. Nothing fixes this fully — it is a reason
   to weight *named specific gaps* over the number.
+
+---
+
+# The four-item visual pass — 2026-08-22/23
+
+Uri, after playing the deployed build: *"the visuals are losing a blind side-by-side against Brawl
+Stars for four specific reasons. Fix them. This is a rendering and art-direction pass only."*
+(1) floor too noisy, (2) characters don't separate, (3) palette scattered with no hierarchy,
+(4) lighting flat. Then, from later play: *"water paddels… should look like water, not circles"*,
+*"i still can't see the 'bushes'"*, and *"projectiles and explosions still look very flat."*
+
+**37 commits.** Each item ran as a builder + a separate harsh critic with fresh context, looping
+until the measurement moved or two rounds landed inside the stated floor.
+
+## The single largest finding of the pass
+
+🚨 **EVERY EFFECT IN THE GAME WAS DRAWN WITH AN UNLIT MATERIAL** — 62 `MeshBasicMaterial` plus 6
+more, **zero lit materials in the entire VFX layer** (`ccb2e4e`, instrument `574959a`). Uri's
+*"projectiles and explosions look very flat and not like what they're supposed to"* was not a
+tuning complaint and not a taste gap. It was a **complete absence of shading**, and it is the
+literal definition of the "pasted sticker" look. The flatness was **100% of them**, not a majority.
+
+This is the ninth-plus confirmation of the standing rule that **every plateau ever probed here was
+a bug, not a taste gap** — and it is the sharpest yet, because a critic loop scoring "flat
+projectiles" could have run forever without finding it. The probe found it in one pass.
+
+⚠️ **And the first fix for it did NOT work, which is the more useful half.** `bd3d5cc`: a key-light
+ramp *moved the metric on all eleven cases and barely moved the picture* — because a normal-based
+shading term has nothing to say to a blob that has been squashed to 0.4. **A metric closing is not
+a picture changing** (`LESSONS §6b`), and the instrument agreed with itself the whole way.
+
+## What Uri reported, and what it actually was
+
+| his words | what it was |
+|---|---|
+| *"water should look like water, not circles"* | **three concentric `CircleGeometry` discs.** He read the primitive exactly. Now a lobed outline, shore-following ripples, a grazing-angle sky reflection (`2d8f881`) — and beneath that the pool was an **opaque decal 60 luma brighter than the floor it lay on**, depth is now alpha (`f5291c9`), while its own surface overlay was **bleaching it**: 0.157 of saturation spent to add 24 luma, with a "reflection" that was **34% constant** — a film, not a reflection (`51fc69d`) |
+| *"i still can't see the bushes"* — **his third report of it** | they were a **0.02 m mat** against a 2.10 m character. Not a visibility bug: there was nothing to see. Now a **2.99 m pot rack you stand under** (`c701f70`) |
+| *"projectiles and explosions look flat"* | zero lit materials, above |
+| *"desaturate the pink floor significantly"* | ⚠️ **falsified, and reversed.** Ours measured S **0.4570** against the plate's **0.4361** — already matched. Desaturating took it to **0.2451**, a **9× larger** gap across half the frame. Pushed the other way instead: frame median S **0.328 → 0.493**, into a band it had been below **all six** plates of, and the player got MORE salient, not less (`4c35bac`). **Fifth falsification of "fix it by desaturating."** He then reported the floor "looks a lot better" |
+
+## Item by item
+
+**1 — floor noise.** Debris **7,185 → 1,418** in three clusters, zero casting shadows (`a63936e`).
+The ground stopped being a **grid**: joint contrast **43.4 → 15.0** luma, no straight line surviving
+anywhere (`8b8c35a`). Then the chroma correction above.
+
+**2 — character separation.** The character ink line measured **0.22–0.32 px at the camera the game
+is played at** — a world-space thickness cannot serve two cameras (`140d054`, and `70ee682` is that
+commit's own title being wrong by re-measurement). The rim was a body **wash**, not an edge, and
+**`key.shadow.radius` had been INERT for its entire life** — so Uri's "soften the shadow" had never
+been delivered by anything (`f77a9d7`).
+
+**3 — palette hierarchy.** The hierarchy was spent **backwards** in both screens where a character
+is presented. Lobby: backdrop 0.963 / ground 0.958 / podium 0.915 / **character 0.689** — least
+saturated thing in its own frame; podium out-chromaed it **0.652 vs 0.442** in the character's own
+hue band. After: character first of four, its share of the loud budget **15.8% → 99.5%**
+(`b945147`). Roster: **7 of 11 cards drew the character DARKER than the backdrop presenting it**;
+polarity **−0.156 → +0.138**, 0/11 negative (`20f5c6b`). Menus: the backdrop's four gradient stops
+sat at four hues, collapsed to one 30° bin (`adc625c`).
+⚠️ **The arena half is the opposite finding and must not be generalised** — the arena is *inside*
+the plate band on every aggregate; its defect is **allocation** (props hold 49.2% of loud pixels on
+15.6% of area), not level. Item 3's "muted base" would have undone item 1.
+
+**4 — lighting/depth.** All three asks — warm/cool contrast, vignette, AO — were audited before
+building, and **two of the three already shipped** (`8ca7a46`); four of six reference plates are
+*brighter* at the corners, so a dark vignette is not the reference look. AO landed at **zero draw
+calls** (`d16fcec`).
+
+## Instruments that were wrong, and how they were caught
+
+**Not one of these was caught by a check.** Every one came from an agent re-deriving a claim it had
+been handed as true — the reversed rule at the top of `CLAUDE.md`, working as intended.
+
+* `arena-scan --baseline`, the **colour drift gate six documents name as the only source of chroma
+  truth, has been refusing to answer** — the stored baseline's stations carry fog 1985, the tree
+  derives 1720.47, so every station key differs. The refusal is *correct*; the gate is inert
+  (`d62a800`). Re-baseline is owed and is deliberately **not** being done mid-pass.
+* `gatecount --docs-only` printed **"0 verified, 64 skipped, 0 faults"** — a green-battery shape —
+  while accounting for **64 of 152 rows**; the other 88 were in neither total (`cfaabfa`). **The
+  orchestrator had used that exact line as evidence two hours earlier.**
+* An ablation reporting an "8.3-point" offender **was reading its own green**; the object was worth
+  **0.3 of a 9.9-point gap** (`dfc3355`).
+* A mask **swallowed the AO's own floor wreath** and reported the hero as dark; all three of that
+  critic's numbers fell with it (`40b8a1a`).
+* A reference-arm control said *"NOT a single-variable pair"* about a pair differing in **one file**
+  (`f307ef3`). A capture tool produced images `review.mjs` **refuses** (`61b4307`). A HUD panel had
+  **zero of the shipped HUD in it** (`9274f62`). A new instrument shipped a **1× map literal** while
+  its own header boasted about deriving the station beside it (`603f583`).
+* `clonetoon_test` went red because **three rows hard-coded `0.28`** — the shipped default, retyped
+  into an assertion about propagation (`9ed8f63`).
+* Three commit titles were falsified by the next commit: a "0.17 px" that was 0.22–0.32, a "four of
+  the other six" that was two, and a quoted draw delta that had never been measured (`a6ae899` —
+  it was +1, caused by the puddle **casting a shadow**, and stopping that is −2).
+
+## Open, and parked for Uri
+
+* **§88** — collapsing the roster to one hue family cost adjacent-tier separation **52.4 → 5.0**,
+  and the ceiling *inside* the new constraints is **6.2**. Recommendation is leave it, on the
+  strength of his own §26 answer that rarity confers no power. A rarity ring mitigates.
+* **The concealment patches are extruded over OPEN FLOOR on all twenty** — `0 of 2,220`
+  (concealment × cover) pairs overlap (`91513b2`). Relevant to his parked §29(a).
