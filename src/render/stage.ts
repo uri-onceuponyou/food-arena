@@ -887,7 +887,37 @@ export class Stage {
     if (opts.shadows !== false && this.profile.shadows) {
       this.shadowsOn = true;
       this.renderer.shadowMap.enabled = true;
-      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      // ── PCFSoftShadowMap -> PCFShadowMap, AND THIS IS A BUG FIX, NOT A TASTE CALL ──
+      //
+      // Uri, on the shipped build: *"the current directional shadows are long and
+      // offset ... keep the directional shadow but SOFTEN and shorten it."* `140d054`
+      // answered the soften half with `key.shadow.radius = 0.4 -> 1.6` in
+      // `lighting.ts`, and wrote down the honest prediction that this repo had already
+      // measured that knob as a near no-op ("re-tested at 1.4 and 3.0 ... every metric
+      // moved by under 0.001"), reading it as `LESSONS §6b` backwards — a flat metric
+      // is not evidence a change did nothing.
+      //
+      // 🚨 IT WAS NOT A METRIC PROBLEM. `shadowRadius` is referenced in three 0.180.0's
+      // `shadowmap_pars_fragment.glsl.js` ONLY inside `#if defined( SHADOWMAP_TYPE_PCF )`.
+      // The `PCF_SOFT` branch builds its kernel from `texelSize` alone and never reads
+      // the uniform, so under the type set on THIS line the value was inert BY
+      // CONSTRUCTION and no instrument could ever have seen it move.
+      // `tools/tmp/v2_band.mjs --wave shadow` settles it at the only resolution that
+      // cannot be argued with, both sides asserted in one run on ONE frozen frame:
+      //   PCF_SOFT radius 0 / 1.6 / 20  -> 3/3 rows BIT-IDENTICAL to shipped
+      //   PCF      radius 1.6 / 4 / 8   -> 3 DISTINCT frames, none equal to shipped
+      // The null alone would also be what a knob path that never resolved looks like;
+      // the pair is what makes it evidence.
+      //
+      // ⚠️ WHAT IT COSTS, MEASURED RATHER THAN ASSUMED. PCF takes SEVENTEEN taps
+      // against PCF_SOFT's nine, so the shadow read is ~1.9x per lit fragment. Draw
+      // calls are EXACTLY unchanged (the sweep reads 1720/1722 on every PCF row, same
+      // as shipped) — this buys nothing and costs nothing in the draw budget `5aa4655`
+      // fought for. The alternative that would have been cheaper to SAMPLE was VSM
+      // (one tap, a real Gaussian on the depth map, and visibly the cleanest penumbra
+      // of everything tried): it was REJECTED on the same sweep because it takes the
+      // frame from **1722 to 1852 draws, +130**, and this game ships on a phone at 423.
+      this.renderer.shadowMap.type = THREE.PCFShadowMap;
       this.renderer.shadowMap.autoUpdate = false;
       this.renderer.shadowMap.needsUpdate = true;
     }

@@ -203,6 +203,25 @@ export function toonMat(opts: ToonMatOptions): THREE.MeshStandardMaterial {
 }
 
 /**
+ * The Fresnel falloff exponent and the peak strength, as ONE pair.
+ *
+ * They are a pair because the exponent alone would dim the whole term and the strength
+ * alone would only widen the wash it already was — the derivation is in
+ * `applyRimLight`'s note. Held here rather than as defaults on the signature so that a
+ * probe can read the shipped values without constructing a material, and so the two
+ * cannot drift apart in a `git diff`.
+ *
+ * ⚠️ `rimPower` is a UNIFORM, not a `#define`. That is deliberate and it costs nothing:
+ * `Material.customProgramCacheKey()` returns `onBeforeCompile.toString()`, so every
+ * material patched here still shares ONE compiled program (the note below), and a
+ * `#define` would have split the cache per value the moment anything overrode it. Being
+ * a uniform is also what makes the value sweepable live on one frozen frame, which is
+ * how it was chosen.
+ */
+export const RIM_POWER = 5.0;
+export const RIM_STRENGTH = 1.40;
+
+/**
  * Fresnel rim term, injected into a standard material's fragment shader.
  *
  * An independent art director's third named gap was "move past single flat toon
@@ -243,11 +262,75 @@ export function toonMat(opts: ToonMatOptions): THREE.MeshStandardMaterial {
  *      one-line change and it lands on the four characters whose near-white clipping
  *      was hardest won (lollipop 0.1610 -> 0.0175, sushi, soup, egg), so it must be
  *      gated on a per-character `clipShare` run and not merged blind.
+ *
+ * ── THE 2.6/0.28 PAIR SHIPPED A WASH, NOT AN EDGE, AND IT WAS MEASURED TWICE ──
+ * Uri asked for *"a rim/fresnel light so each character has a BRIGHT EDGE that lifts it
+ * off the background"*. `140d054`'s own ablation is the first piece of evidence that we
+ * did not have one: driving every live rim to zero moved **1,130,817 px of 1,440,000 at
+ * mean 3.86/255** — a 1.5% lift spread across three quarters of the picture. That is the
+ * signature of a body wash, not of an edge.
+ *
+ * `tools/tmp/v2_band.mjs --wave rim` is the second, on ONE frozen frame with the live
+ * uniforms driven page-side (self-pair bit-identical, POSCTRL x21 moves the frame):
+ *
+ *   arm        band sat   chroma    luma
+ *   rim x0      0.4521   0.3119   0.5147
+ *   shipped     0.4460   0.3103   0.5195
+ *   rim x3      0.4388   0.3089   0.5276
+ *   rim x6      0.4293   0.3068   0.5376
+ *   rim x21     0.4002   0.3027   0.5711
+ *
+ * **More rim MONOTONICALLY DESATURATES the frame** — it adds luma and takes saturation
+ * and chroma, at every step, which is what a broad additive term does. Read at 2x, x6 is
+ * a chalky character and x21 is a white one; at no strength does an EDGE appear. So the
+ * brightness knob alone could never have delivered the ask, and the reason is the
+ * exponent: at `pow(rimDot, 2.6)` the term still carries 16% of its peak at 37 deg off
+ * the silhouette, so most of its energy lands on the BODY rather than the contour.
+ *
+ * → the exponent becomes a uniform and moves 2.6 -> `RIM_POWER`, with the strength
+ *   raised to compensate at the silhouette. The trade is deliberate and one-way: the
+ *   peak (rimDot = 1) gets brighter, and every interior sample gets DARKER, because
+ *   `x^p` falls faster for larger `p` everywhere below 1. It buys an edge by spending
+ *   the wash, rather than by adding light to the frame.
+ * ⚠️ There is a second occluder and it is ours: `140d054` also put a **screen-space ink
+ *   line of 1.53 px** on the same silhouette, and the rim's own half-max band on a
+ *   rounded body is ~1.4 px at match framing. The ink is drawn over the top of exactly
+ *   the pixels the rim's peak lands on. A narrower rim does not fix that on its own —
+ *   it makes the band that survives INSIDE the ink brighter, which is the half that is
+ *   reachable from this file.
+ *
+ * ── HOW 5.0 / 1.40 WAS CHOSEN, AND THE CONTROL THAT MAKES THE ROW SET READABLE ──
+ * `--wave rim2`, on a clean worktree of `8b8c35a` carrying exactly these hunks, both
+ * uniforms driven page-side on ONE frozen frame (self-pair BIT-IDENTICAL):
+ *
+ *   arm                band sat   chroma    luma
+ *   p2.6 s0.28 (old)    0.4460   0.3104   0.5195
+ *   p4   s0.95          0.4455   0.3096   0.5202
+ *   p5   s0.95          0.4476   0.3102   0.5181
+ *   p5   s1.40          0.4461   0.3096   0.5195
+ *   p7   s2.00          0.4477   0.3103   0.5179
+ *
+ * ⚠️ THE FIRST ROW IS THE CONTROL AND IT IS THE REASON TO BELIEVE THE REST: driving
+ * the NEW build's uniforms back to the OLD pair reproduces the OLD tree's shipped
+ * numbers to four decimals on every column (0.4460 / 0.3103 / 0.5195, measured on a
+ * separate worktree in a separate run). The uniform path is therefore exact, and the
+ * only thing separating these rows is the pair named on them.
+ *
+ * The band cannot choose between them — every row sits inside 0.002 — and that is the
+ * expected result rather than a disappointment: a term confined to the outer ~1 px of
+ * each silhouette governs a fraction of a percent of a 388,800 px band (`LESSONS §6b`
+ * read backwards, and `lighting.ts` has the same problem with edge softness). So it
+ * was chosen by rendering the rows and READING them at 4x, which is what the band is
+ * not able to do: at 5.0/1.40 the soup pot's ceramic ring carries a distinct bright
+ * contour along its lit edge and its yellow fill reads MORE saturated than shipped,
+ * because the wash that used to sit on top of it is gone. At 2.6 there is no contour
+ * at any strength — only a paler character.
  */
 export function applyRimLight(
   mat: THREE.MeshStandardMaterial | THREE.MeshPhysicalMaterial,
   color: THREE.ColorRepresentation = '#bfe4ff',
-  strength = 0.28
+  strength = RIM_STRENGTH,
+  power = RIM_POWER
 ): void {
   // ── The rim's PARAMETERS, recorded SYNCHRONOUSLY, so a clone can rebuild it ──
   // `rimUniforms` below is only written from inside `onBeforeCompile`, i.e. at first
@@ -260,13 +343,15 @@ export function applyRimLight(
   // in this game (all of them take the default) and is the one ColorRepresentation that
   // survives the round trip: a `THREE.Color` JSON-stringifies to `{r,g,b}`, which
   // `new THREE.Color()` cannot read back.
-  (mat.userData as { rim?: { color: number; strength: number } }).rim = {
+  (mat.userData as { rim?: { color: number; strength: number; power: number } }).rim = {
     color: new THREE.Color(color).getHex(),
     strength,
+    power,
   };
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.rimColor = { value: new THREE.Color(color) };
     shader.uniforms.rimStrength = { value: strength };
+    shader.uniforms.rimPower = { value: power };
     // QA HANDLE, zero cost, and it exists because of a specific measurement problem.
     // The rim is the brightest thing on a silhouette EDGE, and bloom's halo is fed by
     // exactly those pixels — so "how much of the glow outside the character is the
@@ -280,7 +365,8 @@ export function applyRimLight(
         '#include <common>',
         `#include <common>
          uniform vec3 rimColor;
-         uniform float rimStrength;`
+         uniform float rimStrength;
+         uniform float rimPower;`
       )
       // ── `vNormal` DOES NOT EXIST UNDER `flatShading`, AND THE FAILURE IS SILENT ──
       //
@@ -334,7 +420,7 @@ export function applyRimLight(
            vec3 rimNormal = vNormal;
          #endif
          float rimDot = 1.0 - clamp(dot(normalize(rimNormal), normalize(vViewPosition)), 0.0, 1.0);
-         float rim = pow(rimDot, 2.6) * rimStrength;
+         float rim = pow(rimDot, rimPower) * rimStrength;
          gl_FragColor.rgb += rimColor * rim;`
       );
   };
@@ -399,9 +485,14 @@ export function cloneToon<T extends THREE.Material>(
     rim?: boolean;
     rimColor?: THREE.ColorRepresentation;
     rimStrength?: number;
+    rimPower?: number;
   } = {},
 ): T {
-  type RimSpec = { color: number; strength: number };
+  // `power` is OPTIONAL on the spec on purpose: a material serialised before the
+  // exponent existed, or one hand-built in a test fixture, still round-trips — the
+  // `??` below then hands `applyRimLight` its own default rather than `undefined`,
+  // which would reach the uniform as NaN and blank the term on that material only.
+  type RimSpec = { color: number; strength: number; power?: number };
   const srcData = src.userData as { rim?: RimSpec; rimUniforms?: unknown };
   const spec = srcData.rim;
 
@@ -427,6 +518,7 @@ export function cloneToon<T extends THREE.Material>(
     lit,
     opts.rimColor ?? spec?.color,
     opts.rimStrength ?? spec?.strength,
+    opts.rimPower ?? spec?.power ?? RIM_POWER,
   );
   return out;
 }

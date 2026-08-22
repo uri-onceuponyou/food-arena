@@ -304,7 +304,57 @@ export function createLighting(opts?: {
   key.shadow.camera.far = 95;
   key.shadow.bias = -0.0006;
   key.shadow.normalBias = 0.035;
-  // ── 0.4 -> 1.6, THE "SOFTEN" HALF OF URI'S SENTENCE ────────────────────────
+  // ── 0.4 -> 1.6 -> DERIVED, AND THE 1.6 WAS INERT ──────────────────────────
+  //
+  // 🚨 `140d054` set this to 1.6 as "the SOFTEN half of Uri's sentence" and predicted,
+  // correctly, that it would measure as nothing. The reason is not the one it gave.
+  // `stage.ts` shipped `renderer.shadowMap.type = THREE.PCFSoftShadowMap`, and three
+  // 0.180.0 reads the `shadowRadius` uniform ONLY inside
+  // `#if defined( SHADOWMAP_TYPE_PCF )` (`shadowmap_pars_fragment.glsl.js`); the
+  // `PCF_SOFT` branch builds its kernel from `texelSize` alone. **The value was inert
+  // by construction, on every tier, for its whole life.** Proven both ways on one
+  // frozen frame by `tools/tmp/v2_band.mjs --wave shadow`: under PCF_SOFT, radius
+  // 0 / 1.6 / 20 are 3/3 BIT-IDENTICAL to shipped; under PCF the same three values give
+  // 3 distinct frames. `stage.ts` now sets `PCFShadowMap`, so this line finally does
+  // something — and it can no longer be a bare number, for the reason below.
+  //
+  // ── WHY IT IS DERIVED: `radius` IS IN SHADOW-MAP TEXELS, AND A TEXEL IS NOT A
+  //    FIXED SIZE HERE ────────────────────────────────────────────────────────
+  // The kernel spans `2 * radius` texels, and a texel is `2 * r / mapSize` metres,
+  // where BOTH terms move underneath it: `mapSize` is a tier knob (`shadowMapScale`
+  // 1 / 0.75 / 0.5, so 2048 / 1536 / 1024) and `r` is the focus radius, 34 m in a
+  // match and much smaller in every preview framing. A constant `radius` therefore
+  // means a penumbra that is **twice as soft on `low` as on `high`** and several times
+  // softer again in a character preview — the same class of defect as `140d054`'s own
+  // finding that a world-space outline thickness cannot serve two cameras. So the
+  // authored quantity is the PENUMBRA IN METRES and the texel count is solved for it
+  // in `focus()`, which is the one place that knows both terms.
+  //
+  // 0.20 m, chosen by looking at the rendered PNGs at 2x and not by a statistic —
+  // `lighting.ts` has said for rounds that no instrument here measures edge softness,
+  // and the band a sweep can measure moves by 0.0001-0.0002 across the whole blur
+  // range (against 0.0022 for the DEPTH knob), so the band cannot arbitrate this and
+  // did not. What the PNGs show, `tools/tmp/v2_band.mjs --wave shadow2/shadow3`:
+  //   radius 3 (0.20 m)  softened, penumbra clean
+  //   radius 5 (0.33 m)  softer, the 17-tap kernel starts to COMB — visible streaks
+  //   radius 8 (0.53 m)  soft and pleasant at 1x, clearly striped at 2x
+  // Seventeen taps over `2 * radius` texels is an undersampling budget, so the ceiling
+  // here is the kernel's and not taste's: past ~3 texels the blur shows its own
+  // sample pattern. That is also why `shadow.intensity` was NOT taken as a second
+  // lever — see below.
+  const SHADOW_PENUMBRA_M = 0.20;
+  //
+  // ── AND THE DEPTH KNOB WAS PRICED AND REFUSED ─────────────────────────────
+  // `key.shadow.intensity` (three >= r165, default 1) lightens the cast shadow without
+  // touching its edge, and on the band it is the bigger mover of the two. Swept at
+  // 0.85 / 0.70 / 0.55 and read as PNGs: at 0.55 the frame is visibly better around the
+  // CAST, and the arena props stop reading as grounded at all — which is the complaint
+  // `086ff5f` exists to have fixed ("props cast no shadow at all", from two independent
+  // blind critics, while 470 arena meshes were casting). Softening alone already drops
+  // the peak darkness, because the same darkening is spread over a wider penumbra, so
+  // taking both would be spending twice for one effect and risking that reversal.
+  // Left at its default, deliberately, and this note is the record that it was priced.
+  //
   // The history below is kept verbatim because it is the reason to be sceptical of
   // this change, and that scepticism is the honest thing to hand the next reader:
   //
@@ -328,7 +378,9 @@ export function createLighting(opts?: {
   // measures edge softness at all.
   // **If the paired ablation says it is invisible, that is the result and it should be
   // reported as one — not quietly kept because it was asked for.**
-  key.shadow.radius = 1.6;
+  //   *"key.shadow.radius = 1.6"*
+  // It WAS invisible, it is reported as one above, and the cause was the renderer's
+  // shadow-map type rather than the knob. The live value is now solved in `focus()`.
   group.add(key);
   group.add(key.target);
 
@@ -479,6 +531,26 @@ export function createLighting(opts?: {
     const cam = key.shadow.camera;
     // Clamped, not trusted: see `MATCH_SHADOW_RADIUS_M`. `match.ts` asks for 30.
     const r = Math.max(radius, minFocusRadius);
+    // ── THE BLUR RADIUS, SOLVED HERE BECAUSE THIS IS WHERE BOTH TERMS EXIST ───
+    // `SHADOW_PENUMBRA_M` is the authored quantity; three's PCF kernel spans
+    // `2 * radius` texels and a texel is `2 * r / mapSize` metres, so
+    //   penumbra = 2 * radius * (2 * r / mapSize)   =>   radius = penumbra * mapSize / (4r)
+    // Assigned BEFORE the early-out below, so a tier change that only moved `mapSize`
+    // still re-solves it: `setShadowMapSize` clears the cached focus, but a caller that
+    // re-focuses at the identical position would otherwise return with a stale radius.
+    // Floored at 1: below one texel the kernel degenerates to the hard 17-tap sample of
+    // a single texel, which is the aliased edge this exists to remove.
+    //
+    // ⚠️ AND CEILINGED AT 4, WHICH IS THE KERNEL'S LIMIT AND NOT A TASTE CALL. Three's
+    // PCF branch spends 17 taps over `2 * radius` texels, so past ~4 the blur starts
+    // showing its own sample pattern as streaks — seen at 2x on the `shadow2`/`shadow3`
+    // PNGs at 5 and 8. The cap only ever binds in CLOSE framings: a match focus is
+    // r = 34 m and solves to 3.01 / 2.26 / 1.51 texels on the three tiers, comfortably
+    // under it, while `stage.ts` hands a `subject` preview r = 8 m, which would solve
+    // to 12.8. So the lobby gets a proportionally tighter penumbra than the authored
+    // 0.20 m, on purpose: it is the framing where a character is ten times bigger on
+    // screen and a 0.20 m blur would be a smear across its own feet.
+    key.shadow.radius = Math.min(4, Math.max(1, (SHADOW_PENUMBRA_M * mapSize) / (4 * r)));
     const step = (SNAP_TEXELS * 2 * r) / mapSize;
     const sx = Math.round(x / step) * step;
     const sz = Math.round(z / step) * step;

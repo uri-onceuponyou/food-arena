@@ -418,6 +418,139 @@ const SWEEPS = {
     { label: 'sat 1.50', set: { 'grade.saturation': 1.50 } },
     { label: 'shipped(again)', set: {} },
   ],
+
+  // ── WAVE `shadow` — DOES `key.shadow.radius` DO ANYTHING? ──────────────────
+  //
+  // `140d054` set `key.shadow.radius = 0.4 -> 1.6` as "the SOFTEN half of Uri's
+  // sentence", and wrote down the honest prediction that this repo had already
+  // measured the knob as close to a no-op ("re-tested at 1.4 and 3.0 ... every
+  // metric moved by under 0.001"). Read as a metric problem, that is `LESSONS §6b`
+  // backwards — a flat metric is not evidence a change did nothing.
+  //
+  // 🚨 IT IS NOT A METRIC PROBLEM. `src/render/stage.ts` sets
+  // `renderer.shadowMap.type = THREE.PCFSoftShadowMap`, and three 0.180.0's
+  // `shadowmap_pars_fragment.glsl.js` references the `shadowRadius` uniform ONLY
+  // inside `#if defined( SHADOWMAP_TYPE_PCF )`. The `PCF_SOFT` branch builds its
+  // kernel from `texelSize` alone and never reads the uniform. So the value is
+  // inert BY CONSTRUCTION on the shipped renderer, and no instrument could ever
+  // have seen it move.
+  //
+  // These rows settle that at the only resolution that cannot be argued with — the
+  // raw drawing-buffer hash. Under PCF_SOFT, radius 0 / 1.6 / 20 must come back
+  // BIT-IDENTICAL to `shipped`; the moment the type is PCF, the same three values
+  // must all differ. Both halves are needed: identical rows alone would also be
+  // what a knob path that never resolved looks like, which is why the PCF rows are
+  // the positive control for this specific claim rather than the generic `key=0`.
+  //
+  // ⚠️ A `shadowMap.type` change is a shader DEFINE, so it needs every material
+  // recompiled and the shadow map re-rendered. `ROW` does that on EVERY row, not
+  // only on these, so that the rows stay symmetric — see the note there. There is
+  // deliberately no per-row `recompile` flag: a flag that is never read is
+  // indistinguishable from a comment (`CLAUDE.md` #6).
+  shadow: [
+    { label: 'shipped', set: {} },
+    { label: 'POSCTRL key=0', set: { 'lighting.key.intensity': 0 } },
+    // — the deadness proof: three values of a live-looking knob, one frame apart —
+    { label: 'PCF_SOFT radius 0', set: { 'lighting.key.shadow.radius': 0 } },
+    { label: 'PCF_SOFT radius 1.6 (shipped)', set: { 'lighting.key.shadow.radius': 1.6 } },
+    { label: 'PCF_SOFT radius 20', set: { 'lighting.key.shadow.radius': 20 } },
+    // — the positive control: the SAME knob, under a type that reads it —
+    { label: 'PCF radius 1.6', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 1.6 } },
+    { label: 'PCF radius 4', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 4 } },
+    { label: 'PCF radius 8', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 8 } },
+    // — the other half of "soften": how deep the cast shadow is allowed to go —
+    { label: 'shadow.intensity 0.85', set: { 'lighting.key.shadow.intensity': 0.85 } },
+    { label: 'shadow.intensity 0.70', set: { 'lighting.key.shadow.intensity': 0.70 } },
+    { label: 'shadow.intensity 0.55', set: { 'lighting.key.shadow.intensity': 0.55 } },
+    { label: 'shipped(again)', set: {} },
+  ],
+
+  // ── WAVE `shadow2` — the CHOICE, once wave `shadow` settled the fact ───────
+  // Run with `--shots`, because the quantity in question is one no statistic in this
+  // repo measures: `lighting.ts` says so itself ("no statistic here measures edge
+  // softness at all"). The band moves by 0.0001–0.0002 across the whole blur sweep and
+  // by 0.0022 across the depth sweep, so the band CANNOT arbitrate this — the PNGs can.
+  // Rows are ordered so each PNG differs from `shipped` in exactly one named way.
+  shadow2: [
+    { label: 'shipped', set: {} },
+    { label: 'POSCTRL key=0', set: { 'lighting.key.intensity': 0 } },
+    { label: 'PCF radius 4', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 4 } },
+    { label: 'PCF radius 8', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 8 } },
+    { label: 'PCF radius 12', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 12 } },
+    { label: 'shadow.intensity 0.55', set: { 'lighting.key.shadow.intensity': 0.55 } },
+    { label: 'PCF r8 + intensity 0.55', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 8, 'lighting.key.shadow.intensity': 0.55 } },
+    { label: 'PCF r8 + intensity 0.70', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 8, 'lighting.key.shadow.intensity': 0.70 } },
+    { label: 'shipped(again)', set: {} },
+  ],
+
+  // ── WAVE `shadow3` — PCF BANDS AT WIDE RADII, so price the alternative ─────
+  // Read the `shadow2` PNGs at 2x before believing this wave is unnecessary: three's
+  // PCF branch takes SEVENTEEN taps over a footprint of `2*radius` texels, so at
+  // radius 8 it is sampling 16 texels with 17 points and the penumbra combs. VSM blurs
+  // the depth map itself (a separable Gaussian, `blurSamples`) and then reads it with
+  // ONE tap — so it is smooth by construction, and its sampling cost is LOWER than the
+  // nine taps PCF_SOFT already pays. The blur runs on shadow-map update, and this
+  // renderer has `shadowMap.autoUpdate = false`, so that cost is not per frame.
+  // ⚠️ three's own note: under VSM every shadow RECEIVER also casts. That changes the
+  // caster set, which is a behaviour change and not only a look change — so this wave
+  // exists to look at the artefacts, not to adopt it blind.
+  shadow3: [
+    { label: 'shipped', set: {} },
+    { label: 'POSCTRL key=0', set: { 'lighting.key.intensity': 0 } },
+    { label: 'PCF radius 2', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 2 } },
+    { label: 'PCF radius 3', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 3 } },
+    { label: 'PCF radius 5', set: { 'renderer.shadowMap.type': 1, 'lighting.key.shadow.radius': 5 } },
+    { label: 'VSM radius 4', set: { 'renderer.shadowMap.type': 3, 'lighting.key.shadow.radius': 4, 'lighting.key.shadow.blurSamples': 8 } },
+    { label: 'VSM radius 8', set: { 'renderer.shadowMap.type': 3, 'lighting.key.shadow.radius': 8, 'lighting.key.shadow.blurSamples': 8 } },
+    { label: 'shipped(again)', set: {} },
+  ],
+
+  // ── WAVE `rim2` — the EXPONENT, once it is a uniform ──────────────────────
+  // Only runs on a tree whose `applyRimLight` carries `rimPower`; on any older one the
+  // knob refuses rather than writing a dead uniform, so a row cannot come back null and
+  // be read as "the exponent does not matter".
+  // The pair is what is being chosen: `x^p` falls faster for larger `p` EVERYWHERE
+  // below 1, so raising the exponent alone only dims the term. Each row therefore names
+  // both, and the strengths are set so the peak (rimDot = 1, i.e. exactly the
+  // silhouette) rises while every interior sample falls.
+  rim2: [
+    { label: 'shipped', set: {} },
+    { label: 'POSCTRL rim x21', set: { 'rim.strengthMult': 21 } },
+    { label: 'p2.6 s0.28 (old)', set: { 'rim.power': 2.6, 'rim.strengthMult': 0.28 / 0.95 } },
+    { label: 'p4 s0.60', set: { 'rim.power': 4, 'rim.strengthMult': 0.60 / 0.95 } },
+    { label: 'p4 s0.95', set: { 'rim.power': 4, 'rim.strengthMult': 1 } },
+    { label: 'p5 s0.95', set: { 'rim.power': 5, 'rim.strengthMult': 1 } },
+    { label: 'p5 s1.40', set: { 'rim.power': 5, 'rim.strengthMult': 1.40 / 0.95 } },
+    { label: 'p6 s1.40', set: { 'rim.power': 6, 'rim.strengthMult': 1.40 / 0.95 } },
+    { label: 'p7 s2.00', set: { 'rim.power': 7, 'rim.strengthMult': 2.00 / 0.95 } },
+    { label: 'shipped(again)', set: {} },
+  ],
+
+  // ── WAVE `rim` — is the Fresnel rim an EDGE or a WASH? ─────────────────────
+  // Uri asked for "a rim/fresnel light so each character has a BRIGHT EDGE that lifts
+  // it off the background". `140d054`'s own ablation is the reason to doubt we have
+  // one: driving the rim to zero moved **1,130,817 px of 1,440,000 at mean 3.86/255**
+  // — that is a whole-frame lift of 1.5%, i.e. a wash spread over three quarters of the
+  // picture, not an edge. At `pow(rimDot, 2.6)` the term still carries 0.16 of its peak
+  // at 37 deg off the silhouette, so most of its energy lands on the BODY.
+  //
+  // Strength is a live uniform, so the brightness half is sweepable with no code change.
+  // The exponent is compile-time and is NOT swept here; what these rows price is
+  // "how much more rim can this frame take before it goes white", which is the number
+  // that decides whether the narrower-and-brighter rewrite is worth doing at all.
+  // ⚠️ `white` (all three channels >= 250) is the column to watch, not `ch255`.
+  rim: [
+    { label: 'shipped', set: {} },
+    { label: 'POSCTRL rim x21', set: { 'rim.strengthMult': 21 } },
+    { label: 'rim x0 (ablate)', set: { 'rim.strengthMult': 0 } },
+    { label: 'rim x2', set: { 'rim.strengthMult': 2 } },
+    { label: 'rim x3', set: { 'rim.strengthMult': 3 } },
+    { label: 'rim x4', set: { 'rim.strengthMult': 4 } },
+    { label: 'rim x6', set: { 'rim.strengthMult': 6 } },
+    { label: 'rim x3 cyan', set: { 'rim.strengthMult': 3, 'rim.colorHex': 0x66ffff } },
+    { label: 'rim x3 warm', set: { 'rim.strengthMult': 3, 'rim.colorHex': 0xfff0c0 } },
+    { label: 'shipped(again)', set: {} },
+  ],
 };
 const DEFAULT_ROWS = SWEEPS[get('--wave', 'wave1')] ?? SWEEPS.wave1;
 if (!SWEEPS[get('--wave', 'wave1')]) { console.error(`v2_band: unknown --wave ${get('--wave', '')}; have ${Object.keys(SWEEPS).join(', ')}`); process.exit(2); }
@@ -458,6 +591,18 @@ const SNAPSHOT = () => {
     'lighting.front.intensity': L.front.intensity, 'lighting.rim.intensity': L.rim.intensity,
     'lighting.ambient.intensity': L.ambient.intensity,
     'scene.environmentIntensity': sc.environmentIntensity,
+    // The shadow knobs the `shadow` wave drives. Snapshotted for the same reason as
+    // every other one: rows must not accumulate, and `shipped(again)` is what proves it.
+    'lighting.key.shadow.radius': L.key.shadow.radius,
+    'lighting.key.shadow.intensity': L.key.shadow.intensity,
+    'lighting.key.shadow.blurSamples': L.key.shadow.blurSamples,
+    'renderer.shadowMap.type': st.renderer.shadowMap.type,
+    // The rim's restore is expressed as "put it back", not as 230 numbers — the base
+    // values live in `ROW`'s own cache. `null` on the colour means "copy the cached
+    // base", so a row that never touched the rim still re-applies the identity.
+    'rim.strengthMult': 1,
+    'rim.colorHex': null,
+    'rim.power': null,
   };
 };
 
@@ -476,8 +621,69 @@ const ROW = (arg) => {
     'grade': st.grade, 'lighting.key': st.lighting.key, 'lighting.fill': st.lighting.fill,
     'lighting.front': st.lighting.front, 'lighting.rim': st.lighting.rim,
     'lighting.ambient': st.lighting.ambient, 'scene': st.scene,
+    'lighting.key.shadow': st.lighting.key.shadow,
+    'renderer.shadowMap': st.renderer.shadowMap,
+  };
+  // ── THE ONE NON-PATH KNOB, AND WHY IT HAS TO BE ONE ───────────────────────
+  // The Fresnel rim is not a property of any object reachable from `__stage`: it is a
+  // per-MATERIAL uniform written from inside `onBeforeCompile`, i.e. at first render
+  // (`toon.ts` `applyRimLight`). There are ~230 of them and no path can name them. So
+  // `rim.strengthMult` / `rim.colorHex` walk the scene, exactly as `v2_ablate.mjs`'s
+  // arm D does, and are declared here rather than hidden.
+  // The BASE value of every uniform is cached on the window the first time it is
+  // touched, so `rim.strengthMult: 1` is an exact restore and the baseline snapshot
+  // does not have to carry 230 numbers. A material drawn for the first time AFTER the
+  // cache is built legitimately has no entry and is reported, not silently skipped.
+  const rimEntries = () => {
+    if (w.__vbRim) return w.__vbRim;
+    const out = [];
+    st.scene.traverse((o) => {
+      if (!o.isMesh) return;
+      const ms = Array.isArray(o.material) ? o.material : [o.material];
+      for (const m of ms) {
+        const u = m && m.userData && m.userData.rimUniforms;
+        if (u && u.rimStrength && !out.some((e) => e.u === u)) {
+          out.push({
+            u, base: u.rimStrength.value, baseColor: u.rimColor.value.clone(),
+            basePower: u.rimPower ? u.rimPower.value : null,
+          });
+        }
+      }
+    });
+    w.__vbRim = out;
+    return out;
   };
   const put = (path, v) => {
+    if (path === 'rim.strengthMult') {
+      const es = rimEntries();
+      if (!es.length) return 'rim.strengthMult: NO rim uniforms in the scene — the knob would be a silent no-op';
+      for (const e of es) e.u.rimStrength.value = e.base * v;
+      return null;
+    }
+    if (path === 'rim.power') {
+      const es = rimEntries();
+      if (!es.length) return 'rim.power: NO rim uniforms in the scene — the knob would be a silent no-op';
+      // ⚠️ A tree whose `applyRimLight` predates the exponent has no `rimPower` uniform
+      // at all, and writing one onto the uniform map would create a dead entry that
+      // reads back perfectly while the shader keeps its hard-coded 2.6. Refuse instead:
+      // this is exactly the "the knob path never resolved" failure the positive control
+      // exists for, and it should be a FAULT rather than a null row.
+      // `null` is the RESTORE, and on a tree with no `rimPower` there is nothing to
+      // restore — so it is a no-op there rather than a fault. Setting an actual value
+      // on such a tree still refuses, which is the case that matters.
+      if (!es[0].u.rimPower) {
+        if (v == null) return null;
+        return 'rim.power: this build has no rimPower uniform — the exponent is still compiled in';
+      }
+      for (const e of es) e.u.rimPower.value = v == null ? e.basePower : v;
+      return null;
+    }
+    if (path === 'rim.colorHex') {
+      const es = rimEntries();
+      if (!es.length) return 'rim.colorHex: NO rim uniforms in the scene — the knob would be a silent no-op';
+      for (const e of es) { if (v == null) e.u.rimColor.value.copy(e.baseColor); else e.u.rimColor.value.setHex(v); }
+      return null;
+    }
     const i = path.lastIndexOf('.');
     const obj = targets[path.slice(0, i)];
     const key = path.slice(i + 1);
@@ -492,6 +698,22 @@ const ROW = (arg) => {
   if (errs.length) return { err: errs.join('; ') };
 
   const r = st.renderer, gl = r.getContext();
+  // ── RECOMPILE ON EVERY ROW, NOT ONLY ON THE ROWS THAT NEED IT ─────────────
+  // `renderer.shadowMap.type` is a shader DEFINE (`SHADOWMAP_TYPE_*`), so a row that
+  // changes it must invalidate every material's program or the frame keeps the old
+  // one and the row is a silent no-op — the exact failure mode this file's positive
+  // control exists to catch. Doing it only on those rows would make the rows
+  // ASYMMETRIC: `shipped(again)` would run without a recompile that `PCF radius 4`
+  // ran with, and any difference between them could then be blamed on either. So it
+  // runs unconditionally, which costs one cache lookup per material after the first
+  // compile of each define set, and makes `shipped` vs `shipped(again)` a control on
+  // the recompile itself as well as on the knobs.
+  st.scene.traverse((o) => {
+    const m = o.material;
+    if (!m) return;
+    if (Array.isArray(m)) { for (const mm of m) mm.needsUpdate = true; } else m.needsUpdate = true;
+  });
+  r.shadowMap.needsUpdate = true;
   r.info.autoReset = false; r.info.reset();
   st.render(0);
   const draws = r.info.render.calls;
@@ -694,6 +916,42 @@ async function run() {
       }
     } else if (rows.length > 2) {
       report.faults.push(`${e.id}: no positive control in the sweep`);
+    }
+
+    // ── THE `shadow` WAVE'S OWN VERDICT — a two-sided claim, asserted both ways ──
+    //
+    // The claim is "`key.shadow.radius` is inert under `PCFSoftShadowMap`". One side of
+    // that is three PCF_SOFT rows agreeing bit-for-bit with `shipped`. On its own that
+    // is worthless: a knob path that never resolved looks exactly the same. So the
+    // OTHER side is asserted in the same breath — the identical values under
+    // `PCFShadowMap` must produce three DISTINCT frames. Only the pair is evidence.
+    //
+    // ⚠️ Both arms assert their row set is NON-EMPTY first. `[].every()` is `true`, and
+    // a wave that stopped emitting these labels would otherwise report a clean pass on
+    // zero rows (`CLAUDE.md` #6, the vacuity class).
+    const softR = e.rows.filter((r) => /^PCF_SOFT radius/.test(r.label));
+    const hardR = e.rows.filter((r) => /^PCF radius/.test(r.label));
+    // ⚠️ ASYMMETRIC ON PURPOSE, and the asymmetry is the point. SHADOW-B is a
+    // standalone positive result ("this knob moves the frame"), so a wave may carry it
+    // alone. SHADOW-A is a NULL, and a null is only evidence next to the control that
+    // shows the path works — so a wave carrying PCF_SOFT rows WITHOUT PCF rows is a
+    // fault, while the reverse is not.
+    if (softR.length || hardR.length) {
+      if (softR.length && softR.length < 2) {
+        report.faults.push(`${e.id}: the PCF_SOFT radius arm has ${softR.length} row(s) — too few to say anything`);
+      } else if (softR.length) {
+        const inert = first && softR.every((r) => r.sha === first.sha);
+        console.log(`   SHADOW-A radius is INERT under PCF_SOFT: ${inert ? `✅ ${softR.length}/${softR.length} rows bit-identical to shipped` : `🔴 NO — a radius row moved the frame`}`);
+        if (!inert) report.faults.push(`${e.id}: SHADOW-A a PCF_SOFT radius row MOVED the frame — the deadness claim is false and must be withdrawn`);
+      }
+      if (softR.length >= 2 && hardR.length < 2) {
+        report.faults.push(`${e.id}: the PCF radius arm has ${hardR.length} row(s) — the inertness arm has no positive control`);
+      } else if (hardR.length >= 2) {
+        const shas = new Set(hardR.map((r) => r.sha));
+        const live = shas.size === hardR.length && first && !shas.has(first.sha);
+        console.log(`   SHADOW-B radius is LIVE under PCF:     ${live ? `✅ ${shas.size} distinct frames from ${hardR.length} rows, none equal to shipped` : `🔴 NO — ${shas.size} distinct frames from ${hardR.length} rows`}`);
+        if (!live) report.faults.push(`${e.id}: SHADOW-B the same radius values under PCF did NOT produce distinct frames — SHADOW-A's null is uninterpretable`);
+      }
     }
   }
   // KNOWN-BAD arms
