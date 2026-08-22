@@ -921,19 +921,48 @@ function buildDebrisPile(mats: THREE.Material[], cx: number, cy: number, seed: n
 /** wu. Jittered-grid cell; at most one chip per cell, so nothing ever piles up.
  * 28 -> 22 -> 19 across rounds 3 and 8: the paired A/B below wanted more chip AREA, and
  * count is half of that lever (size is the other half, and cheaper — see `CHIP_R_MIN`).
- * 73 x 52 candidate cells, ~1750 chips placed, still **2 draw calls**. */
+ *
+ * 🚨 THIS LINE SAID **"73 x 52 candidate cells, ~1750 chips placed"** AND BOTH NUMBERS
+ * WERE THE 1x MAP'S. `cols`/`rows` are `ARENA_W / CHIP_CELL` and `ARENA_H / CHIP_CELL`,
+ * so `6631446`'s x4 resize took the grid to **147 x 105 = 15,435 cells** and the field to
+ * **7,185 chips** without a line of this file changing — measured in a real browser
+ * (`ar_chipcheck`: `ground_chip_pebble` 3,960 + `ground_chip_shard` 3,225). The comment
+ * stayed at a quarter of the truth for a fortnight. `flattenDecor`'s note below carried
+ * the same stale order of magnitude ("~700 of them"). **A count derived from ARENA_W
+ * cannot be written down; it can only be measured.** Still 2 draw calls either way. */
 const CHIP_CELL = 19;
 /**
- * Placement probability per cell in the emptiest / densest part of the field.
+ * ── ROUND 9: THE FIELD IS ZONES NOW, NOT A CONTINUOUS SPRINKLE ──────────────
  *
- * Round 2, off the render rather than off a number: at 0.16-0.62 the scatter was
- * visually UNIFORM — a fine even sprinkle over the whole floor, which is the read a
- * texture gives, not the read litter gives. `bs_01`'s chips gather in loose drifts with
- * bare paver between them. The spread is widened and the field slowed down (below) so
- * there are stretches with almost nothing and drifts with several chips per tile.
+ * Uri, looking at the shipped game: *"hundreds of small polygonal debris pieces scattered
+ * at uniform density across the entire arena, each casting its own shadow. The result is
+ * visual noise with no rest for the eye. Cut the debris count by roughly 80%. Cluster
+ * whatever remains into a few deliberate zones — near the pot, along walls, in corners —
+ * instead of even distribution. The floor is a stage, not an attraction."*
+ *
+ * ⚠️ **ROUND 2 ALREADY DIAGNOSED THIS AND THE FIX DID NOT HOLD.** Its note, kept because
+ * it is the same finding a round earlier: *"at 0.16-0.62 the scatter was visually UNIFORM
+ * — a fine even sprinkle over the whole floor, which is the read a texture gives, not the
+ * read litter gives"*. The answer then was to widen the spread to 0.10-0.85 and slow the
+ * noise down. That is a **contrast** lever on a field that is still stationary and
+ * arena-wide, and at 7,185 chips over 5.6M wu it re-converged on the same read: measured
+ * on a clean `piece=floor` frame, 6.394% of the ground carried off-tile hue in **2,497
+ * connected components per frame, 2,496 of them under 2,000 px.** Dispersed speckle. The
+ * lever was never contrast; it was **placement**.
+ *
+ * So the probability is no longer a function of a noise field alone. `chipZone` below is
+ * the deliberate part — pot apron, wall runs, corner drifts — and the old low-frequency
+ * `density` is demoted to a MODULATOR inside those zones, which is what stops a zone
+ * reading as a painted band. Open floor drops to `CHIP_P_OPEN`, which is close enough to
+ * zero to be the rest Uri asked for and not so close that the arena's middle becomes a
+ * different, cleaner material from its edges.
+ *
+ * Offline replica of this exact loop (`tools/tmp/v1_scatter.mjs`, pinned to the browser's
+ * own 7,185): **1,418 chips, an 80.3% cut**, of which 1,295 (91%) land in a named zone
+ * and 123 on open floor.
  */
-const CHIP_P_MIN = 0.10;
-const CHIP_P_MAX = 0.85;
+const CHIP_P_OPEN = 0.010;
+const CHIP_P_ZONE = 0.95;
 /**
  * wu. Chip radius, before the per-instance ground-axis scale (0.80-1.40) below. Delivered
  * width is therefore 3.5-10.9wu, mean ~6.6wu = **16.5% of a 40wu tile**.
@@ -966,6 +995,46 @@ const CHIP_R_MAX = 3.9;
  * is why the flatten factor below bottoms out at 0.45 rather than going flatter.
  */
 const CHIP_Y = 0.020;
+
+/**
+ * ── THE THREE ZONES, ALL DERIVED FROM `shared.ts`, NONE RETYPED ─────────────
+ *
+ * wu. Every one is written against `ARENA_W` / `ARENA_H` / `CENTER` or against a radius
+ * measured off the pot, for the reason the map-scale block in `CLAUDE.md` gives: the
+ * playfield has already quadrupled once and *"today's correct literals are the next
+ * generation's stale ones"* — the `CHIP_CELL` note above is this same file getting that
+ * wrong. A zone written as an offset from `CENTER` survives the next resize; a zone
+ * written as `(1150, 330)` does not, and would still be a legal coordinate.
+ *
+ * `APRON_R`/`APRON_W` are the pot ring: chips gather where the spill is. The band spans
+ * `APRON_R ± APRON_W`, i.e. 60-280 wu, and the `< 80` cut below removes its inner lip so
+ * nothing sits inside the burn decal.
+ */
+const CHIP_APRON_R = 170;
+const CHIP_APRON_W = 110;
+/** How far in from the playfield edge the wall drift reaches. ~2.75 tiles. */
+const CHIP_WALL_REACH = 110;
+/** Corner drifts are the deepest — squared falloff, so the core is a real pile. */
+const CHIP_CORNER_REACH = 440;
+
+/**
+ * 0 on open floor, 1 in the core of a deliberate zone.
+ *
+ * ⚠️ `Math.max` of three fields rather than a sum: a sum makes a corner (where the wall
+ * band meets the corner disc) twice as dense as either, which is a seam artefact rather
+ * than a decision. The maximum is the "whichever reason put litter here" rule.
+ */
+function chipZone(wx: number, wy: number): number {
+  const clamp01 = (v: number) => THREE.MathUtils.clamp(v, 0, 1);
+  const dPot = Math.hypot(wx - CENTER.x, wy - CENTER.y);
+  const apron = 1 - clamp01(Math.abs(dPot - CHIP_APRON_R) / CHIP_APRON_W);
+  const dEdge = Math.min(wx, ARENA_W - wx, wy, ARENA_H - wy);
+  const wall = 1 - clamp01(dEdge / CHIP_WALL_REACH);
+  const cx = wx < ARENA_W / 2 ? 0 : ARENA_W;
+  const cy = wy < ARENA_H / 2 ? 0 : ARENA_H;
+  const corner = 1 - clamp01(Math.hypot(wx - cx, wy - cy) / CHIP_CORNER_REACH);
+  return clamp01(Math.max(apron, wall, corner * corner));
+}
 
 /** One scattered chip, resolved before any Three.js object exists so the scatter is a
  * pure function of the seed and the transcription below cannot perturb it. */
@@ -1225,7 +1294,13 @@ function buildGroundChips(): THREE.Group {
       // inside 80 would be either buried in the prop or sitting in the hazard's own
       // scorch decal, where it would read as a hazard token rather than as litter.
       if (Math.hypot(wx - CENTER.x, wy - CENTER.y) < 80) continue;
-      if (keep > CHIP_P_MIN + (CHIP_P_MAX - CHIP_P_MIN) * density(wx, wy)) continue;
+      // ── ZONE x MODULATOR, in that order. ──────────────────────────────────
+      // `density` is no longer the field; it is the thing that keeps a zone from
+      // reading as a painted band, so it multiplies INSIDE the zone and has no reach
+      // outside one. The 0.45 floor is what stops the modulator carving holes in a
+      // drift that is supposed to be continuous.
+      const z = THREE.MathUtils.clamp(chipZone(wx, wy) * (0.45 + density(wx, wy)), 0, 1);
+      if (keep > CHIP_P_OPEN + (CHIP_P_ZONE - CHIP_P_OPEN) * z) continue;
       (toShard ? shards : pebbles).push({ wx, wy, r, flat, rot, tiltX, tiltZ, sx, sz, ci });
     }
   }
@@ -1234,7 +1309,30 @@ function buildGroundChips(): THREE.Group {
     if (!list.length) return;
     const im = new THREE.InstancedMesh(geo, chipMat, list.length);
     im.name = name;
-    im.castShadow = true;
+    // ── ROUND 9: THIS WAS `im.castShadow = true` AND THE REASON IT WAS TRUE IS BELOW ──
+    //
+    // THE OLD RULE, kept verbatim because it was right about the mechanism and wrong
+    // about the price (`flattenDecor` carried its twin):
+    //
+    //   > "`ground_chip_*` is exempt for the same reason as `_veg`: they are real solids
+    //   >  resting ON the tile, and the small offset shadow under each is the only thing
+    //   >  that stops ~700 of them reading as printed spots. It is also what makes them
+    //   >  register on `groundFeat`, which counts LUMA contrast — an unshadowed chip held
+    //   >  inside +/-0.06 luma of the tile by this file's value contract would contribute
+    //   >  almost nothing to the metric it exists to move."
+    //
+    // Three things moved under it. (1) The count was never ~700; it was **7,185**, so the
+    // exemption was buying 7,185 individual contact shadows, **92,100 shadow-map triangles
+    // — 20.6% of every triangle in the depth pass** at two fighters, measured. (2) The
+    // value contract widened in round 8 to 0.55x..1.55x of the tile in LINEAR luma, so a
+    // chip is no longer "inside +/-0.06" and no longer needs a borrowed shadow to
+    // register. (3) Uri named the shadows specifically — *"kill or drastically reduce
+    // per-debris shadow casting"* — looking at the shipped frame, which is the instrument
+    // that outranks `groundFeat`.
+    //
+    // `receiveShadow` stays: a chip standing in a prop's shadow must go dark with the
+    // ground under it, or it lights up as a bright speck inside every shadow in the arena.
+    im.castShadow = false;
     im.receiveShadow = true;
     noOutline(im);
     const m = new THREE.Matrix4();
@@ -1751,7 +1849,16 @@ export function buildFloor(M: Materials): THREE.Group {
   // same way. Only the chroma moves, with the tile it belongs to. The one thing that
   // must never happen here is the pre-loop-3 state where the joint was BRIGHTER and
   // warmer than the tile, and scaling a single colour cannot produce that.
-  subfloorDark.color.set('#513841');
+  // Round 12: the tile's chroma came down (see `tileLightInst`) and this block's own
+  // standing rule is *"only the chroma moves, with the tile it belongs to"* — so it moves
+  // with it, by exactly the same construction. #473B3F is the NEW tile albedo scaled by
+  // the same 1/1.7 (authored luma 105.6 -> 61.8, delivered ratio 1.707) at unchanged hue
+  // 338 and at the tile's new HSV 0.169. Every argument above resolves the same way: the
+  // ratio all four critics were arguing about is untouched, and the joint is still darker
+  // and no warmer than the tile, which is the one thing that must never invert.
+  //   #513841  was   rgb( 81, 56, 65)  hue 338.4  HSV 0.309  luma 62.0
+  //   #473B3F  now   rgb( 71, 59, 63)  hue 338.6  HSV 0.169  luma 61.8
+  subfloorDark.color.set('#473B3F');
   const base = mesh(
     new THREE.PlaneGeometry(wu(ARENA_W + 300), wu(ARENA_H + 300)),
     subfloorDark,
@@ -2037,8 +2144,48 @@ export function buildFloor(M: Materials): THREE.Group {
   // body median is 0.533, so a floor moving from 0.365 to 0.424 is still well clear of
   // it and is now further from it in HUE as well, because the same change takes the
   // ground's chroma up while the character's stays put.
-  tileLightInst.color.set('#8A5F6F');
-  tileDarkInst.color.set('#825969');
+  // ── ROUND 12: THE CHROMA COMES BACK DOWN, AND THIS IS A HIERARCHY ARGUMENT ──
+  //
+  // Uri, on the shipped frame: *"desaturate the pink floor significantly; it's currently
+  // high-saturation and occupies most of the frame, which is backwards. The floor is a
+  // stage, not an attraction."*
+  //
+  // 🚨 THIS CONTRADICTS A STANDING RULE AND THE CONTRADICTION IS NOT BEING PAPERED OVER.
+  // `CLAUDE.md`: *"Do not fix anything by desaturating — falsified four times."* Those
+  // four were about repairing a **defect** — contrast, legibility, separation — by
+  // pulling chroma out, and every one of them failed. This is a different claim, and the
+  // difference is what makes it defensible: it is about **share**. `shared.ts` measures
+  // these two entries at **13.0% + 13.2% = 26.2% of every frame**, the largest single
+  // surface in the game, and round 11 deliberately took them UP to the reference plate's
+  // 0.45 HSV on the argument that the ground was "a third short" of it. That argument
+  // priced the surface against the plate and never against the CAST standing on it.
+  //
+  // ⚠️ AND IT MOVES `arena-scan`'s RAILS THE WRONG WAY, WHICH IS REPORTED RATHER THAN
+  // SWALLOWED. Those rails were derived FROM the reference plates, so a rail going red
+  // here is real evidence pointing away from this change. See the commit message and the
+  // round report for the measured before/after on every rail — the tension is Uri's to
+  // resolve, not this file's.
+  //
+  // Held constant on purpose, so exactly one axis moves and the acceptance test can
+  // attribute anything it sees:
+  //   HUE      337.7 / 336.6 deg — unchanged to a tenth. Round 11 established the hue was
+  //            never the problem, and rotating it would restart that whole argument.
+  //   LUMA     0.2126R + 0.7152G + 0.0722B: 105.3 -> 105.6 and 98.9 -> 99.3 on the sRGB
+  //            triple. `floorprobe`'s R turns on the tile field's internal edges against
+  //            a mid-value silhouette, so moving VALUE would confound this measurement
+  //            with the one gameplay test this file has.
+  //   SAT      HSV 0.312 -> 0.159 and 0.315 -> 0.159. **That is the whole change.**
+  //
+  //   #8A5F6F  was   rgb(138, 95,111)  hue 337.7  HSV 0.312  luma 105.3
+  //   #78656C  now   rgb(120,101,108)  hue 337.9  HSV 0.158  luma 105.6
+  //   #825969  was   rgb(130, 89,105)  hue 336.6  HSV 0.315  luma  98.9
+  //   #715F66  now   rgb(113, 95,102)  hue 336.7  HSV 0.159  luma  99.3
+  //
+  // The 1.7:1 light/dark ratio the tile field works to is preserved (it is a value ratio
+  // and value did not move), and so is the ~6.5 luma step between the two shades that
+  // makes the chequer read at all.
+  tileLightInst.color.set('#78656C');
+  tileDarkInst.color.set('#715F66');
   const lightMesh = new THREE.InstancedMesh(tileGeo, tileLightInst, total);
   const darkMesh = new THREE.InstancedMesh(tileGeo, tileDarkInst, total);
   lightMesh.receiveShadow = true;
@@ -2800,13 +2947,24 @@ export function buildFloor(M: Materials): THREE.Group {
   // their small contact shadow is what stops them looking pasted on.
   g.traverse((o) => {
     const m = o as THREE.Mesh;
-    // `ground_chip_*` is exempt for the same reason as `_veg`: they are real solids
-    // resting ON the tile, and the small offset shadow under each is the only thing
-    // that stops ~700 of them reading as printed spots. It is also what makes them
-    // register on `groundFeat`, which counts LUMA contrast — an unshadowed chip held
-    // inside ±0.06 luma of the tile by this file's value contract would contribute
-    // almost nothing to the metric it exists to move.
-    if (!m.isMesh || m.name.endsWith('_veg') || m.name.startsWith('ground_chip')) return;
+    // ── ROUND 9: `ground_chip` IS NO LONGER EXEMPT. ────────────────────────────
+    //
+    // THE OLD EXEMPTION, kept above its reversal with the reason, per `CLAUDE.md`:
+    //
+    //   > "`ground_chip_*` is exempt for the same reason as `_veg`: they are real solids
+    //   >  resting ON the tile, and the small offset shadow under each is the only thing
+    //   >  that stops ~700 of them reading as printed spots."
+    //
+    // **The "~700" was measured at 7,185**, and 7,185 individual contact shadows is
+    // exactly the "visual noise with no rest for the eye" Uri named. The full reversal
+    // and its numbers are recorded at `im.castShadow` in `buildGroundChips`; this line is
+    // now belt-and-braces over that one, so the two cannot disagree.
+    //
+    // The loose produce (`_veg`) KEEPS its exemption and that is not an oversight: it is
+    // a few dozen real spheres at prop scale, not thousands of 5 wu chips, and its contact
+    // shadow is what stops a sphere looking pasted on. The defect was never "a small
+    // object casts a shadow"; it was the COUNT.
+    if (!m.isMesh || m.name.endsWith('_veg')) return;
     m.castShadow = false;
   });
 

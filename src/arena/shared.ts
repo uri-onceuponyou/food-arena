@@ -557,12 +557,31 @@ export const KPAL = {
   // `tools/tmp/caphex.mjs` before it was written, then corrected once against the
   // rendered PNG: #9D657B measured HSV 0.52 at shipped framing and read as bubblegum
   // rather than fired clay, so it came down one step. #966779 lands on the plate.
-  tileLight: '#8A5F6F',
-  tileDark: '#825969',
+  //
+  // ── ROUND 12: THE CHROMA COMES DOWN. THE HUE AND THE VALUE DO NOT. ─────────
+  // Uri: *"desaturate the pink floor significantly; it's currently high-saturation and
+  // occupies most of the frame, which is backwards. The floor is a stage, not an
+  // attraction."* These two are **26.2% of every frame** (the share table above), which
+  // is what makes his argument a HIERARCHY argument rather than the "fix it by
+  // desaturating" move `CLAUDE.md` has falsified four times — those four were about
+  // repairing a defect by pulling chroma; this is about what the largest surface in the
+  // game is allowed to spend. The paragraph above still holds on the point it was making
+  // (the HUE was never wrong, and it has not moved: 337.7 -> 337.9 deg); what it got
+  // wrong is that it priced this surface against the plate and never against the cast
+  // standing on it. HSV 0.312 -> 0.158 at luma 105.3 -> 105.6.
+  // ⚠️ These two are still OVERRIDDEN in `floor.ts` and reach the screen at zero pixels
+  // from here. They are re-keyed anyway, for the reason this block already gives: the
+  // day the override is retired the palette must already hold the right answer.
+  tileLight: '#78656C',
+  tileDark: '#715F66',
   // The joint seen through the grout gaps. Holds the ~1.7:1 albedo ratio to the tile
   // that four contradictory critics were finally split down the middle on (see the
   // `subfloorDark` note in `floor.ts`) — the ratio is unchanged, only the chroma moves.
-  subfloor: '#513841',
+  // Round 12: follows the tile by the same 1/1.7 luma construction `floor.ts` uses for
+  // its `subfloorDark` override — the ratio is what four critics argued about and it is
+  // unchanged; only the chroma moves, with the tile it belongs to. Also overridden
+  // downstream, also re-keyed for the same reason.
+  subfloor: '#473B3F',
   border: '#4A2F3C',
 
   // The pantry plank pad. This was the arena's single worst blocking-vs-walkable
