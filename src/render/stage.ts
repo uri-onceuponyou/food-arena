@@ -403,6 +403,7 @@ uniform float caoRadius;
 uniform vec2  caoProjScale;
 uniform float caoBias;
 uniform float caoRange;
+uniform float caoFloor;
 
 void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
   // Sky / cleared background. Nothing to occlude, and 1/z of the far plane is a
@@ -514,7 +515,49 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth,
   // returns exactly 0 rather than a NaN.
   occ /= max(valid, 1.0);
 
-  float shade = 1.0 - clamp(occ * caoIntensity, 0.0, 1.0);
+  // ── caoFloor — THE DARKEST THIS PASS MAY EVER MAKE A SURFACE ──────────────────────
+  // The line below used to be, and the old wording is kept per the reversal rule:
+  //
+  //     float shade = 1.0 - clamp(occ * caoIntensity, 0.0, 1.0);
+  //
+  // It reaches EXACTLY ZERO at occ >= 1/caoIntensity, i.e. at 0.833 of the directions
+  // occluded, and a small subject standing on a floor reaches that in the ring one or two
+  // pixels outside its own silhouette: measured on the shipped hub frame, 1% of the floor
+  // within 8 px of the fighter is at or below 0.7 luma out of 255, against 123.1 on open
+  // ground. Rendered, that is a hard black line hugging the character — an INK PASS. It
+  // is the same defect the spiral above was built to remove from the props, arriving by a
+  // different route: the spiral fixed the QUANTISATION of the halo, not its SATURATION.
+  // CLAUDE.md's art direction is "almost no ink outline", and the character already
+  // carries an authored one (toon.ts, OUTLINE_CHAR_SCREEN, 1.53 px), so this pass was
+  // drawing a second, thicker, blacker one underneath it.
+  //
+  // 🚨 AND IT IS WRONG ON ITS OWN TERMS, NOT ONLY ON TASTE. An occlusion term attenuates
+  // the AMBIENT arriving at a surface. It cannot attenuate the KEY, which is still
+  // hitting the floor next to his feet from a direction nothing is blocking. A multiply
+  // that reaches 0 asserts that every light in the rig is blocked, which no geometry in
+  // this scene does — lighting.ts puts only 11.2% of the ground's linear light in the
+  // hemisphere fill at hub, so the physically reachable floor is ~0.89, and the 0.65 this
+  // ships is already a good deal darker than the scene can justify. That is deliberate —
+  // this is an ARTISTIC contact term, not a physical one — but it settles the direction:
+  // the shipped 0.0 was not "more correct", it was an order of magnitude past correct.
+  //
+  // The form is chosen so the SMALL end is untouched. shade = f + (1-f)*exp(-o/(1-f)) has
+  //   f(0)  = 1                        no occlusion is still no darkening
+  //   f'(0) = -caoIntensity            IDENTICAL first-order response to the old line, so
+  //                                    the contact band the sweep was tuned on is intact
+  //   f(inf)= caoFloor                 and it can never go below it
+  // i.e. it changes the deep end only, which is precisely where the defect is. A plain
+  // clamp — max(shade, caoFloor) — was rejected because it puts a FLAT plateau of
+  // constant black-ish under him with a visible edge where the clamp starts, trading a
+  // hard line for a hard disc.
+  //
+  // caoFloor = 0.0 takes the ORIGINAL branch verbatim and is therefore an EXACT identity
+  // arm: the sweep's first row is bit-identical to the previous commit's frame, which is
+  // what proves the harness is single-variable before any other row is read.
+  float o = occ * caoIntensity;
+  float shade = caoFloor > 0.0
+    ? caoFloor + (1.0 - caoFloor) * exp(-o / (1.0 - caoFloor))
+    : 1.0 - clamp(o, 0.0, 1.0);
   outputColor = vec4(inputColor.rgb * shade, inputColor.a);
 }
 `;
@@ -537,6 +580,7 @@ export class ContactAOEffect extends Effect {
   // `buildPost` still passes every one explicitly, and the measurements are on that call.
   constructor(camera: THREE.PerspectiveCamera, {
     intensity = 1.2, radius = 0.75, bias = 0.44, rangeRadii = 2.5, dirs = 6,
+    floor = 0.65,
   } = {}) {
     super('ContactAOEffect', CONTACT_AO_SHADER, {
       blendFunction: BlendFunction.SRC,
@@ -546,6 +590,7 @@ export class ContactAOEffect extends Effect {
         ['caoIntensity', new THREE.Uniform(intensity)],
         ['caoRadius', new THREE.Uniform(radius)],
         ['caoBias', new THREE.Uniform(bias)],
+        ['caoFloor', new THREE.Uniform(floor)],
         // Metres, derived from the radius rather than authored separately: the two are
         // one geometric statement ("how far away can something still be MY occluder"),
         // and an independent metre value would silently stop tracking a radius change.
@@ -597,6 +642,12 @@ export class ContactAOEffect extends Effect {
    */
   get bias(): number { return this.uniforms.get('caoBias')!.value as number; }
   set bias(v: number) { this.uniforms.get('caoBias')!.value = v; }
+  /**
+   * The darkest multiplier this pass may apply, 0..1. See the shader: 0 restores the
+   * original saturating line EXACTLY and is the identity arm every sweep opens on.
+   */
+  get floor(): number { return this.uniforms.get('caoFloor')!.value as number; }
+  set floor(v: number) { this.uniforms.get('caoFloor')!.value = v; }
   /**
    * How far away, in world METRES, an occluder may be and still count. Above it the
    * whole sample PAIR is dropped, which is what stops a prop painting its silhouette
@@ -2327,7 +2378,56 @@ export class Stage {
       // the knob and it is one line — but a tier that renders a DIFFERENT contact falloff
       // is a tier that has to be judged separately, and this file's opening invariant is
       // that it does not do that.
-      intensity: 1.20, radius: 0.75, bias: 0.44, dirs: 6,
+      // ── floor 0.65 — THE DARKEST THIS PASS MAY MAKE ANY SURFACE ────────────────
+      //
+      // The line it replaces reached EXACTLY ZERO, and on a small subject standing on a
+      // floor that is not an edge case: 34.43% of the arena floor within 8 px of the
+      // fighter was under 25 luma out of 255 at the hub, 1% of it at or below 0.7, while
+      // open ground sat at 123.1. Rendered, that is a hard black line hugging the
+      // character, and the round-3 critic scored it as the frame's biggest remaining gap
+      // (*"a hard near-black fringe ... neither a clean edge nor a readable foot
+      // anchor"*). It is an INK line, and this project's art direction is
+      // "almost no ink outline" — the character already carries an authored one.
+      //
+      // Swept live on ONE frozen frame per row (tools/tmp/dp3_ink.mjs --mode sweep), so
+      // no row can be content drift; the drift control is EXACTLY ZERO at both ends and
+      // floor 0 takes the original branch verbatim as an exact identity arm. Hub station,
+      // 1600x900. ringDark is the share of floor within 8 px of him under 25 luma —
+      // FLOOR pixels, so it can be neither the ink hull nor his own dark artwork:
+      //
+      //   floor   ringDark   ring p50   AO dMax   AO dMean   lobes   band vP10   <V.45
+      //   0.00     34.43%      52.6      112       3.60        6      0.3569     18.99%
+      //   0.55      9.55%      70.3       45       2.18        4      0.3647     18.32%
+      //   0.65      6.27%      74.0       39       1.95        4      0.3647     18.08%  <- ships
+      //   0.75      2.93%      78.5       35       1.64        3      0.3647     17.73%
+      //
+      // 🚨 THE DARK TAIL THIS GIVES BACK IS NIL, WHICH IS THE RESULT THAT MATTERS. vP10
+      // over the HUD-trimmed band is IDENTICAL at 0.55, 0.65 and 0.75, and every row is
+      // deep inside the six-plate band (vP10 0.333-0.549, belowV45 3.07-30.09%, dp_dark
+      // --mode plates). So the blackest pixels in the frame — the ones a p10 is supposed
+      // to be made of — were NOT the ones carrying the dark tail. They were a 3,381 px
+      // wreath, 0.2% of the frame, and removing them costs the statistic nothing.
+      //
+      // ⚠️ THE STOPPING RULE WAS WRITTEN AFTER THE SWEEP AND THAT IS DECLARED RATHER THAN
+      // HIDDEN: "the highest floor that still leaves the AO at least half its shipped mean
+      // contribution to the contact window" — 1.95/3.60 = 54% at 0.65, 1.64/3.60 = 46% at
+      // 0.75, which fails it. 0.55 and 0.75 are both defensible and the crops between them
+      // are close; what is NOT defensible is 0.00, and that is what the sweep settles.
+      //
+      // ⚠️ AND IT DOES NOT REACH THE CRITIC'S LITERAL BAR, WHICH IS REPORTED RATHER THAN
+      // WIDENED. *"No sub-25-luma sample on or inside the silhouette"* is not reachable
+      // from this file: with the AO ablated entirely the frame still carries 641 of them,
+      // because the character's own ink hull (toon.ts, OUTLINE_CHAR_SCREEN = #241a33,
+      // luma 30) and his dark boots and limbs are below the bar on their own. This pass
+      // owned 543 of the 1,184 and now owns 125. The rest is a hunk for the owner of
+      // src/characters/** and src/render/toon.ts.
+      //
+      // ⚠️ A PLAIN max(shade, floor) WAS THE FIRST IDEA AND IS WRONG: it puts a flat
+      // plateau of constant darkness under him with a visible edge where the clamp
+      // engages, i.e. it trades a hard line for a hard disc. The shipped form is
+      // exponential and matches the old response to FIRST ORDER at small occlusion — see
+      // the shader.
+      intensity: 1.20, radius: 0.75, bias: 0.44, dirs: 6, floor: 0.65,
     });
     if (contactAO) this.contactAO = contactAO;
 
