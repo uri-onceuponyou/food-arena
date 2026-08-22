@@ -144,6 +144,7 @@ const pad = (s, n) => String(s).padEnd(n);
 const rpad = (s, n) => String(s).padStart(n);
 const f2 = (v) => (Number.isFinite(v) ? v.toFixed(2) : 'n/a');
 const f3 = (v) => (Number.isFinite(v) ? v.toFixed(3) : 'n/a');
+const f1 = (v) => (Number.isFinite(v) ? v.toFixed(1) : 'n/a');
 const pct = (v) => (Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : 'n/a');
 
 const PAGE_STILL_HUD = () => {
@@ -378,6 +379,46 @@ function metrics(cur, base, w, h, opts) {
   lums.sort((a, b) => a - b);
   const q = (t) => lums[Math.min(lums.length - 1, Math.max(0, Math.round(t * (lums.length - 1))))];
   const p05 = q(0.05); const p50 = q(0.50); const p95 = q(0.95);
+  /**
+   * ── PEAK LUMA, AND WHY IT NEEDED ITS OWN *PAIRED* FORM ────────────────────────
+   *
+   * Round 2's critic gave an acceptance test that is the best-posed one this element
+   * has had, precisely because it is not area: *"p99.9 luma INSIDE the effect mask
+   * moving from 244 toward the plates' 253-255"*. `peakL`/`p999L` are that number.
+   *
+   * ⚠️ **BUT A PEAK ALONE IS NOT A CONTROL, AND ON THIS TREE IT READS BACKWARDS.**
+   * Measured on `86f2a31`'s live-match ablation (`shots/fxc2/own3`): inside the VFX
+   * mask ours peaks at **246.6**, and the SAME REGION with the whole VFX layer
+   * ablated peaks at **252.9**. The effect is not merely failing to add a highlight —
+   * it is compositing OVER one that was already there and taking the region's peak
+   * DOWN. So the honest statistic is the PAIR, and `peakGain = peakL - basePeakL` is
+   * the one that can distinguish "we added light" from "we happened to land on a
+   * bright fighter". A negative `peakGain` is the defect, stated as a number.
+   *
+   * ⚠️ And the frame-wide p99.9 is **244.0 with the VFX layer on AND off**, i.e. the
+   * critic's headline number is also the whole frame's — a coincidence, but one that
+   * makes "244" look like a property of the effect when read alone. Both columns are
+   * taken over the mask INTERIOR only, on the same pixels, in the same run.
+   */
+  const q999 = q(0.999);
+  const peakL = lums[lums.length - 1];
+  const Lbase = lumaOf(base, w, h);
+  let basePeak = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const p = y * w + x;
+      if (!inner[p]) continue;
+      if (Lbase[p] > basePeak) basePeak = Lbase[p];
+    }
+  }
+  let hotN = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const p = y * w + x;
+      if (!inner[p]) continue;
+      if (L[p] >= 250) hotN++;
+    }
+  }
   const gradFine = sumFine / n;
   const gradCoarse = sumCoarse / n;
   return {
@@ -391,18 +432,23 @@ function metrics(cur, base, w, h, opts) {
     segRatio: (sumGB / nb) > 1e-9 ? (sumG / n) / (sumGB / nb) : NaN,
     lumaSd: sdL,
     coreDrop: (p95 - p05) > 1e-9 ? (p95 - p50) / (p95 - p05) : NaN,
+    p999L: q999, peakL, basePeakL: basePeak, peakGain: peakL - basePeak,
+    hotPx: hotN,
   };
 }
 
-const COLS = ['maskPx', 'flatShare', 'meanGrad', 'stepRatio', 'falloffR', 'segRatio', 'lumaSd', 'coreDrop'];
+const COLS = ['maskPx', 'flatShare', 'meanGrad', 'stepRatio', 'falloffR', 'segRatio', 'lumaSd', 'coreDrop',
+  'p999L', 'peakL', 'basePeakL', 'peakGain', 'hotPx'];
 function row(label, m) {
   if (m.vacuous) return `${pad(label, 30)}  VACUOUS: ${m.vacuous}`;
   return `${pad(label, 30)}  ${rpad(m.maskPx, 7)}  ${rpad(pct(m.flatShare), 7)}  ${rpad(f2(m.meanGrad), 7)}`
     + `  ${rpad(f3(m.stepRatio), 7)}  ${rpad(f3(m.falloffR), 7)}  ${rpad(f3(m.segRatio), 7)}`
-    + `  ${rpad(f2(m.lumaSd), 6)}  ${rpad(f3(m.coreDrop), 6)}`;
+    + `  ${rpad(f2(m.lumaSd), 6)}  ${rpad(f3(m.coreDrop), 6)}`
+    + `  ${rpad(f1(m.p999L), 6)}  ${rpad(f1(m.peakL), 6)}  ${rpad(f1(m.basePeakL), 7)}  ${rpad(f1(m.peakGain), 7)}  ${rpad(m.hotPx, 5)}`;
 }
 const HEAD = `${pad('case', 30)}  ${rpad('maskPx', 7)}  ${rpad('flat', 7)}  ${rpad('mGrad', 7)}`
-  + `  ${rpad('step', 7)}  ${rpad('falloff', 7)}  ${rpad('seg', 7)}  ${rpad('sd', 6)}  ${rpad('core', 6)}`;
+  + `  ${rpad('step', 7)}  ${rpad('falloff', 7)}  ${rpad('seg', 7)}  ${rpad('sd', 6)}  ${rpad('core', 6)}`
+  + `  ${rpad('p999L', 6)}  ${rpad('peakL', 6)}  ${rpad('basePk', 7)}  ${rpad('pkGain', 7)}  ${rpad('hotPx', 5)}`;
 
 export { metrics, lumaOf, maskOf, erode };
 
@@ -480,9 +526,58 @@ async function fireCase(page, c, sliceMs, seed) {
       window.__vfxLayer.sync(st);
       window.__vfxLayer.updateEffects(0.05);
     }
+    /**
+     * §I's known-bad: ALL LIGHT REMOVED FROM THE LAYER, applied here rather than by a
+     * texture repaint.
+     *
+     * ⚠️ **THE TEXTURE REPAINT COULD NOT EXPRESS THE BUG AND READ AS A PASS-SHAPED
+     * FAIL.** Blacking out all 11 CanvasTextures the layer owns left `proj.donut.Candy`
+     * at `peakL 253.0`, `hotPx 12`, byte-for-byte on the peak columns, while
+     * `flatShare`, `meanGrad`, `stepRatio` and `lumaSd` all moved in the same capture —
+     * because a projectile's brightest pixels come from `projectileGeo`, an UNTEXTURED
+     * `MeshBasicMaterial` sphere, and `mat.color` is not reachable through `mat.map`.
+     *
+     * And it has to happen HERE, between the spawn and the grab, not before the fire:
+     * every hook and every pooled allocator authors `mat.color.set(...)` AT SPAWN, so a
+     * blackout applied earlier is overwritten by the effect itself and the arm goes
+     * quietly vacuous in the other direction.
+     */
+    let dimSave = null;
+    if (w.dim) {
+      const grp = window.__stage.scene.getObjectByName('vfx_layer');
+      dimSave = [];
+      // ⚠️ DEDUPED. Pooled materials are SHARED between meshes, so an undeduped walk
+      // saves the real colour on the first sight of a material and saves the BLACK it
+      // just wrote on the second — and the restore, iterating in order, ends on the
+      // black. That is the whole of the 1,270-byte §I SELF-PAIR leak, and it survived a
+      // `getHex` -> `clone` precision fix that changed the number by exactly zero.
+      const dimSeen = new Set();
+      grp.traverse((o) => {
+        if (!o.visible) return;
+        const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+        for (const mt of mats) {
+          if (!mt.color || dimSeen.has(mt)) continue;
+          dimSeen.add(mt);
+          // ⚠️ `clone()`, NOT `getHex()`. A hex round-trip goes linear -> sRGB -> 8 bit
+          // and back, so it is LOSSY, and the loss is invisible: §I SELF-PAIR read
+          // **1,270 bytes** of leak after a restore that looked complete. `.clone()`
+          // keeps the float triple.
+          dimSave.push([mt, mt.color.clone()]);
+          mt.color.setRGB(0, 0, 0);
+        }
+      });
+    }
     const cur = window.__fx.grab();
+    const dimN = dimSave ? dimSave.length : 0;
+    // ⚠️ RESTORED HERE, NOT LEFT TO THE NEXT SPAWN. The first version relied on every
+    // allocator re-authoring `mat.color` at spawn; most do, and the ones that do not
+    // (a hook that colours a mesh once at construction, `syncPool`'s persistent marks)
+    // leaked — §I SELF-PAIR read **10,033 bytes** of difference after the arm, on a
+    // tree the arm had not otherwise touched. A known-bad that does not put the tree
+    // back is a known-bad that contaminates every row measured after it.
+    if (dimSave) for (const [mt, c0] of dimSave) mt.color.copy(c0);
     window.__fx.reset();
-    return { base, cur, at, color: weapon.color, damage: weapon.damage };
+    return { base, cur, at, color: weapon.color, damage: weapon.damage, dimN };
   }, [c, sliceMs, seed]);
 }
 
@@ -508,7 +603,26 @@ async function repaintTextures(page, mode) {
       collect(v);
       if (Array.isArray(v)) for (const e of v) { collect(e); if (e && e.mat) collect(e.mat.map); }
     }
-    window.__stage.scene.traverse((o) => {
+    /**
+     * 🚨 **THIS TRAVERSED `window.__stage.scene` AND SO REPAINTED THE WHOLE ARENA.**
+     * Old line kept per house style: `window.__stage.scene.traverse(...)`. The header
+     * five lines up says *"every VFX sprite texture"* and the code said *every canvas
+     * texture in the game* — the floor, the props, the apron. Caught by §I HOLDS on
+     * `86f2a31`: `basePeakL`, read off the PRE-FIRE frame where the VFX layer draws
+     * nothing at all, moved 216.7 -> 216.0 under a repaint that by the header's own
+     * description could not reach it. It could: it was repainting the ground the
+     * fighters stand on. So §C/§D have been flattening the BACKGROUND as well as the
+     * effect for two rounds of decisions, and every `flatShare` delta they produced was
+     * a scene-wide one attributed to the VFX layer.
+     *
+     * Scoped to the `vfx_layer` group, which is where `spawnTransient` puts every
+     * bespoke hook's mesh — so nothing that belongs to this file is lost by narrowing.
+     * Asserted non-empty below, because a scoping bug that reaches NOTHING is the same
+     * class of vacuity one level down.
+     */
+    const grp = window.__stage.scene.getObjectByName('vfx_layer');
+    if (!grp) return { ok: false, why: 'no vfx_layer group in the scene' };
+    grp.traverse((o) => {
       const mats = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
       for (const mt of mats) collect(mt.map);
     });
@@ -543,7 +657,15 @@ async function repaintTextures(page, mode) {
           const a0 = src.data[p + 3];
           if (a0 === 0) { out.data[p + 3] = 0; continue; }
           const r = Math.hypot(x - cxr, y - cyr) / maxr;
-          if (m === 'flat') {
+          if (m === 'dark') {
+            // §I's known-bad: silhouette and alpha untouched, all LIGHT removed. An
+            // additive member then contributes exactly nothing and a normal-blended one
+            // contributes black, so any peak the EFFECT owns must fall. A peak the
+            // effect does not own does not move — which is the answer this arm exists
+            // to be able to give.
+            out.data[p] = 0; out.data[p + 1] = 0; out.data[p + 2] = 0;
+            out.data[p + 3] = a0;
+          } else if (m === 'flat') {
             // HARD-EDGED UNIFORM DISC: silhouette preserved (alpha only where the
             // original had alpha), body constant, no core, no falloff.
             out.data[p] = 255; out.data[p + 1] = 255; out.data[p + 2] = 255;
@@ -685,25 +807,75 @@ async function main() {
 
       const sv = await repaintTextures(page, 'save');
       if (!sv.ok) bad(`§C/§D could not save textures: ${sv.why}`);
-      log(`  saved ${sv.n} CanvasTextures reachable off the live layer + scene`);
+      log(`  saved ${sv.n} CanvasTextures reachable off the vfx_layer group`);
 
-      // §C FLATTEN
-      await repaintTextures(page, 'flat');
-      const fc = await fireCase(page, probe, SLICE, SEED);
-      const mc = metrics(Uint8Array.from(fc.cur), Uint8Array.from(fc.base), W, H, opts);
-      await repaintTextures(page, 'restore');
-      await repaintTextures(page, 'save');
-      // §D SHADE
-      await repaintTextures(page, 'shade');
-      const fd = await fireCase(page, probe, SLICE, SEED);
-      const md = metrics(Uint8Array.from(fd.cur), Uint8Array.from(fd.base), W, H, opts);
-      const rs = await repaintTextures(page, 'restore');
+      /**
+       * 🚨 **§C/§D USED `cases[0]` AND IT WAS A KNOWN-BAD PLANTED WHERE THE BUG CANNOT
+       * EXPRESS ITSELF.** Old line kept per house style: `await repaintTextures(page,
+       * 'flat'); const fc = await fireCase(page, probe, ...)`.
+       *
+       * A texture repaint can only move a case whose interior is drawn by TEXTURED
+       * members. `impact.pizza.Tomato` at 160 ms is untextured `MeshBasicMaterial`
+       * debris, so §D read `flatShare 8.5% -> 8.9%` — the wrong direction — and §C/§D
+       * ORDERS read `-0.149 > -0.066`, also wrong, on `86f2a31`, an unmodified tree.
+       * Both arms had been GREEN while the collector was traversing the whole scene:
+       * they were passing on the ARENA FLOOR's texture, not on the effect. Narrowing
+       * the scope to `vfx_layer` (see `repaintTextures`) turned them red, which is the
+       * correct colour for a known-bad that reaches nothing it is named after.
+       *
+       * So the probe is now CHOSEN BY WHETHER THE KNOWN-BAD CAN EXPRESS ITSELF: the
+       * first case where flattening actually raises `flatShare`. Cases that cannot are
+       * reported by name rather than silently averaged in, because "the arm is green"
+       * and "the arm is pointed at something it can move" are different facts and this
+       * file has now been caught confusing them twice in one run.
+       */
+      let probeC = null; let mc = null; let md = null; let rs = null; let m1c = null;
+      let baseBytesC = -1; let baseBytesD = -1;
+      const cannot = [];
+      for (const cand of cases.slice(0, 8)) {
+        const b0 = await fireCase(page, cand, SLICE, SEED);
+        const mb = metrics(Uint8Array.from(b0.cur), Uint8Array.from(b0.base), W, H, opts);
+        if (mb.vacuous) { cannot.push(`${cand.id}(vacuous)`); continue; }
+        await repaintTextures(page, 'save');
+        await repaintTextures(page, 'flat');
+        const fc = await fireCase(page, cand, SLICE, SEED);
+        const mcc = metrics(Uint8Array.from(fc.cur), Uint8Array.from(fc.base), W, H, opts);
+        await repaintTextures(page, 'restore');
+        if (mcc.vacuous || !(mcc.flatShare > mb.flatShare)) {
+          cannot.push(`${cand.id}(§C ${pct(mb.flatShare)}->${pct(mcc.flatShare)})`);
+          continue;
+        }
+        await repaintTextures(page, 'save');
+        await repaintTextures(page, 'shade');
+        const fd = await fireCase(page, cand, SLICE, SEED);
+        const mdd = metrics(Uint8Array.from(fd.cur), Uint8Array.from(fd.base), W, H, opts);
+        const rr = await repaintTextures(page, 'restore');
+        // BOTH directions, or the probe is rejected. Accepting on §C alone is how the
+        // first version picked `impact.pizza.Tomato` — a case where flattening moves
+        // `flatShare` (the mask grew) but shading cannot lower it, because the interior
+        // that would have to smooth out is untextured debris. A MOVES pair is a pair.
+        if (mdd.vacuous || !(mdd.flatShare < mb.flatShare)) {
+          cannot.push(`${cand.id}(§D ${pct(mb.flatShare)}->${pct(mdd.flatShare)})`);
+          continue;
+        }
+        baseBytesC = 0; baseBytesD = 0;
+        for (let i = 0; i < b0.base.length; i++) {
+          if (b0.base[i] !== fc.base[i]) baseBytesC++;
+          if (b0.base[i] !== fd.base[i]) baseBytesD++;
+        }
+        probeC = cand; mc = mcc; md = mdd; rs = rr; m1c = mb;
+        break;
+      }
+      if (cannot.length) log(`  §C/§D cases a TEXTURE repaint cannot move (untextured interiors): ${cannot.join(', ')}`);
+      if (!probeC) { bad('§C/§D found no case a texture repaint can move — the known-bad is vacuous everywhere'); }
+      log(`  §C/§D probe: ${probeC ? probeC.id : 'NONE'}`);
       log(HEAD);
-      log(row('  shipped', m1));
+      if (probeC) {
+      log(row('  shipped', m1c));
       log(row('  §C flattened (known-bad)', mc));
       log(row('  §D shaded (known-bad)', md));
-      const cUp = !mc.vacuous && mc.flatShare > m1.flatShare;
-      const dDown = !md.vacuous && md.flatShare < m1.flatShare;
+      const cUp = !mc.vacuous && mc.flatShare > m1c.flatShare;
+      const dDown = !md.vacuous && md.flatShare < m1c.flatShare;
       /**
        * ⚠️ **THIS ARM WAS WRITTEN AS "§C MUST REDUCE |falloffR| BELOW THE SHIPPED
        * VALUE" AND IT WAS VACUOUS BY CONSTRUCTION.** Old wording kept per house style:
@@ -717,14 +889,123 @@ async function main() {
        * falling-off than a strong radial ramp, whatever the shipped tree reads. It has
        * a real failure mode — a `falloffR` that had quietly become a constant, or a
        * repaint that never reached the textures, fails it.
+       *
+       * ══ 🚨 AND THAT PREMISE IS FALSE ON THIS ROSTER. OLD WORDING KEPT ABOVE. ══════
+       *
+       * It was green only while `repaintTextures` was traversing the WHOLE SCENE and
+       * flattening the arena floor. Scoped correctly to `vfx_layer`, on `86f2a31`, an
+       * unmodified tree: `impact.hamburger.Tomato` reads flat **-0.623** against shaded
+       * **-0.469** — the flattened arm falls off MORE, the reverse of the assertion, on
+       * both cases tried.
+       *
+       * The mechanism is the one `UNION_ALPHA_FALLOFF`'s own header records: on this
+       * roster the members sit on a SHELL. §D's ramp is painted inside EACH member's
+       * quad, so it gives every lobe its own little core — and a ring of per-lobe cores
+       * puts the bright pixels at the union's RADIUS, which makes the union's own
+       * `falloffR` LESS negative, not more. Per-member shading cannot produce
+       * union-level radial falloff when the members are a ring. The arm was asserting
+       * a property of one radial sprite about a burst that has not been one radial
+       * sprite for two rounds.
+       *
+       * `stepRatio` is the same ORDERS with a premise that survives, and it is one of
+       * the two columns this file says decisions are taken on: a HARD-EDGED uniform
+       * disc must carry MORE step energy relative to its smooth component than a
+       * smooth ramp does. Nothing about the members' arrangement can invert that.
+       * Measured on the same two captures: 4.616 vs 3.733 on `hamburger.Tomato`, 4.022
+       * vs 3.121 on `pizza.Tomato`. `falloffR` is still PRINTED on both arms, because
+       * the number is informative even where the ordering is not assertable.
        */
-      const cdOrder = !mc.vacuous && !md.vacuous && mc.falloffR > md.falloffR;
-      log(`  §C FLATTEN flatShare ${pct(m1.flatShare)} -> ${pct(mc.flatShare)} ${cUp ? 'PASS (rose)' : 'FAIL (did not rise)'}`);
-      log(`  §D SHADE   flatShare ${pct(m1.flatShare)} -> ${pct(md.flatShare)} ${dDown ? 'PASS (fell)' : 'FAIL (did not fall)'}`);
-      log(`  §C/§D ORDERS falloffR flat ${f3(mc.falloffR)} > shaded ${f3(md.falloffR)} ${cdOrder ? 'PASS' : 'FAIL'}`);
+      const cdOrder = !mc.vacuous && !md.vacuous && mc.stepRatio > md.stepRatio;
+      log(`  §C FLATTEN flatShare ${pct(m1c.flatShare)} -> ${pct(mc.flatShare)} ${cUp ? 'PASS (rose)' : 'FAIL (did not rise)'}`);
+      log(`  §D SHADE   flatShare ${pct(m1c.flatShare)} -> ${pct(md.flatShare)} ${dDown ? 'PASS (fell)' : 'FAIL (did not fall)'}`);
+      log(`  §C/§D ORDERS stepRatio flat ${f3(mc.stepRatio)} > shaded ${f3(md.stepRatio)} ${cdOrder ? 'PASS' : 'FAIL'}`
+        + `   [falloffR flat ${f3(mc.falloffR)} vs shaded ${f3(md.falloffR)} — printed, NOT asserted, see the note]`);
       if (!cUp) bad('§C flatten did not raise flatShare');
       if (!dDown) bad('§D shade did not lower flatShare');
-      if (!cdOrder) bad('§C/§D falloffR did not order flat > shaded');
+      if (!cdOrder) bad('§C/§D stepRatio did not order flat > shaded');
+      /**
+       * ── §I: THE PEAK COLUMNS, VALIDATED ON THE KNOWN-BADS ALREADY CAPTURED ──────
+       *
+       * `peakL`/`p999L`/`hotPx`/`peakGain` are new and `CLAUDE.md` rule 6 applies to
+       * them exactly as to every other column: a number nobody has seen FAIL is not a
+       * measurement. Both arms come free off §C/§D — no extra capture, no extra frame.
+       *
+       *   MOVES  every material under `vfx_layer` has its colour set to BLACK between
+       *          the spawn and the grab (see `fireCase`'s `dim`). Additive members then
+       *          add nothing and normal-blended ones composite black, so any peak the
+       *          EFFECT owns must fall. A peak column reading the wrong buffer, or a
+       *          mask that has drifted off the effect, fails it.
+       *   HOLDS  `basePeakL` is read off the PRE-FIRE frame, which no texture repaint
+       *          can reach (nothing is live in it). It must be EXACTLY equal across the
+       *          shipped, flattened and shaded arms. If it moves, the tool is reading
+       *          the post-fire buffer for its own control and every `peakGain` in the
+       *          sheet is comparing a frame against itself.
+       */
+      /**
+       * ⚠️ **THIS ASSERTED `basePeakL` EQUALITY AND IT WAS FALSE BY CONSTRUCTION.**
+       * Old wording kept: *"`basePeakL` is read off the PRE-FIRE frame, which no
+       * texture repaint can reach... It must be EXACTLY equal across the shipped,
+       * flattened and shaded arms."* The premise about the FRAME is right. The
+       * conclusion about the STATISTIC does not follow: `basePeakL` is a max over the
+       * mask INTERIOR, and the repaint changes the effect, hence the mask, hence which
+       * pixels of that unchanged frame are being maxed. It read 241.0/241.0/241.0 on
+       * one tree — by luck — and 247.0/248.0/241.0 on a tree that differed in one file,
+       * where `maskPx` went 5396 -> 6384 under §C. A control that moves because the
+       * SUBJECT moved is not a control.
+       *
+       * Stated on the raw buffer instead, where the claim is actually true and exact:
+       * the pre-fire frame itself must be BYTE-IDENTICAL across the three arms.
+       */
+      const baseHeld = baseBytesC === 0 && baseBytesD === 0;
+      log(`  §I HOLDS pre-fire frame under §C/§D: ${baseBytesC} / ${baseBytesD} bytes differ (want 0/0) ${baseHeld ? 'PASS (exact)' : 'FAIL (the control moved)'}`
+        + `   [basePeakL ${f1(m1c.basePeakL)} / ${f1(mc.basePeakL)} / ${f1(md.basePeakL)} — mask-dependent, printed, NOT asserted]`);
+      if (!baseHeld) bad('§I the pre-fire frame moved under a repaint it cannot reach');
+      }
+      /**
+       * §I MOVES runs on a case CHOSEN FROM THIS SHEET, not on `probe`.
+       *
+       * ⚠️ The first version asserted it on `impact.pizza.Tomato` like every other arm
+       * and it read `peakL 225.8 -> 225.8` under a full opaque-white repaint that moved
+       * `flatShare` 8.5% -> 14.5% and `maskPx` 1865 -> 1903 in the same capture. That is
+       * not a dead column; it is a case whose brightest pixel **is not owned by any
+       * texture in the layer** — `pizza.Tomato`'s impact at 160 ms is untextured
+       * `MeshBasicMaterial` debris, and the peak inside its mask belongs to the fighter
+       * underneath it (`pkGain -20.5`). Asserting MOVES there would have been a
+       * known-bad planted where the bug cannot express itself, which is `CLAUDE.md`
+       * rule 6's own list of vacuity disguises, word for word.
+       *
+       * So the arm picks the VFX row with the most pixels ALREADY over 250 luma, which
+       * is the row most likely to own its own peak, and requires that removing all light
+       * from the layer's MATERIALS takes it down. On a tree where NO row has a
+       * hot pixel that choice is itself reported and the arm falls back to the largest
+       * `peakGain` row.
+       */
+      const peakRows = Object.entries(results)
+        .filter(([k, v]) => k !== 'figures' && !v.vacuous)
+        .sort((a, b) => (b[1].hotPx - a[1].hotPx) || (b[1].peakGain - a[1].peakGain));
+      if (!peakRows.length) bad('§I MOVES has no non-vacuous VFX row to run on');
+      else {
+        const [pk, pkm] = peakRows[0];
+        const pkCase = CASES.find((c) => c.id === pk);
+        log(`  §I MOVES probe: ${pk} (hotPx ${pkm.hotPx}, peakL ${f1(pkm.peakL)}, peakGain ${f1(pkm.peakGain)})`);
+        const s0 = await fireCase(page, pkCase, SLICE, SEED);
+        const mp0 = metrics(Uint8Array.from(s0.cur), Uint8Array.from(s0.base), W, H, opts);
+        const sd = await fireCase(page, { ...pkCase, dim: true }, SLICE, SEED);
+        const mpd = metrics(Uint8Array.from(sd.cur), Uint8Array.from(sd.base), W, H, opts);
+        const sr = await fireCase(page, pkCase, SLICE, SEED);
+        let pbytes = 0;
+        for (let i = 0; i < s0.cur.length; i++) if (s0.cur[i] !== sr.cur[i]) pbytes++;
+        const reached = sd.dimN > 0;
+        const moves = !mpd.vacuous && reached && mpd.peakL < mp0.peakL && mpd.hotPx <= mp0.hotPx;
+        log(row('  §I shipped', mp0));
+        log(row('  §I light removed (known-bad)', mpd));
+        log(`  §I MOVES ${sd.dimN} materials blacked out; peakL ${f1(mp0.peakL)} -> ${f1(mpd.peakL)}, `
+          + `hotPx ${mp0.hotPx} -> ${mpd.hotPx} ${moves ? 'PASS (peak fell)' : 'FAIL'}`);
+        log(`  §I SELF-PAIR frame after restore differs on ${pbytes} bytes (want 0)`);
+        if (!reached) bad('§I blackout reached ZERO materials — the known-bad is vacuous');
+        if (!moves) bad('§I peak columns did not fall when all light was removed from the layer');
+        if (pbytes !== 0) bad(`§I restore leaked: ${pbytes} bytes differ`);
+      }
       // §E RESTORE — bit-identical
       const e1 = await fireCase(page, probe, SLICE, SEED);
       const me = metrics(Uint8Array.from(e1.cur), Uint8Array.from(e1.base), W, H, opts);
@@ -775,10 +1056,29 @@ async function main() {
       if (!(unionEnd.cores > 0)) bad('§H REACH: zero cores allocated — the "one hot centre" half never drew');
       if (unionEnd.scopes === unionEnd.inert) bad('§H REACH: every scope was INERT — a union of one is the per-lobe case this exists to get past');
     }
+    /**
+     * §K — the LIT DEBRIS treatment's reach census, on the same argument as §G/§H and
+     * read off the same module. ABSENT on any tree that predates it, which is correct
+     * and is why it is not a gate on the BEFORE arm. `converted + reused` is the count
+     * that matters: a conversion that reaches zero meshes is indistinguishable from one
+     * that did not help, and the three `skipped*` fields are printed so a filter that
+     * has silently swallowed everything is visible rather than inferred.
+     */
+    const litEnd = await page.evaluate(async () => {
+      try {
+        const m = await import('/src/game/vfx.ts');
+        return m.FX_LIT_STATS ? { ...m.FX_LIT_STATS } : null;
+      } catch (e) { return { err: String(e) }; }
+    });
+    log(`FX_LIT_STATS  (after the run): ${litEnd ? JSON.stringify(litEnd) : 'ABSENT — this tree predates the lit-debris treatment'}`);
+    if (litEnd && !litEnd.err) {
+      if (!(litEnd.converted > 0)) bad('§K REACH: zero materials converted to a lit surface — the treatment reached nothing');
+      if (!(litEnd.reused > 0)) bad('§K REACH: zero cache hits — every spawn is allocating a fresh material, which is not what the WeakMap is for');
+    }
     await writeFile(`${OUT}/${LABEL}.p${PITCH}.json`, JSON.stringify({
       base: BASE, label: LABEL, pitch: PITCH, viewport: [W, H],
       delta: DELTA, erode: ERODE, blur: BLUR, flatEps: FLAT_EPS, seed: SEED, slice: SLICE,
-      reach, reachEnd, unionEnd, results,
+      reach, reachEnd, unionEnd, litEnd, results,
     }, null, 1));
     log(`\nwrote ${OUT}/${LABEL}.p${PITCH}.json`);
   } finally {

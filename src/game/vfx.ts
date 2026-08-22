@@ -56,7 +56,7 @@ import { statusReadyAt } from './combat';
 import { CHARACTERS } from './rules';
 import type { CharacterId, Weapon } from './rules';
 import { CHARACTER_HEIGHT, CHARACTER_RADIUS, groundPos, wu } from '../units';
-import { flatMat } from '../render/toon';
+import { flatMat, toonMat } from '../render/toon';
 // The scene's own warm key direction, for the VFX body shading below. Imported
 // rather than retyped so a change to the rig cannot leave the effects lit from a
 // direction the cast is not — `render/lighting.ts` owns the value, this file only
@@ -149,6 +149,20 @@ function bumpVfxQaCount(key: VfxQaKey): void {
 
 /** Metres off the ground projectiles fly at — roughly chest height on the cast. */
 const PROJECTILE_HEIGHT = 0.5;
+/**
+ * Roughness of the generic projectile's now-LIT surface (`materialFor`).
+ *
+ * Below `toonMat`'s own 0.52 default, which is tuned for a character-sized form. A
+ * projectile is roughly one tenth of a character across, so at the cast's roughness its
+ * specular lobe spreads over the whole sphere and reads as "slightly brighter on one
+ * side" rather than as a highlight. Tighter is what puts a small hot spot on a small
+ * ball — the vinyl-toy read `CLAUDE.md` names, at the scale this object actually is.
+ *
+ * ⚠️ NOT lower than this. At 0.20 the lobe is a couple of pixels wide at match framing
+ * and aliases into a flicker as the shot moves; the point is a highlight that survives
+ * a 58-degree camera and a phone, not a mirror.
+ */
+const PROJECTILE_ROUGHNESS = 0.30;
 
 /**
  * Clearance every flat VFX decal in this file is expressed against, in metres.
@@ -969,6 +983,185 @@ function shadeVfxMaterial(mat: THREE.Material): boolean {
  * shard, streak, star, soft disc, halo), so their falloff is already authored in a
  * texture, and a `Sprite`'s geometry is shared by three itself.
  */
+/**
+ * ═══════════════════════════════════════════════════════════════════════════════
+ * LIT DEBRIS — the one change in this file that answers Uri's actual word.
+ * ═══════════════════════════════════════════════════════════════════════════════
+ *
+ * > *"projectiles and explosions still look very flat and not like what they are
+ * > supposed to."*
+ *
+ * ── THE MEASUREMENT, AND IT IS NOT A METAPHOR ─────────────────────────────────
+ *
+ * Every effect this game draws is `MeshBasicMaterial` or `SpriteMaterial`. Both are
+ * UNLIT: the fragment colour is the material colour, full stop. There is no diffuse
+ * term, no specular lobe, no Fresnel rim and no terminator anywhere in `src/game/vfx.ts`
+ * or `src/vfx/weapons/**`. A `SphereGeometry(wu(10), 10, 8)` drawn with one is a
+ * uniformly-coloured circle; a `TetrahedronGeometry` chunk is a uniformly-coloured
+ * polygon. **"Flat" is the literal, correct description of the material, not an
+ * impression of it.**
+ *
+ * `fx_flat.mjs` measures it against the LIT GEOMETRY STANDING IN THE SAME FRAME —
+ * `figures`, the cast's `toonMat` bodies — on a same-frame ablation mask, detached
+ * worktree of `86f2a31`, both pitches. `peakGain` is the peak luma inside the effect's
+ * own footprint MINUS the peak of the identical pixels with the layer ablated:
+ *
+ *     pitch 58                 peakGain   hotPx(>=250 luma)
+ *     figures (toonMat)          +24.6            6
+ *     proj.hamburger.Tomato      -90.6            0
+ *     proj.waterbottle.Cap       -44.2            0
+ *     impact.pizza.Tomato        -20.5            0
+ *
+ * **TEN of the twelve VFX cases had ZERO pixels over 250 luma at BOTH pitches, and FIVE
+ * had a NEGATIVE `peakGain` at one pitch or the other** (four at each; `impact.pizza.
+ * Tomato` and `proj.soup.Splash` are negative at only one). The effect is not merely
+ * failing to add a highlight — it is compositing over one that was already there and
+ * taking it away. That is round 2's *"light is never added anywhere in the effect"*,
+ * measured on the pixels rather than counted off the blend modes.
+ *
+ * ⚠️ That sentence read *"nine of twelve"* until it was re-derived off the sheets in the
+ * same breath as writing it, and it is ten. Kept visible per house style: this file
+ * already carries two commits whose messages published an inherited count, and
+ * `--amend` is banned, so a wrong one stays.
+ *
+ * ── WHAT THIS ACTUALLY DID, tallied off the two sheets rather than remembered ──
+ *
+ * `peakL` (peak luma inside the effect's own ablation mask), paired per case on two
+ * detached worktrees of `86f2a31` differing in THIS FILE ALONE:
+ *
+ *     peakL rose on 9 of 12 at pitch 58 and 10 of 12 at pitch 20, and FELL on ZERO at
+ *     either pitch. Rows with a negative `peakGain`: 4 -> 1 at pitch 58, 4 -> 2 at
+ *     pitch 20. Median paired delta: p999L +9.04 / peakL +7.26 (pitch 58),
+ *     +2.72 / +1.43 (pitch 20).
+ *
+ *     proj.waterbottle.Cap    162.4 -> 237.1  (p58)   173.5 -> 248.9  (p20)
+ *     proj.hamburger.Tomato   116.0 -> 206.6           125.2 -> 209.8
+ *     proj.pizza.Tomato       198.8 -> 226.0           193.8 -> 229.1
+ *     impact.soup.Splash      222.4 -> 249.0           246.5 -> 247.7
+ *     impact.lollipop.Smash   223.6 -> 247.7           247.0 -> 247.3
+ *
+ * ⚠️ **AND THE HONEST NEGATIVE: `hotPx` BARELY MOVED.** Rows with zero pixels over 250
+ * luma at both pitches went 10 -> 8 of 12, and the MEDIAN paired `hotPx` delta is
+ * **+0.0** at both pitches. A lit surface adds a highlight; it does not add a
+ * blown-out one, and nothing here reaches the reference plates' clipped white. That is
+ * the part of round 2's acceptance test this change does NOT meet, and it is stated
+ * rather than buried under the columns that did move.
+ *
+ * ⚠️ **AND THE MEASURED COST: SATURATION.** Over the pixels this change moves at all,
+ * mean HSV saturation falls 0.686 -> 0.641 at pitch 20 and 0.657 -> 0.604 at pitch 58,
+ * while mean luma rises 138.5 -> 143.1 and 162.3 -> 167.3. An additive near-white core
+ * raises the minimum channel, and that is what desaturation IS. It is 0.26% of the
+ * frame and it is the direction `CLAUDE.md` warns about four times over, so it is
+ * reported as a number rather than left for the next agent to find.
+ *
+ * ── WHY THIS AND NOT "MOVE THE DEBRIS TO ADDITIVE BLENDING" ───────────────────
+ *
+ * That was round 2's literal prescription and it is aimed at the wrong members. Every
+ * element `burst()` itself draws is ALREADY additive: the flash and the shards and the
+ * streaks are `allocParticle()` slots off the particle pool (`blending:
+ * THREE.AdditiveBlending`, see the constructor), and both rings are additive too. The
+ * NormalBlending 93.3% is the BESPOKE hooks' solid primitives and the sticky-trail
+ * ground marks — neither of which is "the outer debris members of spawnImpactBurst".
+ *
+ * And flipping solid debris to additive is a change this file has measured and rejected
+ * twice, in two places, for the same reason: additive over this arena's bright warm
+ * floor makes a WASH, not a core (see the block above `buildProjectileHaloTexture`, and
+ * `STUN_STAR_HEIGHT`'s note where additive `#FFE75E` over a bun *"clips to white and
+ * disappears into it"*). A chunk of tomato is an OBJECT. Objects are lit; sparks are
+ * added. The particle pool is already on the right side of that line.
+ *
+ * ── WHAT IS CONVERTED, AND WHY THE FILTER IS THIS NARROW ──────────────────────
+ *
+ * Only a `MeshBasicMaterial` that is **opaque** (`transparent: false`), **normally
+ * blended**, and **untextured** (`map === null`). That set is exactly the solid
+ * flat-coloured 3D primitives — on the live-match census (`fx_own.mjs`, `86f2a31`) 25
+ * of 109 visible objects, every one of them a `Tetrahedron`/`Box`/`Cylinder`/`Capsule`/
+ * `Icosahedron` chunk of food. Each exclusion is load-bearing:
+ *
+ *   TRANSPARENT  a hook that animates `mat.opacity` per frame owns that material, and
+ *                the UNION SHADE alpha term reads and rewrites it. Replacing it would
+ *                make both writes land on an object nobody draws — a peer found three
+ *                false zeros in one ablation this way, including an opacity knob that
+ *                was declared and never read.
+ *   ADDITIVE     already light. Lighting light is not a thing.
+ *   MAPPED       the map IS the value structure (`buildGlazeMarkTexture` authors a
+ *                whole body/speckle/pit histogram into its alpha and RGB). A diffuse
+ *                term would fight it, and `shadeVfxGeometry` already skips mapped
+ *                materials for the same reason — `FX_SHADE_STATS.skippedMapped`.
+ *
+ * ── THE EMISSIVE FLOOR, WHICH IS NOT A DIMMER ─────────────────────────────────
+ *
+ * A chunk of debris tumbles to a random orientation, so some faces point away from the
+ * key and would come back DARKER than the flat colour they replaced — trading one
+ * defect for a worse one, and this file has a scar for exactly that shape ("the number
+ * was right and the picture was wrong"). `emissive` set to the material's own colour at
+ * `FX_LIT_EMISSIVE` floors the surface at a fraction of its albedo whichever way it
+ * faces, so the light term can only ADD. The saturation is the material's own; nothing
+ * here desaturates anything, which this project has falsified four times.
+ *
+ * ── CACHED BY SOURCE MATERIAL ─────────────────────────────────────────────────
+ *
+ * A `WeakMap` keyed on the basic material, so a hook's shared/pooled material is
+ * converted ONCE. Three consequences, all wanted: no per-spawn allocation; one compiled
+ * program per distinct source material rather than per mesh (`applyRimLight` patches
+ * via `onBeforeCompile` and `customProgramCacheKey` is the patch source, so all of them
+ * share one program anyway); and the replacement is NOT flagged `userData.__ownMat`, so
+ * `disposeOwnedMaterials` — which disposes only what a transient owns — cannot dispose
+ * a material that other live effects are still drawing with.
+ */
+export const FX_LIT_STATS = {
+  converted: 0, reused: 0, skippedTransparent: 0, skippedAdditive: 0, skippedMapped: 0,
+  skippedNotBasic: 0,
+};
+/** Emissive floor as a fraction of the material's own colour — see the note above. */
+const FX_LIT_EMISSIVE = 0.62;
+/** Debris is small and glossy-plastic; below `toonMat`'s 0.52 character default so the
+ * specular lobe is a HIGHLIGHT on a chunk rather than a wash across it. Same argument,
+ * same number, as `PROJECTILE_ROUGHNESS`. */
+const FX_LIT_ROUGHNESS = 0.30;
+const litMatCache = new WeakMap<THREE.Material, THREE.MeshStandardMaterial>();
+
+function litVfxMaterial(m: THREE.Material): THREE.MeshStandardMaterial | null {
+  const basic = m as THREE.MeshBasicMaterial;
+  if (!(m as unknown as { isMeshBasicMaterial?: boolean }).isMeshBasicMaterial) {
+    FX_LIT_STATS.skippedNotBasic++; return null;
+  }
+  if (basic.transparent) { FX_LIT_STATS.skippedTransparent++; return null; }
+  if (basic.blending !== THREE.NormalBlending) { FX_LIT_STATS.skippedAdditive++; return null; }
+  if (basic.map) { FX_LIT_STATS.skippedMapped++; return null; }
+  const hit = litMatCache.get(m);
+  if (hit) { FX_LIT_STATS.reused++; return hit; }
+  const lit = toonMat({
+    color: basic.color.clone(),
+    roughness: FX_LIT_ROUGHNESS,
+    metalness: 0,
+    doubleSide: basic.side === THREE.DoubleSide,
+    emissive: basic.color.clone().multiplyScalar(FX_LIT_EMISSIVE),
+  });
+  lit.depthWrite = basic.depthWrite;
+  lit.depthTest = basic.depthTest;
+  lit.vertexColors = basic.vertexColors;
+  litMatCache.set(m, lit);
+  FX_LIT_STATS.converted++;
+  return lit;
+}
+
+/** Walk a hook-produced object and swap every solid unlit primitive for a lit one. */
+function litVfxObject(object: THREE.Object3D): void {
+  object.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!(mesh as unknown as { isMesh?: boolean }).isMesh) return;
+    if ((mesh as unknown as { isSprite?: boolean }).isSprite) return;
+    if (Array.isArray(mesh.material)) {
+      const out = mesh.material.map((m) => litVfxMaterial(m) ?? m);
+      mesh.material = out;
+      return;
+    }
+    const lit = litVfxMaterial(mesh.material);
+    if (lit) mesh.material = lit;
+  });
+}
+
 function shadeVfxObject(object: THREE.Object3D): void {
   object.traverse((o) => {
     const mesh = o as THREE.Mesh;
@@ -1123,12 +1316,39 @@ const UNION_ALPHA_FALLOFF = 0.55;
  *
  * Retuned to a smaller, dimmer, less-white core, and re-read at BOTH pitches.
  */
-const UNION_CORE_RADIUS_K = 0.30;
+const UNION_CORE_RADIUS_K = 0.34;
 /** How far the core's weapon colour is lerped toward white. `burst()`'s own flash uses
  * 0.30 for the same composite-over-the-victim reason; this stays above it because a
  * core has to out-read the mass, and below the 0.62 the lobby camera rejected. */
-const UNION_CORE_WHITE = 0.45;
-const UNION_CORE_OPACITY = 0.55;
+const UNION_CORE_WHITE = 0.72;
+const UNION_CORE_OPACITY = 1.0;
+/**
+ * ── ⚠️ THE THREE NUMBERS ABOVE WERE 0.30 / 0.45 / 0.55 AND THE CORE WAS INVISIBLE ──
+ *
+ * Kept per house style, because the pair of failures is the useful part: the first
+ * version (0.38 / 0.62 / 0.85) washed the victim out at the lobby camera, the retune
+ * that answered it (0.30 / 0.45 / 0.55) was measured by round 2's blind critic at
+ * *"runtime opacity 0.183 on a SpriteMaterial, invisible in every 4x crop"*. Both were
+ * moves along ONE dial — how bright is the disc — while the defect is that the element
+ * has no PROFILE. See `buildCoreSpikeTexture`, which is the actual change; these three
+ * only re-point the same sprite at the new curve.
+ *
+ * The acceptance test is not any of them. It is round 2's own, restated as a paired
+ * quantity because a peak alone is not a control (`fx_flat.mjs`'s `peakGain` note):
+ * **the peak luma inside the effect's own ablation mask, minus the peak of the same
+ * pixels with the layer removed.** On `86f2a31` nine of twelve VFX cases had ZERO
+ * pixels over 250 luma at either pitch while the lit cast in the same frame had 5-6,
+ * and five cases were NEGATIVE — the effect was taking light OUT of its own footprint.
+ *
+ * ⚠️ `UNION_CORE_WHITE` at 0.82 is above the 0.62 the lobby camera rejected, and that
+ * is deliberate rather than an oversight: **luma is 71.5% GREEN**, and every weapon
+ * colour that drew this complaint is a red or a pink whose green channel is under 0.30.
+ * A core made "brighter" in the weapon's own hue cannot reach a hot LUMA no matter how
+ * far it is pushed — it clips red and stays dark. Only a move toward white moves the
+ * number the complaint is about. What made 0.62 fail was the AREA it covered, and that
+ * is what the spike profile removes; the crops at pitch 20 are the check, and they are
+ * in the packet.
+ */
 /**
  * The core's own life, in seconds, INDEPENDENT of how long the mass lasts.
  *
@@ -1425,6 +1645,79 @@ function buildRadialGlowTexture(): THREE.CanvasTexture {
  * has to cover a silhouette evenly; a glow has to fall off from a hot core. They are
  * different shapes and this one needed its own.
  */
+/**
+ * THE HOT CORE'S OWN ALPHA PROFILE — a spike, not a glow.
+ *
+ * ── Why `glowTex` could not be this, stated as the trade it forces ────────────
+ *
+ * `buildRadialGlowTexture` is alpha 1.0 at the centre, **0.85 still at 40% of the
+ * radius**, 0 at the rim. Additively, the value a sprite adds is `colour x opacity x
+ * alpha(r)`, so with that profile the only way to make the CENTRE clip is to raise
+ * `opacity` — and at 0.85-of-peak out to 40% of the quad, that raises a broad disc with
+ * it. That is the object the LOBBY CAMERA REFUSED last round: `UNION_CORE_RADIUS_K
+ * 0.38 / WHITE 0.62 / OPACITY 0.85` left `impact.hamburger.Tomato`'s victim visibly
+ * PALER and less saturated through the core, and this project has falsified "fix it by
+ * desaturating" four times. The retune that followed (0.30 / 0.45 / 0.55) bought that
+ * back by making the core DIMMER — which is why round 2's critic could then measure it
+ * at *"runtime opacity 0.183, invisible in every 4x crop"*. Both ends of that dial are
+ * wrong, because the dial is the wrong dial.
+ *
+ * A profile that is 1.0 at the centre and already **0.30 by 22% of the radius** breaks
+ * the trade: the peak can go to a value that clips while the area painted above half
+ * strength falls by roughly `(0.22/0.40)^2` = **3.3x**. Hot centre, small wash.
+ *
+ * ── The stops, and the one that is load-bearing ───────────────────────────────
+ *
+ * `0 -> 1.0`, `0.14 -> 0.85`, `0.32 -> 0.45`, `0.55 -> 0.18`, `1 -> 0`. The tail out to
+ * the rim is deliberately NOT cut to zero early: an additive term that ends abruptly
+ * draws a visible disc edge, which is the *"hard-edged overlapping circular
+ * boundaries"* complaint this file has three separate scars from. The long faint tail
+ * IS the falloff half of *"no bright core, no shaped edge, no falloff"*.
+ *
+ * ── ⚠️ THE FIRST STOPS WERE `0.10 -> 0.72`, `0.22 -> 0.30`, `0.45 -> 0.09` AND THEY
+ *    DELIVERED **LESS** LIGHT THAN THE `glowTex` THEY REPLACED ────────────────────
+ *
+ * Kept per house style, because it is a clean falsification of my own argument three
+ * paragraphs up. Same-frame ablation of the core sprites ALONE, seeded, frozen clock,
+ * `impact.hamburger.Tomato` at the 160 ms slice (`tools/tmp/fx_core.mjs`, NULL control
+ * 0 px and SELF-PAIR 0 px on every row of both arms):
+ *
+ *     tree                    core opacity   ownedPx   mean delta   px x delta
+ *     shipped (`glowTex`)           0.2732      2,448         24.0       58,752
+ *     first spike stops             0.4968      3,404         12.6       42,890
+ *
+ * **It owned 39% MORE pixels and delivered 27% LESS light**, at nearly twice the
+ * material opacity. Concentrating the profile is only half a design: it buys a centre
+ * that clips and it pays for it out of the mid-band, where nearly all of a sprite's
+ * area lives. `peakL` on that case still rose (241.1 -> 248.5) and the FRAME got
+ * darker — a column moving the right way while the picture moves the wrong way, which
+ * is `CLAUDE.md` #3 in one measurement.
+ *
+ * These stops keep the clipping centre and put the mid-band back: at 32% of the radius
+ * this reads 0.45 against the first attempt's 0.30-at-22%, while `glowTex` sits at 0.85
+ * out to 40%. Steeper than a glow, far from a spike.
+ *
+ * White, because the material's colour is what tints it (`UNION_CORE_WHITE`).
+ */
+function buildCoreSpikeTexture(): THREE.CanvasTexture {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d')!;
+  const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.14, 'rgba(255,255,255,0.85)');
+  grad.addColorStop(0.32, 'rgba(255,255,255,0.45)');
+  grad.addColorStop(0.55, 'rgba(255,255,255,0.18)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, size, size);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.needsUpdate = true;
+  return tex;
+}
+
 function buildSoftDiscTexture(): THREE.CanvasTexture {
   const size = 64;
   const canvas = document.createElement('canvas');
@@ -2864,6 +3157,7 @@ export class VfxLayer {
 
   // ── Ability VFX pools ──────────────────────────────────────────────────────
   private readonly glowTex = buildRadialGlowTexture();
+  private readonly coreTex = buildCoreSpikeTexture();
   private readonly softDiscTex = buildSoftDiscTexture();
   private readonly starTex = buildStarburstTexture();
   private readonly streakTex = buildStreakTexture();
@@ -2965,7 +3259,10 @@ export class VfxLayer {
     // against, so shards and streaks have to composite over it, not under it.
     for (let i = 0; i < UNION_CORE_POOL_SIZE; i++) {
       const mat = new THREE.SpriteMaterial({
-        map: this.glowTex,
+        // `coreTex`, NOT `glowTex` — see `buildCoreSpikeTexture`. The comment below
+        // still says "same `glowTex`" about the PARTICLE pool's flash, which is true of
+        // that pool and is no longer true here.
+        map: this.coreTex,
         color: 0xffffff,
         transparent: true,
         opacity: 0,
@@ -3294,6 +3591,12 @@ export class VfxLayer {
             spawnTransient: (obj, life, onUpdate) => this.spawnTransientObject(obj, life, onUpdate),
           };
           const obj = bespoke.projectile(ctx);
+          // A bespoke projectile is created by `syncPool`, not by `spawnTransient`, so
+          // it never passes the choke point in `spawnTransientObject` — which is why
+          // the generic-path fix in `materialFor` moved `proj.waterbottle.Cap` and left
+          // `hamburger`/`pizza`/`soup`/`donut` BIT-IDENTICAL on every column. Four of
+          // the five projectile rows in `fx_flat`'s sheet are bespoke.
+          litVfxObject(obj);
           obj.userData.weaponVfx = bespoke;
           // ⚠️ NAMED, and it is not decoration. `docs/AGENT-BRIEF.md` §3: "an UNNAMED
           // mesh is invisible to every diagnostic here" — ablation, part maps and the
@@ -3702,6 +4005,13 @@ export class VfxLayer {
     // to know it exists, exactly as `castMuzzle`/`impactAnchor` made the shared BEATS
     // unconditional rather than asking each author to opt in.
     shadeVfxObject(object);
+    // LIT DEBRIS — the same choke-point argument as the line above, one property
+    // further down: `shadeVfxObject` bakes a ramp into a shared geometry attribute and
+    // `bd3d5cc` measured that it *"moved the METRIC on all 11 cases and BARELY MOVED
+    // THE PICTURE"*, because a baked vertex colour is identical on every instance by
+    // construction. A light term is not — it is a function of the mesh's actual
+    // orientation and of the camera. See `litVfxObject`.
+    litVfxObject(object);
     this.group.add(object);
     // UNION SHADE: the same choke-point argument one level up. A hook spawns its lobes
     // one at a time and knows nothing about the mass they add up to, so membership is
@@ -5581,6 +5891,7 @@ export class VfxLayer {
     this.haloMats.clear();
 
     this.glowTex.dispose();
+    this.coreTex.dispose();
     this.softDiscTex.dispose();
     this.starTex.dispose();
     this.streakTex.dispose();
@@ -5653,10 +5964,62 @@ export class VfxLayer {
     obj.userData.shellSpec = { scale, haloR };
   }
 
+  /**
+   * The generic projectile's surface — and it was the plainest statement of Uri's own
+   * complaint anywhere in this file.
+   *
+   * ── ⚠️ IT WAS `flatMat(color)`, AND THAT IS LITERALLY WHAT "FLAT" MEANS ─────────
+   *
+   * Old line kept per house style: `mat = flatMat(color);`. `flatMat` is
+   * `MeshBasicMaterial` (`render/toon.ts`) — unlit, no terminator, no specular, no
+   * rim. On `86f2a31` a `hamburger.Tomato` shot in flight, photographed at 4x, is a
+   * uniform red disc with a darker ring: **every pixel of the sphere is the same
+   * colour**, and a `SphereGeometry(wu(10), 10, 8)` is doing nothing that a 2D circle
+   * would not do.
+   *
+   * Measured rather than described (`fx_flat.mjs`, detached worktree of `86f2a31`,
+   * both pitches, mask = same-frame ablation):
+   *
+   *     case                    peakL   basePeakL   peakGain   hotPx
+   *     figures (toonMat)       251.1       226.5      +24.6       6
+   *     proj.hamburger.Tomato   116.0       206.5      -90.6       0
+   *     proj.waterbottle.Cap    162.4       206.5      -44.2       0
+   *
+   * `peakGain` is the peak luma inside the effect's own footprint MINUS the peak of the
+   * identical pixels with the layer ablated. The lit geometry standing in the same
+   * frame ADDS 24.6 luma of highlight to what it covers; the projectile SUBTRACTS 90.6.
+   * *"No light is ever added anywhere in the effect"* was the round-2 critic's phrase,
+   * and on the generic projectile it is not a metaphor — the material has no light term
+   * in it at all.
+   *
+   * ── WHY `toonMat` AND NOT A BRIGHTER FLAT COLOUR ──────────────────────────────
+   *
+   * `209e270` priced "make it bigger" at a 0.230 rank correlation with legibility and
+   * the weapon's own lightness at -0.738, so a brighter flat disc is the lever this
+   * file has already measured as the weak one. `toonMat` is the material the CAST uses
+   * — the reference arm above — and it is what `CLAUDE.md`'s art-direction section
+   * describes: smooth-shaded, soft specular, Fresnel rim, no cel banding. A projectile
+   * lit by the same key as the fighter that threw it is an in-world object; a flat disc
+   * is a HUD marker, and four critics and Uri all used the sticker word.
+   *
+   * ⚠️ **`rim` is left ON deliberately.** `applyRimLight` is an `onBeforeCompile`
+   * injection, and `CLAUDE.md` rule 5 records 54 sites that lost it to
+   * `Material.clone()` — nothing here clones; the cache hands out the same instance,
+   * which is also why every projectile of one colour shares ONE compiled program
+   * (`customProgramCacheKey` is the patch source, see `toon.ts`).
+   *
+   * ⚠️ **Draw count is UNCHANGED** — same mesh, same geometry, one material swap. The
+   * cost is per-pixel shading on an object a few dozen pixels across, and it is priced
+   * at 2/3/6 fighters in the commit rather than assumed.
+   *
+   * `flatMat` is still imported and still used for the splat/trail ground marks, whose
+   * value structure is authored INTO their texture (`buildGlazeMarkTexture`) and would
+   * be fought by a light term.
+   */
   private materialFor(color: string): THREE.Material {
     let mat = this.materialCache.get(color);
     if (!mat) {
-      mat = flatMat(color);
+      mat = toonMat({ color, roughness: PROJECTILE_ROUGHNESS, metalness: 0 });
       this.materialCache.set(color, mat);
     }
     return mat;

@@ -20,7 +20,18 @@ const [aPath, bPath] = process.argv.slice(2);
 if (!aPath || !bPath) { console.error('usage: fx_ab.mjs <before.json> <after.json>'); process.exit(2); }
 const A = JSON.parse(await readFile(aPath, 'utf8'));
 const B = JSON.parse(await readFile(bPath, 'utf8'));
-const cols = [['maskPx', 0], ['flatShare', 3], ['meanGrad', 2], ['stepRatio', 3], ['falloffR', 3], ['segRatio', 3], ['coreDrop', 3]];
+/**
+ * ⚠️ **`peakGain` IS PRINTED AND MUST NOT BE READ AS A PAIRED DELTA.** It is
+ * `peakL - basePeakL`, and `basePeakL` is a max over the MASK INTERIOR — so when the
+ * effect changes, the mask changes, and the "underneath" being subtracted is a
+ * different set of pixels in the two arms. Measured on this very pair:
+ * `impact.lollipop.Smash` reads `peakGain 20.0 -> 0.7` while its `peakL` goes
+ * **223.6 -> 247.7**, because `basePeakL` moved 203.6 -> 247.0 under a mask that grew
+ * 3948 -> 4033. `peakGain` is a WITHIN-ARM diagnostic — "is this effect adding light to
+ * its own footprint or taking it away" — and `peakL`/`p999L` are the columns that
+ * survive a cross-arm comparison.
+ */
+const cols = [['maskPx', 0], ['flatShare', 3], ['meanGrad', 2], ['stepRatio', 3], ['falloffR', 3], ['segRatio', 3], ['coreDrop', 3], ['p999L', 1], ['peakL', 1], ['peakGain', 1], ['hotPx', 0]];
 const pad = (s, n) => String(s).padEnd(n);
 const rp = (s, n) => String(s).padStart(n);
 console.log(`\npitch ${A.pitch}   ${aPath}  ->  ${bPath}`);
