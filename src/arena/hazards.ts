@@ -1309,16 +1309,40 @@ interface PuddleSurfaceUniforms {
   uPBand: { value: THREE.Vector4 };
   /** x sky strength · y Fresnel exponent · z band strength · w crest gain. */
   uPFres: { value: THREE.Vector4 };
-  /** x foam amplitude · y foam cells across the disc.
+  /** x foam amplitude · y foam cells across the disc · z the thin-shore brightening.
    *  ⚠️ THIS WAS A `vec4` CARRYING A CHOP AMPLITUDE AND FREQUENCY. Both chop versions
    *  rendered as a pattern (rings, then a dot lattice) and the term was removed — see
    *  the long note in the fragment. The uniform shrank with it rather than keeping two
-   *  dead slots: a uniform nothing reads is a uniform the next reader has to prove is
-   *  dead. The foam band's start in `vShore` is a shared CONSTANT in the shader, not a
-   *  slot here, because it is the same on both pools. */
-  uPFoam: { value: THREE.Vector2 };
+   *  dead slots: a uniform nothing reads is a uniform the next reader has to
+   *  prove is dead. The foam band's start in `vShore` is a shared CONSTANT in the
+   *  shader, not a slot here, because it is the same on both pools.
+   *
+   *  🚨 `z` IS NEW AND IT DECOUPLES TWO UNRELATED JOBS THAT WERE SHARING ONE NUMBER.
+   *  `faShore` used to read `uPBand.w * 1.15` — `uPBand.w` is the specular band's
+   *  HALF-WIDTH, and it was also setting how hard the pool's shore glows. Two effects
+   *  on one knob is a knob nobody can turn: widening the specular band brightened the
+   *  shore, and `wt_ablate.mjs` could not measure either one alone. Worse, the only
+   *  way to ablate the shore was `uPBand.w = 0`, which makes `smoothstep(edge0, edge1)`
+   *  degenerate at `edge0 == edge1` — UNDEFINED in GLSL, and the driver this repo runs
+   *  returned 1.0, i.e. the "ablation" turned the specular band ON EVERYWHERE and read
+   *  as +29.41 luma. A term that cannot be switched off without breaking its neighbour
+   *  is a term nobody will ever measure. */
+  uPFoam: { value: THREE.Vector3 };
+  /** PHASE WARP on the shore coordinate — x third harmonic, y fifth, both in `vShore`
+   *  units. Zero on grease. See the `faWarp` note in the fragment for why this is the
+   *  only one of three attempts at interior structure that cannot degenerate into a
+   *  pattern. */
+  uPWarp: { value: THREE.Vector2 };
+  /** SURFACE RELIEF — the two halves of one wave, and the shape of the reflection.
+   *  x crest gate exponent · y Fresnel floor · z trough shade amplitude ·
+   *  w trough shade exponent. See the long note on `faGate` in the fragment. */
+  uPRelief: { value: THREE.Vector4 };
   /** What the pool mirrors. */
   uPSky: { value: THREE.Color };
+  /** What a TROUGH shades toward — the pool's own colour taken deeper and more
+   *  saturated. Derived from `KPAL` at construction, never retyped, so a palette move
+   *  carries it. */
+  uPTrough: { value: THREE.Color };
 }
 
 /**
@@ -1362,8 +1386,11 @@ uniform vec2  uPDrip;
 uniform vec4  uPRipple;
 uniform vec4  uPBand;
 uniform vec4  uPFres;
-uniform vec2  uPFoam;
-uniform vec3  uPSky;`)
+uniform vec3  uPFoam;
+uniform vec4  uPRelief;
+uniform vec2  uPWarp;
+uniform vec3  uPSky;
+uniform vec3  uPTrough;`)
     .replace('#include <map_fragment>', `#include <map_fragment>
 {
 	// DYNAMICS — and the FIRST version of this was a defect, not a feature.
@@ -1387,8 +1414,34 @@ uniform vec3  uPSky;`)
 	// wave is purely radial, where an angle has no meaning anyway.
 	float faAng = atan( vLocal.y, vLocal.x );
 	float faMix = 0.45 * smoothstep( 0.03, 0.34, vShore );
-	float faW1  = sin( vShore * uPRipple.x - uPTime * uPRipple.y );
-	float faW2  = sin( vShore * uPRipple.x * 0.62 + faAng * 2.0 + uPTime * uPRipple.y * 0.55 );
+	// 🚨 A SHORE-FOLLOWING WAVE WITH ONE PHASE DRAWS CONTOUR LINES, AND THAT IS A THIRD
+	// SIGHTING OF ONE FAILURE. The record above has two: raising the frequency drew
+	// *"eight crisp nested rings, a topographic survey"*, and multiplying in a second
+	// periodic function drew a polka-dot lattice. What survived was ~2.5 cycles across
+	// the pool — which is not a fix, it is the same defect at an amplitude low enough to
+	// be called soft. At native pixels (\`tools/tmp/wt_r3_crop_it1.png\`) the interior is
+	// three broad pale arcs, each closing on itself, each parallel to the outline: a
+	// contour map with the contours blurred.
+	//
+	// The escape is neither frequency nor a second wave. Both of those keep the crests
+	// ISOPHASE — every point at the same \`vShore\` is at the same point in the cycle, so
+	// a crest is a level set of \`vShore\` and a level set of \`vShore\` is a contour, by
+	// definition. **Warp the phase with the ANGLE instead.** The wave stays one wave —
+	// so it cannot interfere with itself into a lattice, which is exactly how v2 failed
+	// — but its crests now wander in and out by a fraction of a wavelength as they go
+	// round, and a line that wanders is not a contour. Two low harmonics rather than one
+	// so the wander does not itself read as a two-lobed shape.
+	//
+	// ⚠️ RAMPED ON THE SAME \`smoothstep( 0.03, 0.34, vShore )\` AS \`faMix\`, and for the
+	// same reason: \`faAng\` is undefined where every spoke of the fan meets, and a phase
+	// warp discontinuous at the centre would pin a curl there — the defect
+	// \`wt_iter4\` already caught once. Amplitude is a UNIFORM and it is ZERO on grease:
+	// grease swells in broad sheets and has no business shimmering.
+	float faWarp = ( uPWarp.x * sin( faAng * 3.0 + 1.7 ) + uPWarp.y * sin( faAng * 5.0 - 0.6 ) )
+		* smoothstep( 0.03, 0.34, vShore );
+	float faShoreW = vShore + faWarp;
+	float faW1  = sin( faShoreW * uPRipple.x - uPTime * uPRipple.y );
+	float faW2  = sin( faShoreW * uPRipple.x * 0.62 + faAng * 2.0 + uPTime * uPRipple.y * 0.55 );
 	float faWave = ( faW1 * ( 1.0 - faMix ) + faW2 * faMix ) * exp( -vShore * uPRipple.z );
 	// CRESTS, not a sinusoid. A raw sine spends most of its range near zero and reads
 	// as a soft haze; raising the positive half to a power leaves thin bright lines
@@ -1442,13 +1495,77 @@ uniform vec3  uPSky;`)
 	// lifts by one constant and the render is a flat blob with a good outline
 	// (\`tools/tmp/wt_iter2/\`), which is a different failure from the bullseye and just
 	// as dead.
-	float faSky = uPFres.x * ( 0.34 + 0.66 * faF ) * faDepth * ( 0.62 + 0.38 * faWave * uPFres.w );
+	// 🚨 THIS LINE USED TO CONTRADICT THE PARAGRAPH DIRECTLY ABOVE IT, AND MEASUREMENT
+	// IS WHAT CAUGHT IT. Old wording, kept per the reversal rule:
+	//
+	//     float faSky = uPFres.x * ( 0.34 + 0.66 * faF ) * faDepth
+	//                 * ( 0.62 + 0.38 * faWave * uPFres.w );
+	//
+	// Two CONSTANTS in one expression. At the match camera \`faF\` is 0.0715, so the
+	// angular half of the first bracket contributes 0.047 against a fixed 0.34, and the
+	// wave half swings +-0.38 about a fixed 0.62. Multiply them out and **34% of the
+	// sky term is applied with no dependence on the view angle and no dependence on the
+	// wave at all** — a flat white film over the whole pool. The comment three lines up
+	// says *"a CONSTANT reflection just pales the pool out, which is exactly what the
+	// first render did."* It was right, and the code under it was doing that.
+	//
+	// Measured before it was touched, \`tools/tmp/wt_ablate.mjs\` at the match camera,
+	// a GEOMETRIC pool mask (see that tool on why a hue mask is blind to this):
+	//
+	//     pool, as shipped                 luma 167.01   sat 0.5658   7.18% washed
+	//     surface overlay hidden           luma 142.71   sat 0.7229   0.05% washed
+	//
+	// The pool BODY is a high-chroma element — 0.7229 — and this overlay was spending
+	// 24.30 luma to take 0.157 of saturation off it, across 17.90% of the frame. That
+	// is the wrong direction twice over: the only measured lead on the arena's quality
+	// gap is that our frames have NO high-chroma tier (p75 saturation 0.510 against a
+	// 0.551-0.835 reference range), and this pool was one of the few genuinely
+	// saturated things in the picture until its own surface bleached it.
+	//
+	// THE FIX IS A SHAPE CHANGE, NOT A REDUCTION. The reflection is gated on the CREST
+	// half of the wave, so the same peak brightness is delivered over a much smaller
+	// area — a glint instead of a haze — and the flat 0.34 Fresnel floor drops to a
+	// per-kind uniform. Peak sky alpha at the match camera is held (0.1337 against
+	// 0.1317, +1.5%) while its MEAN falls to 0.512 of what it was; at the lobby camera
+	// the peak GROWS 1.40x, which is the grazing behaviour the paragraph above says is
+	// the thing that reads as water.
+	//
+	// ⚠️ \`uPFres.w\` (the crest gain) stays INSIDE the gate rather than being replaced
+	// by it, so grease — gate exponent 1.0, crest gain 0.6 — keeps a broad slow swell
+	// and does not inherit water's shimmer. \`hazards.ts\`'s header is explicit that the
+	// substance read is how a player knows which hazard he is standing in.
+	float faGate = pow( clamp( 0.5 + 0.5 * faWave * uPFres.w, 0.0, 1.0 ), uPRelief.x );
+	float faSky = uPFres.x * ( uPRelief.y + ( 1.0 - uPRelief.y ) * faF ) * faDepth * faGate;
+
+	// THE TROUGH, which is the half of a wave this surface never had. Everything above
+	// this line ADDS light: five terms, all positive, all compositing a near-white sky
+	// colour. A real liquid surface reads because a crest tilts toward the light AND a
+	// trough tilts away from it — relief is a difference, and a surface that only ever
+	// brightens is a fog, not a fluid. It is also why every previous attempt to make
+	// the pool "read as water" reached for more brightness and paled it further.
+	// Composited toward \`uPTrough\` (the pool's own colour, deeper and more saturated)
+	// rather than toward black, so this DARKENS AND SATURATES in one term — the same
+	// argument \`uBDeep\` makes on the body, applied to the moving surface instead of to
+	// the depth profile. Rides \`faDepth\` for the same reason the sky term does: the
+	// shore is a film and a film has no relief to shade.
+	float faShade = pow( max( -faWave, 0.0 ), uPRelief.w ) * uPRelief.z * faDepth;
 
 	// The pool THINS at its edge, and thin liquid is bright liquid. One band just
 	// inside the shoreline, riding the same \`vShore\` the crests do, so it follows every
 	// lobe instead of being a ring. It is the last thing standing between "a coloured
 	// shape with a rim" and "a shallow pool with a shore".
-	float faShore = smoothstep( 0.74, 0.99, vShore ) * uPBand.w * 1.15;
+	// ⚠️ WAS \`smoothstep( 0.74, 0.99, vShore ) * uPBand.w * 1.15\`, and both halves of
+	// that were wrong. \`uPBand.w\` is the SPECULAR BAND'S HALF-WIDTH — see the uniform
+	// note on \`uPFoam.z\` for why one number driving two effects made this term
+	// unmeasurable. And the job it was doing is now done properly one layer down:
+	// round 2 gave the BODY depth-driven alpha, so the pool is already physically
+	// sheerer at its shore and the floor already reads through it there. Painting a
+	// second white band over the top of that is the same brightening twice, once with
+	// geometry and once with paint — and the paint version is a broad soft halo just
+	// inside the outline, which is a large fraction of what made the pool read as
+	// frosted glass. Kept at a trace rather than deleted: a real spill IS brighter
+	// where it thins, and the body's alpha ramp alone does not catch the light.
+	float faShore = smoothstep( 0.74, 0.99, vShore ) * uPFoam.z;
 
 	// HIGH FREQUENCY, and it is a REPORTED DEFECT rather than a garnish. A blind critic
 	// on round 1: *"the interior wave is the lowest-frequency element in a frame full of
@@ -1502,6 +1619,17 @@ uniform vec3  uPSky;`)
 
 	float faL = clamp( faBand + faSky + faRip + faFoam + faShore, 0.0, 1.0 );
 
+	// THE TROUGH LAYER GOES UNDER THE LIGHT LAYER, and the order is load-bearing: a
+	// crest and a trough are never the same pixel (one is \`max(faWave,0)\`, the other
+	// \`max(-faWave,0)\`), so they cannot fight, but compositing the shade FIRST means
+	// the sky highlight is laid over an already-deepened surface rather than being
+	// dimmed by it. Same un-premultiplied source-over as the sky layer below — see the
+	// note there for why \`rgb += tint * a\` is the obvious version and DARKENS.
+	float faS = clamp( faShade, 0.0, 1.0 );
+	float faAt = faS + diffuseColor.a * ( 1.0 - faS );
+	diffuseColor.rgb = ( uPTrough * faS + diffuseColor.rgb * diffuseColor.a * ( 1.0 - faS ) ) / max( faAt, 1e-4 );
+	diffuseColor.a = faAt;
+
 	// Source-over of the sky layer ON TOP of the authored texel, in un-premultiplied
 	// space. \`diffuseColor.rgb += sky * l\` with \`a += l\` is the obvious version and it
 	// DARKENS: the blend is \`rgb * a + dst * (1 - a)\`, so a lift of l contributes l^2
@@ -1540,24 +1668,70 @@ function puddleSurfaceMaterial(isGrease: boolean, map: THREE.Texture): { mat: TH
     // which hazard he is standing in.
     uPRipple: { value: new THREE.Vector4(4.6, 0.30, 0.40, 0.16) },
     uPBand: { value: new THREE.Vector4(2.2, 0.06, 0.14, 0.20) },
-    uPFres: { value: new THREE.Vector4(0.17, 2.2, 0.13, 0.6) },
+    // ⚠️ `x` WAS 0.17 AND IS HELD, NOT TUNED. The crest gate below changes the MEAN of
+    // the sky term as well as its shape, and grease is not what this round is about —
+    // Uri's note is about the water. 0.17 * 0.62 (the old constant wave floor) = 0.1054
+    // against 0.21 * 0.50 (the new mean at gate exponent 1.0, crest gain 0.6) = 0.1050,
+    // so grease's average sky contribution is carried across to within 0.4%. Measured
+    // rather than trusted: `wt_ablate.mjs` reports both pools and grease must move an
+    // order of magnitude less than water.
+    uPFres: { value: new THREE.Vector4(0.21, 2.2, 0.13, 0.6) },
     // A whisper of chop and NO foam. Grease is viscous: it can be disturbed, it cannot
     // break into flecks, and a foaming grease pool would read as water.
-    uPFoam: { value: new THREE.Vector2(0.0, 40.0) },
+    // `z` is the shore brightening, carried across at its old value: it used to read
+    // `uPBand.w * 1.15` = 0.20 * 1.15 = 0.23, and grease is held.
+    uPFoam: { value: new THREE.Vector3(0.0, 40.0, 0.23) },
+    // GATE EXPONENT 1.0 — grease SWELLS, it does not shimmer. At 1.0 the gate is a
+    // plain linear ramp on the wave, which is the closest thing to the flat film this
+    // term used to be; water runs 3.0 and gets a narrow glint. The Fresnel floor stays
+    // at the old hard-coded 0.34 for the same hold-grease-still reason.
+    // z/w: a shallow, broad trough shade — a viscous surface has relief, but soft.
+    uPRelief: { value: new THREE.Vector4(1.0, 0.34, 0.13, 1.2) },
+    // NO phase warp. Grease's crests are 2.5x longer than water's and a fifth of the
+    // amplitude; wandering them would make a viscous sheet look choppy, which is the
+    // one read this file's header says must stay separate.
+    uPWarp: { value: new THREE.Vector2(0.0, 0.0) },
     // Grease does not mirror the sky, it catches the burner. `KPAL.flameCore` is the
     // warm light-catch this pool is actually lit by and is reserved chroma, so the
     // link cannot drift out from under it — the same argument the sheen streak above
     // already makes for pinning to `KPAL.flame`.
     uPSky: { value: new THREE.Color().setStyle(KPAL.flameCore, THREE.SRGBColorSpace) },
+    // The trough of a grease swell shows the pool's own body, deeper: warm, dark, and
+    // with the blue pulled hardest — the same absorption direction `uBDeep` uses on the
+    // body, so the two layers agree about what "deeper grease" looks like. DERIVED from
+    // `KPAL.grease`, so a palette move carries it (the module header's standing rule).
+    uPTrough: { value: new THREE.Color().setStyle(KPAL.grease, THREE.SRGBColorSpace).multiply(new THREE.Color(0.62, 0.50, 0.34)) },
   } : {
     uPTime: { value: 0 },
     // The drip point `makeWaterSurfaceTexture` draws its rings around, in UV.
     uPDrip: { value: new THREE.Vector2(0.46, 0.52) },
     uPRipple: { value: new THREE.Vector4(16.0, 1.7, 0.35, 0.46) },
     uPBand: { value: new THREE.Vector4(0.9, 0.30, 0.25, 0.075) },
-    uPFres: { value: new THREE.Vector4(0.34, 1.4, 0.34, 1.0) },
-    uPFoam: { value: new THREE.Vector2(0.30, 96.0) },
+    // `x` 0.34 -> 0.52 IS NOT A BRIGHTENING. It is what holds the PEAK of the glint
+    // while the crest gate below cuts its mean: 0.52 * 1.0 * (0.20 + 0.80*0.0715) =
+    // 0.1337 at the match camera against the old 0.34 * 1.0 * (0.34 + 0.66*0.0715) =
+    // 0.1317, i.e. +1.5% at the crest and 0.512x averaged over the pool. Changing one
+    // of these two numbers without the other is how this term became a film.
+    uPFres: { value: new THREE.Vector4(0.52, 1.4, 0.34, 1.0) },
+    // `z` 0.0863 -> 0.028. The shore brightening used to be `uPBand.w * 1.15` and is
+    // now its own slot; the value is cut to a third because round 2's depth-driven body
+    // alpha already thins the pool at its shore. See the `faShore` note in the shader.
+    uPFoam: { value: new THREE.Vector3(0.30, 96.0, 0.028) },
+    // GATE EXPONENT 3.0 and a 0.20 Fresnel floor — water SHIMMERS. `pow(0.5+0.5*w, 3)`
+    // has mean 0.3125 against the old flat 0.62 and the same peak of 1.0, which is the
+    // whole trick: identical brightest pixel, half the area lit.
+    // z/w: a firmer, tighter trough than grease — thin water has real relief.
+    uPRelief: { value: new THREE.Vector4(3.0, 0.20, 0.30, 1.6) },
+    // 0.095 and 0.055 of `vShore` against a wave of `uPRipple.x` = 16 rad across the
+    // pool: the crests wander by up to 1.52 and 0.88 radians, i.e. roughly a quarter
+    // and an eighth of a wavelength. Enough that no crest closes on itself; not so much
+    // that they stop running parallel to the shore, which is the part that was right.
+    uPWarp: { value: new THREE.Vector2(0.095, 0.055) },
     uPSky: { value: new THREE.Color().setHex(PUDDLE_SKY_HEX, THREE.SRGBColorSpace) },
+    // The trough of a ripple shows deeper water: darker, and MORE cyan, because water
+    // absorbs red first. Same direction as the body's `uBDeep`, derived from the same
+    // `KPAL.water` the body is built from rather than from a hex typed here.
+    uPTrough: { value: new THREE.Color().setStyle(KPAL.water, THREE.SRGBColorSpace).multiply(new THREE.Color(0.40, 0.58, 0.78)) },
   };
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
