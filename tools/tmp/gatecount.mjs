@@ -1155,8 +1155,97 @@ function selftest() {
        'planted fires, real file clean');
   }
 
+  /* ─ §H  the SUMMARY LINE itself  ────────────────────────────────────────── */
+  //
+  // This section exists because the line that reports this tool's verdict was the one
+  // part of it nobody could assert — it was built inline in `main()`. It dropped 88 of
+  // 152 rows for an unknown length of time and read as a clean battery while doing it.
+  // A tool that polices documents for counts that do not add up was printing one.
+  H('§H  the summary line  (fails: a tally that does not account for every row)');
+  {
+    const R = (verdict, n) => Array.from({ length: n }, (_, i) => ({ key: `k${verdict}${i}`, verdict }));
+
+    const full = [...R('OK', 2), ...R('SKIP', 1)];
+    const lineFull = summarise(full, [], true, 1.0);
+    ok(lineFull.includes('2 verified') && lineFull.includes('1 skipped') && lineFull.includes('0 faults'),
+       'H1  POSITIVE CONTROL: a full clean run still reads as a full clean run', lineFull.split('\n')[0]);
+    ok(!lineFull.includes('TALLY ACCOUNTS FOR') && !lineFull.includes('--docs-only'),
+       'H2  ...and carries neither caveat when every row is accounted for and gates DID run');
+
+    // ── THE KNOWN-BAD, AT THE REAL SHAPE THAT SHIPPED ─────────────────────────
+    // 64 SKIP + 88 not-run, exactly what `--docs-only` produced on 2026-08-22.
+    const docsOnly = [...R('SKIP', 64), ...R('not-run', 88)];
+    const lineDocs = summarise(docsOnly, [], false, 0.0);
+    ok(lineDocs.includes('88 NOT RUN'),
+       'H3  KNOWN-BAD: the 88 `not-run` rows APPEAR in the tally — they were in neither total',
+       lineDocs.split('\n')[0]);
+    ok(lineDocs.includes('NO COUNT WAS CHECKED AGAINST THE TREE'),
+       'H4  KNOWN-BAD: `--docs-only` says so in words, because exit 0 does not');
+    ok(lineDocs !== `gatecount: 0 verified, 64 skipped (browser / non-numeric), 0 faults   0.0s`,
+       'H5  KNOWN-BAD: the exact string that shipped is no longer producible from this input');
+    // ⚠️ And the OTHER half of that agent's report did NOT check out, which is why this
+    // arm is here: the DUP scan runs fine under --docs-only. Planting an agreeing
+    // sentinel count into a worktree copy of CLAUDE.md exits 1. `--docs-only` was never
+    // vacuous as a DUP check; it was vacuous as a REPORT. Do not "fix" the scan.
+    ok(summarise([...R('SKIP', 2)], [{ kind: 'DUP', key: 'x', msg: 'y' }], false, 0).includes('1 FAULT(S)'),
+       'H6  a DUP found under --docs-only still reports as a fault, not as a skip');
+
+    // A verdict nobody wrote a bucket for must widen the tally, never shrink the denominator.
+    const novel = [...R('OK', 1), ...R('something-new', 3)];
+    const lineNovel = summarise(novel, [], true, 0);
+    ok(lineNovel.includes('3 something-new') && !lineNovel.includes('TALLY ACCOUNTS FOR'),
+       'H7  KNOWN-BAD: an UNRECOGNISED verdict is surfaced by name, not silently dropped',
+       lineNovel.split('\n')[0]);
+  }
+
   console.log(`\ngatecount --selftest: ${pass} passed, ${fail} failed`);
   return fail === 0 ? 0 : 1;
+}
+
+/**
+ * The summary line, as a PURE function so it can be asserted — it could not be, before.
+ *
+ * 🚨 IT DROPPED 88 OF 152 ROWS AND STILL READ GREEN. `--docs-only` printed
+ *
+ *     gatecount: 0 verified, 64 skipped (browser / non-numeric), 0 faults   0.0s
+ *
+ * and exited 0 — byte-for-byte the shape of a clean full battery — while all 88 offline
+ * gates sat at `not-run` and NOT ONE COUNT had been checked against the tree. `skipN`
+ * counted only `verdict === 'SKIP'`, so the `not-run` rows fell into neither total and the
+ * printed numbers did not add up to the row count. Nothing said so.
+ *
+ * Found by a builder agent, which called `--docs-only` "a vacuous pass". Re-deriving it
+ * split the claim in two, and the halves have opposite answers:
+ *   - the DUP and ROW scans DO run under `--docs-only` — verified by planting an AGREEING
+ *     sentinel count into a worktree copy of CLAUDE.md, which exits 1 with a DUP. The scan
+ *     was never vacuous.
+ *   - the REPORT was. And the orchestrator had just used that exact line as its evidence
+ *     that a CLAUDE.md edit was clean. It happened to be true. It was not shown to be.
+ *
+ * So the rule this file already enforces about DOCUMENTS applies to its own stdout: a
+ * tally that does not account for every row is indistinguishable from one that does.
+ */
+function summarise(rows, faults, run, secs = 0) {
+  const byVerdict = new Map();
+  for (const r of rows) byVerdict.set(r.verdict, (byVerdict.get(r.verdict) ?? 0) + 1);
+  const okN = byVerdict.get('OK') ?? 0;
+  const skipN = byVerdict.get('SKIP') ?? 0;
+  const notRunN = byVerdict.get('not-run') ?? 0;
+  const rest = [...byVerdict].filter(([k]) => k !== 'OK' && k !== 'SKIP' && k !== 'not-run');
+
+  const parts = [`${okN} verified`, `${skipN} skipped (browser / non-numeric)`];
+  if (notRunN) parts.push(`${notRunN} NOT RUN (--docs-only)`);
+  for (const [k, n] of rest) parts.push(`${n} ${k}`);
+  parts.push(faults.length ? `${faults.length} FAULT(S)` : '0 faults');
+
+  const covered = okN + skipN + notRunN + rest.reduce((a, [, n]) => a + n, 0);
+  let line = `gatecount: ${parts.join(', ')}   ${secs.toFixed(1)}s`;
+  // Structural, not cosmetic: if a verdict is ever added without a bucket, this says so
+  // instead of quietly shrinking the denominator.
+  if (covered !== rows.length) line += `\n  \u26a0\ufe0f TALLY ACCOUNTS FOR ${covered} OF ${rows.length} ROWS`;
+  if (!run) line += '\n  \u26a0\ufe0f --docs-only: the DUP and ROW scans RAN and are trustworthy; '
+    + 'NO COUNT WAS CHECKED AGAINST THE TREE. This is not a green battery.';
+  return line;
 }
 
 const kinds = (r) => r.faults.map((f) => f.kind).join(',') || '(clean)';
@@ -1195,14 +1284,10 @@ function main() {
     console.log(`${mark} ${r.key.padEnd(W - 2)} ${doc.padStart(12)} ${act.padStart(12)}  ${r.verdict}${r.note ? '  — ' + r.note : ''}${ms}`);
   }
 
-  const okN = rows.filter((r) => r.verdict === 'OK').length;
-  const skipN = rows.filter((r) => r.verdict === 'SKIP').length;
   console.log('\n' + '─'.repeat(W + 40));
-  if (faults.length === 0) {
-    console.log(`gatecount: ${okN} verified, ${skipN} skipped (browser / non-numeric), 0 faults   ${((Date.now() - t0) / 1000).toFixed(1)}s`);
-    process.exit(0);
-  }
-  console.log(`gatecount: ${faults.length} FAULT(S)   ${((Date.now() - t0) / 1000).toFixed(1)}s\n`);
+  console.log(summarise(rows, faults, run, (Date.now() - t0) / 1000));
+  if (faults.length === 0) process.exit(0);
+  console.log('');
   for (const f of faults) console.log(`  ✗ ${f.kind.padEnd(12)} ${f.key}\n      ${f.msg}`);
   console.log('');
   process.exit(1);
