@@ -1082,6 +1082,101 @@ export const KPAL = {
   concealTrayWarm: '#C9552F',
 } as const;
 
+/**
+ * Pull a generated texture's values toward their own mean, keeping `keep` of every
+ * deviation. Hue and saturation are untouched by construction — see below.
+ *
+ * ── WHY THIS EXISTS ─────────────────────────────────────────────────────────
+ * A blind critic scored the arena 5 against a reference plate's 8 and named one
+ * mechanism, with a measurement attached: *"our environment has no low-contrast rest
+ * area — there is nowhere quiet for the eye, so nothing reads as subject vs. ground."*
+ * Luma SD inside 54 px cells, every frame normalised to 1176 px wide, median cell:
+ * **ours 31.3, plates 21.4 / 17.2 / 16.9** — re-derived on this tree with
+ * `tools/tmp/cv_restarea.mjs`, not inherited. The plates concentrate contrast and let
+ * the rest of the frame go quiet; we were spending it on every surface at once.
+ *
+ * 🚨 **MY FIRST ABLATION SAID THIS TEXTURE WAS WORTH 8.3 OF THOSE POINTS AND IT WAS
+ * WRONG — the number is 0.3.** Kept here because the ablation looked like a clean
+ * single-variable control and was not. Rendering the nine `steel`/`freezer`/`potMetal`/
+ * `spiceCart` materials as `flatMat('#00FF00')` dropped the frame's median cell SD
+ * 31.3 → 23.0 and its lower-left region 45.4 → 17.7. **The green did that, not the
+ * texture.** `#00FF00` has luma 182; those materials draw the counters' DARK rims and
+ * ledges, so the ablation replaced a strong dark-on-bright edge with two near-equal
+ * lumas and erased the very edges it was supposed to leave alone. An ablation colour is
+ * not free — it has a luma, and a luma statistic can see it.
+ *
+ * The honest control is this constant set to **0**, which changes the texture and
+ * nothing else. It reads **31.0** — identical to the 0.3 shipped here, to the digit,
+ * on 294 cells of a deterministic frame. So the whole available effect of this texture
+ * on the median cell is **31.3 → 31.0**, and 0.3 already captures all of it.
+ *
+ * ── WHAT WAS ACTUALLY WRONG, AND IT IS NOT THE STREAKS ──────────────────────
+ * `textures.ts`'s `makeBrushedMetalTexture` lays 48 bands whose shade runs
+ * `0.5 + 0.5 * (…)`, i.e. **grey 0.50 to 1.00** — a **2:1 albedo swing** used as `map`
+ * (and, on `steel`/`steelDark`, as `roughnessMap` too). Brushed metal wants a hint of
+ * streak; this was a value break as strong as the step between two different
+ * materials, laid across the largest surfaces in the arena. Its reach is much wider
+ * than the four instances below suggest: `props/counters.ts` builds every counter top
+ * by CLONING `steel` through `tinted()`, and a clone inherits `.map`, so the single
+ * biggest slab in the frame carries this pattern under a colour that is not `steel`'s.
+ *
+ * ── WHY COMPRESS THE CANVAS RATHER THAN EDIT THE GENERATOR ──────────────────
+ * `src/arena/textures.ts` is another agent's file this round. It is also the right
+ * place structurally: this is a per-INSTANCE decision (the arena's counter tops are
+ * enormous and read at a grazing angle; the same generator's output on a spice cart is
+ * fine), and the generator has four callers here with different `repeat`s.
+ *
+ * ── HUE AND SATURATION CANNOT MOVE, WHICH IS THE POINT ──────────────────────
+ * `CLAUDE.md`: **do not fix anything by desaturating** — falsified four times — and the
+ * critic's own measurement had already cleared saturation (whole-frame mean 0.6234
+ * against plates 0.5543 / 0.6977 / 0.5864, INSIDE their range). Every generator in
+ * `textures.ts` draws **neutral grey only** and the colour arrives from the material,
+ * so this operates on a greyscale multiplier: it is a pure luma-contrast move. And it
+ * is MEAN-PRESERVING — dark bands rise, bright bands fall by the same amount — so the
+ * surface does not get darker either. Both properties are asserted in
+ * `tools/tmp/cv_restarea.mjs` §D against this exact band law.
+ *
+ * ── SO WHY SHIP IT, IF THE MEDIAN DOES NOT MOVE ────────────────────────────
+ * Because the median cannot express it, and `AGENT-BRIEF §4.6` says to ask that
+ * question in both directions. Median cell SD over 294 cells is set by the cells
+ * straddling prop EDGES; this texture only ever lived in cell INTERIORS, which were
+ * already below the median. What it does move is the statistic that actually encodes
+ * *"somewhere quiet for the eye"* — the share of near-flat cells (SD < 6):
+ *
+ *     p1_58  5.1% -> 11.9%     p1_40  3.7% -> 8.5%     plates 6.6 / 16.6 .. 27.8%
+ *
+ * from **below all six reference plates** to inside their range, and the slab's own
+ * interior cells go from 8-9 SD to 2-3. Read the two PNGs at 58° and 40°: the left
+ * counter mass reads as ONE object now. The number that did not move is reported next
+ * to the one that did, in the commit.
+ *
+ * ⚠️ **NOT a return to the round-7 flat fills.** `keep` is a fraction, not zero: the
+ * streak survives at reduced depth, and the top-vs-side value ramp `props/counters.ts`
+ * built to stop props reading as flat solids is geometry and is untouched. Read the PNG
+ * at both cameras before moving this number.
+ */
+function compressValueRange(tex: THREE.CanvasTexture, keep: number): THREE.CanvasTexture {
+  const canvas = tex.image as HTMLCanvasElement;
+  const ctx = canvas.getContext('2d');
+  // Defensive, and it is not theoretical: a null 2D context here would otherwise throw
+  // during arena construction and take the whole match screen with it.
+  if (!ctx) return tex;
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  const n = d.length / 4;
+  let sr = 0, sg = 0, sb = 0;
+  for (let i = 0; i < d.length; i += 4) { sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; }
+  const mean = [sr / n, sg / n, sb / n];
+  for (let i = 0; i < d.length; i += 4) {
+    for (let c = 0; c < 3; c++) {
+      d[i + c] = Math.max(0, Math.min(255, Math.round(mean[c] + (d[i + c] - mean[c]) * keep)));
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  tex.needsUpdate = true;
+  return tex;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared materials — created once per arena instance, reused across every prop
 // that shares a surface type. Kept in a factory function so nothing leaks between
@@ -1103,8 +1198,14 @@ export function buildMaterials() {
   const tileWearB = makeTileWearTexture(4029);
   const woodGrainWarm = makeWoodGrainTexture(4111);
   const butcherBlockTex = makeButcherBlockTexture(4177);
-  const brushedSteel = makeBrushedMetalTexture(4211);
-  const brushedFreezer = makeBrushedMetalTexture(4237);
+  // ── THE BRUSHED-METAL BAND SWING — see `compressValueRange` for the measurement ──
+  // One number, used by all four instances of this generator, so the arena's cool metal
+  // family keeps one surface law. `1` restores `textures.ts`'s shipped 0.50-1.00 grey
+  // swing exactly; `0` is the flat fill round 7 removed. Both ends are wrong and the
+  // measured cost of each is in that header.
+  const BRUSH_KEEP = 0.3;
+  const brushedSteel = compressValueRange(makeBrushedMetalTexture(4211), BRUSH_KEEP);
+  const brushedFreezer = compressValueRange(makeBrushedMetalTexture(4237), BRUSH_KEEP);
   const plankWarm = makePlankTexture(4271, 4);
   const plankHerb = makePlankTexture(4293, 3);
   const burlapTex = makeBurlapTexture(4321);
@@ -1117,9 +1218,9 @@ export function buildMaterials() {
   // default gameplay framing). Own texture instances (not reused ones) so each can
   // carry its own `repeat` without fighting another surface's tuning.
   const rugWeave = makeBurlapTexture(4451);
-  const cartMetal = makeBrushedMetalTexture(4487);
+  const cartMetal = compressValueRange(makeBrushedMetalTexture(4487), BRUSH_KEEP);
   const utilityMatTex = makeTileWearTexture(4519);
-  const potMetalTex = makeBrushedMetalTexture(4547);
+  const potMetalTex = compressValueRange(makeBrushedMetalTexture(4547), BRUSH_KEEP);
 
   // Floor tiles: applied at repeat (1,1) — each tile box's own UV already spans
   // 0..1 across its top face (see `buildFloor`), so the generator's one "tile's
