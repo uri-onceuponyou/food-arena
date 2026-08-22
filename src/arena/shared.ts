@@ -27,7 +27,7 @@ import type { CoverBox } from './types';
 import type { ConcealBox } from '../game/movement';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { toonMat, glossyMat, flatMat, roundedBox, RAMP_SOFT } from '../render/toon';
-import { wu, groundPos } from '../units';
+import { wu, groundPos, CHARACTER_HEIGHT } from '../units';
 import { PALETTE, fogOpeningRadiusFor } from '../game/rules';
 import {
   makeTileWearTexture,
@@ -2158,14 +2158,56 @@ export function addConceal(
 /**
  * A service table's linen with plates and trays stacked on it — the thing you duck under.
  *
- * ── EVERYTHING HERE IS UNDER 0.80 m ON PURPOSE ──────────────────────────────
- * `CHARACTER_HEIGHT` is 2.10 m and the match camera pitches 58 degrees, so a canopy tall
- * enough to physically cover a fighter would also hide the floor the fighter stands on
- * for a screen-height above it. It does not need to: `§29b` is FULLY HIDDEN and the
- * renderer removes the opponent's model outright, so the geometry's job is to say
- * *"this ground hides you"*, not to occlude. Every reference plate delivers its
- * concealment as a tinted GROUND PATCH with clutter on it, at ankle-to-knee height, for
- * exactly this reason.
+ * ── 🚨 "EVERYTHING HERE IS UNDER 0.80 m ON PURPOSE" — REVERSED BY THE OWNER ──
+ * The old header is kept verbatim below the reversal, per `CLAUDE.md`'s rule about an
+ * assertion that encodes a rule which has been overturned. It read:
+ *
+ *   > *"`CHARACTER_HEIGHT` is 2.10 m and the match camera pitches 58 degrees, so a canopy
+ *   > tall enough to physically cover a fighter would also hide the floor the fighter
+ *   > stands on for a screen-height above it. It does not need to: `§29b` is FULLY HIDDEN
+ *   > and the renderer removes the opponent's model outright, so the geometry's job is to
+ *   > say 'this ground hides you', not to occlude. Every reference plate delivers its
+ *   > concealment as a tinted GROUND PATCH with clutter on it, at ankle-to-knee height,
+ *   > for exactly this reason."*
+ *
+ * Uri, playing the shipped build: *"i still can't see the 'bushes' that we can hide below
+ * them."* That is the **third independent report of the same thing** — an agent measuring
+ * these at a shallow camera weeks ago wrote that they *"read unambiguously as ground mats,
+ * not as something you duck under"*, and `DECISIONS §29a` has been waiting on his eye
+ * since. The argument above is internally sound and answers the wrong question: it
+ * optimises for **not occluding the frame**, and the thing it was asked for is **reading
+ * as cover**. Tallest element was **0.62 m against a 2.10 m character** — 29% of a
+ * fighter, laid on a 0.02 m cloth. There was nothing to be below.
+ *
+ * ── WHAT REPLACED IT, AND WHY IT DOES NOT COST THE FRAME ────────────────────
+ * A **pot rack on four poles** over the same footprint: an open grid of rails and slats at
+ * `RACK_Y`, a short cloth valance hanging off its perimeter, and pans and lids swinging
+ * under it. The old objection is answered by OPENNESS rather than by lowness — the rack
+ * covers **~22% of the footprint in plan**, so the floor, the ground crockery and the
+ * fighter are all still visible THROUGH it, while the near rails, the valance and the
+ * hanging pans cross the fighter's silhouette and put something unmistakably above him.
+ *
+ * ── THE HEIGHTS ARE DERIVED FROM `CHARACTER_HEIGHT`, NEVER TYPED ────────────
+ * `RACK_Y = CHARACTER_HEIGHT + DUCK_CLEAR_M + HANG_MAX`. Two properties fall out of that
+ * and both are the point of writing it this way:
+ *   * the lowest hanging pan clears a standing fighter's head by exactly `DUCK_CLEAR_M`,
+ *     so **nothing here can ever interpenetrate a character** — `CLAUDE.md` rule 3 is
+ *     about a limb through a torso and a pan through a head is the same defect;
+ *   * if `CHARACTER_HEIGHT` moves again (it has, 2.35 → 2.10), the canopy moves with it
+ *     instead of silently becoming a hat.
+ *
+ * ── 🔴 THE MECHANIC IS NOT TOUCHED, AND THE FOOTPRINT IS NOT TOUCHED ────────
+ * `ConcealBox` is `{x, y, w, h}` — **plan extents only, no height field anywhere in the
+ * sim**. `movement.ts:isConcealed` tests the fighter's centre against that rectangle and
+ * `isVisibleFrom` works on the same 2D list, so height is invisible to every reader.
+ * `DECISIONS §29a`'s constraint — `stepAI` has no search and sees `CONCEAL_REVEAL_RADIUS`
+ * = 84 wu, so a patch wider than 168 wu has an interior it can never reach — is therefore
+ * a constraint on **FOOTPRINT ONLY**, and this change adds none. Re-derived, not inherited.
+ *
+ * ── AND THE CANOPY MUST NOT OVERHANG THE RIM ────────────────────────────────
+ * The rim is the true bound (below). A canopy wider than the cloth would give the player a
+ * SECOND, wrong edge to read the hiding place off, and the outer one at that — so the rack
+ * is built at the cloth's own `0.985` inset and every hanging thing lives inside it.
  *
  * ── THE RIM IS ON THE TRUE BOUND, TO THE WORLD UNIT ─────────────────────────
  * Standing 5 wu outside a region is the difference between hidden and shot, and the
@@ -2186,20 +2228,16 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
 
   // The linen. Rounded, and inset a hair below the rim so the rim reads as an edge
   // rather than as a stripe painted on the cloth.
-  const cloth = mesh(
-    roundedBox(wM * 0.985, 0.02, dM * 0.985, Math.min(wM, dM) * 0.09),
-    M.concealCloth,
-    'conceal_cloth',
-  );
-  cloth.position.y = FLOOR_Y.decal;
-  cloth.castShadow = false;
-  g.add(cloth);
+  const INSET = 0.985;
+  const clothParts: THREE.BufferGeometry[] = [
+    roundedBox(wM * INSET, 0.02, dM * INSET, Math.min(wM, dM) * 0.09).translate(0, FLOOR_Y.decal, 0),
+  ];
 
   // The rim, ON the true bound: a thin frame of four bars rather than a scaled quad, so
   // the line width is absolute and does not thicken with the patch. Merged into ONE
   // geometry — see the draw-call note below.
   const RIM = 0.09;
-  const rimParts: THREE.BufferGeometry[] = [];
+  const frameParts: THREE.BufferGeometry[] = [];
   for (const [sx, sz, w, d] of [
     [0, dM / 2 - RIM / 2, wM, RIM],
     [0, -(dM / 2 - RIM / 2), wM, RIM],
@@ -2208,12 +2246,8 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
   ] as const) {
     const b = new THREE.BoxGeometry(w, 0.02, d);
     b.translate(sx, FLOOR_Y.fine, sz);
-    rimParts.push(b);
+    frameParts.push(b);
   }
-  const rim = mesh(mergeGeometries(rimParts, false)!, M.concealClothRim, 'conceal_rim');
-  rim.castShadow = false;
-  rim.receiveShadow = false;
-  g.add(rim);
 
   // Plate stacks and trays. `u`/`v` are fractions of the half-extent, `r` a fraction of
   // the smaller extent, `h` a height in metres, `plates` the number of discs.
@@ -2267,6 +2301,170 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
       (isTray ? trayParts : plateParts).push(disc);
     }
   }
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // THE CANOPY — the half that answers "hide BELOW them"
+  // ───────────────────────────────────────────────────────────────────────────
+  //
+  // ⚠️ EVERY VERTICAL NUMBER HERE IS DERIVED FROM `CHARACTER_HEIGHT`. Retyping 2.1
+  // would survive `tsc`, survive every gate, and go stale the next time the cast is
+  // rescaled — which has already happened once (2.35 -> 2.10, `units.ts`).
+  //
+  //   RACK_Y is the UNDERSIDE of the rack, i.e. the ceiling of the space you stand in.
+  //   HANG_MAX is the deepest anything is allowed to swing below it.
+  //   => lowest hanging pan sits at CHARACTER_HEIGHT + DUCK_CLEAR_M, by construction.
+  //
+  // `DUCK_CLEAR_M` is deliberately generous. The alternative — clearing the head by a
+  // few centimetres — reads better in a still and is a bug in motion: characters bob,
+  // `rig.ts` animates the whole body, and a pan grazing a head at one phase of the run
+  // cycle is the interpenetration defect `CLAUDE.md` rule 3 is entirely about.
+  const DUCK_CLEAR_M = 0.45;
+  const HANG_MAX = 0.44;
+  const RACK_Y = CHARACTER_HEIGHT + DUCK_CLEAR_M + HANG_MAX;
+  const RACK_T = 0.16;               // rail / slat thickness, absolute (see RIM's note)
+  const RAIL = 0.14;                 // perimeter rail width
+  const SLAT = 0.13;                 // cross-slat width
+  const POST = 0.21;                 // corner pole side
+  const VAL_DROP = 0.52;             // valance drop below the rack
+  const VAL_T = 0.07;                // valance thickness
+
+  // Plan extents of the rack. `INSET`, the CLOTH's own inset — the rack may never be the
+  // outermost thing, or the player reads the hiding place off the wrong edge.
+  const rW = wM * INSET, rD = dM * INSET;
+  // The valance takes the OUTER plane and the rails sit just inside it. First draft had
+  // them concentric with `RAIL` (0.20) wider than `VAL_T` (0.07), which put the cloth
+  // entirely inside the rail's own footprint — rendered, invisible, and indistinguishable
+  // from not having built it. `CLAUDE.md` rule 4, in its smallest possible form.
+  const valX = rW / 2 - VAL_T / 2, valZ = rD / 2 - VAL_T / 2;
+  const railX = valX - VAL_T / 2 - RAIL / 2, railZ = valZ - VAL_T / 2 - RAIL / 2;
+  const railY = RACK_Y + RACK_T / 2;
+
+  // ── Perimeter rails + TWO cross bars, and the count came down after looking ──
+  // The first draft ran three slats one way and two the other. It rendered as a CAGE —
+  // a regular orange lattice that says scaffolding, not kitchen — and the fix was not to
+  // thin the bars but to delete most of them: the overhead mass belongs to the hanging
+  // cookware below, which is the thing that says what this is. Plan coverage of the
+  // frame is now
+  //     (4·RAIL·rW + 2·SLAT·rD + 4·POST² − overlaps) / (rW·rD)
+  // = **15.2 / 13.9 / 12.9%** at the shipped 110 / 120 / 130 wu sizes, and the nine
+  // hanging pots add **11.1%** at every size (they scale with the patch), so the canopy
+  // blocks **at most a quarter of its own footprint** and the fighter, the ground
+  // crockery and the floor all read THROUGH it. The old builder's objection to a canopy
+  // was that it would hide the ground; it is answered by OPENNESS, not by lowness.
+  for (const [sx, sz, w, d] of [
+    [0, railZ, rW, RAIL],
+    [0, -railZ, rW, RAIL],
+    [railX, 0, RAIL, rD],
+    [-railX, 0, RAIL, rD],
+  ] as const) {
+    frameParts.push(new THREE.BoxGeometry(w, RACK_T, d).translate(sx, railY, sz));
+  }
+  for (const u of [-0.34, 0.34]) {
+    frameParts.push(new THREE.BoxGeometry(SLAT, RACK_T, rD).translate(u * (rW / 2), railY, 0));
+  }
+
+  // ── Four poles, at the corners and NOT in the middle ────────────────────────
+  // A concealment region is walk-through by definition (`addConceal`'s header), so every
+  // solid-looking thing in it is something a fighter passes through. Corners are where a
+  // fighter crossing the patch is least likely to be, and a slim pole reads as a prop you
+  // brush past rather than as structure you ought to collide with. This is the one place
+  // the build knowingly trades a little honesty for the read; it is called out here so
+  // the next owner is deciding rather than discovering.
+  for (const sx of [-railX, railX]) {
+    for (const sz of [-railZ, railZ]) {
+      const h = railY + RACK_T / 2 - FLOOR_Y.decal;
+      frameParts.push(roundedBox(POST, h, POST, 0.05).translate(sx, FLOOR_Y.decal + h / 2, sz));
+      frameParts.push(puck(POST * 0.85, 0.10, 12).translate(sx, FLOOR_Y.fine + 0.05, sz));
+    }
+  }
+
+  // ── Hanging cookware — the part that crosses the fighter's silhouette ───────
+  // A rack alone is a grid seen from above and foreshortens to almost nothing at 58°.
+  // What actually says "this is over your head" is an object hanging INTO the space
+  // between the camera and the fighter. Same fixed-table discipline as `CLUTTER`, same
+  // reason: the point-symmetric partner patch must be identical under 180°.
+  //
+  // ⚠️ THESE ARE POTS, NOT PLATES — the `h` column is a HEIGHT, and the first draft's
+  // 0.14 m pucks were the bug. Seen from a 58° camera a flat disc hanging at 2.6 m and a
+  // flat disc lying on the floor at 0.2 m are the same shape at nearly the same screen
+  // size, so the hangers merged into the ground crockery and the overhead read vanished.
+  // A pot shows its side as well as its rim, which is what makes it obviously a solid at
+  // a height. They hang on the two cross bars (`u = ±0.34`) and on the centre line.
+  //   [u, v, warm, r (fraction of `short`), h (m), drop (m, rack underside -> pot bottom)]
+  const HANGERS: ReadonlyArray<readonly [number, number, boolean, number, number, number]> = [
+    [-0.34, -0.44, true, 0.070, 0.34, HANG_MAX],
+    [-0.34, 0.06, false, 0.055, 0.24, 0.30],
+    [-0.34, 0.56, true, 0.062, 0.30, 0.38],
+    [0.00, -0.62, false, 0.050, 0.20, 0.26],
+    [0.00, -0.10, true, 0.078, 0.38, HANG_MAX],
+    [0.00, 0.44, false, 0.058, 0.26, 0.32],
+    [0.34, -0.50, false, 0.052, 0.22, 0.28],
+    [0.34, 0.00, true, 0.066, 0.32, 0.40],
+    [0.34, 0.52, true, 0.058, 0.26, 0.32],
+  ];
+  for (const [u, v, warm, r, h, drop] of HANGERS) {
+    const x = u * (rW / 2), z = v * (rD / 2);
+    const pot = puck(r * short, h, 16).translate(x, RACK_Y - drop + h / 2, z);
+    (warm ? trayParts : plateParts).push(pot);
+    const stemH = Math.max(0.02, drop - h);
+    frameParts.push(new THREE.BoxGeometry(0.05, stemH, 0.05).translate(x, RACK_Y - stemH / 2, z));
+  }
+
+  // ── The valance — a continuous roofline, which is what a silhouette needs ───
+  // The rack read as a grid; the grid read as a grid. A skirt of cloth on all four sides
+  // gives the structure ONE unbroken top edge, which is the thing the eye segments an
+  // object by. It hangs from the rack underside, so its lowest point is
+  // `RACK_Y - VAL_DROP` — still above a standing fighter by construction.
+  for (const [sx, sz, w, d] of [
+    [0, valZ, rW, VAL_T],
+    [0, -valZ, rW, VAL_T],
+    [valX, 0, VAL_T, rD],
+    [-valX, 0, VAL_T, rD],
+  ] as const) {
+    clothParts.push(roundedBox(w, VAL_DROP, d, 0.03).translate(sx, RACK_Y - VAL_DROP / 2, sz));
+  }
+
+  // ── FOUR DRAWS PER PATCH, EXACTLY AS BEFORE ────────────────────────────────
+  // The canopy adds 36 parts — four rails, two slats, four poles, four feet, nine pots,
+  // nine stems and four valance panels — and **not one new MESH**, because every part was
+  // authored into one of the four material buckets that already existed. `perf.mjs
+  // --mode counts` confirms it: `meshes 858` before and after, at both 2 and 6 seats.
+  // `CLAUDE.md` rule 10 — draw counts are EXACT, and Uri plays on a phone that `5aa4655`
+  // took from 928 draws to 423.
+  //
+  // ⚠️ **THAT IS NOT THE SAME AS COSTING NOTHING, AND THE MESH COUNT IS WHY IT LOOKS LIKE
+  // IT IS.** Measured, `--device mobile`, the tier the phone actually gets:
+  // **423 -> 431 draws (+8, +1.89%)** and **755,292 -> 773,796 triangles (+2.45%)**,
+  // identical at 2 and at 6 seats. Desktop: 484 -> 494 (+10, +2.07%). The split between
+  // frustum and shadow is ablated at `cloth.castShadow` below.
+  const cloth = mesh(mergeGeometries(clothParts, false)!, M.concealCloth, 'conceal_cloth');
+  // Still `false`, and now for a second reason. It was false because a 0.02 m linen lying
+  // on the floor casts nothing; the valance merged into the same buffer DOES hang at
+  // 2.47 m and would. THE SPLIT WAS MEASURED, not reasoned — `tools/perf.mjs --mode
+  // counts`, desktop, `match`, on a detached worktree of `c471efe`:
+  //
+  //     484   before (the flat mats)
+  //     486   canopy, NEITHER new mesh casting     -> +2 is pure FRUSTUM: a 3 m pole has
+  //                                                   a far bigger bounding sphere than a
+  //                                                   0.02 m mat, so meshes that used to
+  //                                                   be culled are now in frame
+  //     494   canopy, FRAME casting                -> +8, the shadow-map pass
+  //     502   canopy, frame AND cloth casting      -> +8 again, for a second shadow band
+  //                                                   drawn inside the first
+  //
+  // The frame carries the poles and the rails, and its ground shadow is most of what says
+  // "this is off the floor" at 58°. The valance's is a duplicate. **8 draws for a
+  // duplicate is not a trade to make on the owner's phone**, so this stays false.
+  // ⚠️ `renderer.shadowMap.autoUpdate` is `false` here, which reads like "shadow casters
+  // are free per frame" and is not: the map is re-rendered when the light re-focuses, and
+  // `perf.mjs` attributes those draws to `0:RenderPass`. The ablation above is how that
+  // was established rather than assumed.
+  cloth.castShadow = false;
+  g.add(cloth);
+  const frame = mesh(mergeGeometries(frameParts, false)!, M.concealClothRim, 'conceal_rim');
+  frame.castShadow = true;
+  frame.receiveShadow = false;
+  g.add(frame);
   g.add(mesh(mergeGeometries(plateParts, false)!, M.concealPlate, 'conceal_plates'));
   g.add(mesh(mergeGeometries(trayParts, false)!, M.concealTrayWarm, 'conceal_trays'));
   return g;
