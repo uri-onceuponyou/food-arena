@@ -5,7 +5,17 @@ execution at the visual bar of **Brawl Stars** and **Zooba**. Owner: Uri.
 
 Remote: https://github.com/uri-onceuponyou/food-arena — push freely.
 
-> **New session? Read this file, then `docs/STATE.md`. Do not re-derive anything.**
+> **New session? Read this file, then `docs/HANDOVER.md`, then `docs/STATE.md`.**
+>
+> ⚠️ **The old wording here was *"do not re-derive anything"* and it is REVERSED, because it
+> was measured wrong.** Kept visible per house style. Over one 109-commit session, agents
+> re-deriving a claim they had been handed as true caught: a rule in THIS FILE citing the
+> document that had already reversed it; a line citation that drifted twice in a day; a chroma
+> direction retired months earlier and still being pasted into briefs; six `tools/tmp` prefixes
+> that did not exist; and three separate ways of being flatteringly wrong about a sample size.
+> **Not one was caught by a check.** Reading is how you find out what a document CLAIMS.
+> Re-deriving is how you find out whether it is still true. **Do both — and report what did
+> not check out, because that is a RESULT.**
 
 ---
 
@@ -13,6 +23,7 @@ Remote: https://github.com/uri-onceuponyou/food-arena — push freely.
 
 | file | what it is |
 |---|---|
+| 🆕 **`docs/HANDOVER.md`** | **Read this FIRST.** The session snapshot: where the project stands, the three things to know before acting, ranked next work, and the traps that cost time. ⚠️ It is a SNAPSHOT and says so — it names the confound that makes cross-session quality numbers unsafe, so reading it before `STATE.md` stops you trusting a comparison you should not. **Linked here deliberately: `AGENT-BRIEF.md` is the cautionary tale of a file that existed so a brief could not vanish, and then vanished from the handover by being referenced by nothing.** |
 | **`docs/STATE.md`** | What is DONE (with evidence) and what is PENDING (ranked). Start here. |
 | **`docs/DECISIONS-FOR-URI.md`** | Every judgement call parked for Uri, with what was assumed and what reversing costs. Opens with a one-screen answer sheet. |
 | **`docs/LESSONS.md`** | Every hard-won learning. Reading it is cheaper than re-learning any of it. |
