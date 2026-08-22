@@ -365,7 +365,19 @@ desaturates; removed deliberately). ⚠️ **Do not fix anything by desaturating
 Reference plates live in `reference/images/curated/` — `gameplay_topdown/` for the arena and cast,
 `menus/` for the screens (6 plates supplied by Uri).
 
-🚨 **DO NOT TAKE A CHROMA DIRECTION FROM THIS FILE. RUN `arena-scan --baseline` AND READ IT.**
+🚨 **DO NOT TAKE A CHROMA DIRECTION FROM THIS FILE. RUN `arena-scan --gate` AND READ IT.**
+
+⚠️ **THIS SAID `--baseline` UNTIL 2026-08-22, AND `--baseline` CURRENTLY REFUSES TO ANSWER.**
+Kept visible because it is the same failure as the paragraph below: a rule naming a source that
+cannot answer, which reads exactly like a rule naming one that can. A sweep's identity is
+`id@x,y/fog<radius>` for all 18 stations (`baselineIdentityError` in `arena-scan.mjs`), and the
+stored baseline's fifteen open-arena stations carry **`/fog1985`** while the tree derives
+`MAX_SAFE_RADIUS = fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` = **1720.47**. Every key differs, so
+the drift comparison exits 2 rather than printing a confident wrong regression — **the refusal is
+correct and the gate is inert.** The **11 rails (`--gate`) still run and still fire**; they are what
+answers the chroma question today. A re-baseline is owed, but *not* while an arena pass is in
+flight — a baseline is itself a measurement and pinning one to a moving tree is how the last one
+manufactured a six-day phantom regression.
 This paragraph has now been wrong TWICE, in opposite directions, and the second time is the
 instructive one.
 
