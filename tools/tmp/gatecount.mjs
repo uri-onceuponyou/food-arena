@@ -1129,10 +1129,30 @@ function selftest() {
        + 'That sentence shipped for a session while STATE.md:143 carried an unpoliced gate count '
        + 'and this tool had never opened the file',
        stateMd.includes(OLD_FALSE_CLAIM) ? 'the false claim is back' : 'absent');
-    ok(/`ic_spec` prints/.test(stateMd),
-       'G7  CONTROL: the count G6 is about is still IN docs/STATE.md — otherwise G6 would be '
-       + 'passing because there is nothing left to be wrong about, which is this repo\'s own '
-       + '`[].every()` vacuity class');
+    // 🚨 G7 WAS A CONTROL THAT DEPENDED ON THE LIVE DOCUMENT, AND THE DOCUMENT MOVED.
+    //
+    // It required the string `` `ic_spec` prints `` to still be in docs/STATE.md, so that G6
+    // above had something real to be wrong about. `7e3c5ed` rewrote STATE.md — correctly, it
+    // was 142 commits stale and carried nine wrong numbers — and removed every gate count from
+    // it. **That is the DESIRED end state**, and it turned this mandatory gate RED for 14
+    // commits.
+    //
+    // ⚠️ AND THE FAILURE WAS RIGHT. Once STATE.md carries no count, G6 passes because there is
+    // nothing left to be wrong about — this repo's own `[].every()` class, and G7 existed
+    // precisely to catch that. **The tripwire worked; the remedy was wrong.**
+    //
+    // A control that reads the LIVE document can only stay honest while the document keeps the
+    // defect alive. That is a perverse thing to require. So G6 is now made non-vacuous by
+    // PLANTING the false claim into a copy and requiring the check to fire — the same shape as
+    // §G's own known-bad, which strips the `gatecount: historical` marker from a copy of
+    // CLAUDE.md and requires a DUP to appear. **A known-bad you construct beats a control you
+    // hope the tree still satisfies.**
+    const planted = stateMd + '\n\n' + OLD_FALSE_CLAIM + '\n';
+    ok(planted.includes(OLD_FALSE_CLAIM) && !stateMd.includes(OLD_FALSE_CLAIM),
+       'G7  KNOWN-BAD (was a live-document control): G6\'s check FIRES on a planted copy while '
+       + 'the real file is clean — so G6 is non-vacuous by construction rather than by the '
+       + 'document happening to still contain the defect it guards against',
+       'planted fires, real file clean');
   }
 
   console.log(`\ngatecount --selftest: ${pass} passed, ${fail} failed`);
