@@ -193,6 +193,16 @@ async function shoot(browser, n, { swap = false, tag } = {}) {
         enemy: window.__vfxDebugFighters?.enemy ?? null,
       },
       screenSlots: window.__vfxDebugScreen?.slots ?? null,
+      // The guaranteed visible radius in the WORST direction, from the rig's own fair-view
+      // solve. Needed to tell an OFF-CAMERA null (correct) from an ON-CAMERA null (a bug).
+      fairRadius: typeof window.__fairView === 'function'
+        ? (window.__fairView().guaranteedRadiusUnits ?? null) : null,
+      // The whole fair-view solve, so a failure reports WHICH bound rejected the point
+      // rather than only that one did. `binding` says whether depth or width is the
+      // constraint; a fighter inside `guaranteedRadiusUnits` that still fails is either a
+      // real `groundOnScreen` defect or a target the rig has not finished lerping to, and
+      // these numbers are what tells the two apart without another run.
+      fairView: typeof window.__fairView === 'function' ? window.__fairView() : null,
       screenLegacy: { player: window.__vfxDebugScreen?.player ?? null, enemy: window.__vfxDebugScreen?.enemy ?? null },
       // The renderer's own per-slot arrays, read through the published layer handle.
       statusVisuals: layer ? layer.statusBySlot?.length ?? null : null,
@@ -260,8 +270,54 @@ try {
     check(`[N=${n}] every HP readout carries ITS OWN slot's hp`, hpOk, JSON.stringify(r.hps));
 
     // ── 2: one model per slot, projected where the sim says the fighter is ──
-    const projOk = r.screenSlots?.length === n && r.screenSlots.every((p) => p && Number.isFinite(p.x));
-    check(`[N=${n}] every slot projects to a screen point`, projOk, JSON.stringify(r.screenSlots));
+    //
+    // 🚨 THIS ROW USED TO READ, AND IT WAS STRUCTURALLY IMPOSSIBLE:
+    //
+    //     const projOk = r.screenSlots?.length === n
+    //       && r.screenSlots.every((p) => p && Number.isFinite(p.x));
+    //     check(`[N=${n}] every slot projects to a screen point`, projOk, …);
+    //
+    // Kept above the replacement per house style. `match.ts`'s `projectPointToScreen`
+    // returns `null` BY DESIGN when `!groundOnScreen(...)` — an off-camera fighter has no
+    // screen point, and that is correct. The assertion was true when the arena was
+    // 1400x1000 and every spawn fit in frame. The map went x4 at `6631446` (2800x2000,
+    // six spawns) while the guaranteed view radius stayed ~199 wu, so most fighters at
+    // match start are legitimately off-camera and this row has been RED EVER SINCE.
+    // It is a browser gate, so it is not in the pre-commit block and nothing noticed.
+    // Verified pre-existing: identical 4 failures on a detached worktree of 8ca8f88,
+    // the deploy before the whole visual pass.
+    //
+    // ⚠️ WEAKENING IT TO `.some()` WOULD BE THE WRONG FIX — that passes on one fighter
+    // and one bug. The replacement asserts the thing that is actually true AND still
+    // load-bearing: a null is only legal for a fighter OUTSIDE the guaranteed radius.
+    // A fighter the camera is guaranteed to see, that does not project, is a real defect
+    // and this now says so.
+    const slots = r.screenSlots ?? [];
+    check(`[N=${n}] the projection array covers every seat`, slots.length === n, `got ${slots.length}`);
+    // Non-empty FIRST: `[].every()` is `true`, and every arm below is an `every`.
+    const shown = slots.filter((p) => p && Number.isFinite(p.x) && Number.isFinite(p.y));
+    check(`[N=${n}] at least one slot projects`, shown.length > 0, `${shown.length} of ${slots.length}`);
+    check(`[N=${n}] the LOCAL slot always projects — it is the camera's own subject`,
+      !!(slots[0] && Number.isFinite(slots[0].x)), JSON.stringify(slots[0]));
+    check(`[N=${n}] every projected point is finite (no NaN leaking through)`,
+      shown.length === slots.filter(Boolean).length,
+      `${shown.length} finite of ${slots.filter(Boolean).length} non-null`);
+    // THE LOAD-BEARING ARM. Needs the radius to exist, or it is vacuous.
+    check(`[N=${n}] __fairView() published a guaranteed radius`,
+      typeof r.fairRadius === 'number' && r.fairRadius > 0, String(r.fairRadius));
+    const obs = r.slots[0];
+    const offCamera = slots
+      .map((p, i) => ({ i, p, d: Math.hypot(r.slots[i].x - obs.x, r.slots[i].y - obs.y) }))
+      .filter((e) => !e.p);
+    const wronglyHidden = offCamera.filter((e) => e.d <= (r.fairRadius ?? 0));
+    check(`[N=${n}] every UNPROJECTED slot is genuinely beyond the guaranteed radius`,
+      wronglyHidden.length === 0,
+      `radius ${Number(r.fairRadius).toFixed(1)} wu · hidden-but-close ${JSON.stringify(
+        wronglyHidden.map((e) => [e.i, Math.round(e.d)]))} · all off-camera distances ${JSON.stringify(
+        offCamera.map((e) => Math.round(e.d)))} · observer slot0 ${JSON.stringify(
+        [Math.round(obs.x), Math.round(obs.y)])} · hidden-but-close at ${JSON.stringify(
+        wronglyHidden.map((e) => [Math.round(r.slots[e.i].x), Math.round(r.slots[e.i].y)]))} · fairView ${
+        JSON.stringify(r.fairView)}`);
 
     // Legacy aliases must still mean slot 0 / slot 1, because 22 instruments read them.
     check(`[N=${n}] __vfxDebugFighters.player is still slot 0`,
@@ -295,7 +351,23 @@ try {
       // reading the constant — a palette that is long enough but wired to the wrong index
       // would pass a test that read `TRAIL_COLOR` directly.
       const cols = [];
-      for (let i = 0; i < 6; i++) cols.push(`#${layer.trailMatsFor(i)[0].color.getHexString()}`);
+      for (let i = 0; i < 6; i++) {
+        const mat = layer.trailMatsFor(i)[0];
+        // 🚨 `mat.color` IS NO LONGER THE SLOT'S PALETTE ENTRY, and this row went red on
+        // `#f6a15e` / `#f6c75b` when 31f481c landed. `markHotColor()` puts a hue-shifted
+        // high-luma neighbour on `mat.color` and the texture multiplies it back down to the
+        // base pink — a multiply map can only take green AWAY, and Rec.709 luma is 71%
+        // green, so a pink mark cannot be hot at any depth. `userData.markColor` is the
+        // palette entry, published by `vfx.ts`'s `groundMarkMat` for exactly this row.
+        //
+        // ⚠️ NO `??` FALLBACK TO `mat.color`, DELIBERATELY. A fallback would make this row
+        // pass again the moment the field disappeared — the same shape as the HUD probe
+        // that did `querySelector('.hud') ?? document.body` and reported the coverage of
+        // the whole page under the name "HUD covers x%". A missing accessor must be
+        // VISIBLE, so it becomes a value that cannot match any hex.
+        const mc = mat.userData.markColor;
+        cols.push(typeof mc === 'string' ? mc.toLowerCase() : `MISSING-userData.markColor-slot${i}`);
+      }
       return cols;
     });
     await page.close();
@@ -304,6 +376,11 @@ try {
   console.log(`   ${JSON.stringify(palette)}`);
   check('six slots resolve to six trail materials', palette.length === 6);
   check('every slot\'s trail colour is DISTINCT', new Set(palette).size === 6, JSON.stringify(palette));
+  // The set is asserted PRESENT before it is asserted CORRECT — a palette of six
+  // `MISSING-…` sentinels would otherwise satisfy "six slots" and "all distinct".
+  check('every slot publishes userData.markColor (the accessor, not the tint)',
+    palette.every((c) => c.startsWith('#')) && palette.length === 6,
+    JSON.stringify(palette.filter((c) => !c.startsWith('#'))));
   check('slots 0 and 1 keep the two MEASURED hexes', palette[0] === '#f5475e' && palette[1] === '#f5c147',
     JSON.stringify(palette.slice(0, 2)));
 
