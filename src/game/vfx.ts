@@ -42,11 +42,13 @@
  */
 
 import * as THREE from 'three';
-import type { Fighter, FighterId, FighterRole, MatchState, Projectile, Splat, TrailMark, Vec2 } from './state';
+import type {
+  Fighter, FighterId, FighterRole, MatchState, Medikit, Projectile, Splat, TrailMark, Vec2,
+} from './state';
 // The presentation-side seat rules, stated once for all four consumers of the event
 // stream — see `roster.ts` for why every resolver has a legacy-role fallback.
 import { fighterOf, fightersOf, slotOf } from './roster';
-import { SPLAT_RADIUS, TRAIL, REACH } from './rules';
+import { SPLAT_RADIUS, TRAIL, REACH, MEDIKIT } from './rules';
 // The sim's own predicate for "may this status be applied yet", exported by
 // `combat.ts` specifically so this layer can render the shrug-off window without
 // re-deriving the arithmetic (see its doc comment). Importing it rather than copying
@@ -239,6 +241,59 @@ const GROUND_CLEAR_Y = 0.30;
 /** Ground-decal layer heights. See `GROUND_CLEAR_Y` for how these were derived. */
 const SPLAT_Y = GROUND_CLEAR_Y;
 const TRAIL_Y = GROUND_CLEAR_Y + 0.01;
+
+// ── MEDIKITS ────────────────────────────────────────────────────────────────────
+//
+// 🚨 **THE ARC THIS DRAWS IS THE ONLY PLACE THE POP EXISTS.** `state.ts:Medikit` carries
+// the LANDING point and nothing else — the sim decides where a kit ends up at the instant
+// of death and never moves it again — so `fromX`/`fromY` and `armsAt` are here purely so
+// this layer can draw the hop. Nothing below can change who gets the kit, and a build that
+// drew a straight line, or drew nothing, would play identically. That is the same contract
+// `splat-created` and `concealment-broken` already have: the sim states what happened, this
+// layer decides what it looks like.
+//
+// ⚠️ **THE FOOTPRINT IS THE PICKUP RADIUS, NOT A SIZE SOMEBODY LIKED.** The body is
+// `wu(MEDIKIT.pickupRadius)` across, so the silhouette a player sees on the floor is exactly
+// the radius the sim collects on. A kit drawn smaller than it collects reads as a miss when
+// you take it from the side; drawn larger, it reads as a bug when you walk through the edge
+// of it and nothing happens. Both are the class this project calls "the picture and the
+// model disagree" (`DECISIONS §13`).
+// 🚨 **NOT `GROUND_CLEAR_Y`, AND THE FIRST VERSION OF THIS WAS, WHICH FLOATED THE BOX BY
+// 0.30 m.** `GROUND_CLEAR_Y` is the DECAL plane — the height flat, depth-write-off quads
+// (splats, trail marks) sit at so they cannot z-fight the floor. A medikit is not a decal;
+// it is a solid box with a bottom face, and resting that bottom on the decal plane leaves
+// it hovering 0.30 m over the ground, which is **14% of `CHARACTER_HEIGHT`**. At the match
+// camera's 58° the contact shadow hides it; at the lobby camera's 20° it would read as a
+// box floating in mid-air. That is `CLAUDE.md` #3's rule exactly — *"a change that only
+// looks right at 58° is a cheat"* — and it was found by arithmetic (the browser reported a
+// world y of 0.703 and 0.703 = 0.30 + H/2) rather than by looking, which is why the number
+// is quoted here instead of an impression.
+//
+// The rest height is DERIVED so the bob's TROUGH is the floor: `H/2 + MEDIKIT_BOB` puts the
+// underside at exactly y = 0 at the bottom of every bob and never below it. So the kit
+// touches down once a cycle instead of either hovering or sinking, at every pitch.
+const MEDIKIT_Y = 0;
+/** Body width/depth in metres — the sim's own pickup radius. */
+const MEDIKIT_W = wu(MEDIKIT.pickupRadius);
+/** Body height. Well under `CHARACTER_HEIGHT` (2.1 m): a pickup must not read as a fighter. */
+const MEDIKIT_H = MEDIKIT_W * 0.62;
+/** Apex of the cosmetic hop, in metres above the resting height. */
+const MEDIKIT_POP_APEX = MEDIKIT_H * 2.2;
+/** Idle bob amplitude/rate — the genre's "this is a pickup" tell. */
+const MEDIKIT_BOB = MEDIKIT_H * 0.16;
+const MEDIKIT_BOB_RATE = 0.0042;
+const MEDIKIT_SPIN_RATE = 0.0013;
+/**
+ * How long before a kit expires it starts flashing, in ms.
+ *
+ * DERIVED, not picked: `MEDIKIT.popMs` (350) is the one timescale this feature already
+ * owns, and three of them is long enough to notice at 60 fps without turning the last
+ * second of every kit into a strobe. It is a SCALE pulse and never an opacity ramp,
+ * deliberately — the material is shared by every live kit, so animating opacity would
+ * animate all of them at once, which is the shape of `Material.clone()` dropping
+ * `onBeforeCompile` across 54 sites (`CLAUDE.md` #5) approached from the other side.
+ */
+const MEDIKIT_WARN_MS = MEDIKIT.popMs * 3;
 
 // ── Ability VFX layer heights/sizes (metres) ────────────────────────────────────
 /** Chest-ish height for impact flashes/shards, so hits read as landing ON the
@@ -3372,6 +3427,8 @@ export class VfxLayer {
   private readonly shellPool = new Map<number, THREE.Object3D>();
   private readonly splatPool = new Map<number, THREE.Object3D>();
   private readonly trailPool = new Map<number, THREE.Object3D>();
+  /** One group per live medikit, keyed by the sim's kit id. See `MEDIKIT_Y`. */
+  private readonly medikitPool = new Map<number, THREE.Object3D>();
   private readonly materialCache = new Map<string, THREE.Material>();
 
   // ── Bespoke per-weapon VFX support (`vfx/weapons/`) ────────────────────────
@@ -3467,6 +3524,24 @@ export class VfxLayer {
   // the sim's own damage radius (see `GLAZE_FILL`).
   private readonly splatGeo = new THREE.PlaneGeometry(2 * wu(SPLAT_RADIUS) / GLAZE_FILL, 2 * wu(SPLAT_RADIUS) / GLAZE_FILL);
   private readonly trailGeo = new THREE.PlaneGeometry(2 * wu(TRAIL.radius) / GLAZE_FILL, 2 * wu(TRAIL.radius) / GLAZE_FILL);
+  // ── MEDIKIT — one geometry set and one material pair, shared by every live kit ──
+  //
+  // Module-shared rather than per-kit because `syncPool` builds an object on the way IN and
+  // `shadeVfxObject` bakes its vertex ramp into the GEOMETRY once; a geometry per kit would
+  // re-bake on every death, which is the allocation shape `tools/perf.mjs --mode alloc`
+  // exists to catch and which never shows up in a profile.
+  private readonly medikitBodyGeo = new THREE.BoxGeometry(MEDIKIT_W, MEDIKIT_H, MEDIKIT_W);
+  private readonly medikitArmXGeo = new THREE.BoxGeometry(MEDIKIT_W * 0.66, MEDIKIT_H * 0.16, MEDIKIT_W * 0.24);
+  private readonly medikitArmZGeo = new THREE.BoxGeometry(MEDIKIT_W * 0.24, MEDIKIT_H * 0.16, MEDIKIT_W * 0.66);
+  // 🚨 **HIGH-KEY WHITE AND A SATURATED RED, AND THE PAIR IS THE POINT.**
+  // `docs/HANDOVER.md`'s one measured lead is that **one hue owns 88% of the cast frame** —
+  // 94.34% of chromatic pixels inside a single 35° band. A pickup that has to be spotted
+  // instantly across a 2800x2000 arena is the one object in the game that must NOT sit in
+  // that band, and the medical cross is the rare case where the readable colour and the
+  // literal colour are the same. ⚠️ `toonMat`, i.e. `MeshStandardMaterial` — this project
+  // measured and REJECTED cel shading, and nothing here is fixed by desaturating.
+  private readonly medikitBodyMat = toonMat({ color: '#FBFDFF', roughness: 0.42 });
+  private readonly medikitCrossMat = toonMat({ color: '#FF2F45', roughness: 0.38, emissive: '#7A0A16', emissiveIntensity: 0.55 });
   /**
    * One texture per lobe silhouette PER MARK COLOUR.
    *
@@ -4233,6 +4308,71 @@ export class VfxLayer {
       (obj, s) => {
         const pos = groundPos(s.x, s.y);
         obj.position.set(pos.x, SPLAT_Y, pos.z);
+      },
+    );
+
+    // ── MEDIKITS ────────────────────────────────────────────────────────────
+    //
+    // Keyed on the sim's kit id like every other sim-owned pool, so a kit that is taken or
+    // expires simply stops being in `state.medikits` and `syncPool` removes it. There is no
+    // "collected" animation for exactly that reason: the sim publishes `medikit-taken` with
+    // the position and the amount, and a pickup BEAT belongs on the event stream beside the
+    // other one-shots, not inside a pool whose whole job is to mirror what currently exists.
+    syncPool<Medikit>(
+      this.medikitPool,
+      this.group,
+      state.medikits,
+      () => {
+        const g = new THREE.Group();
+        g.name = 'vfx_medikit';
+        const body = new THREE.Mesh(this.medikitBodyGeo, this.medikitBodyMat);
+        body.name = 'vfx_medikit_body';
+        g.add(body);
+        // The cross sits on the TOP face, which is the face the MATCH camera actually sees:
+        // `render/camera.ts` defaults the match to `pitchDeg ?? 58`, so a marking on the
+        // sides would be foreshortened to nothing at the pitch a player is looking from.
+        // ⚠️ It is checked at the LOBBY pitch too (`ui/screens/charStage.ts`, `pitchDeg: 20`)
+        // — `CLAUDE.md` #3: a thing that only reads at one pitch is a cheat.
+        for (const geo of [this.medikitArmXGeo, this.medikitArmZGeo]) {
+          const arm = new THREE.Mesh(geo, this.medikitCrossMat);
+          arm.name = 'vfx_medikit_cross';
+          arm.position.y = MEDIKIT_H * 0.5;
+          g.add(arm);
+        }
+        return g;
+      },
+      (obj, k) => {
+        const to = groundPos(k.x, k.y);
+        // See `MEDIKIT_Y`: the bob's trough is the floor, so the box touches down once a
+        // cycle and its underside is never below y = 0.
+        const rest = MEDIKIT_Y + MEDIKIT_H * 0.5 + MEDIKIT_BOB;
+        // `armsAt - popMs` is the drop tick. Derived from the kit rather than remembered
+        // from the event, so a kit that existed before this layer was built (a rejoin, a
+        // `clear()` and re-sync, the QA arena hook) draws in the right place on frame one
+        // instead of starting its hop over.
+        const airLeft = k.armsAt - state.elapsed;
+        if (airLeft > 0) {
+          const from = groundPos(k.fromX, k.fromY);
+          const t = 1 - airLeft / MEDIKIT.popMs;      // 0 at the death, 1 as it lands
+          obj.position.set(
+            from.x + (to.x - from.x) * t,
+            rest + 4 * MEDIKIT_POP_APEX * t * (1 - t), // a parabola through both endpoints
+            from.z + (to.z - from.z) * t,
+          );
+          // Tumbles while it is in the air and is level the instant it lands, so the pop
+          // reads as a thrown object rather than a sliding one.
+          obj.rotation.set(Math.PI * 2 * t, Math.PI * 3 * t, 0);
+        } else {
+          const age = state.elapsed - k.armsAt;
+          obj.position.set(to.x, rest + Math.sin(age * MEDIKIT_BOB_RATE) * MEDIKIT_BOB, to.z);
+          obj.rotation.set(0, age * MEDIKIT_SPIN_RATE, 0);
+        }
+        // ABOUT TO GO. A scale flutter rather than an opacity ramp — the material is shared
+        // by every live kit, so fading one would fade all of them. See `MEDIKIT_WARN_MS`.
+        const left = k.expiresAt - state.elapsed;
+        obj.scale.setScalar(left < MEDIKIT_WARN_MS && left > 0
+          ? 1 + Math.sin(left * 0.03) * 0.14
+          : 1);
       },
     );
 
@@ -6286,7 +6426,7 @@ export class VfxLayer {
     // `shellPool` is listed here and not left to `syncPool` for the same reason the
     // other three are: `clear()` runs on a match restart, when `state.projectiles`
     // becomes empty without any pool ever being asked to sync against it again.
-    for (const pool of [this.projectilePool, this.shellPool, this.splatPool, this.trailPool]) {
+    for (const pool of [this.projectilePool, this.shellPool, this.splatPool, this.trailPool, this.medikitPool]) {
       for (const obj of pool.values()) this.group.remove(obj);
       pool.clear();
     }
@@ -6343,6 +6483,11 @@ export class VfxLayer {
     this.projectileGeo.dispose();
     this.splatGeo.dispose();
     this.trailGeo.dispose();
+    this.medikitBodyGeo.dispose();
+    this.medikitArmXGeo.dispose();
+    this.medikitArmZGeo.dispose();
+    this.medikitBodyMat.dispose();
+    this.medikitCrossMat.dispose();
     this.splatMats.forEach((m) => m.dispose());
     // `trailMats` is SPARSE by construction (built on first use, per slot), so a
     // `for..of` over it would visit holes. `Object.values` skips them, which is exactly
