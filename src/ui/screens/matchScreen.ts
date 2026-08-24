@@ -40,6 +40,37 @@
  * The post-match Menu button stays in the corner: it only exists after the match is
  * decided, when there is no stick to collide with.
  *
+ * ── 🚨 ...AND ALL OF THAT WAS TRUE WHILE THE CHIP WAS EFFECTIVELY INVISIBLE ──
+ * Uri asked for "a quit button in gameplay or the pause screen". Everything above had
+ * already shipped, and the bundle deployed to GitHub Pages — the build he plays —
+ * contains both the string "Quit to Home" and the class `match-chip`. So the request
+ * was not for a missing control. It was `CLAUDE.md` rule 4 again: **it was rendering
+ * and it was INVISIBLE.**
+ *
+ * Measured on a served snapshot at 390x844, six seats, mid-match: the chip's fill
+ * against the ring of pixels immediately outside it came to **1.026:1**. One is
+ * "identical". The plate was copied from `.hud-clock`, which gets away with it because
+ * the clock is mostly large cream numerals; a 44px square whose entire ink is two 4px
+ * bars does not. In portrait it sits in the letterbox band, which is very nearly its
+ * own colour, so what the player saw was two floating tick marks and no button at all.
+ *
+ * The whole header above argues about the chip's POSITION, at length, with two
+ * instruments behind it — and `chip_probe.mjs` and `thumbzone.mjs` both measure the
+ * chip's RECT. **A rect is not a picture.** Neither tool could have failed on this, and
+ * nothing anywhere asserted that pressing the control ends the match, tears the session
+ * down or leaves the economy alone. `tools/tmp/qx_quit.mjs` is that assertion, at six
+ * seats, portrait and landscape, with six known-bad arms.
+ *
+ * The fix is in the CSS block below (a two-tone edge, not a lighter fill — the reason
+ * is measured there) and the boundary now reads **7.19:1 portrait / 3.73:1 landscape**
+ * against a 3.0 floor, which is WCAG 2.1 SC 1.4.11 rather than a number invented here.
+ *
+ * ── ...and leaving now asks first ───────────────────────────────────────────
+ * Both quiet buttons in the pause sheet abandon a live match, which banks NOTHING (the
+ * profile write is gated on `phase === 'ended'`), and the top one sits one 10px gap
+ * under Resume. See `showConfirm` for why the guard is temporal rather than geometric —
+ * the geometric version was tried and measurement killed it.
+ *
  * ── z-order ─────────────────────────────────────────────────────────────────
  * The HUD's game-over card draws a full-viewport scrim at z-index 20 with
  * `pointer-events: auto`. The screen layer sits at 40, so this screen's buttons stay
@@ -79,7 +110,7 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
          absolutely positioned — so nesting it there made 'top: 96px' resolve against
          the corner and put the chip 140px BELOW the bottom of the frame. Measured,
          not reasoned about: tools/tmp/thumbzone.mjs. -->
-    <button class="match-chip" type="button" data-el="pause" aria-label="Pause">${icon('pause')}</button>
+    <button class="match-chip" type="button" data-el="pause" aria-label="Pause">${icon('pause', { size: '22px' })}</button>
 
     <div class="match-corner">
       <button class="fa-btn fa-btn--quiet match-exit" type="button" data-el="exit">${icon('back')} Menu</button>
@@ -87,10 +118,18 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
 
     <div class="match-sheet" data-el="sheet">
       <div class="match-sheet-card">
-        <p class="match-sheet-title">Paused</p>
-        <button class="fa-btn fa-btn--primary" type="button" data-el="resume">${icon('play')} Resume</button>
-        <button class="fa-btn fa-btn--quiet" type="button" data-el="change">${icon('swap')} Change Fighter</button>
-        <button class="fa-btn fa-btn--quiet" type="button" data-el="quit">${icon('home')} Quit to Home</button>
+        <div class="match-sheet-pane" data-el="pane-pause">
+          <p class="match-sheet-title">Paused</p>
+          <button class="fa-btn fa-btn--primary" type="button" data-el="resume">${icon('play')} Resume</button>
+          <button class="fa-btn fa-btn--quiet" type="button" data-el="change">${icon('swap')} Change Fighter</button>
+          <button class="fa-btn fa-btn--quiet" type="button" data-el="quit">${icon('home')} Quit to Home</button>
+        </div>
+        <div class="match-sheet-pane match-sheet-pane--confirm" data-el="pane-confirm" hidden>
+          <p class="match-sheet-title">Leave the match?</p>
+          <p class="match-sheet-body" data-el="confirmbody"></p>
+          <button class="fa-btn fa-btn--primary" type="button" data-el="keep">${icon('play')} Keep Playing</button>
+          <button class="fa-btn fa-btn--quiet match-leave" type="button" data-el="leave">${icon('close')} Leave</button>
+        </div>
       </div>
     </div>
   `;
@@ -220,22 +259,115 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     },
   });
 
+  const panePause = q<HTMLDivElement>('pane-pause');
+  const paneConfirm = q<HTMLDivElement>('pane-confirm');
+  const leaveBtn = q<HTMLButtonElement>('leave');
+
+  /**
+   * The chip's glyph is re-rendered on every toggle, so the SIZE has to be re-applied
+   * with it or the icon silently shrinks back to its `1em` default the first time the
+   * player pauses — a value set once in the template and lost on the first interaction
+   * is invisible to every screenshot taken before that interaction.
+   *
+   * The label flips too. It read "Pause" in both states, so a screen reader announced
+   * the resume control as Pause for the whole time the sheet was open.
+   */
+  const CHIP_ICON_PX = '22px';
+  function setChip(paused: boolean): void {
+    pauseBtn.innerHTML = icon(paused ? 'play' : 'pause', { size: CHIP_ICON_PX });
+    pauseBtn.setAttribute('aria-label', paused ? 'Resume' : 'Pause');
+  }
+
+  // ── 🚨 THE ONE DESTRUCTIVE ACT IN THE PRODUCT GETS A CONFIRM ────────────────
+  //
+  // Leaving a live match is not undoable and it is not free: the profile write is
+  // guarded by `banked`, which is only ever set from `onPhase(phase === 'ended')`, so
+  // a match abandoned mid-play banks **nothing** — no trophies, no coins, no XP, no
+  // chest progress. That is correct (you did not finish), and it is exactly why a
+  // mis-tap here costs the player the whole match.
+  //
+  // ⚠️ AND THE LIKELIEST MIS-TAP IS NOT THE ONE THE OLD LAYOUT DEFENDED AGAINST.
+  // The header below argues at length about the *chip* being out of the thumb zone —
+  // true, and it is why the chip needs no confirm: pausing is free and reversible.
+  // But inside the sheet, BOTH quiet buttons abandon the match and the top one sits
+  // one 10px gap under Resume, the button a player actually aims at. "Change Fighter"
+  // is therefore the most probable accidental exit in the whole product, and it was
+  // the one nobody had guarded. Both route through here.
+  //
+  // The safe option is the loud primary and it is FIRST; the destructive one repeats
+  // the exact label of the button that opened it, because the clearest possible
+  // statement of what is about to happen is the words the player just pressed.
+  // ⚠️ THE REMAINING ACCIDENT IS A DOUBLE-TAP PUNCHING THROUGH THE CONFIRM AT THE SAME
+  // COORDINATE, AND NO WORDING DEFENDS AGAINST IT. The first attempt was geometric —
+  // place the destructive button clear of the rect that opened it — and MEASUREMENT
+  // killed it: `tools/tmp/qx_quit.mjs` found Leave overlapping Quit by **6,623 px² at
+  // 390x844 and 4,656 px² at 844x390**, because both panes are centred in the same card
+  // and their button rows land on each other by arithmetic. Making them miss would mean
+  // pinning row heights that are `clamp()`s of the viewport, i.e. a fix that holds at
+  // the four sizes tested and rots at the fifth.
+  //
+  // So the guarantee is TEMPORAL and layout-independent: the destructive button is
+  // inert for `LEAVE_ARM_MS` after the confirm appears. `.fa-btn[disabled]` already
+  // dims in `theme.ts`, so it also reads as arriving rather than as broken, and a
+  // disabled button refuses the keyboard as well as the finger. `qx_quit.mjs` §D
+  // asserts both halves — a click inside the window does NOT leave, a click after it
+  // does — and `--arm passthru` arms the button immediately and requires the row to go
+  // red. 350 ms is under the ~500 ms floor for a deliberate second tap and well over
+  // the ~120 ms one for an accidental one.
+  const LEAVE_ARM_MS = 350;
+  let armTimer = 0;
+  let pendingExit: Route | null = null;
+
+  function showConfirm(to: Route, label: string, glyph: string): void {
+    pendingExit = to;
+    leaveBtn.innerHTML = `${icon(glyph)} ${label}`;
+    q<HTMLParagraphElement>('confirmbody').textContent =
+      'This match ends now — no trophies, coins or XP from it.';
+    panePause.hidden = true;
+    paneConfirm.hidden = false;
+    leaveBtn.disabled = true;
+    window.clearTimeout(armTimer);
+    armTimer = window.setTimeout(() => { leaveBtn.disabled = false; }, LEAVE_ARM_MS);
+  }
+
+  function closeConfirm(): void {
+    pendingExit = null;
+    // Disarm on the way out as well as on the way in: a confirm cancelled inside the
+    // window would otherwise leave a timer running that arms a button nobody is
+    // looking at, and re-opening it would find it already live.
+    window.clearTimeout(armTimer);
+    leaveBtn.disabled = true;
+    paneConfirm.hidden = true;
+    panePause.hidden = false;
+  }
+
   function setPaused(on: boolean): void {
+    // Closing the sheet always drops any half-made decision: re-opening it must never
+    // hand the player a confirm they no longer remember asking for.
+    if (!on) closeConfirm();
     if (on) session.pause(); else session.resume();
     sheet.classList.toggle('is-open', on);
-    pauseBtn.innerHTML = on ? icon('play') : icon('pause');
+    setChip(on);
   }
 
   pauseBtn.addEventListener('click', () => setPaused(!session.paused));
   q<HTMLButtonElement>('resume').addEventListener('click', () => setPaused(false));
-  q<HTMLButtonElement>('change').addEventListener('click', () => ctx.navigate({ name: 'characters' }));
-  q<HTMLButtonElement>('quit').addEventListener('click', () => ctx.navigate({ name: 'home' }));
+  q<HTMLButtonElement>('change').addEventListener('click',
+    () => showConfirm({ name: 'characters' }, 'Change Fighter', 'swap'));
+  q<HTMLButtonElement>('quit').addEventListener('click',
+    () => showConfirm({ name: 'home' }, 'Quit to Home', 'home'));
+  q<HTMLButtonElement>('keep').addEventListener('click', () => setPaused(false));
+  leaveBtn.addEventListener('click', () => { if (pendingExit) ctx.navigate(pendingExit); });
   exitBtn.addEventListener('click', () => ctx.navigate({ name: 'home' }));
 
   // Escape toggles pause — desktop players reach for it before they look for a chip.
+  // ⚠️ It backs out of the confirm FIRST. Escape is the universal "undo that", and a
+  // binding that jumped straight from an open confirm back into the match would leave
+  // the player unable to cancel with the key they cancel everything else with.
   const onKey = (ev: KeyboardEvent): void => {
     if (ev.key !== PAUSE_KEY) return;
     ev.preventDefault();
+    if (pendingExit !== null) { closeConfirm(); return; }
     setPaused(!session.paused);
   };
   window.addEventListener('keydown', onKey);
@@ -253,6 +385,10 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     resize() { session.resize(); },
     dispose() {
       window.removeEventListener('keydown', onKey);
+      // The arming timer outlives the screen otherwise. It only touches a detached
+      // node, so nothing visible breaks — which is exactly why it would never be
+      // noticed, and `shell.ts` tears screens down on every navigation.
+      window.clearTimeout(armTimer);
       session.dispose();
       root.remove();
     },
@@ -311,14 +447,40 @@ const CSS = `
   line-height: 1;
   color: var(--cream);
   --fa-ic-ink: #FFF3DE;
-  background: rgba(26,18,36,0.78);
+  background: rgba(26,18,36,0.88);
   border: 3px solid #1a1224;
   border-radius: 14px;
-  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  /* ── 🚨 THE PLATE WAS INVISIBLE, AND THAT IS THE WHOLE REASON THIS GAME READ AS
+     HAVING NO WAY OUT ──────────────────────────────────────────────────────────
+     Measured on a served snapshot at 390x844, six seats, mid-match: the chip's fill
+     against the ring of pixels immediately outside it came to **1.026:1**. One is
+     "identical". The chip copied '.hud-clock''s plate — rgba(26,18,36,0.78) on a
+     #1a1224 border — which works for the clock because the clock is mostly big cream
+     numerals, and does not work for a 44px square whose entire ink is two 4px bars.
+     In portrait that square sits in the letterbox band, which is very nearly the same
+     colour as the plate, so the player saw two floating tick marks and no button.
+     'src/ui/icons/index.ts''s header already records that this project has shipped the
+     dark-on-dark bug three separate times; this is the fourth, and it is the one that
+     hid the only exit.
+
+     The fix is a TWO-TONE edge, not a lighter fill, and the reason is that the chip is
+     over the arena in landscape and over the letterbox in portrait. A lighter fill
+     that clears 3:1 against the letterbox measures 1.37:1 against the arena's pink
+     floor — it fixes one orientation and fails the other. Cream outside / ink inside
+     always has a >=3:1 step somewhere across the boundary whatever is behind it: cream
+     against the letterbox is 17.0:1, cream against the brightest floor pink is 3.45:1,
+     and where the backdrop is itself cream the inner ink border carries it at 17:1.
+     The floor is WCAG 2.1 SC 1.4.11 (non-text contrast, 3:1) — a published external
+     number, not one invented here. 'tools/tmp/qx_quit.mjs' §C measures it. */
+  box-shadow: 0 0 0 2px rgba(255,243,222,0.92), 0 5px 0 rgba(0,0,0,0.35);
   transition: transform 0.08s, box-shadow 0.08s, background 0.12s;
 }
 .fa-match .match-chip:hover { background: rgba(58,40,80,0.9); }
-.fa-match .match-chip:active { transform: translateY(3px); box-shadow: 0 0 0 rgba(0,0,0,0.35); }
+.fa-match .match-chip:active {
+  transform: translateY(3px);
+  /* The ring survives the press — it is the control's boundary, not its decoration. */
+  box-shadow: 0 0 0 2px rgba(255,243,222,0.92), 0 0 0 rgba(0,0,0,0.35);
+}
 
 /* Only after the match is decided. Before that, leaving is a pause-menu decision,
    not a one-tap accident during a fight. */
@@ -360,6 +522,46 @@ const CSS = `
   from { opacity: 0; transform: scale(0.94) translateY(10px); }
   to { opacity: 1; transform: none; }
 }
+
+/* ⚠️ '[hidden]' IS A UA 'display: none' AND A CLASS RULE OUTRANKS IT. Declaring
+   'display: flex' on '.match-sheet-pane' without the line below leaves the hidden pane
+   fully laid out and clickable — both panes stacked, and the Leave button live before
+   anyone has asked for a confirm. Same shape as every other "it isn't there / it IS
+   there and invisible" defect in this repo, inverted. */
+.fa-match .match-sheet-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fa-match .match-sheet-pane[hidden] { display: none; }
+
+.fa-match .match-sheet-body {
+  margin: 0 0 2px;
+  max-width: min(340px, 70vw);
+  text-align: center;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 500;
+  font-size: clamp(0.72rem, 1.7vh, 0.92rem);
+  line-height: 1.35;
+  color: rgba(255,243,222,0.82);
+}
+
+/* The destructive half of the confirm, and the ONLY control in the product that ends
+   something the player cannot get back. Tinted rather than restyled: it keeps the
+   'fa-btn--quiet' material so it still reads as the same family of button, and the
+   ketchup wash plus a smaller footprint say "this is the other one" without inventing
+   a variant in 'theme.ts', which this file does not own. */
+.fa-match .match-leave {
+  align-self: center;
+  min-width: 62%;
+  background: linear-gradient(180deg, #FFE2DA 0%, #F4B7A6 100%);
+  box-shadow: 0 4px 0 rgba(120,40,20,0.45);
+  /* The 350ms arming window (see LEAVE_ARM_MS) rides the theme's [disabled] opacity.
+     Fading it in makes the wait read as the button ARRIVING rather than as a dead
+     control, which is the difference between a safety and a bug report. */
+  transition: transform 0.08s, box-shadow 0.08s, filter 0.12s, opacity 0.25s ease-out;
+}
+.fa-match .match-leave:active { box-shadow: 0 0 0 rgba(120,40,20,0.45); }
 .fa-match .match-sheet-title {
   margin: 0 0 4px;
   text-align: center;
