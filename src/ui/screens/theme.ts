@@ -420,10 +420,30 @@ const CSS = `
   overflow: hidden;
   box-shadow: 0 3px 0 rgba(0,0,0,0.35), inset 0 2px 6px rgba(0,0,0,0.5);
 }
+/* ⚠️ 'display: flex' IS A FIX, NOT A TIDY-UP, AND IT MAKES AN EXISTING DECLARATION WORK.
+   'home.ts' has carried '.fa-home .fa-tab { justify-content: center }' since the tab bar
+   was written, and it has been INERT the whole time: a <button> lays its content out as
+   an inline flow, not as a flex container, so 'justify-content' applies to nothing and
+   the centring you see is the UA's 'text-align: center'. The difference shows up the
+   moment the content does not fit — an inline flow WRAPS, so at 390px the trophy glyph
+   took line 1 and the word "Trophies" took line 2, and the one tab that did it lost the
+   bar's baseline while its three neighbours kept it.
+
+   Flex + 'white-space: nowrap' makes the icon and the label one unbreakable run, so the
+   failure mode under pressure becomes "the label shrinks" (handled at the call site with
+   a vw-aware font-size) instead of "the label falls under its own icon". 'gap' also
+   replaces the literal space character between the glyph and the word in the markup,
+   which was the only thing setting that distance and was not tunable at all. */
 .fa-tab {
   appearance: none;
   border: none;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  min-width: 0;
   background: transparent;
   color: rgba(255,243,222,0.78);
   --fa-ic-ink: var(--cream);

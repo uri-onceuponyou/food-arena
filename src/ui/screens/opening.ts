@@ -202,8 +202,30 @@ const CSS = `
    allowed to be the loudest thing in the frame. The 2 degree tilt is the
    prototype's, and is the single detail that stops a centred sans-serif wordmark
    reading as a placeholder. */
+/* 🚨 THE 2-DEGREE TILT COSTS INK ABOVE THE BOX, AND ON A LANDSCAPE PHONE THE VIEWPORT
+   TAKES IT. Measured on a detached worktree of ce0c665 with 'tools/tmp/mn_occlude.mjs'
+   (CLIP is pure geometry, so the number is exact rather than within a floor):
+
+     844x390   "Food Fight Arena"   CLIPPED 4.6%
+     390x844   "Food Fight Arena"   clean
+    1600x900   "Food Fight Arena"   clean
+
+   Rotating a box about its centre lifts its top corners by (w/2)·sin(2°). This wordmark
+   is ~10.3 ems wide, so that is ~0.18em of ink above the layout box — 5.1px at the
+   28.1px the 7.2vh clamp resolves to at 390px tall. '.fa-screen''s top padding there is
+   'var(--gap)' at its 6px floor, and '-webkit-text-stroke: 4px' puts another 2px outside
+   the glyph. The tilt is deliberate and is documented above as "the single detail that
+   stops a centred sans-serif wordmark reading as a placeholder", so the fix is to pay
+   for the ink rather than to straighten the type.
+
+   'em' and not 'px' because the overhang is proportional to the wordmark's WIDTH, which
+   is proportional to its font-size — so one declaration is correct from the 1.5rem floor
+   to the 4rem ceiling. The +3px covers the stroke, which is authored in px and does not
+   scale. Costs 8.1px of the title row at landscape phone and 14.5px at desktop, both out
+   of the 'minmax(0, 1fr)' hero row, which is the row with the slack. */
 .fa-opening .open-title {
   margin: 0;
+  padding-top: calc(0.2em + 3px);
   font-family: 'Rubik', sans-serif;
   font-weight: 900;
   font-size: clamp(1.5rem, 7.2vh, 4rem);

@@ -645,6 +645,50 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     q<HTMLParagraphElement>('kitcap').style.setProperty('--home-cap-x', `${(frac * 100).toFixed(1)}%`);
   }
 
+  /**
+   * Publish the top bar's MEASURED bottom edge, and the bottom bar's measured top, so
+   * the two absolutely-positioned overlays on this screen can derive their clearance
+   * instead of assuming it.
+   *
+   * 🚨 THE CSS BELOW USED TO ASSUME "THE TOP BAR IS 56px TALL AT EVERY VIEWPORT" AND
+   * PUBLISHED THE SIX MEASUREMENTS THAT SAID SO. All six were landscape or desktop.
+   * In portrait the bar WRAPS — the same `@media (max-width: 700px)` block that sets
+   * `.fa-topbar { flex-wrap: wrap }` is three declarations above the override that
+   * discarded the derived floor — and at 390x844 it measures **152px**, not 56. So the
+   * hero's own name rendered 80.7% behind the tab bar, with the fix for exactly that
+   * defect written out at length in the comment directly above it.
+   *
+   * `hud.ts` already learned this and its comment names the same class: *"THE TOUCH
+   * RADAR'S `top` WAS A CONSTANT DERIVED FROM AN ASSUMED BAR HEIGHT, AND THE CHIP RAIL
+   * BROKE THAT ASSUMPTION."* Its answer is `--fa-topbar-b`, the bar's real bottom
+   * published to CSS. This is the same answer for the lobby, and it is a strictly
+   * better instrument than any constant: a longer player name, a font swap, a locale, a
+   * fifth tab or a third row all move the bar, and none of them can be named in a
+   * media query.
+   *
+   * ⚠️ WRITES NOTHING WHEN THE BOX IS STILL ZERO, exactly as `positionKitCaret` does —
+   * `render()` runs before `shell.ts:mount` appends this root, so every rect is 0x0 on
+   * the first pass and a call that is too early must not overwrite a good value with a
+   * guess. The CSS carries the old constant as its fallback, so a build where this
+   * never runs is no worse than the one before it.
+   */
+  function publishBars(): void {
+    const rootRect = root.getBoundingClientRect();
+    if (rootRect.height <= 0) return;
+    const bar = root.querySelector<HTMLElement>('.fa-topbar');
+    if (bar) {
+      const r = bar.getBoundingClientRect();
+      if (r.height > 0) root.style.setProperty('--home-topbar-b', `${Math.round(r.bottom - rootRect.top)}px`);
+    }
+    const foot = root.querySelector<HTMLElement>('.home-bottom');
+    if (foot) {
+      const r = foot.getBoundingClientRect();
+      // Distance from the STAGE's bottom edge up to the footer's top. `.home-stage` is
+      // inset 0 on the screen root, so the screen root's bottom is the stage's bottom.
+      if (r.height > 0) root.style.setProperty('--home-bottom-h', `${Math.round(rootRect.bottom - r.top)}px`);
+    }
+  }
+
   function render(): void {
     const def = CHARACTERS[ctx.profile.selected];
     q('name').textContent = ctx.profile.name;
@@ -726,14 +770,27 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   stage.attachTo(stageHost);
   // The first frame after `shell.ts:mount` has appended this root — the earliest moment
   // the kit has a box. See `positionKitCaret`.
-  const caretFrame = requestAnimationFrame(() => positionKitCaret());
+  const caretFrame = requestAnimationFrame(() => { positionKitCaret(); publishBars(); });
+
+  // A ResizeObserver and not just `resize()`, because the bar's height changes for
+  // reasons a window resize never sees: the Rubik/Heebo swap re-measures every chip,
+  // the player renaming themselves in settings widens the first chip by up to 12
+  // characters, and either can tip the row into wrapping. `resize()` is kept as well —
+  // the observer does not fire when only the VIEWPORT changed and the bar's own box did
+  // not, which is exactly the case that moves `--home-bottom-h`.
+  const barObserver = new ResizeObserver(() => publishBars());
+  const topbarEl = root.querySelector<HTMLElement>('.fa-topbar');
+  const footEl = root.querySelector<HTMLElement>('.home-bottom');
+  if (topbarEl) barObserver.observe(topbarEl);
+  if (footEl) barObserver.observe(footEl);
 
   return {
     root,
     update(dt) { stage.update(dt); },
-    resize() { stage.resize(); positionKitCaret(); },
+    resize() { stage.resize(); positionKitCaret(); publishBars(); },
     dispose() {
       unsubscribe();
+      barObserver.disconnect();
       cancelAnimationFrame(caretFrame);
       root.removeEventListener('click', onClick);
       // Hand the shared stage back in the state every OTHER consumer expects. The room
@@ -1486,10 +1543,42 @@ const CSS = `
    ('.fa-topbar-spacer') is LEFT of the tabs, and the nameplate is centred on the hero,
    which is centred on the screen. Decentring the name to dodge the tabs would decentre
    it from the thing it names. */
+/* 🚨 AND "THE TOP BAR IS 56px TALL AT EVERY ONE OF THEM" IS FALSE IN PORTRAIT, WHICH IS
+   WHERE URI HOLDS THE PHONE. Kept above per the reversed-assertion rule; this is the
+   correction and the reason.
+
+   All six viewports in that table are landscape or desktop, and none is under 844px
+   wide — so not one of them fires the '@media (max-width: 700px)' block at the bottom
+   of this file, which sets '.fa-topbar { flex-wrap: wrap }'. Wrapped, the bar is not
+   56px. Measured on a detached worktree of ce0c665, 390x844:
+
+     .fa-topbar        11.0 -> 163.0   152px tall, THREE rows
+       row 1  chips                     11 ->  51
+       row 2  .fa-tabs                  57 -> 113
+       row 3  the settings gear ALONE  119 -> 163
+     .home-nameplate   top 92.8   (clamp(70px, 11vh, 120px) -> 92.84)
+     .home-hero-name   92.8 -> 120.3
+
+   The name therefore starts 20.2px INSIDE the tab bar. 'tools/tmp/mn_occlude.mjs',
+   16 arms over 4 detectors: OCCLUDED 80.7% of its ink, OVERLAP 71% of its box, occluder
+   named as '.fa-tabs'. occFrac's self-pair floor is 0.000 pp and overlapFrac is exact
+   geometry, so both numbers are far outside the noise. The hero's own NAME, on the
+   lobby, on a phone, in portrait.
+
+   ⚠️ THE FLOOR ABOVE WOULD HAVE HELD — the portrait override discarded it. It reads
+   'top: clamp(70px, 11vh, 120px)' with no 'max()', three declarations below the
+   'flex-wrap: wrap' that invalidated the constant it was derived from. A guess replaced
+   a derivation, in the same block that broke the derivation.
+
+   The offset now comes off the bar's MEASURED bottom ('publishBars', mirroring
+   'hud.ts''s '--fa-topbar-b', whose comment records this identical class on the touch
+   radar). A measurement survives wrapping, a font swap, a longer player name and a
+   fifth tab; no constant does. '--tap + 12px' stays as the FALLBACK so a build where
+   the script never runs is exactly as good as the one before it — not worse. */
 .fa-home .home-nameplate {
   position: absolute;
   top: max(
-    calc(var(--fa-safe-t) + var(--gap) + var(--tap) + 12px + 6px),
+    calc(var(--home-topbar-b, calc(var(--fa-safe-t) + var(--gap) + var(--tap) + 12px)) + 6px),
     clamp(46px, 7.5vh, 76px)
   );
   inset-inline-start: 0;
@@ -1569,9 +1658,33 @@ const CSS = `
 /* BOTTOM-LEFT, not bottom-right. The stage now runs the full screen height, so its
    bottom-right corner is exactly where the mode plate and START GAME are -- the hint
    would have been drawn across the primary CTA. */
+/* 🚨 AND BOTTOM-LEFT IS NOT FAR ENOUGH LEFT IN PORTRAIT — same reasoning, same blind
+   spot, one axis over. Kept above per the reversed-assertion rule.
+
+   The rule dodged the CTA on the assumption that it sits in the bottom-RIGHT corner.
+   It does at 844x390. At 390x844 '.home-bottom' wraps ('flex-wrap: wrap' in the
+   max-width:700px block), the mode plate takes its own full-width row above, and START
+   GAME — 269.8px of a 370px content column — spans x 114.8 -> 384.5. The hint spans
+   x 24 -> 140.7 at the same y. Measured on ce0c665, 390x844:
+
+     .home-stage-hint   x  24.0 -> 140.7   y 805.5 -> 830.5
+     [data-el=start]    x 114.8 -> 384.5   y 753.7 -> 834.4
+
+   'mn_occlude': OCCLUDED 10.8% of the hint's ink, OVERLAP 10% of its box, occluder
+   named '.fa-btn fa-btn--primary'. Small, and real — it eats the final T of "TAP TO
+   TAUNT", which is worse than it sounds because a clipped word reads as a bug rather
+   than as a quiet label.
+
+   There is no horizontal escape: the CTA is 73% of the content width. So the hint goes
+   ABOVE the footer instead of beside it, off '--home-bottom-h' (the footer's measured
+   height, 'publishBars') rather than off a guess about which corner the CTA is in. It
+   is still the stage's bottom-left, just above the band the footer owns — and it still
+   sits under the character rather than over him, which is what "bottom-left" was
+   protecting. The fallback keeps today's value, so a build without the script is
+   unchanged. */
 .fa-home .home-stage-hint {
   position: absolute;
-  bottom: clamp(8px, 1.6vh, 16px);
+  bottom: calc(var(--home-bottom-h, 0px) + clamp(8px, 1.6vh, 16px));
   inset-inline-start: clamp(4px, 1vh, 12px);
   pointer-events: none;
   font-family: 'Rubik', sans-serif;
@@ -2216,13 +2329,57 @@ const CSS = `
   }
   .fa-home .home-mode-lines { align-items: flex-start; }
   .fa-home .home-bottom { flex-wrap: wrap; }
-  /* Two rows rather than one. The spacer goes because a flex spacer inside a wrapping
-     row pushes the wrap point around for no benefit; the chips take the first line and
-     the navigation takes the second. */
+  /* WAS, and kept per the reversed-assertion rule:
+
+       ".fa-home .fa-topbar-spacer { display: none; }"
+       ".fa-home .fa-tabs { flex: 1 1 auto; }"
+       "Two rows rather than one. The spacer goes because a flex spacer inside a
+        wrapping row pushes the wrap point around for no benefit; the chips take the
+        first line and the navigation takes the second."
+
+     🚨 IT IS THREE ROWS, NOT TWO, AND THE THIRD HOLDS ONE 44px GEAR. Measured on a
+     detached worktree of ce0c665 at 390x844 — '.fa-topbar' runs 11.0 -> 163.0, i.e.
+     152px, 18% of the viewport height, before any content:
+
+       row 1  chips                     11 ->  51
+       row 2  .fa-tabs                  57 -> 113
+       row 3  the settings gear ALONE  119 -> 163
+
+     The spacer being gone is exactly WHY: with 'flex: 1 1 auto' the nav takes whatever
+     is left of row 1, cannot fit, wraps to row 2 and then fills it — so the gear has
+     nowhere to go but a third line, where it lands on the hero card looking like a
+     stray control. The wrap point the old comment did not want the spacer to "push
+     around" is the thing that needed pushing: give the nav its OWN row explicitly
+     ('flex: 1 0 100%') and the wrap point stops being emergent, the spacer goes back to
+     doing its one job (hold the gear against the right edge), and the bar is two real
+     rows. 152px -> 102px, and the gear is where every other screen in this game puts
+     it.
+
+     This is also half of the fix for the hero name: 'publishBars' derives the
+     nameplate's clearance from the bar's MEASURED bottom, so a shorter bar moves the
+     name up with it rather than needing a second constant. */
   .fa-home .fa-topbar { flex-wrap: wrap; row-gap: 6px; }
-  .fa-home .fa-topbar-spacer { display: none; }
-  .fa-home .fa-tabs { flex: 1 1 auto; }
-  .fa-home .fa-tab { flex: 1 1 0; justify-content: center; padding: 0 6px; }
+  .fa-home .fa-topbar-spacer { display: block; flex: 1 1 auto; min-width: 0; }
+  .fa-home .fa-tabs { order: 1; flex: 1 0 100%; }
+  /* WAS 'flex: 1 1 0' — equal-width tabs, and that is what wrapped "Trophies".
+     'flex-basis: 0' throws away every tab's content width and hands all four the same
+     89.5px. Three of the labels are short enough not to care; "Trophies" needs 75px of
+     label beside a 16px glyph inside 89.5px minus padding, does not get it, and the
+     glyph takes line 1 while the word takes line 2 — so the bar loses its baseline and
+     one of four tabs reads as broken. 'mn_occlude' flags it as WRAP with the icon and
+     the label on different lines; the other three are correctly silent.
+     'flex-basis: auto' keeps each tab's own content width as its starting size and then
+     shares the slack, so the wide label gets the width it needs and the narrow ones give
+     it up. Measured need at 390px: 4 labels 221.6 + 4 glyphs 64 + gaps 16 + padding 40
+     = ~342 inside 358 of track. The 'min(..., 4.2vw)' is the graceful half: it is inert
+     at 390px and shrinks the type on a 360 or 320px phone rather than letting it clip. */
+  .fa-home .fa-tab {
+    flex: 1 1 auto;
+    justify-content: center;
+    padding: 0 5px;
+    gap: 4px;
+    font-size: min(clamp(0.74rem, 1.9vh, 1.02rem), 4.2vw);
+  }
   /* PORTRAIT KEEPS THE FULL-BLEED STAGE, but the landscape width cap is nonsense here:
      52vw of a 430px-wide phone is 224px inside a 932px-tall box, which frames the hero
      by WIDTH and shrinks it to a third of the screen. The flanks are hidden at this
@@ -2233,7 +2390,19 @@ const CSS = `
   .fa-home .home-stage { width: min(92vh, 92vw); }
   .fa-home .home-room-alcove { width: min(97vh, 98vw); }
   .fa-home .home-stage-slot { display: none; }
-  .fa-home .home-nameplate { top: clamp(70px, 11vh, 120px); }
+  /* WAS '.fa-home .home-nameplate { top: clamp(70px, 11vh, 120px); }', DELETED rather
+     than retuned, and kept here with the reason per the reversed-assertion rule.
+
+     It is a bare clamp with no 'max()' — it threw away the derived floor whose own
+     comment says it exists "so the nameplate moves with it instead of silently sliding
+     back under the tabs", written three declarations below the 'flex-wrap: wrap' that
+     invalidated the constant that floor was derived from. At 390x844 it resolves to
+     92.84px against a bar that ends at 163: the name rendered 80.7% behind the tabs.
+
+     Retuning the number would have fixed this viewport and no other. The base rule now
+     derives from '--home-topbar-b', the bar's measured bottom, which is correct at every
+     viewport and at every row count — including the 102px two-row bar this block now
+     produces, which a retuned constant would have been wrong about immediately. */
 }
 
 @media (prefers-reduced-motion: reduce) {
