@@ -380,6 +380,25 @@ if (args.selftest) {
       enemyImmune || enemySlowed, `ratio ${eRatio.toFixed(6)}`);
   }
 
+  /**
+   * 🚨 THE OPPONENT IN EVERY SPLAT ARM BELOW WAS HARD-CODED TO `'donut'`, AND ON
+   * 2026-08-24 DONUT STARTED SPLATTERING. Uri's kit shape (`rules.ts:WeaponSlot`) gave it
+   * a Super, `Glaze`, whose whole idea is a sticky floor patch — so the roster's splatter
+   * set went {hamburger.Tomato, pizza.Tomato} to three, and four arms that meant "an
+   * opponent with NO splatter weapon" silently meant "an opponent that splatters".
+   * They failed loudly (`splats=3 ownTerrain=94 oppTerrain=0`), which is the good case;
+   * the bad case is the one where a fixture keeps passing while measuring something else.
+   *
+   * DERIVED, so the next splatter weapon cannot restale it, and asserted NON-EMPTY first
+   * because `[...].filter(...)[0]` is `undefined` and `runMatch(undefined)` is a different
+   * failure entirely. TWO are needed: one arm runs a matchup with no splatter on EITHER
+   * side.
+   */
+  const NO_SPLAT = CHARACTER_IDS.filter((id) => !CHARACTERS[id].weapons.some((w) => w.splatter));
+  ok('the roster still contains at least two characters with NO splatter weapon (non-vacuity)',
+    NO_SPLAT.length >= 2, `${NO_SPLAT.length} of ${CHARACTER_IDS.length}: ${NO_SPLAT.join(' ')}`);
+  const [DRY_A, DRY_B] = NO_SPLAT;
+
   // ── C. A SPLAT IS TERRAIN, AND IT IS TERRAIN FOR WHOEVER LAID IT ───────────
   {
     arena = CLEAR; driver = driverFor(CLEAR);
@@ -387,12 +406,12 @@ if (args.selftest) {
     // splat Hamburger's own Tomato Toss leaves, which lands at the target and which the
     // chasing player then walks into. So a non-zero player terrain count here is not
     // noise — it is the splatter owner being slowed by its own ground effect.
-    const r = runMatch('hamburger', 'donut', 'chase', 0);
+    const r = runMatch('hamburger', DRY_A, 'chase', 0);
     ok('on a hazard-free arena the only terrain is a splat, and it is the splatterer\'s own',
       r.side.player.splats > 0 && r.side.player.terrainSlowTicks > 0 && r.side.enemy.terrainSlowTicks > 0,
       `splats=${r.side.player.splats} ownTerrain=${r.side.player.terrainSlowTicks} oppTerrain=${r.side.enemy.terrainSlowTicks}`);
     // …and with no splatter weapon anywhere, terrain is exactly zero on a clear arena.
-    const c = runMatch('hotdog', 'donut', 'chase', 0);
+    const c = runMatch('hotdog', DRY_A, 'chase', 0);
     ok('no splatter weapon and no hazards -> zero terrain ticks on both sides',
       c.side.player.terrainSlowTicks === 0 && c.side.enemy.terrainSlowTicks === 0);
   }
@@ -447,13 +466,13 @@ if (args.selftest) {
   // ── E. Splat accounting ────────────────────────────────────────────────────
   {
     arena = CLEAR; driver = driverFor(CLEAR);
-    const a = runMatch('hamburger', 'donut', 'chase', 0);   // only the player splatters
-    const b = runMatch('donut', 'hamburger', 'chase', 0);   // only the AI splatters
+    const a = runMatch('hamburger', DRY_A, 'chase', 0);   // only the player splatters
+    const b = runMatch(DRY_A, 'hamburger', 'chase', 0);   // only the AI splatters
     ok('splats are attributed to the side whose kit has `splatter`',
       a.side.player.splats > 0 && a.side.enemy.splats === 0
       && b.side.enemy.splats > 0 && b.side.player.splats === 0,
       `a p=${a.side.player.splats} b e=${b.side.enemy.splats}`);
-    const c = runMatch('donut', 'lollipop', 'chase', 0);    // neither splatters
+    const c = runMatch(DRY_A, DRY_B, 'chase', 0);          // neither splatters
     ok('a matchup with no `splatter` weapon creates no splats',
       c.side.player.splats === 0 && c.side.enemy.splats === 0);
   }

@@ -370,6 +370,12 @@ function selftest() {
   const failed = results.filter((r) => !r.ok);
   for (const r of results) console.log(`  ${r.ok ? 'ok  ' : 'FAIL'}  ${r.label}`);
   console.log(`\n  ${results.length - failed.length}/${results.length} known-bads caught`);
+  // `gatecount`'s shared summary regex is `/^\s*(\d+) passed, \d+ failed\s*$/m` and it must
+  // match EXACTLY ONCE. The line above is for a human and matches nothing; this one is the
+  // machine-readable count `docs/TOOLS.md`'s gate table is diffed against. Emitting both is
+  // deliberate — a tool whose only summary is prose cannot be registered, and an unregistered
+  // gate is one `gatecount` reports as UNREG rather than one it runs.
+  console.log(`\n${results.length - failed.length} passed, ${failed.length} failed`);
   return failed.length === 0;
 }
 

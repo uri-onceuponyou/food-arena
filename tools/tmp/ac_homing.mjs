@@ -174,8 +174,18 @@ if (import.meta.main && args.selftest) {
   // target, so at speed 0 this rig must return the same answer or the rig is the thing
   // that is wrong. Run across all three homing weapons AND a non-homing spread, so a
   // fixture that only works for one shape cannot pass.
+  // ⚠️ THE LAST CELL WAS `['waterbottle', 'Glass', 100]` AND IT WENT RED READING `0 vs 7`.
+  // Uri's 2026-08-24 kit shape converted `waterbottle.Glass` from `ranged`/116 wu to
+  // `melee`/70 wu (`rules.ts:WeaponSlot` — Water Bottle owned three ranged weapons and no
+  // melee, and the shape has two ranged slots). At 100 wu a 70 wu melee delivers nothing,
+  // so the cell measured a weapon that cannot reach rather than a rig that cannot fire.
+  // 🚨 SUBSTITUTED, NOT DELETED, AND ON THE SHAPE THIS CELL EXISTS FOR: the comment above
+  // asks for a NON-HOMING control beside the three homing ones, and `Glass` was the
+  // single-projectile half of that. `waterbottle.Cap` is the same character, the same
+  // shape (one projectile, no `homing`, no `pellets`) and still `ranged` at 128 wu, so the
+  // control keeps testing what it was written to test.
   for (const [id, key, sep] of [['sushi', 'Catch', 95], ['burrito', 'Swarm', 95],
-    ['egg', 'Hatch', 95], ['sushi', 'Rice', 40], ['waterbottle', 'Glass', 100]]) {
+    ['egg', 'Hatch', 95], ['sushi', 'Rice', 40], ['waterbottle', 'Cap', 100]]) {
     const r = fireOnce(id, key, sep, 0, 0);
     ok(`stationary target: ${id}/${key} at ${sep} wu delivers exactly pressValue`,
       Math.abs(r.dealt - r.expected) < 1e-9, `${r.dealt} vs ${r.expected}`);

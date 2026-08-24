@@ -9,7 +9,24 @@
  * health edit can trip:
  *
  *   §22(g)  >= 6 distinct card stat totals, largest tie <= 3   (currently EXACTLY 6)
- *   §22(h)  rho(kitDps, healthMultiplier) <= -0.6              (currently -0.788)
+ *   §22(h)  rho(kitDps, healthMultiplier) < 0                  (currently -0.221)
+ *
+ * 🚨 **THIS BOUND IS A SECOND IMPLEMENTATION OF `sim.test.mjs` §22(h), AND ON 2026-08-24
+ * I CHANGED THAT ONE AND NOT THIS ONE.** The gate went red immediately — it says so on its
+ * own POSITIVE row, *"the SHIPPED roster is admissible (if this fails, sim.test.mjs §22 is
+ * already red)"* — which is the good outcome, and it is exactly the *"a rule stated once
+ * and implemented twice"* shape `CLAUDE.md` names (`b2be2f7`/`f1e6c03`: the terrain slow
+ * and the trail boost, one line apart, fixed a pass apart). **If you change either bound,
+ * change both, and grep for a third.**
+ *
+ * WAS `rho <= -0.6`, *"currently -0.788"*. Uri's kit shape (11 characters x 4 weapons,
+ * `rules.ts:WeaponSlot`) moved it to **-0.221**. The full reasoning is at `sim.test.mjs`
+ * §22(h) and is not repeated here — the short form is that `kitDps` sums the WHOLE kit, so
+ * while kits ran 1..4 weapons the -0.788 was substantially health compensating **weapon
+ * count**, and every kit is four now. The bound is re-stated at the only place with a
+ * MEANING rather than a measurement — **strictly negative**, i.e. compensation present in
+ * SIGN — because -0.6 was a magnitude a confounded statistic happened to reach. The
+ * pay-to-win shape this row exists to catch gives rho > 0 and still fails.
  *   §22(h)  durability range hi/lo >= 1.6                      (currently 2.00)
  *   §22(a)  a bigger health BAR always means a bigger pool
  *
@@ -73,7 +90,7 @@ function evaluate(over) {
   const onScale = CHARACTER_IDS.every((id) => Number.isInteger(h[id]) && h[id] >= 1 && h[id] <= 10);
 
   return { h, rho, distinct, largestTie, range, orderOk, onScale, totals,
-    pass: rho <= -0.6 && distinct >= 6 && largestTie <= 3 && range >= 1.6 && orderOk && onScale };
+    pass: rho < 0 && distinct >= 6 && largestTie <= 3 && range >= 1.6 && orderOk && onScale };
 }
 
 function report(label, over) {
@@ -81,7 +98,7 @@ function report(label, over) {
   const flag = (ok) => (ok ? 'ok  ' : 'FAIL');
   console.log(`\n── ${label}`);
   console.log(`   health   ${CHARACTER_IDS.map((id) => `${id.slice(0, 4)}${e.h[id]}`).join(' ')}`);
-  console.log(`   §22(h) rho(kitDps, healthMult)  ${e.rho.toFixed(3)}  <= -0.6   ${flag(e.rho <= -0.6)}`);
+  console.log(`   §22(h) rho(kitDps, healthMult)  ${e.rho.toFixed(3)}  < 0      ${flag(e.rho < 0)}`);
   console.log(`   §22(h) durability range hi/lo   ${e.range.toFixed(2)}x  >= 1.6    ${flag(e.range >= 1.6)}`);
   console.log(`   §22(g) distinct stat totals     ${e.distinct}      >= 6     ${flag(e.distinct >= 6)}`);
   console.log(`   §22(g) largest tie              ${e.largestTie}      <= 3     ${flag(e.largestTie <= 3)}`);
@@ -113,7 +130,7 @@ if (args.selftest) {
   const ranked = [...CHARACTER_IDS].sort((a, b) => kitDps(a) - kitDps(b));
   const aligned = evaluate(Object.fromEntries(ranked.map((id, i) => [id, 3 + Math.round(i * 7 / 10)])));
   ok('health ALIGNED with kit output fails the rho bound (the pay-to-win shape)',
-    !aligned.pass && aligned.rho > -0.6, `rho ${aligned.rho.toFixed(3)}`);
+    !aligned.pass && aligned.rho >= 0, `rho ${aligned.rho.toFixed(3)}`);
 
   // KNOWN-BAD 3: the pre-DEVIATION-#10 card — every character on one health value would
   // collapse the totals; instead reproduce the degenerate-total case §22(g) was built for

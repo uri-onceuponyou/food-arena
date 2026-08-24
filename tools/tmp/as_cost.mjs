@@ -166,7 +166,7 @@ const controlHashes = () => Object.fromEntries(CONTROL_FILES.map((f) =>
 
 const { scaleArena, pointSymmetryFaults } = await importShielded(`${ROOT}/tools/tmp/ax_layout.mjs`);
 const RULES = await import(`${ROOT}/src/game/rules.ts`);
-const { MATCH_DURATION_MS, CONCEAL_REVEAL_RADIUS, concealmentKeepoutRadius } = RULES;
+const { MATCH_DURATION_MS, CONCEAL_REVEAL_RADIUS, concealmentKeepoutRadius, REACH, HIT_RADIUS_VS_PLAYER, PLAYER_SIZE } = RULES;
 
 /**
  * Tile a concealment list the same way `ax_layout` tiles cover — k x k with odd tiles
@@ -812,11 +812,56 @@ if (args.selftest) {
      * now sized so the interior is 52 wu against a 42 wu body — 10 wu of slack, under
      * match-sim's 15 wu span — and BOTH counters have to fire.
      */
-    const B0 = 100, OFF = 76;   // 100x100 blocks, centres 76 wu out: a 52 wu interior
+    /**
+     * 🚨 THE CAGE FAILED A SECOND TIME, ON 2026-08-24, AND THE CAUSE IS NOT THE CAGE.
+     * WAS `const B0 = 100, OFF = 76;` — 100x100 blocks 76 wu out, a 52 wu interior and an
+     * outer half-extent of **126 wu**. D6 read `longest 118.9s` at the parent commit and
+     * **`longest 7.1s`** on Uri's kit shape (`rules.ts:WeaponSlot`, 11 characters x 4
+     * slots). The pen still seals; the AI still cannot move. What died is the OTHER half
+     * of the stall rule.
+     *
+     * The rule is `span < SPAN_LIMIT && d > eReach`, with
+     * `eReach = maxNormalRange(ai) + HIT_RADIUS_VS_PLAYER`. The besieging player closes to
+     * the outer wall and stops at **d ~ 126 wu**, so a long stall was only ever recorded
+     * for an AI whose longest normal-range weapon fell SHORT of that — and there was
+     * exactly one: **Lollipop, the roster's only melee-only kit** (`Giant` is 157.22 and is
+     * filtered out by `range <= REACH.rangedMax`), leaving `maxNormalRange = 70` and
+     * `eReach = 95.2`. The kit shape gives every character a `short` and a `long` ranged
+     * slot, so the roster's MINIMUM `maxNormalRange` is now **128** and `eReach` is 153.2
+     * for everybody: `d > eReach` is false at the wall for all 110 matchups at once.
+     * `sim.test.mjs`'s "exactly one character has no ranged weapon, and it is Lollipop" was
+     * reversed by the same commit and for the same reason.
+     *
+     * → THE FIX IS TO PUSH THE BESIEGER BEYOND THE LONGEST eReach IN THE ROSTER, and it is
+     * DERIVED so the next reach change cannot restale it. Widening the pen is the WRONG
+     * lever and this file already records why — the first cage failed with a ~280 wu
+     * courtyard the AI could pace. So the INTERIOR is held at 52 wu (42 wu body + 10 wu of
+     * slack, under `SPAN_LIMIT` 15) and the WALL IS MADE THICKER instead:
+     *
+     *     interior = 2*OFF - B0        outer half-extent = OFF + B0/2 = interior/2 + B0
+     *     require  outer > REACH.rangedMax + HIT_RADIUS_VS_PLAYER  (= 165.2, the longest
+     *                                                               eReach any kit can have)
+     *     plus one body of margin, so a fighter's own radius cannot eat the gap.
+     */
+    const INTERIOR = Math.round(PLAYER_SIZE + 10);          // 52 wu: body + slack < SPAN_LIMIT
+    const LONGEST_EREACH = REACH.rangedMax + HIT_RADIUS_VS_PLAYER;
+    const B0 = Math.ceil((LONGEST_EREACH + PLAYER_SIZE - INTERIOR / 2) / 10) * 10;
+    const OFF = (INTERIOR + B0) / 2;
     const pen = [];
     for (const dx of [-1, 0, 1]) for (const dy of [-1, 0, 1]) {
       if (dx === 0 && dy === 0) continue;
       pen.push({ kind: 'wall', x: 1000 + dx * OFF, y: 500 + dy * OFF, w: B0, h: B0 });
+    }
+    {
+      // The two properties the numbers above are FOR, asserted rather than trusted: the
+      // pocket is small enough that the AI cannot out-span `SPAN_LIMIT`, and the besieger
+      // is pushed beyond every kit's `eReach`. Without these, a future constant change
+      // makes D6 fail again with no clue as to which half broke.
+      const outer = INTERIOR / 2 + B0;
+      ok('D6a the cage pocket is still smaller than the span limit can resolve',
+        INTERIOR - PLAYER_SIZE < 15, `interior ${INTERIOR} wu vs body ${PLAYER_SIZE} wu`);
+      ok('D6b …and its outer wall stands beyond the LONGEST eReach in the roster',
+        outer > LONGEST_EREACH, `outer ${outer.toFixed(1)} wu vs eReach ceiling ${LONGEST_EREACH.toFixed(1)} wu`);
     }
     const caged = {
       ...arena1, cover: pen, hazards: [], concealment: [],

@@ -386,11 +386,20 @@ if (args.selftest) {
     // A single-projectile weapon has no off-axis parts, so its curve is FLAT in range and
     // ZERO past it. That is the step this tool's argmax sweep exists to find.
     const seaweed = CHARACTERS.sushi.weapons.find((w) => w.key === 'Seaweed');
+    // ⚠️ THE SEPARATIONS WERE TYPED — `115`, `116`, `117` — AND SEAWEED'S RANGE MOVED.
+    // Uri's 2026-08-24 kit shape put it on `REACH.rangedLong` (116 -> 128) because Sushi
+    // held TWO short-band weapons and none in the long band, and this arm went red with
+    // `116->13.44 117->13.44` — the step it looks for was 12 wu further out, so both
+    // samples landed INSIDE the range and the comparison had nothing to see.
+    // 🚨 The old numbers were STALE-BUT-LEGAL: 116 and 117 are still perfectly valid
+    // separations, so nothing about them looked wrong. `CLAUDE.md`'s standing rule is the
+    // fix — DERIVE, never retype — so the step is now read off the weapon's own `range`.
+    const R = seaweed.range;
     ok('a lone projectile is flat inside its range',
-      pressValue(seaweed, 10) === 5 && pressValue(seaweed, 115) === 5);
+      pressValue(seaweed, 10) === 5 && pressValue(seaweed, R - 1) === 5, `range ${R}`);
     ok('`sustainedAt` drops a weapon the instant the target is past its range',
-      sustainedAt('sushi', 116) > sustainedAt('sushi', 117),
-      `116->${sustainedAt('sushi', 116).toFixed(2)} 117->${sustainedAt('sushi', 117).toFixed(2)} (Seaweed range 116)`);
+      sustainedAt('sushi', R) > sustainedAt('sushi', R + 1),
+      `${R}->${sustainedAt('sushi', R).toFixed(2)} ${R + 1}->${sustainedAt('sushi', R + 1).toFixed(2)} (Seaweed range ${R})`);
   }
   {
     // Expression is 1.0 at the peak BY CONSTRUCTION, and must be < 1 somewhere or the
@@ -480,16 +489,44 @@ if (args.selftest) {
     ok('impatience is REACHABLE (Sushi close in, Big Catch on cooldown)',
       r.side.enemy.impatient > 0 && r.side.enemy.impatient < tot,
       `${r.side.enemy.impatient}/${tot} presses`);
-    // KNOWN-BAD: a one-weapon kit can never be impatient. Donut has exactly one
-    // offensive weapon, so a counter that fires on anything would light up here.
-    const one = runMatch('donut', 'donut', 'chase', 0, {
-      beforeTick: (st) => {
-        st.player.x = 680; st.player.y = 500; st.enemy.x = 720; st.enemy.y = 500;
-      },
-    });
+    // KNOWN-BAD: a one-weapon kit can never be impatient — impatience is defined two
+    // hundred lines up as *"a strictly better weapon was in range and merely on cooldown"*,
+    // and with one weapon there is no strictly better one to be waiting for.
+    //
+    // ⚠️ WAS: *"Donut has exactly one offensive weapon"*, and it ran on the SHIPPED Donut.
+    // **THAT IS NO LONGER TRUE OF ANY CHARACTER.** Uri's 2026-08-24 kit shape gives all
+    // eleven exactly four weapons (`rules.ts:WeaponSlot`), so the roster no longer contains
+    // the input this known-bad needs and the arm reported `donut 10/11` — the counter
+    // firing, correctly, on a kit that now has three alternatives.
+    //
+    // 🚨 THE ARM IS KEPT AND ITS INPUT IS SYNTHESISED, because deleting it would remove the
+    // ONLY evidence that this counter does not fire on everything, and the row above it
+    // ("impatience is REACHABLE") is satisfied by a counter that fires always. A guard with
+    // no negative case is a comment with a tick next to it.
+    //
+    // The kit is narrowed on the LIVE def and restored in a `finally`: the sim reads
+    // `CHARACTERS[id].weapons` at `createFighter` time, so there is no injection point, and
+    // a leak here would silently mis-drive every later arm in this file. The restore is
+    // ASSERTED, not assumed.
+    const donutDef = CHARACTERS.donut;
+    const savedWeapons = donutDef.weapons;
+    let one;
+    try {
+      donutDef.weapons = [savedWeapons.find((w) => w.key === 'Candy')];
+      one = runMatch('donut', 'donut', 'chase', 0, {
+        beforeTick: (st) => {
+          st.player.x = 680; st.player.y = 500; st.enemy.x = 720; st.enemy.y = 500;
+        },
+      });
+    } finally {
+      donutDef.weapons = savedWeapons;
+    }
+    ok('…the synthetic one-weapon kit really was one weapon, and the roster is restored',
+      donutDef.weapons === savedWeapons && donutDef.weapons.length === 4,
+      `donut restored to ${donutDef.weapons.length} weapons`);
     ok('…and a one-weapon kit is NEVER impatient (the counter is not firing on everything)',
       one.side.enemy.impatient === 0 && one.side.enemy.pressSep.length > 0,
-      `donut ${one.side.enemy.impatient}/${one.side.enemy.pressSep.length}`);
+      `donut(1-weapon) ${one.side.enemy.impatient}/${one.side.enemy.pressSep.length}`);
   }
 
   // ── E. THE BRANCH CENSUS, IN BOTH DIRECTIONS ──────────────────────────────

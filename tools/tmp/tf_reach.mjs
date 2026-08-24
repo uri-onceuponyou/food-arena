@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * TF_REACH — does a weapon connect at its own press gate? All 23 ranged weapons,
+ * TF_REACH — does a weapon connect at its own press gate? All 28 ranged weapons,
  * measured on the real sim, against a target that is RUNNING.
  *
  * ── The question, and why `hm_audit --ladder` cannot answer it any more ──────
@@ -143,7 +143,14 @@ if (import.meta.main && args.selftest) {
   };
   console.log(`\n══ tf_reach SELFTEST ══  sim ${SIM_DIR === `${ROOT}/src/game` ? 'working tree' : SIM_DIR}`);
 
-  ok('the roster still has 23 ranged weapons', rangedWeapons().length === 23, `${rangedWeapons().length}`);
+  // ⚠️ WAS `=== 23`. **23 -> 28 on 2026-08-24**, Uri's kit shape (`rules.ts:WeaponSlot`,
+  // 11 characters x 4 slots): six new ranged weapons, minus `waterbottle.Glass` which left
+  // the ranged set for the melee slot. 23 + 6 - 1 = 28.
+  // 🚨 THIS ROW IS A NON-VACUITY GUARD, NOT THE FINDING, and it is deliberately still a
+  // LITERAL rather than `CHARACTERS`-derived: derived, it would agree with the tree by
+  // construction and could never notice a weapon silently leaving the scan. The price is
+  // that a roster change must re-record it by hand, which is what just happened.
+  ok('the roster still has 28 ranged weapons', rangedWeapons().length === 28, `${rangedWeapons().length}`);
   ok('the role speeds are read off the roster, not assumed',
     topHuman > topChase && topHuman > 0, `human ${topHuman.toFixed(1)} · AI ${topChase.toFixed(1)}`);
 

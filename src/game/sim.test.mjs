@@ -3047,6 +3047,13 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
     // previous balance answers were shipped with the cost stated. `stats.health` drives
     // `healthMultiplier`, i.e. real HP; moving eleven of them to restore a correlation
     // coefficient would be exactly the "tune until the aggregate looks calm" §77 forbids.
+    // 🚨 **AND THIS BOUND IS IMPLEMENTED TWICE. `tools/tmp/bl_vitals_gate.mjs` CARRIES ITS
+    // OWN COPY, AND I CHANGED THIS ONE FIRST AND THAT ONE NOT AT ALL.** It went red inside
+    // the hour on its own positive row — *"the SHIPPED roster is admissible (if this fails,
+    // sim.test.mjs §22 is already red)"* — which is the good outcome and the reason that
+    // row exists. It is the same shape `CLAUDE.md` records for the terrain slow and the
+    // trail boost: one rule, two implementations, one line apart, fixed a pass apart.
+    // **CHANGE BOTH, AND GREP FOR A THIRD.**
     check('health still COMPENSATES the kit — the correlation is NEGATIVE (was <= -0.6 on unequal kit sizes)',
       rho < 0, `rho = ${rho.toFixed(3)} between kit HP/s and health multiplier `
       + `(was -0.788 when kits ran 1..4 weapons; every kit is 4 now, so the size confound is gone)`);

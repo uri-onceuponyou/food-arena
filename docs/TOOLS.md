@@ -368,8 +368,9 @@ line: a reload of a bare `/` **re-derives the boot route** (`main.ts`) and lands
 
 ## THE GATE BATTERY — run all of these before you believe a change
 
-The five gates in `CLAUDE.md` were the whole story when there were five. There are now **152**, and
-every one exists because something shipped past its absence.
+The five gates in `CLAUDE.md` were the whole story when there were five. There are now **153**, and
+every one exists because something shipped past its absence. (152 until 2026-08-24; `wp_shape
+--selftest`, the kit-shape guard, is the 153rd.)
 
 ### 🔴 This table is the SINGLE SOURCE for every expected count
 
