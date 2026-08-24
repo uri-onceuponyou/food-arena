@@ -1215,9 +1215,31 @@ async function run() {
       await page.waitForSelector('.match-sheet.is-open', { timeout: 5000 });
       await page.click('[data-el="resume"]', { force: true });
 
+      // ── 🚨 QUIT IS TWO CLICKS NOW, AND THIS STEP ENCODED THE OLD CONTRACT ─────
+      // Kept above the change per `CLAUDE.md`'s reversal rule, because the old wording
+      // is the evidence of what the product used to do:
+      //
+      //     await page.click('[data-el="pause"]');
+      //     await page.click('[data-el="quit"]');
+      //     await atScreen(page, "home", 20000);
+      //
+      // `matchScreen.ts` now routes BOTH pause-sheet exits — Quit to Home and Change
+      // Fighter — through a confirm, because both abandon a live match and a match
+      // abandoned mid-play banks NOTHING (the profile write is gated on
+      // `phase === 'ended'`), while the top one sits one 10px gap under Resume. So the
+      // click on `[data-el="quit"]` opens the confirm and `[data-el="leave"]` performs
+      // it. The `waitForSelector` between them is load-bearing rather than tidy: the
+      // destructive button is deliberately DISABLED for `LEAVE_ARM_MS` (350ms) after
+      // the confirm appears, to defeat a double-tap punching through at the same
+      // coordinate — measured at 6,623px² of overlap at 390x844. Playwright's
+      // actionability wait covers exactly that, so this step also proves the button
+      // arms; a `{ force: true }` here would skip the wait and hide a button that never
+      // became clickable.
       step = 'match->home';
       await page.click('[data-el="pause"]');
       await page.click('[data-el="quit"]');
+      await page.waitForSelector('[data-el="leave"]:not([disabled])', { timeout: 5000 });
+      await page.click('[data-el="leave"]');
       await atScreen(page, "home", 20000);
 
       step = 'equipped fighter persisted';
