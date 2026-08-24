@@ -5626,6 +5626,28 @@ export function speedFor(id: CharacterId, roleBaseSpeed: number): number {
  *
  * Heals are excluded: a heal is not damage, and the one `self` weapon in the roster is
  * already visible on the card as an ability.
+ *
+ * 🚨 **AND IT IS REACH-BLIND. THIS IS NOT A ROUNDING CAVEAT; IT IS A WHOLE CLASS OF
+ * CHANGE THIS FUNCTION CANNOT EXPRESS.** *"at a range where every part lands"* is the
+ * second line of this comment and it is doing more work than it looks like: `range` never
+ * enters the sum, so **two kits that differ only in reach have the same `kitDps`.**
+ *
+ * MEASURED 2026-08-24, on the kit-shape pass. `waterbottle.Glass` went `ranged`/116 wu ->
+ * `melee`/70 wu with `damage` 7 and `cooldown` 1100 UNTOUCHED:
+ *
+ *     waterbottle kitDps      28.76 before  ·  28.76 after   (bit identical)
+ *     Glass presses / match    4.55 before  ·   1.38 after   (`roster_table --why`)
+ *     waterbottle strength    33.1% before  ·    0.0% after  (`roster_table`, smart2)
+ *
+ * **A character left the 1v1 ladder and this function reported that nothing changed.**
+ * `docs/LESSONS.md` §6b is usually read as *"a metric closing is not a picture changing"*;
+ * this is its mirror — **a FLAT metric is not evidence a change did nothing.** Ask what
+ * the metric can express before reading a null off it. Anything that reasons about a
+ * reach change must go through the sim (`roster_table`, `nf_ffa`), never through here.
+ *
+ * ⚠️ The card's `damage` bar is derived from this, so the bar cannot see reach either.
+ * That is acceptable for a CARD — a player reads a range from the ability text — and it
+ * is not acceptable for a balance argument.
  */
 export function kitDps(id: CharacterId): number {
   let dps = 0;
