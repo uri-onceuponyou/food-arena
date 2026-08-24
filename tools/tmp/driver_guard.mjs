@@ -425,7 +425,16 @@ const SHIPPED_AI = await import(`${ROOT}/src/game/ai.ts`);
   const CELLS = [
     ['taco', 50, [], 'Double', 'Filling'],            // authored 0, delivers 23 vs 12
     ['burrito', 50, [], 'Swarm', 'Disc'],             // 4-pellet homing: authored 5, delivers 20 vs 10
-    ['soup', 50, ['Dump'], 'Splash', 'Noodle'],       // subset-only: delivers 9 vs 5
+    // ⚠️ WAS `['soup', 50, ['Dump'], ...]` and this cell WENT RED on 2026-08-24, exactly as
+    // its own failure message asks for: *"a kit change has made one of these cells agree —
+    // re-derive the cell, do not delete it"*. Uri's kit shape gave Soup a melee, `Ladle`
+    // (10 damage at `meleeStrong` 70), and at 50 wu BOTH keys then pick it — 10 beats
+    // Splash's delivered 9 and Noodle's authored 5 — so the cell stopped exercising the
+    // disagreement it exists to exercise. RE-DERIVED, not relaxed: `Ladle` joins `Dump` on
+    // cooldown, which restores the ORIGINAL subset (Splash vs Noodle) and the original
+    // 9-vs-5 disagreement. The `want`/`old` columns are unchanged, which is the evidence
+    // that the cell is the same test and not a new, easier one.
+    ['soup', 50, ['Dump', 'Ladle'], 'Splash', 'Noodle'], // subset-only: delivers 9 vs 5
     ['waterbottle', 50, ['Mega'], 'Spray', 'Glass'],  // subset-only: delivers 9 vs 7
     ['sushi', 20, ['Catch'], 'Rice', 'Fish'],         // subset-only AND close-range-only: 10 vs 6
   ];

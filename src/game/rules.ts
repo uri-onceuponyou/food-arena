@@ -2586,6 +2586,66 @@ export const CONCEAL_ATTACK_REVEAL_MS = FLIGHT_MS.normal;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type WeaponType = 'melee' | 'ranged' | 'self';
+
+/**
+ * ── THE KIT SHAPE — Uri, 2026-08-24 ─────────────────────────────────────────
+ *
+ *   > *"Change weapons - All characters have 3 weapons (melee, short range, long range)
+ *   > + Super. Adapt accordingly. Invent new weapons if needed."*
+ *
+ * Every character carries EXACTLY FOUR weapons, one per slot, authored in this order,
+ * so weapon key `1` is the melee on all eleven and weapon key `4` is the Super on all
+ * eleven. Before this the roster ran **33 weapons unevenly** — Donut had ONE, Lollipop
+ * two, five characters had no melee at all and four had no Super at all — and the
+ * weapon tray printed `1 2 3 4` regardless (`CLAUDE.md` rule 9 records that as a defect
+ * three agents saw and none owned).
+ *
+ * ⚠️ `slot` IS REQUIRED AND IS NOT DERIVED FROM `range`, ON PURPOSE. Three of the four
+ * slots *could* be inferred (`type === 'melee'`, then the two ranged bands) and the
+ * fourth — the Super — cannot be inferred from any field at all: before this pass the
+ * six de-facto supers were identifiable only by having the largest `cooldown` on their
+ * character, which is a coincidence of tuning rather than a declaration. A field that is
+ * inferred from a number is a field that silently changes meaning when the number is
+ * tuned. `tools/tmp/wp_shape.mjs` asserts the declaration and the geometry AGREE, which
+ * is the check an inferred field cannot have.
+ *
+ * THE BANDS ARE RUNGS OF `REACH`, never literals (see `REACH`, and `CLAUDE.md`'s
+ * standing rule that a retyped coordinate is invisible to every legality check):
+ *
+ *   melee   type 'melee'   range ∈ { meleeQuick 58, meleeStrong 70, meleeHeavy 84 }
+ *   short   type 'ranged'  range ∈ { rangedClose 98, rangedMid 116 }
+ *   long    type 'ranged'  range ∈ { rangedLong 128, rangedMax 140 }
+ *   super   any type       cooldown >= SUPER_MIN_COOLDOWN_MS and >= every other slot's
+ *
+ * and `short.range < long.range` is asserted per character on top of the bands, because
+ * two weapons could sit in different bands and still be one rung apart the wrong way if
+ * the bands were ever widened.
+ */
+export type WeaponSlot = 'melee' | 'short' | 'long' | 'super';
+
+/**
+ * The authored order of `CharacterDef.weapons`, and therefore the key order on the
+ * tray: `1` melee, `2` short, `3` long, `4` Super, on every character.
+ */
+export const WEAPON_SLOT_ORDER = ['melee', 'short', 'long', 'super'] as const;
+
+/**
+ * The cooldown floor that separates a Super from an ordinary weapon.
+ *
+ * DERIVED, not picked: it is the MINIMUM cooldown among the six weapons this project
+ * already treated as ultimates before the slot existed (`DECISIONS §77` names them —
+ * `taco.Double` 2500, `egg.Hatch` 2600, `soup.Dump` 3000, `sushi.Catch` 3200,
+ * `waterbottle.Mega` 3500, `burrito.Swarm` 3600 — plus `lollipop.Giant` 7000 and
+ * `hamburger.Onion` 6000, which nobody disputed were supers). 2500 is `taco.Double`.
+ *
+ * It separates cleanly rather than by luck: the largest cooldown on any NON-super
+ * weapon in the shipped roster is `egg.Tackle` at **2200**, so the gap [2200, 2500] is
+ * empty and no ordinary weapon is one tuning step from being mistaken for a Super.
+ * `wp_shape.mjs` asserts both sides — supers above, non-supers below — so the day that
+ * gap closes is a red gate rather than a quiet reclassification.
+ */
+export const SUPER_MIN_COOLDOWN_MS = 2500;
+
 export type StatusEffect = 'slow' | 'stun' | null;
 export type Rarity = 'Normal' | 'Rare' | 'Epic' | 'Legendary' | 'Neon' | 'Cyber';
 
@@ -2601,6 +2661,12 @@ export interface Weapon {
   key: string;
   name: string;
   type: WeaponType;
+  /**
+   * Which of the four kit slots this weapon fills. REQUIRED — see `WeaponSlot` for why
+   * it is declared rather than inferred, and `tools/tmp/wp_shape.mjs` for the assertions
+   * that hold the declaration and the geometry together.
+   */
+  slot: WeaponSlot;
   /** Max travel distance (ranged) or reach (melee), in world units. */
   range?: number;
   damage: number;
@@ -3272,6 +3338,29 @@ export function abilityCards(def: CharacterDef): AbilityCard[] {
     desc: a.desc,
     weapon: weaponForAbility(def, a),
   }));
+}
+
+/**
+ * The one weapon filling `slot` on this character.
+ *
+ * 🚨 THROWS on a miss, and does NOT fall back to an index, for the reason
+ * `weaponForAbility` throws: this repo shipped a join that quietly returned nothing and
+ * listed 3 of 5 fighters. `weapons[WEAPON_SLOT_ORDER.indexOf(slot)]` would be correct on
+ * every character today and would go silently wrong the first time somebody authors the
+ * array out of order — which is exactly how `hamburger`'s two arrays came to disagree.
+ * Look up by the DECLARATION; `wp_shape.mjs` is what asserts the order agrees with it.
+ */
+export function weaponInSlot(def: CharacterDef, slot: WeaponSlot): Weapon {
+  const found = def.weapons.filter((w) => w.slot === slot);
+  if (found.length !== 1) {
+    throw new Error(`rules: ${def.id} has ${found.length} weapons in slot '${slot}', expected exactly 1`);
+  }
+  return found[0]!;
+}
+
+/** This character's Super — `weaponInSlot(def, 'super')`, named because it reads better. */
+export function superWeaponOf(def: CharacterDef): Weapon {
+  return weaponInSlot(def, 'super');
 }
 
 export interface CharacterDef {
@@ -3974,7 +4063,7 @@ function defineCharacter<const W extends readonly Weapon[]>(
 export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   hamburger: defineCharacter({
     id: 'hamburger', name: 'Hamburger', emoji: '🍔', rarity: 'Normal',
-    stats: { damage: 10, health: 3, speed: 5 }, hasTrail: false,
+    stats: { damage: 7, health: 3, speed: 5 }, hasTrail: false,
     // WAS: 'Closed happy eyes, small smile. Stacked bun/patty/lettuce/tomato silhouette.'
     //   Uri, blind to the code: "the face is the WORST PART in the character… drawn lines and
     //   not an actual face" (DECISIONS §37). Per-part scored `face-overall` 3.5 vs 9 and `eyes`
@@ -3984,9 +4073,9 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     //   what the existing geometry was authored against.
     face: 'EYES: open and eager. White sclera ovals — on the orange bun they will be the brightest value on the character, which is the point — with dark pupils offset up-and-forward, a catchlight in each, and the old closed-happy arc kept ONLY as the upper lash line above them. The existing shared tangent frame on the curved crown is right and must be kept: it is why the eyes and brows can never drift out of plane. MOUTH: a broad open grin with a dark throat behind the lip and a visible lower lip — not a flat dark shape, which is what the per-part pass named ("no lip thickness or interior value step"). SILHOUETTE: the stacked bottom-bun/patty/cheese/tomato/lettuce/top-bun tower, every layer owning real height and its own substance — the richest food mass in the cast and worth protecting. But the lettuce must read as a frill running CONTINUOUSLY around the whole stack; two leaf points either side of the head is the ear signal (five for five). PERSONALITY: hearty, greedy, good-natured heavy.',
     weapons: [
-      { key: 'Smash', name: 'Patty Smash', type: 'melee', range: REACH.meleeStrong, damage: 12, cooldown: 650, cone: 80, color: '#FFC93C', effect: null, emoji: '🍖' },
-      { key: 'Tomato', name: 'Tomato Toss', type: 'ranged', range: REACH.rangedClose, damage: 8, cooldown: 800, speed: SPEED.closeFast, color: '#E63946', effect: 'slow', splatter: true, emoji: '🍅' },
-      { key: 'Lettuce', name: 'Lettuce Fling', type: 'ranged', range: REACH.rangedMax, damage: 6, cooldown: 1100, speed: SPEED.maxSlow, color: '#7CB518', effect: 'stun', emoji: '🥬' },
+      { key: 'Smash', name: 'Patty Smash', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 12, cooldown: 650, cone: 80, color: '#FFC93C', effect: null, emoji: '🍖' },
+      { key: 'Tomato', name: 'Tomato Toss', type: 'ranged', slot: 'short', range: REACH.rangedClose, damage: 8, cooldown: 800, speed: SPEED.closeFast, color: '#E63946', effect: 'slow', splatter: true, emoji: '🍅' },
+      { key: 'Lettuce', name: 'Lettuce Fling', type: 'ranged', slot: 'long', range: REACH.rangedMax, damage: 6, cooldown: 1100, speed: SPEED.maxSlow, color: '#7CB518', effect: 'stun', emoji: '🥬' },
       // ✅ THE ONLY `self` WEAPON IN THE ROSTER, and until 2026-08-05 the AI could not
       // use it: `ai.ts` reached weapons only through `pickHighestDamageWeapon` (which
       // skips `type === 'self'`) and `pickSniperWeapon` (which requires `'ranged'`), so
@@ -4007,7 +4096,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // tier spread clears the ~9 pp floor (8.05 pp) and it holds settled at 14/110.
       // Resolvable to ±3 HP and no finer — see the ladder above before moving it, and do
       // NOT reach for the cooldown (measured inert) or Patty Smash (measured violent).
-      { key: 'Onion', name: 'Onion Ring', type: 'self', damage: 0, cooldown: 6000, healAmount: 18, color: '#F4E9DA', effect: null, emoji: '🧅' },
+      { key: 'Onion', name: 'Onion Ring', type: 'self', slot: 'super', damage: 0, cooldown: 6000, healAmount: 18, color: '#F4E9DA', effect: null, emoji: '🧅' },
     ],
     // 🚨 THE ONE CHARACTER WHOSE TWO ARRAYS ARE IN A DIFFERENT ORDER — weapons run
     // Smash / Tomato / Lettuce / Onion and the blurbs run Tomato / Lettuce / Smash /
@@ -4027,7 +4116,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   donut: defineCharacter({
     id: 'donut', name: 'Donut', emoji: '🍩', rarity: 'Normal',
-    stats: { damage: 4, health: 7, speed: 6 }, hasTrail: true,
+    stats: { damage: 8, health: 7, speed: 6 }, hasTrail: true,
     // WAS: 'Crooked smile, sprinkles across a pink glaze torus.'
     //   Uri: "better than the burger — the eyes have more depth, but can be taken deeper, and the
     //   mouth is deeper than burger but still missing details" (DECISIONS §38). This is the one
@@ -4035,11 +4124,33 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     //   eyes at all, and the sphere-with-a-specular the file chose is rung two of four. The
     //   crooked smile is genuine personality and is carried forward verbatim.
     face: 'EYES: OPEN, and KEEP THE SPHERE — ADD THE WHITE. Donut already has real 3D eye geometry catching a specular — that is exactly why Uri ranked it above hamburger — but a highlight is not a sclera, and a dark bead with a glint is not an open eye. Build white sclera spheres as the brightest value on the character, a dark pupil offset toward the smile\'s high side so the gaze and the grin agree, and an explicit catchlight mesh on top of the specular rather than instead of it. MOUTH: the crooked, lopsided smile stays — it is the personality and Uri named it as the better half of this face — but it needs an INTERIOR: a lip line with a darker throat plane behind it. "Deeper than burger but still missing details" is a request for a value step inside the silhouette, not a bigger curve. SILHOUETTE: sprinkles across a pink glaze torus, chocolate-dipped feet holding the value drop. ⚠️ Donut is a STUB body — there is genuinely no torso between the limbs, so the chain sprouts from the ring edge and reads detached. Do NOT swap the archetype (it would cost the silhouette Uri just called better than the burger\'s); build a visible attachment mass where each limb meets the ring instead. PERSONALITY: sweet, chaotic, slightly smug.',
+    // 🆕 THREE OF THESE FOUR ARE NEW (2026-08-24, the kit-shape pass). Donut shipped with
+    // **ONE** weapon — the only character in the roster with a single slot — so `1 2 3 4`
+    // on the tray was three dead keys, and the character had no melee and no Super at all.
+    // Every new number here is a RUNG of `REACH`/`SPEED`, never a literal.
+    //
+    // The design constraint that shaped all three: Donut is the one character with
+    // `hasTrail`, so the kit is built to REWARD standing on the trail rather than to
+    // ignore it. `Ring` and `Candy` both carry `trailBoosted`; the Super deliberately
+    // does not, because a super that is conditional on terrain is a super you cannot
+    // plan around.
     weapons: [
-      { key: 'Candy', name: 'Candy Barrage', type: 'ranged', range: REACH.rangedLong, damage: 4, cooldown: 900, speed: SPEED.long, color: '#FF6FA5', effect: null, pellets: 3, spreadDeg: 14, trailBoosted: true, emoji: '🍬' },
+      { key: 'Ring', name: 'Ring Spin', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 9, cooldown: 900, cone: 160, color: '#FF6FA5', effect: null, trailBoosted: true, emoji: '🍩' },
+      // ⚠️ `pellets` IS 5 AND MUST STAY ODD. It was authored 4 and `sim.test.mjs` §50b
+      // caught it inside the hour: `hasAxisShot` is `homing || (!comboParts && (!pellets ||
+      // pellets % 2 === 1))`, so an EVEN fan has no pellet on the firing axis and cannot
+      // connect at its own press gate against a target running straight away. The only
+      // 4-pellet weapon in the roster, `burrito.Swarm`, is exempt because it HOMES.
+      // A fan is not a free parameter; the parity is a reach property.
+      { key: 'Sprinkles', name: 'Sprinkle Spray', type: 'ranged', slot: 'short', range: REACH.rangedClose, damage: 1, cooldown: 700, speed: SPEED.closeFast, color: '#4FC3F7', effect: null, pellets: 5, spreadDeg: 30, emoji: '✨' },
+      { key: 'Candy', name: 'Candy Barrage', type: 'ranged', slot: 'long', range: REACH.rangedLong, damage: 4, cooldown: 900, speed: SPEED.long, color: '#FF6FA5', effect: null, pellets: 3, spreadDeg: 14, trailBoosted: true, emoji: '🍬' },
+      { key: 'Glaze', name: 'Glaze Bomb', type: 'ranged', slot: 'super', range: REACH.rangedLong, damage: 15, cooldown: 3000, speed: SPEED.long, color: '#FFF3DE', effect: 'slow', splatter: true, emoji: '🍯' },
     ],
     abilities: [
+      { emoji: '🍩', name: 'Ring Spin', desc: 'Spins his ring in a wide arc, hitting everyone around him', weapon: 'Ring' },
+      { emoji: '✨', name: 'Sprinkle Spray', desc: 'Scatters sprinkles - each one chips away a little health', weapon: 'Sprinkles' },
       { emoji: '🍬', name: 'Candy Barrage', desc: 'Throws candies that chip away health', weapon: 'Candy' },
+      { emoji: '🍯', name: 'Glaze Bomb', desc: 'Special: lobs a bomb of glaze that bursts into a sticky floor patch, slowing anyone who steps on it', weapon: 'Glaze' },
       // `weapon: null` — THE ONE PASSIVE IN THE ROSTER. It is `hasTrail` above, not a
       // weapon slot, which is why this character has 2 blurbs against 1 weapon and why
       // the join has to admit a null rather than assume a 1:1 array pairing.
@@ -4049,7 +4160,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   taco: defineCharacter({
     id: 'taco', name: 'Taco', emoji: '🌮', rarity: 'Rare',
-    stats: { damage: 9, health: 4, speed: 5 }, hasTrail: false,
+    stats: { damage: 10, health: 4, speed: 5 }, hasTrail: false,
     // WAS: 'Trapezoid shell with a jagged crimped top edge; face floats completely outside the
     //       shell, to the side.'
     //   All three clauses were implemented literally once and all three were wrong on screen
@@ -4063,10 +4174,15 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     //   in below. The old wording is kept because it explains why the file departs from it.
     face: 'EYES: the best construction in the cast after egg — a sphere PLUS an explicit white glint mesh, which is why Uri ranked taco third of three blind — and it needs one thing: a real white sclera behind the pupil, sized as the brightest mass on the face rather than a glint on a dark bead. Dark pupil offset for gaze, catchlight kept. MOUTH: a wide open cheeky smile with a BRIGHT interior, and it must sit CLEAR of the neck column and collar, which `taco.ts:216` names as this character\'s darkest band. A dark opening immediately above the darkest band merges into one mass and reads as a HAT BRIM — that is exactly what Uri saw, and it is a fusion, not a missing mouth. Lift the mouth, or lighten the interior, or both. FACE PLACEMENT: front and centre on the near shell wall, sharing one tangent frame. Never floating beside the shell. SILHOUETTE: a crescent — a U wall with two soft horns and a dipped mouth — with a small crimped ripple, not a trapezoid and not tall spikes. FILLINGS: shredded, diced and crumbled. The palette (TOMATO #E63946, LETTUCE, ONION) is correct and the SHAPES are the bug: spheres read as berries and purple rings read as grapes, which is Uri\'s "looks like fruit". PERSONALITY: crisp, quick, cheeky.',
     weapons: [
-      { key: 'Filling', name: 'Filling Toss', type: 'ranged', range: REACH.rangedLong, damage: 12, cooldown: 900, speed: SPEED.long, color: '#6B3E26', effect: null, emoji: '🥩' },
+      // 🆕 NEW 2026-08-24 — Taco had NO melee. `meleeStrong` rather than `meleeHeavy`
+      // because the shell is the character's fast, crisp read (`stats.speed` 7, joint
+      // highest in the cast) and `meleeHeavy` is documented above as the rung for "slow,
+      // telegraphed, high-damage" swings, which this is not.
+      { key: 'Shell', name: 'Shell Snap', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 11, cooldown: 700, cone: 90, color: '#F4C453', effect: null, emoji: '🌮' },
       // Onion Bomb sits one rung below Filling/Double so Taco keeps two distinct
       // ranges, exactly as it did at 200 vs 220.
-      { key: 'Onion', name: 'Onion Bomb', type: 'ranged', range: REACH.rangedMid, damage: 7, cooldown: 750, speed: SPEED.mid, color: '#B497D6', effect: null, emoji: '🧅' },
+      { key: 'Onion', name: 'Onion Bomb', type: 'ranged', slot: 'short', range: REACH.rangedMid, damage: 7, cooldown: 750, speed: SPEED.mid, color: '#B497D6', effect: null, emoji: '🧅' },
+      { key: 'Filling', name: 'Filling Toss', type: 'ranged', slot: 'long', range: REACH.rangedLong, damage: 12, cooldown: 900, speed: SPEED.long, color: '#6B3E26', effect: null, emoji: '🥩' },
       // ── THE WIND-UP: DERIVED 550 ms, MEASURED, NOT APPLIED (2026-08-18) ──────
       //
       // `a06c0fd` lifted the `ai.ts` block that refused ranged casts, so `DECISIONS §77`'s
@@ -4086,7 +4202,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // root measures WORSE. It also turns **9** rows red in `sim.test.mjs`, seven of them
       // §1 fixtures that press this weapon and read its projectiles on the same tick.
       {
-        key: 'Double', name: 'Double Toss', type: 'ranged', range: REACH.rangedLong, damage: 0, cooldown: 2500, speed: SPEED.long, color: '#6B3E26', effect: null, emoji: '💥',
+        key: 'Double', name: 'Double Toss', type: 'ranged', slot: 'super', range: REACH.rangedLong, damage: 0, cooldown: 2500, speed: SPEED.long, color: '#6B3E26', effect: null, emoji: '💥',
         comboParts: [
           { color: '#6B3E26', damage: 14, angle: -10, emoji: '🥩' },
           { color: '#B497D6', damage: 9, angle: 10, emoji: '🧅' },
@@ -4094,15 +4210,16 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       },
     ],
     abilities: [
-      { emoji: '🥩', name: 'Filling Toss', desc: 'Throws his filling for heavy damage', weapon: 'Filling' },
+      { emoji: '🌮', name: 'Shell Snap', desc: 'Snaps his shell shut on everyone in front of him', weapon: 'Shell' },
       { emoji: '🧅', name: 'Onion Bomb', desc: 'Throws onion for damage', weapon: 'Onion' },
+      { emoji: '🥩', name: 'Filling Toss', desc: 'Throws his filling for heavy damage', weapon: 'Filling' },
       { emoji: '💥', name: 'Double Toss', desc: 'Special: throws filling and onion together for massive damage', weapon: 'Double' },
     ],
   }),
 
   burrito: defineCharacter({
     id: 'burrito', name: 'Burrito', emoji: '🌯', rarity: 'Rare',
-    stats: { damage: 6, health: 7, speed: 7 }, hasTrail: false,
+    stats: { damage: 8, health: 7, speed: 7 }, hasTrail: false,
     // WAS: 'White wrap, stands upright, toppings visible at the open end.'
     //   ⚠️ NO FACE SPEC AT ALL — and Uri's verdict was "face is not good" (DECISIONS §39). This
     //   is the strongest single datum behind §42: the one character whose `face:` field never
@@ -4110,8 +4227,6 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     //   wording is kept because "open end with visible fillings" is still the silhouette landmark.
     face: 'EYES: this character had NO EYE SPEC AND NO MOUTH SPEC, which is the defect. Open eyes, three elements: a white sclera, a dark pupil offset for gaze, a catchlight. ⚠️ The wrap is TORTILLA #DFD2B9, a pale cream — so an off-white sclera will dissolve into it. The sclera must be genuinely white AND carry a strong dark lash/lid line to hold its edge against a low-contrast ground; this is the one character where the eye needs a drawn boundary to survive its own background. MOUTH: real, with a dark interior behind the lip. PLACEMENT IS THE REAL FIX: set the face HIGH and WIDE on the tube. A small face low on a long narrow head reads as a MUZZLE, and that is half of why Uri said "looks a bit like a goat". 🚨 SILHOUETTE — THE GOAT. Every part of this character is individually a correct burrito and together they compose an animal: two upright torn-foil peaks on top read as EARS, LANKY proportions read as animal proportions, pale cream reads as fur, small low face reads as a muzzle. Improving the face alone will not fix it — the silhouette is read first. Fold the foil peaks BACK over the crown, round them, or make them asymmetric; do not leave two points either side of the head. The uncut ~2.5:1 vertical tube is the one proportion nothing else in the cast has and is worth keeping. PERSONALITY: wound-up, fast, over-stuffed.',
     weapons: [
-      // Disc sits one rung below Swarm so Burrito keeps its 240-vs-260 ordering.
-      { key: 'Disc', name: 'Burrito Disc', type: 'ranged', range: REACH.rangedLong, damage: 10, cooldown: 850, speed: SPEED.long, color: '#F4E9DA', effect: null, emoji: '🌯' },
       // 4 -> 6 with the Swarm nerf below, and the two are ONE change: DEVIATION #13 moves
       // power out of the max-reach homing swarm and into the weapon at 58 wu, because 58 wu
       // is exactly where `af35362` changed nothing. Measured on the shipped constants, one
@@ -4121,7 +4236,14 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // That makes it the only lever found in this pass that moves the two policies by
       // materially different amounts, and it is the reason Burrito's chase cost is -14.8 pp
       // here instead of the -23.4 the swarm nerf alone produces.
-      { key: 'Roll', name: 'Roll Stun', type: 'melee', range: REACH.meleeQuick, damage: 6, cooldown: 1400, cone: 100, color: '#FFC93C', effect: 'stun', emoji: '🌀' },
+      { key: 'Roll', name: 'Roll Stun', type: 'melee', slot: 'melee', range: REACH.meleeQuick, damage: 6, cooldown: 1400, cone: 100, color: '#FFC93C', effect: 'stun', emoji: '🌀' },
+      // 🆕 NEW 2026-08-24 — Burrito had no weapon between `meleeQuick` (58) and
+      // `rangedLong` (128), a 70 wu hole that is the whole of the range at which this
+      // character is fastest. `rangedClose` is documented above as "the first rung clear of
+      // every melee", which is exactly the gap being filled.
+      { key: 'Salsa', name: 'Salsa Splash', type: 'ranged', slot: 'short', range: REACH.rangedClose, damage: 4, cooldown: 800, speed: SPEED.closeFast, color: '#D62839', effect: 'slow', pellets: 3, spreadDeg: 28, emoji: '🥫' },
+      // Disc sits one rung below Swarm so Burrito keeps its 240-vs-260 ordering.
+      { key: 'Disc', name: 'Burrito Disc', type: 'ranged', slot: 'long', range: REACH.rangedLong, damage: 10, cooldown: 850, speed: SPEED.long, color: '#F4E9DA', effect: null, emoji: '🌯' },
       // ⚠️ THE SECOND HOMING WEAPON IN THE RACE `SPEED.maxSlow` DOCUMENTS, AND THE ONE
       //   THE SUSHI FIX DOES NOT TRANSFER TO.
       //
@@ -4168,7 +4290,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // against 31% for the shipped Mega. Not applied; 6 rows red in `sim.test.mjs`. See
       // `Weapon.castMs` §(2)-(4).
       {
-        key: 'Swarm', name: 'Topping Swarm', type: 'ranged', range: REACH.rangedMax, damage: 4, cooldown: 3600, speed: SPEED.maxSlow, color: '#7CB518', effect: null,
+        key: 'Swarm', name: 'Topping Swarm', type: 'ranged', slot: 'super', range: REACH.rangedMax, damage: 4, cooldown: 3600, speed: SPEED.maxSlow, color: '#7CB518', effect: null,
         pellets: 4, spreadDeg: 55, homing: true,
         pelletColors: ['#7CB518', '#E63946', '#FFC93C', '#F4E9DA'],
         pelletEmojis: ['🥬', '🍅', '🧀', '🧅'],
@@ -4176,10 +4298,11 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       },
     ],
     abilities: [
-      { emoji: '🌯', name: 'Burrito Disc', desc: 'Throws himself like a flying disc for damage', weapon: 'Disc' },
       // WAS: '...freezes enemies in place for a few seconds' — the second of the two cards
       // that promised more stun than the GLOBAL 2000 ms constant delivers. DECISIONS §81.
       { emoji: '🌀', name: 'Roll Stun', desc: 'Rolls up and freezes enemies in place for a moment', weapon: 'Roll' },
+      { emoji: '🥫', name: 'Salsa Splash', desc: 'Splashes salsa nearby that slows enemies down', weapon: 'Salsa' },
+      { emoji: '🌯', name: 'Burrito Disc', desc: 'Throws himself like a flying disc for damage', weapon: 'Disc' },
       { emoji: '✨', name: 'Topping Swarm', desc: 'Special: squeezes out all his toppings, which fly everywhere and chase enemies dealing damage - the flying toppings can be destroyed', weapon: 'Swarm' },
     ],
   }),
@@ -4199,7 +4322,14 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // mobility it buys if Tackle is pressed on cooldown: **42 / 2.2 s = 19.09 wu/s**
       // against Egg's own 79.20 wu/s walk — a 24% add, and 0.41x its own chase speed.
       // See `Weapon.selfLaunch`; the roster-wide bound is `sim.test.mjs` §39(f).
-      { key: 'Tackle', name: 'Egg Tackle', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 2200, cone: 70, color: '#FFF8EA', effect: null, selfLaunch: BODY_LENGTH, emoji: '🥚' },
+      { key: 'Tackle', name: 'Egg Tackle', type: 'melee', slot: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 2200, cone: 70, color: '#FFF8EA', effect: null, selfLaunch: BODY_LENGTH, emoji: '🥚' },
+      { key: 'Shards', name: 'Shell Shards', type: 'ranged', slot: 'short', range: REACH.rangedMid, damage: 4, cooldown: 1000, speed: SPEED.mid, color: '#F4E9DA', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💥' },
+      // 🆕 NEW 2026-08-24 — Egg's only weapon past `rangedMid` was `Hatch`, which is the
+      // Super, so pressing anything at long range meant spending the Super. `rangedLong`
+      // and not `rangedMax`: `rangedMax` SETS THE CAMERA (see `REACH.rangedMax`) and Egg
+      // already owns a weapon there; a second one buys nothing and would make the Super's
+      // reach unremarkable, which is the one thing it should not be.
+      { key: 'Yolk', name: 'Yolk Shot', type: 'ranged', slot: 'long', range: REACH.rangedLong, damage: 8, cooldown: 900, speed: SPEED.long, color: '#FFC93C', effect: null, emoji: '🍳' },
       // ⚠️ WAS `speed: SPEED.maxDrift` (80 wu/s) — DECISIONS §50a, Uri: *"chick is faster
       // than the egg."* That is a derivable constraint rather than a taste call, and
       // `SPEED.maxSlow` is the SMALLEST rung that satisfies both halves of it: 160 wu/s is
@@ -4207,19 +4337,19 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // is also the minimum `rules.ts:projectileMaxAgeMs` needs for the shot to close at
       // all. Two independent constraints, one rung. `sim.test.mjs` §31(g) asserts the
       // derivation, never the number.
-      { key: 'Hatch', name: 'Hatch!', type: 'ranged', range: REACH.rangedMax, damage: 4, cooldown: 2600, speed: SPEED.maxSlow, color: '#FFE9A8', effect: null, homing: true, peckHits: 3, peckInterval: 500, emoji: '🐣' },
-      { key: 'Shards', name: 'Shell Shards', type: 'ranged', range: REACH.rangedMid, damage: 4, cooldown: 1000, speed: SPEED.mid, color: '#F4E9DA', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💥' },
+      { key: 'Hatch', name: 'Hatch!', type: 'ranged', slot: 'super', range: REACH.rangedMax, damage: 4, cooldown: 2600, speed: SPEED.maxSlow, color: '#FFE9A8', effect: null, homing: true, peckHits: 3, peckInterval: 500, emoji: '🐣' },
     ],
     abilities: [
       { emoji: '🥚', name: 'Egg Tackle', desc: 'Launches herself at the enemy for big damage - slow to charge up', weapon: 'Tackle' },
-      { emoji: '🐣', name: 'Hatch!', desc: 'She cracks open and a chick bursts out, pecking for damage', weapon: 'Hatch' },
       { emoji: '💥', name: 'Shell Shards', desc: 'Broken shell pieces slow enemies and chip away their health', weapon: 'Shards' },
+      { emoji: '🍳', name: 'Yolk Shot', desc: 'Fires a yolk from a distance for damage', weapon: 'Yolk' },
+      { emoji: '🐣', name: 'Hatch!', desc: 'She cracks open and a chick bursts out, pecking for damage', weapon: 'Hatch' },
     ],
   }),
 
   lollipop: defineCharacter({
     id: 'lollipop', name: 'Lollipop', emoji: '🍭', rarity: 'Cyber',
-    stats: { damage: 7, health: 8, speed: 7 }, hasTrail: false,
+    stats: { damage: 10, health: 8, speed: 7 }, hasTrail: false,
     // WAS: 'Eyes on the stick, mouth on the candy. Concentric red/white swirl disc.'
     //   🚨 THE CLEAREST CASE IN THE FILE, AND BOTH HALVES WERE UNFROZEN BY URI BY NAME:
     //   "Unfreeze the structure — the mouth doesn't have to be above the eyes" and "the candy
@@ -4232,7 +4362,27 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     weapons: [
       // ── AUTHORISED DEVIATION #8 (2026-08-05): LOLLIPOP — see the block above
       //    `CHARACTERS` for the full measurement. damage 11 -> 16 and 10 -> 17.
-      { key: 'Smash', name: 'Lollipop Smash', type: 'melee', range: REACH.meleeStrong, damage: 16, cooldown: 750, cone: 80, color: '#E63946', effect: null, emoji: '🔨' },
+      { key: 'Smash', name: 'Lollipop Smash', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 16, cooldown: 750, cone: 80, color: '#E63946', effect: null, emoji: '🔨' },
+      // 🆕 BOTH NEW 2026-08-24, AND THIS IS THE LARGEST SINGLE KIT CHANGE IN THE PASS.
+      //
+      // 🚨 READ DEVIATION #13 IMMEDIATELY BELOW BEFORE READING ANY LOLLIPOP NUMBER: it
+      // records that *"Lollipop is the roster's ONLY kit with no `ranged` weapon"*, and
+      // that this is the whole reason `af35362`'s roster-wide reach fix was worth nothing
+      // to this character while ten other kits improved around it. **That sentence is now
+      // FALSE, and it is kept below verbatim because it is the reason these two weapons
+      // exist.** Uri's kit shape requires a short and a long slot on every character, so
+      // the condition #13 diagnosed is removed by the SHAPE rather than by a tuning pass —
+      // which matters, because `DECISIONS §77` withholds permission to re-tune the roster
+      // and `§85` records this character at **19.7% strength (smart2) / 13.4% (chase)**,
+      // last in the game by 13 pp. **The measured consequence is reported in the commit
+      // message, not compensated for anywhere.**
+      //
+      // Neither number is picked: `rangedClose`/`rangedLong` are the rungs, `SPEED.*` is
+      // derived per rung so flight TIME is constant, and the damages sit deliberately
+      // BELOW the swing (16) so §19(a)'s rule — a special is the biggest press its owner
+      // has — is untouched at the top and the melee stays this character's identity.
+      { key: 'Drops', name: 'Candy Drops', type: 'ranged', slot: 'short', range: REACH.rangedClose, damage: 3, cooldown: 700, speed: SPEED.closeFast, color: '#9B5DE5', effect: null, pellets: 3, spreadDeg: 26, emoji: '🟣' },
+      { key: 'Stick', name: 'Stick Toss', type: 'ranged', slot: 'long', range: REACH.rangedLong, damage: 9, cooldown: 950, speed: SPEED.long, color: '#FFF3DE', effect: null, emoji: '🥢' },
       // ── DEVIATION #13 (2026-08-11): 17 -> 18 and 8000 -> 7000 ms.
       //
       //   Lollipop is the roster's ONLY kit with no `ranged` weapon, so `af35362`'s reach
@@ -4297,10 +4447,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // 2800x2000 arena — 14% of its width — and `ui/screens/characterSelect.ts:73` prints
       // *"Whole map"* off `range >= REACH.ultimateSlam`. A genuinely map-wide effect is one
       // of the three separate projects §77 names, not a constant.
-      { key: 'Giant', name: 'Giant Lollipop', type: 'melee', range: REACH.ultimateSlam, damage: 18, cooldown: 7000, cone: 360, color: '#E63946', effect: 'stun', giantSlam: true, emoji: '🍭' },
+      { key: 'Giant', name: 'Giant Lollipop', type: 'melee', slot: 'super', range: REACH.ultimateSlam, damage: 18, cooldown: 7000, cone: 360, color: '#E63946', effect: 'stun', giantSlam: true, emoji: '🍭' },
     ],
     abilities: [
       { emoji: '🔨', name: 'Lollipop Smash', desc: 'Swings herself like a hammer for heavy damage', weapon: 'Smash' },
+      { emoji: '🟣', name: 'Candy Drops', desc: 'Drops a handful of candies nearby - each one chips away a little health', weapon: 'Drops' },
+      { emoji: '🥢', name: 'Stick Toss', desc: 'Throws her stick from a distance for damage', weapon: 'Stick' },
       // WAS: 'Grows huge and hits the whole map, making everyone dizzy'.
       //
       // *"hits the whole map"* was **400 wu against a 3440.93 wu arena diagonal** — 14% of
@@ -4334,14 +4486,17 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     // (`damageStatFor`) from the kit below, whose Tomato Splat went 6 -> 7 in
     // DEVIATION #13: `kitDps` 15.63 -> 16.74 HP/s, and 16.74 / 3.5 rounds to 5.
     // `sim.test.mjs` §22(f) fails if this line and the weapon table ever disagree.
-    stats: { damage: 5, health: 10, speed: 5 }, hasTrail: false,
+    stats: { damage: 6, health: 10, speed: 5 }, hasTrail: false,
     // WAS: 'Closed eyes, smiling. Triangular slice with pepperoni and a crust base.'
     //   Uri: "face is TERRIBLE" (DECISIONS §42) — the second-harshest verdict in the cast, and
     //   the second character specified with CLOSED eyes. The correlation with the closed-eye
     //   family is the whole finding. Kept because the triangle clause still governs the model.
     face: 'EYES: OPEN. The closed eyes are the entirety of Uri\'s "face is terrible" and they are removed — this was the second-worst-rated face in the cast and the second one specified shut. White sclera as the brightest value on the character (the slice is tan-on-tan, so the eye whites will be the only real value anchor on it), dark pupils offset for gaze, a catchlight each, and the old closed-smiling arc demoted to the upper lash line. MOUTH: a wide confident grin with a dark throat and a visible lower lip. SILHOUETTE: a triangular slice with pepperoni and a crust base — the triangle is the protected landmark here, unlike the rest of the cast\'s shapes, because it is the whole read at gameplay distance. ⚠️ But the melted cheese strands must not hang as two points either side of the head — Uri named that construction on four other characters and it reads as ears whatever it is made of. Drape them across the FRONT of the slice or run them continuously round the edge. ⚠️ And watch the tan-on-tan trap this file already records: slice, torso and limbs were literally the same constant, putting head, arms, legs and body inside a third of a stop. The face is where the missing value range gets paid back first. PERSONALITY: broad, loud, confident tank.',
     weapons: [
-      { key: 'Dough', name: 'Dough Balls', type: 'ranged', range: REACH.rangedLong, damage: 5, cooldown: 850, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '⚪' },
+      // 🆕 NEW 2026-08-24 — Pizza was one of five characters with NO melee at all: three
+      // ranged weapons and nothing to press when something reached it. This is the slot
+      // that fills, and the wheel is the obvious device on this character.
+      { key: 'Cutter', name: 'Crust Cutter', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 10, cooldown: 700, cone: 85, color: '#D98E3D', effect: null, emoji: '🍕' },
       // ── DEVIATION #13 (2026-08-11): 6 -> 7, and it moves the CARD BAR 4 -> 5.
       //
       //   Pizza is the roster's designated wall — the biggest pool (140) carrying the
@@ -4354,19 +4509,40 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       //   cannot be tuned finer than this, which is `HEALTH_PER_STAT`'s lesson on the other
       //   axis. Tomato Splat rather than Dough Balls because Dough measured **+19.4 pp** at
       //   the same +1, i.e. more than twice the gap that needed closing.
-      { key: 'Tomato', name: 'Tomato Splat', type: 'ranged', range: REACH.rangedMid, damage: 7, cooldown: 900, speed: SPEED.mid, color: '#E63946', effect: null, splatter: true, emoji: '🍅' },
-      { key: 'Cheese', name: 'Cheese Blind', type: 'ranged', range: REACH.rangedClose, damage: 4, cooldown: 1300, speed: SPEED.close, color: '#FFD873', effect: 'stun', emoji: '🧀' },
+      { key: 'Tomato', name: 'Tomato Splat', type: 'ranged', slot: 'short', range: REACH.rangedMid, damage: 7, cooldown: 900, speed: SPEED.mid, color: '#E63946', effect: null, splatter: true, emoji: '🍅' },
+      { key: 'Dough', name: 'Dough Balls', type: 'ranged', slot: 'long', range: REACH.rangedLong, damage: 5, cooldown: 850, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '⚪' },
+      // 🚨 CHEESE BLIND IS PIZZA'S SUPER NOW, AND THE COOLDOWN IS THE ONLY THING THAT
+      // MOVED: **1300 -> 2600 ms**. Nothing else on this record changed.
+      //
+      // WHY IT HAD TO MOVE AT ALL: the kit shape is melee + short + long + Super, and
+      // Pizza owned THREE ranged weapons and no melee, so exactly one of the three had to
+      // leave the two ranged slots. Cheese is the one — it is the only ability on this
+      // character that is a *decision* rather than a shot (a stun that blinds), which is
+      // what a Super is, and it already carried the longest cooldown in the kit.
+      //
+      // 2600 is not a taste number. `SUPER_MIN_COOLDOWN_MS` is 2500 and the value lands on
+      // `egg.Hatch`'s 2600 — the nearest EXISTING super rung above the floor — rather than
+      // on a fresh literal, so the roster gains no new cooldown value from this pass.
+      //
+      // ⚠️ THIS IS A NERF TO THE STRONGEST CHARACTER IN THE GAME AND IS NOT COMPENSATED.
+      // Pizza is 69.1% strength on `smart2` at the measurement in this commit's message,
+      // top of eleven. Halving the uptime of its control weapon will cost it. `DECISIONS
+      // §77` withholds permission to pay that back by re-tuning anyone, and `§85` records
+      // that the last two balance answers were shipped with the cost stated rather than
+      // hidden. Same here: the number is in the commit message.
+      { key: 'Cheese', name: 'Cheese Blind', type: 'ranged', slot: 'super', range: REACH.rangedClose, damage: 4, cooldown: 2600, speed: SPEED.close, color: '#FFD873', effect: 'stun', emoji: '🧀' },
     ],
     abilities: [
-      { emoji: '⚪', name: 'Dough Balls', desc: 'Throws dough balls that slow enemies down', weapon: 'Dough' },
+      { emoji: '🍕', name: 'Crust Cutter', desc: 'Runs his cutter through everyone in front of him', weapon: 'Cutter' },
       { emoji: '🍅', name: 'Tomato Splat', desc: 'Tomatoes stick to the floor, damaging and slowing anyone who steps on them', weapon: 'Tomato' },
-      { emoji: '🧀', name: 'Cheese Blind', desc: "Cheese sticks to an enemy's face and blocks their vision until someone hits them", weapon: 'Cheese' },
+      { emoji: '⚪', name: 'Dough Balls', desc: 'Throws dough balls that slow enemies down', weapon: 'Dough' },
+      { emoji: '🧀', name: 'Cheese Blind', desc: "Special: cheese sticks to an enemy's face and blocks their vision until someone hits them", weapon: 'Cheese' },
     ],
   }),
 
   sushi: defineCharacter({
     id: 'sushi', name: 'Sushi', emoji: '🍣', rarity: 'Legendary',
-    stats: { damage: 9, health: 5, speed: 8 }, hasTrail: false,
+    stats: { damage: 7, health: 5, speed: 8 }, hasTrail: false,
     // WAS: 'Wide eyes, puckered lips. Rice cylinder banded with nori, salmon centre.'
     //   Not one of the seven Uri reviewed, and the only old line that already said "wide" rather
     //   than "closed" — so the instinct was right and the construction still carries no white.
@@ -4374,15 +4550,27 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     //   the nori-band-on-rice clause is the character's silhouette landmark.
     face: 'EYES: wide and open — the old line already had the right instinct and is extended, not reversed. Build the three elements: a white sclera as the brightest value on the character, a dark pupil offset for gaze, an explicit catchlight. Rice is near-white, so the sclera needs a dark lid line and a dark pupil to separate from it — the SEPARATION here comes from the pupil and lash, not from the white. ⚠️ BOTH EYES MUST CARRY THE SAME ROLL. `setFromUnitVectors` picks the shortest arc and leaves a different residual roll per side, and that is the recorded cause of this character reading as having a LAZY EYE (LESSONS §12). Use an explicit shared tangent frame or matched quaternions, not per-eye `setFromUnitVectors`. MOUTH: keep the pucker — it is the personality — but a pucker still needs an INTERIOR: a dark opening ringed by a lighter lip, not a painted O. SILHOUETTE: classic salmon nigiri — a rounded rice mound, a near-black nori belt around its lower half, a glossy salmon slice draped over the top, the emoji read exactly. The rice-and-nori motif carried down onto the torso so the whole body reads as made of sushi. Legendary is the premium tier and this is the strongest high-contrast graphic in the cast (near-black on white); it earns the most craft. PERSONALITY: fast, precise, a little haughty.',
     weapons: [
-      { key: 'Rice', name: 'Rice Spray', type: 'ranged', range: REACH.rangedClose, damage: 2, cooldown: 700, speed: SPEED.closeFast, color: '#FFFFFF', effect: null, pellets: 5, spreadDeg: 35, emoji: '🍚' },
+      { key: 'Fish', name: 'Fish Pile', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 6, cooldown: 1200, cone: 150, color: '#F4A261', effect: null, emoji: '🐟' },
+      { key: 'Rice', name: 'Rice Spray', type: 'ranged', slot: 'short', range: REACH.rangedClose, damage: 2, cooldown: 700, speed: SPEED.closeFast, color: '#FFFFFF', effect: null, pellets: 5, spreadDeg: 35, emoji: '🍚' },
       // `lure` — *"Seaweed lures EVERY enemy toward it"*, so this pulls every living
       // opponent toward the bait, not the fighter it struck. Half a body per hit on a
       // 1,000 ms cooldown = **21.00 wu/s** of sustained pull, against the roster's SLOWEST
       // walk of 79.20 wu/s: a fighter running from the bait still nets 58 wu/s away. That
       // margin is the `DECISIONS §80` argument for a PULL, whose sign is the opposite of a
       // knockback's — see `movement.ts:displaceFighter` property 3.
-      { key: 'Seaweed', name: 'Seaweed Bait', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 1000, speed: SPEED.mid, color: '#7CB518', effect: 'slow', lure: BODY_LENGTH / 2, emoji: '🌿' },
-      { key: 'Fish', name: 'Fish Pile', type: 'melee', range: REACH.meleeStrong, damage: 6, cooldown: 1200, cone: 150, color: '#F4A261', effect: null, emoji: '🐟' },
+      //
+      // 🚨 RANGE `rangedMid` (116) -> `rangedLong` (128), 2026-08-24, AND `SPEED.mid` ->
+      // `SPEED.long` WITH IT — the two are ONE change and separating them would be a bug.
+      // `SPEED` is derived per rung so that FLIGHT TIME is the constant (`SPEED.mid` =
+      // `projectileSpeed(rangedMid, FLIGHT_MS.normal)`), so moving `range` alone would have
+      // silently lengthened this shot's flight by 10.3% and made the lure land later —
+      // a timing change wearing a reach change's clothes.
+      // WHY: Sushi held `rangedClose` 98 AND `rangedMid` 116, i.e. TWO short-band weapons
+      // and none in the long band, with its only long reach on the Super. One rung is the
+      // smallest move that gives the kit a real long slot; it is a +12 wu buff on a
+      // character measured at 50.6% / 49.4% strength, mid-roster on both policies, and it
+      // is reported in the commit message rather than compensated.
+      { key: 'Seaweed', name: 'Seaweed Bait', type: 'ranged', slot: 'long', range: REACH.rangedLong, damage: 5, cooldown: 1000, speed: SPEED.long, color: '#7CB518', effect: 'slow', lure: BODY_LENGTH / 2, emoji: '🌿' },
       // ── AUTHORISED DEVIATION #12 (2026-08-10): SUSHI — `speed` SPEED.maxSlow -> SPEED.max
       //    (160 -> 280 wu/s). Not a strength tune. At `maxSlow` this homing shot EXPIRED IN
       //    FLIGHT against a fleeing human and ARRIVED against a fleeing AI, because
@@ -4408,12 +4596,12 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // THREE TIMES, and that is exactly why `movement.ts:MAX_PUSH_DISTANCE` caps ACCUMULATED
       // displacement at one body rather than capping each application: 3 x 42 would be a
       // launch, and the cap makes it 42 however many pellets connect. 42 / 3.2 s = 13.13 wu/s.
-      { key: 'Catch', name: 'Big Catch', type: 'ranged', range: REACH.rangedMax, damage: 9, cooldown: 3200, speed: SPEED.max, color: '#FF8C42', effect: null, pellets: 3, spreadDeg: 40, homing: true, lure: BODY_LENGTH, emoji: '🐡' },
+      { key: 'Catch', name: 'Big Catch', type: 'ranged', slot: 'super', range: REACH.rangedMax, damage: 9, cooldown: 3200, speed: SPEED.max, color: '#FF8C42', effect: null, pellets: 3, spreadDeg: 40, homing: true, lure: BODY_LENGTH, emoji: '🐡' },
     ],
     abilities: [
+      { emoji: '🐟', name: 'Fish Pile', desc: 'Turns into a pile of fish that attack for small damage', weapon: 'Fish' },
       { emoji: '🍚', name: 'Rice Spray', desc: 'Throws a spray of rice grains - each one chips away a little health', weapon: 'Rice' },
       { emoji: '🌿', name: 'Seaweed Bait', desc: 'Seaweed lures every enemy toward it while he shoots them', weapon: 'Seaweed' },
-      { emoji: '🐟', name: 'Fish Pile', desc: 'Turns into a pile of fish that attack for small damage', weapon: 'Fish' },
       // WAS: '...the seaweed scatters across the map, pulling enemies everywhere'.
       // *"scatters across the map"* was **140 wu** (`REACH.rangedMax`) against a 3440.93 wu
       // arena diagonal — 5% of the map's width, and the most over-claimed span in the cast.
@@ -4427,7 +4615,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   soup: defineCharacter({
     id: 'soup', name: 'Soup', emoji: '🍲', rarity: 'Epic',
-    stats: { damage: 6, health: 9, speed: 4 }, hasTrail: false,
+    stats: { damage: 7, health: 9, speed: 4 }, hasTrail: false,
     // WAS: 'Gray steam-coloured eyes, no mouth. Wide bowl with rising steam.'
     //   🚨 UNFROZEN BY URI. "No mouth" is the same defect he already rejected by name on taco
     //   ("no mouth, seems like a hat"), and §42 predicted this reject before it arrived. The
@@ -4438,8 +4626,25 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     //   the way it does today.
     face: 'GIVE IT A MOUTH. Uri rejected "no mouth" on taco and the same complaint lands here — a small, calm, slightly open mouth with a dark interior behind the lip. Soup can stay the unsettling-calm one in the cast without being featureless: CALM IS AN EXPRESSION, NOT AN ABSENCE, and a blank face reads as unfinished rather than eerie. EYES: open, and NOT grey. A white sclera as the brightest value on the character, dark pupils offset for gaze, a catchlight each. Grey-on-grey was the old spec and it is why this face has no value range — it put the irises in the same family as the steam behind them. ⚠️ CLIPPING BUDGET, and it is real: `sepscan --mode chars` measures this character at 16.23% above luma 0.94 with p95 0.9753, against a reference band of 0.72–9.29% (median 2.49%). Soup is ALREADY the cast\'s worst near-white offender, so do NOT pay for the sclera by adding white. Pay for it by taking the CERAMIC bowl albedo (#DCD3C2, luma 0.947) DOWN — the bowl is where the 16.23% lives, it is a large area, and the eyes are a few dozen pixels. That trade improves both numbers at once: the sclera only reads as the brightest value if the bowl stops competing with it. And per LESSONS, scaling a warm off-white down is NOT a desaturation. SILHOUETTE: a wide bowl with rising steam, a ladle held in handR nodding at Splash/Toss/Dump, grey stoneware sleeves, cream mitts, dark boots, the near-black RIM_TRIM band carrying the dark rung. PERSONALITY: slow, heavy, eerily serene — serene WITH a face.',
     weapons: [
-      { key: 'Splash', name: 'Soup Splash', type: 'ranged', range: REACH.rangedClose, damage: 3, cooldown: 750, speed: SPEED.closeFast, color: '#CC9F0D', effect: null, pellets: 3, spreadDeg: 25, emoji: '💦' },
-      { key: 'Noodle', name: 'Noodle Toss', type: 'ranged', range: REACH.rangedLong, damage: 5, cooldown: 1000, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '🍜' },
+      // 🆕 NEW 2026-08-24 — Soup's only melee was `Dump`, which is the Super, so this
+      // character had nothing to press in contact without spending a 3,000 ms cooldown.
+      // The ladle is already in the silhouette (`face:` above names it, held in `handR`,
+      // "nodding at Splash/Toss/Dump"), so the melee slot is filled by the prop the model
+      // is already carrying rather than by a new object nobody drew.
+      // ⚠️ `color` WAS `#B9B3A6`, AN INVENTED OFF-PALETTE GREY, AND THE SHEET IS WHY IT
+      // MOVED. `wv_sheet --beat impact` put this tile beside the other ten new weapons at
+      // the shipped match camera and it read as the dullest of the eleven — a low-chroma
+      // ring on a pink floor. `#C9C9C9` is `PALETTE.steam`, i.e. THIS CHARACTER'S OWN
+      // colour, and it is a VALUE lift (luma 0.71 -> 0.79), not a chroma one.
+      // ⚠️ Deliberately NOT taken further toward white: soup's `face:` spec records this
+      // character as the cast's worst near-white offender (16.23% of its pixels above luma
+      // 0.94 against a 0.72–9.29% reference band), so brightening its effects is a budget
+      // that is already overspent. And raising the CHROMA instead was considered and
+      // refused as a guess: `CLAUDE.md` is explicit that there is **no standing chroma
+      // direction in any document** and that `arena-scan` is the only source.
+      { key: 'Ladle', name: 'Ladle Swing', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 10, cooldown: 800, cone: 100, color: '#C9C9C9', effect: null, emoji: '🥄' },
+      { key: 'Splash', name: 'Soup Splash', type: 'ranged', slot: 'short', range: REACH.rangedClose, damage: 3, cooldown: 750, speed: SPEED.closeFast, color: '#CC9F0D', effect: null, pellets: 3, spreadDeg: 25, emoji: '💦' },
+      { key: 'Noodle', name: 'Noodle Toss', type: 'ranged', slot: 'long', range: REACH.rangedLong, damage: 5, cooldown: 1000, speed: SPEED.long, color: '#FFE9A8', effect: 'slow', emoji: '🍜' },
       // ── 🚨 `castMs: 1100` WAS DERIVED, IMPLEMENTED, MEASURED AND REVERTED. DO NOT RE-ADD IT ──
       //
       // This is the ONE remaining special whose geometry says yes. It is `melee` at
@@ -4533,9 +4738,10 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // the press, and here the press is nearly the whole character. Nothing is changed:
       // the corrected 600 is recorded so the next pass does not re-derive it, and it is not
       // applied because it measures worse than deleting the weapon.
-      { key: 'Dump', name: 'Soup Dump', type: 'melee', range: REACH.meleeHeavy, damage: 16, cooldown: 3000, cone: 90, color: '#CC9F0D', effect: 'slow', emoji: '🌊' },
+      { key: 'Dump', name: 'Soup Dump', type: 'melee', slot: 'super', range: REACH.meleeHeavy, damage: 16, cooldown: 3000, cone: 90, color: '#CC9F0D', effect: 'slow', emoji: '🌊' },
     ],
     abilities: [
+      { emoji: '🥄', name: 'Ladle Swing', desc: 'Swings his ladle at everyone in front of him', weapon: 'Ladle' },
       { emoji: '💦', name: 'Soup Splash', desc: 'Throws his soup liquid - each splash chips away a little health', weapon: 'Splash' },
       { emoji: '🍜', name: 'Noodle Toss', desc: 'Throws noodles that slow enemies down', weapon: 'Noodle' },
       { emoji: '🌊', name: 'Soup Dump', desc: 'Special: tips himself over onto an enemy, pouring all his soup and noodles - big damage and a heavy slow', weapon: 'Dump' },
@@ -4544,7 +4750,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
 
   waterbottle: defineCharacter({
     id: 'waterbottle', name: 'Water Bottle', emoji: '💧', rarity: 'Legendary',
-    stats: { damage: 8, health: 6, speed: 6 }, hasTrail: false,
+    stats: { damage: 6, health: 6, speed: 6 }, hasTrail: false,
     // WAS: 'Eyes floating above the cap, big smile. Translucent blue bottle with a darker cap.'
     //   §42 flagged "eyes floating above the cap" as a predicted reject before Uri sent one: it
     //   is the same detached-feature construction he rejected on taco ("the face floats completely
@@ -4762,9 +4968,30 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     weapons: [
       // Water Bottle is the only four-weapon fighter with three ranged slots, so
       // Spray and Glass each drop a rung to keep all four reaches distinct.
-      { key: 'Spray', name: 'Water Spray', type: 'ranged', range: REACH.rangedClose, damage: 3, cooldown: 850, speed: SPEED.close, color: '#BFEFFF', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💦' },
-      { key: 'Glass', name: 'Glass Shards', type: 'ranged', range: REACH.rangedMid, damage: 7, cooldown: 1100, speed: SPEED.mid, color: '#BFEFFF', effect: 'stun', emoji: '🧊' },
-      { key: 'Cap', name: 'Cap Shot', type: 'ranged', range: REACH.rangedLong, damage: 6, cooldown: 900, speed: SPEED.long, color: '#1E90D8', effect: 'slow', emoji: '🔵' },
+      // 🚨 GLASS SHARDS IS THE MELEE NOW — `ranged`/`rangedMid` -> `melee`/`meleeStrong`,
+      // 2026-08-24. It is the only weapon in this pass whose TYPE changed, and it is a
+      // conversion rather than a deletion on purpose.
+      //
+      // WHY A CONVERSION: Water Bottle owned THREE ranged weapons (98 / 116 / 128) and no
+      // melee, and the kit shape has two ranged slots, so one of the three had to leave
+      // them. The alternative was to delete a weapon and author a new melee, which throws
+      // away a name Uri has seen, its bespoke VFX entry and its audio voice; converting
+      // keeps the key `'Glass'`, so `vfx/weapons/waterbottle.ts` and
+      // `audio/weapons/waterbottle.ts` keep resolving. Broken glass swung in an arc is the
+      // same object doing the same thing at a different distance.
+      //
+      // WHAT MOVED AND WHAT DID NOT: `type`, `range`, and `cone: 90` added because it is
+      // melee-only — and `speed` is DELETED, because `speed` is ranged-only and a melee
+      // record carrying one is a field two readers would disagree about. `damage` 7,
+      // `cooldown` 1100 and `effect: 'stun'` are untouched, so this is a REACH change and
+      // not a strength tune. It costs 46 wu of reach and gains multi-target (`3483d23`: a
+      // swing resolves against every opponent in the arc, not the nearest).
+      // ⚠️ It lands on the character `DECISIONS §77`/`§85` record as **37 pp below its
+      // nearest neighbour**. The paired measurement is in the commit message and nothing
+      // is re-tuned anywhere to pay it back — `§77`.
+      { key: 'Glass', name: 'Glass Shards', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 7, cooldown: 1100, cone: 90, color: '#BFEFFF', effect: 'stun', emoji: '🧊' },
+      { key: 'Spray', name: 'Water Spray', type: 'ranged', slot: 'short', range: REACH.rangedClose, damage: 3, cooldown: 850, speed: SPEED.close, color: '#BFEFFF', effect: 'slow', pellets: 3, spreadDeg: 30, emoji: '💦' },
+      { key: 'Cap', name: 'Cap Shot', type: 'ranged', slot: 'long', range: REACH.rangedLong, damage: 6, cooldown: 900, speed: SPEED.long, color: '#1E90D8', effect: 'slow', emoji: '🔵' },
       // 🌊 THE ROSTER'S ONLY CAST WEAPON, AND THE ONLY CARD THAT NAMES ITS OWN WIND-UP.
       // Its blurb says *"takes a few seconds"* and the record had `castMs` 0 — 3500 was
       // the COOLDOWN, which is a different quantity and is not visible to the player.
@@ -4843,11 +5070,14 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
       // this is re-attempted, clamp the launch to the separation to the nearest opponent —
       // the same clamp `Weapon.lure` already applies — so a tackle CLOSES instead of
       // overshooting. That is a design change, it is measurable, and it is not this pass.
-      { key: 'Mega', name: 'Mega Splash', type: 'melee', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', castMs: 1400, emoji: '🌊' },
+      { key: 'Mega', name: 'Mega Splash', type: 'melee', slot: 'super', range: REACH.meleeHeavy, damage: 18, cooldown: 3500, cone: 100, color: '#1E90D8', effect: 'slow', castMs: 1400, emoji: '🌊' },
     ],
     abilities: [
+      // WAS: 'Shoots glass shards that deal damage and freeze enemies' — true while this
+      // weapon was `ranged`. It is the melee slot now (see the record) and *"shoots"* would
+      // be a card promising a projectile that no longer exists. One span changed.
+      { emoji: '🧊', name: 'Glass Shards', desc: 'Swings broken glass at everyone in front of him and freezes them for a moment', weapon: 'Glass' },
       { emoji: '💦', name: 'Water Spray', desc: 'Sprays water that slows enemies down a lot', weapon: 'Spray' },
-      { emoji: '🧊', name: 'Glass Shards', desc: 'Shoots glass shards that deal damage and freeze enemies', weapon: 'Glass' },
       { emoji: '🔵', name: 'Cap Shot', desc: 'Fires his cap - enemies slip when it hits', weapon: 'Cap' },
       { emoji: '🌊', name: 'Mega Splash', desc: 'Special: launches himself up (takes a few seconds), his cap becomes a second bottle, and together they become one giant bottle that dumps water on an enemy for huge damage and a heavy slow', weapon: 'Mega' },
     ],
@@ -4869,7 +5099,7 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
   // not this character; it is that the roster's behavioural space is already full.
   hotdog: defineCharacter({
     id: 'hotdog', name: 'Hot Dog', emoji: '🌭', rarity: 'Cyber',
-    stats: { damage: 9, health: 6, speed: 8 }, hasTrail: false,
+    stats: { damage: 8, health: 6, speed: 8 }, hasTrail: false,
     // WAS: 'Sleepy half-closed eyes, small smile. Sausage in a bun with a mustard zigzag.'
     //   §42 predicted this reject: "sleepy half-closed" is the closed-eye family again, and
     //   `hotdog.ts` implemented it as "a thick lid stroke over a small peeking pupil" — which is
@@ -4877,20 +5107,37 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     //   the lid stroke and the mustard zigzag are both authored against this wording.
     face: 'EYES OPEN, NOT SLEEPY. Half-closed is the closed-eye family that Uri ranked bottom without seeing any code, and the current build is "a thick lid stroke over a small peeking pupil" — a stroke, which is what "drawn lines and not an actual face" means. Keep the laid-back personality by DROOPING the upper lid a little over a FULL open eye: RELAXED IS A LID ANGLE, NOT A MISSING EYE. Under that lid, all three elements — a white sclera as the brightest value on the character, a dark pupil offset for gaze (offset DOWN and to the side reads as bored far better than a closed eye does), and a catchlight. The old lid stroke survives as the lash line above the sclera, which is where it belonged all along. MOUTH: a small easy smile with a dark interior behind the lip. SILHOUETTE: a plump sausage nestled in a split bun, long axis along local X so the full length reads broadside at the shipped camera instead of foreshortening down its own length; a bold mustard zigzag along the sausage ridge as the one unmistakable landmark; small emissive Cyber end caps in the exposed sausage tips, gently pulsing — energised food, not a glow stick. PERSONALITY: fast, unbothered, permanently half-awake — and now half-awake with EYES.',
     weapons: [
-      { key: 'Mustard', name: 'Mustard Blast', type: 'ranged', range: REACH.rangedLong, damage: 7, cooldown: 900, speed: SPEED.long, color: '#FFC93C', effect: null, emoji: '💛' },
+      { key: 'Slash', name: 'Bun Slash', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 11, cooldown: 650, cone: 75, color: '#FFC93C', effect: null, emoji: '⚔️' },
       // `knockback` — *"Makes enemies slide and lose control"*, and it is the ONLY weapon in
       // the roster that authors one. 🚨 THAT IS THE WHOLE ANSWER TO `6ea35f5`'s REFUSAL: with
       // knockback derived from damage, all 33 weapons pushed and Hamburger's kit shoved its
       // victim 1.66x faster than it could chase. Here: half a body on a 950 ms cooldown =
       // **22.11 wu/s against Hot Dog's own 52.5 wu/s chase, 0.42x** — so Hot Dog's `Slash`
       // can still close on whatever its Ketchup pushed. §39(f) holds that ratio for the roster.
-      { key: 'Ketchup', name: 'Ketchup Slip', type: 'ranged', range: REACH.rangedMid, damage: 5, cooldown: 950, speed: SPEED.mid, color: '#D62839', effect: 'slow', knockback: BODY_LENGTH / 2, emoji: '🔴' },
-      { key: 'Slash', name: 'Bun Slash', type: 'melee', range: REACH.meleeStrong, damage: 11, cooldown: 650, cone: 75, color: '#FFC93C', effect: null, emoji: '⚔️' },
+      { key: 'Ketchup', name: 'Ketchup Slip', type: 'ranged', slot: 'short', range: REACH.rangedMid, damage: 5, cooldown: 950, speed: SPEED.mid, color: '#D62839', effect: 'slow', knockback: BODY_LENGTH / 2, emoji: '🔴' },
+      { key: 'Mustard', name: 'Mustard Blast', type: 'ranged', slot: 'long', range: REACH.rangedLong, damage: 7, cooldown: 900, speed: SPEED.long, color: '#FFC93C', effect: null, emoji: '💛' },
+      // 🆕 NEW 2026-08-24 — Hot Dog had NO Super: its longest cooldown was `Ketchup` at
+      // 950 ms, less than a third of `SUPER_MIN_COOLDOWN_MS`, so this was one of four
+      // characters where slot 4 on the tray was a dead key.
+      //
+      // THE DEVICE IS `knockback`, DELIBERATELY: it is this character's own primitive
+      // already (`Ketchup` above is the only weapon in the roster that authors one) and a
+      // Super should be the kit's own idea made large, not a borrowed one. A FULL body
+      // length against Ketchup's half, and it is the roster's only 360° knockback.
+      // `cone: 360` + `meleeHeavy` is the melee rung documented for "slow, telegraphed,
+      // high-damage" swings; it does NOT approach `lollipop.Giant`, which is `ultimateSlam`
+      // 157.22 — 1.87x this reach — and carries `stun` and `giantSlam` on top, so the two
+      // 360° supers stay clearly different sizes of idea.
+      // ⚠️ `castMs` IS DELIBERATELY ABSENT: `DECISIONS §83` has a wind-up on
+      // `lollipop.Giant` sitting UNANSWERED with Uri, and shipping a second telegraph on a
+      // new weapon would pre-empt that decision on a character nobody asked about.
+      { key: 'Works', name: 'The Works', type: 'melee', slot: 'super', range: REACH.meleeHeavy, damage: 16, cooldown: 3000, cone: 360, color: '#7CB518', effect: null, knockback: BODY_LENGTH, emoji: '🌭' },
     ],
     abilities: [
-      { emoji: '💛', name: 'Mustard Blast', desc: 'Burns enemies from a distance', weapon: 'Mustard' },
-      { emoji: '🔴', name: 'Ketchup Slip', desc: 'Makes enemies slide and lose control', weapon: 'Ketchup' },
       { emoji: '⚔️', name: 'Bun Slash', desc: 'Powerful close-range strike', weapon: 'Slash' },
+      { emoji: '🔴', name: 'Ketchup Slip', desc: 'Makes enemies slide and lose control', weapon: 'Ketchup' },
+      { emoji: '💛', name: 'Mustard Blast', desc: 'Burns enemies from a distance', weapon: 'Mustard' },
+      { emoji: '🌭', name: 'The Works', desc: 'Special: piles on every topping at once, hitting everyone around him for heavy damage and shoving them away', weapon: 'Works' },
     ],
   }),
 };
@@ -5356,12 +5603,41 @@ export function kitDps(id: CharacterId): number {
 /**
  * HP/s per point on the card's `damage` bar.
  *
- * Set so the roster spans the whole top of the scale without clipping: the strongest kit
- * (Hamburger, 33.9 HP/s) lands on 9.69 and rounds to exactly 10, and the weakest (Donut,
- * 13.3) lands on 4. A coarser divisor compresses the roster into fewer bar heights, and
- * the card having too few distinct values is precisely the defect §22(g) exists to catch.
+ * ⚠️ WAS **3.5**, AND THE OLD DERIVATION IS KEPT BECAUSE IT IS STILL THE RULE — only its
+ * INPUTS moved. It read:
+ *
+ *   > *"Set so the roster spans the whole top of the scale without clipping: the strongest
+ *   > kit (Hamburger, 33.9 HP/s) lands on 9.69 and rounds to exactly 10, and the weakest
+ *   > (Donut, 13.3) lands on 4. A coarser divisor compresses the roster into fewer bar
+ *   > heights, and the card having too few distinct values is precisely the defect §22(g)
+ *   > exists to catch."*
+ *
+ * The 2026-08-24 kit-shape pass gave every character FOUR weapons, and `kitDps` sums the
+ * whole kit, so every kit's throughput rose and the SPREAD collapsed: the roster ran
+ * 13.3–33.9 HP/s (2.55x) and now runs **28.8–47.6 (1.65x)**. At 3.5 that pins **6 of 11
+ * characters at the 10 ceiling** and the bar stops discriminating — the exact defect the
+ * old comment names, arriving from the other direction.
+ *
+ * Re-derived on the same rule: **4.67**, at which the strongest kit (Taco, 47.58 HP/s)
+ * lands on 10.19 and rounds to exactly 10, and the weakest (Water Bottle, 28.76) lands on
+ * 6.16 → 6. Swept 3.00–6.00 in 0.01 steps against three conditions at once — top bar
+ * exactly 10, raw quotient below the 10.4999 that would clip, and §22(g)'s card-total test
+ * (>= 6 distinct totals, no tie above 3). **[4.54, 5.00] is the legal band**; inside it,
+ * **[4.65, 4.70] is the only stretch where the largest card-total tie falls to 2** rather
+ * than 3, and 4.67 sits inside that.
+ *
+ * ⚠️ THE OBVIOUS DERIVATION IS WRONG AND WAS TRIED: `maxKitDps / STAT_MAX_DISPLAY` =
+ * 47.58/10 = **4.758**, which puts the top kit exactly on 10.00 and looks like the
+ * principled answer. It lands the roster's card totals on a **4-way tie** and fails
+ * §22(g). The scale's top being exact is worth less than the card discriminating.
+ *
+ * 🚨 **AND THE HONEST HALF: the bar lost resolution and no divisor can give it back.**
+ * Distinct bar heights across the roster went **7 → 4** (the whole legal band returns 4;
+ * the sweep's maximum over 301 divisors is 4). That is not a display bug, it is a true
+ * statement about the new roster — equal-sized kits ARE more alike in raw throughput than
+ * unequal ones — and it is reported rather than tuned away.
  */
-export const DPS_PER_DAMAGE_POINT = 3.5;
+export const DPS_PER_DAMAGE_POINT = 4.67;
 
 /** The card's `damage` bar for this character, derived from its kit. 1-10. */
 export function damageStatFor(id: CharacterId): number {

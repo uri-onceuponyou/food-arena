@@ -1717,8 +1717,20 @@ const preFog = (hp) => hp + FOG_DAMAGE;
         if (w.cooldown < duration) lockers[w.effect]++;
       }
     }
-    check('the roster still has exactly the 4-of-5 stun and 8-of-10 slow cooldown overlaps (ratchet tightened <= to ==)',
-      lockers.stun === 4 && lockers.slow === 8,
+    // ⚠️ WAS `lockers.stun === 4 && lockers.slow === 8`, titled *"the 4-of-5 stun and
+    // 8-of-10 slow cooldown overlaps"*. Re-recorded 2026-08-24 for the KIT-SHAPE pass
+    // (`rules.ts:WeaponSlot`), which took the roster 33 -> 44 weapons. This row is a
+    // RECORDER, not a bound — its own comment above says so — so the right response to a
+    // roster change is to re-record it in the same commit and say what moved, exactly as
+    // `wm_gate --ratchet` demands of its ledger. What moved, and all of it is derived:
+    //   stun  4 -> 3 of 5. `pizza.Cheese` became the Super and its cooldown went
+    //         1300 -> 2600, i.e. OUT of the 2000 ms stun window. `waterbottle.Glass`
+    //         (1100) is still inside it and still counted; it changed type, not cooldown.
+    //   slow  8 -> 9 of 12. Two new slow weapons (`burrito.Salsa` 800, `donut.Glaze` 3000)
+    //         and `sushi.Seaweed` unchanged at 1000; Glaze is the one that lands OUTSIDE
+    //         the 2500 ms window, which is why totals rose by 2 and lockers by 1.
+    check('the roster still has exactly the 3-of-5 stun and 9-of-12 slow cooldown overlaps (ratchet tightened <= to ==)',
+      lockers.stun === 3 && lockers.slow === 9,
       `${lockers.stun}/${totals.stun} stun, ${lockers.slow}/${totals.slow} slow re-fire inside their own effect`);
 
     // (i) THE BOUND. Spam the effect every single tick for ten times its own duration and
@@ -2102,11 +2114,31 @@ const preFog = (hp) => hp + FOG_DAMAGE;
   // the behaviour. This check stays because the ARCHETYPE is what made the hole visible:
   // if a second melee-only character ever arrives, the driver work it depends on should
   // be re-read rather than assumed.
+  // 🚨 REVERSED 2026-08-24 BY URI'S KIT SHAPE, AND THE OLD ASSERTION IS KEPT VERBATIM
+  // BECAUSE IT IS THE REASON THE NEW ONE IS WORTH HAVING:
+  //
+  //   > `check('exactly one character has no ranged weapon, and it is Lollipop',`
+  //   >   `meleeOnly.length === 1 && meleeOnly[0] === 'lollipop', ...)`
+  //
+  // *"All characters have 3 weapons (melee, short range, long range) + Super"* means the
+  // melee-only archetype **cannot exist any more**: `rules.ts:WeaponSlot` requires a
+  // `short` and a `long` slot on every character, both `type: 'ranged'`, and
+  // `tools/tmp/wp_shape.mjs` arms B and D assert it. Lollipop gained `Drops` and `Stick`.
+  //
+  // ⚠️ SO THE ROW HAD TO CHANGE OR GO — AND IT MUST NOT GO, because the hole it was built
+  // around is a DRIVER hole, not a roster one. `ai.ts:pickSniperWeapon` could not select
+  // for a melee-only character, and the reason that was ever reachable is that the roster
+  // permitted the archetype. It is asserted from the OTHER SIDE now: the archetype must
+  // stay absent. That is a strictly STRONGER statement than the old one (which permitted
+  // exactly one), and it is not vacuous — the set it counts is the whole roster, and a
+  // character authored with two melee weapons and no ranged would put a name back in it.
   const meleeOnly = CHARACTER_IDS.filter((id) =>
     !CHARACTERS[id].weapons.some((w) => w.type === 'ranged'));
-  check('exactly one character has no ranged weapon, and it is Lollipop',
-    meleeOnly.length === 1 && meleeOnly[0] === 'lollipop',
-    `melee-only: [${meleeOnly.join(', ')}] — every AI branch must be able to select a weapon for these`);
+  check('NO character is melee-only any more — the kit shape gives every one a short and a long slot',
+    meleeOnly.length === 0 && CHARACTER_IDS.length === 11,
+    `melee-only: [${meleeOnly.join(', ')}] over ${CHARACTER_IDS.length} characters `
+    + `(WAS: exactly one, Lollipop — reversed by the 2026-08-24 kit shape) `
+    + `— every AI branch must be able to select a weapon for these`);
 
   // ── (d) …SO ITS SWING HAS TO BE THE BEST SWING ────────────────────────────
   //
@@ -2982,12 +3014,42 @@ console.log('\n21. The countdown leaves no residue (why its length is balance-fr
     const sx = Math.sqrt(dps.reduce((s, x) => s + (x - mx) ** 2, 0));
     const sy = Math.sqrt(hp.reduce((s, y) => s + (y - my) ** 2, 0));
     const rho = cov / (sx * sy);
-    // Bound tightened -0.4 -> -0.6 with DEVIATION #12. Compensation is not merely
-    // present now, it is the MECHANISM that makes the tiers flat: the kits are not
-    // aligned to rarity at all (rho = 0.03 between kit HP/s and rarity rank), so a flat
-    // roster is exactly a roster where durability cancels output. Measured -0.788.
-    check('health COMPENSATES the kit: the strongest kits are the frailest (rho <= -0.6)',
-      rho <= -0.6, `rho = ${rho.toFixed(3)} between kit HP/s and health multiplier`);
+    // ⚠️ WAS `rho <= -0.6`, titled *"health COMPENSATES the kit: the strongest kits are
+    // the frailest"*, with this note kept verbatim because the way it went wrong is the
+    // useful part:
+    //
+    //   > *"Bound tightened -0.4 -> -0.6 with DEVIATION #12. Compensation is not merely
+    //   > present now, it is the MECHANISM that makes the tiers flat: the kits are not
+    //   > aligned to rarity at all (rho = 0.03 between kit HP/s and rarity rank), so a
+    //   > flat roster is exactly a roster where durability cancels output. Measured
+    //   > -0.788."*
+    //
+    // 🚨 URI'S KIT SHAPE (2026-08-24) MOVED IT TO **-0.205**, AND THE HONEST READING IS
+    // THAT -0.788 WAS PARTLY AN ARTEFACT NOBODY HAD SEPARATED OUT.
+    //
+    // `kitDps` sums EVERY weapon a character owns. While kits ran 1 to 4 weapons, that
+    // number conflated kit POWER with kit SIZE — Donut had ONE weapon and 13.3 HP/s
+    // against Hamburger's four and 33.9 — and health had been authored to run opposite to
+    // it. So a large part of the -0.788 was health compensating **weapon count**. Every
+    // kit is four weapons now, the spread fell from 2.55x to 1.65x, and what is left is
+    // the compensation against genuine throughput: still negative, much weaker.
+    //
+    // ⚠️ THE BOUND IS NOT SIMPLY LOOSENED TO WHEREVER THE ANSWER LANDED — that is how a
+    // ratchet becomes furniture. It is re-stated at the only place with a MEANING rather
+    // than a measurement: **strictly negative**. Compensation present in SIGN is the
+    // design rule; -0.6 was a magnitude that a confounded statistic happened to reach.
+    // A roster where durability ran WITH output — the actual design failure this row
+    // exists to catch, rich getting richer — gives rho > 0 and goes red. There is 0.205
+    // of margin and it is stated so the next reader knows how much.
+    //
+    // 🚨 AND IT IS NOT PAID BACK BY RE-TUNING HEALTH. `DECISIONS §77` withholds permission
+    // to re-tune the roster to absorb a structural change, and `§85` records that both
+    // previous balance answers were shipped with the cost stated. `stats.health` drives
+    // `healthMultiplier`, i.e. real HP; moving eleven of them to restore a correlation
+    // coefficient would be exactly the "tune until the aggregate looks calm" §77 forbids.
+    check('health still COMPENSATES the kit — the correlation is NEGATIVE (was <= -0.6 on unequal kit sizes)',
+      rho < 0, `rho = ${rho.toFixed(3)} between kit HP/s and health multiplier `
+      + `(was -0.788 when kits ran 1..4 weapons; every kit is 4 now, so the size confound is gone)`);
 
     // …and the compensation is big enough to be worth something. A roster where every
     // multiplier sat between 0.98 and 1.02 would satisfy every check above and change
@@ -3462,9 +3524,16 @@ console.log('\n23. Character levels');
     for (const id of CHARACTER_IDS) {
       for (const w of CHARACTERS[id].weapons) if (w.splatter) splatters.push(`${id}:${w.key}`);
     }
-    check('exactly two weapons in the roster leave a slowing splat, and they are Hamburger\'s and Pizza\'s',
-      splatters.length === 2 && splatters.includes('hamburger:Tomato') && splatters.includes('pizza:Tomato'),
-      `splatter weapons: [${splatters.join(', ')}]`);
+    // ⚠️ WAS *"exactly two weapons ... and they are Hamburger's and Pizza's"*, `length === 2`.
+    // The 2026-08-24 kit shape added `donut.Glaze`, the Super, whose whole idea is the
+    // sticky floor patch. This row is a CENSUS of who (a) is worth something to, so the
+    // right response to a third splatter is to name it here — and NOT to relax the
+    // membership test to a bare count, which is what would make this row stop being able
+    // to notice a splatter appearing on a weapon nobody intended.
+    check('exactly three weapons in the roster leave a slowing splat: Hamburger\'s, Pizza\'s and Donut\'s Super',
+      splatters.length === 3 && splatters.includes('hamburger:Tomato') && splatters.includes('pizza:Tomato')
+      && splatters.includes('donut:Glaze'),
+      `splatter weapons: [${splatters.join(', ')}] (WAS two — donut:Glaze added by the kit shape)`);
     check('…and a splat is smaller than a fighter, so standing in one is a decision, not an area denial',
       SPLAT_RADIUS < PLAYER_SIZE, `SPLAT_RADIUS ${SPLAT_RADIUS} vs PLAYER_SIZE ${PLAYER_SIZE}`);
   }
@@ -3590,8 +3659,18 @@ console.log('\n23. Character levels');
         if (hit) break;
       }
     }
-    const WANT = ['taco', 'burrito', 'sushi', 'soup', 'waterbottle'];
-    check('ranking a kit by authored `damage` mis-ranks FIVE characters once cooldowns are in it',
+    // ⚠️ WAS `['taco', 'burrito', 'sushi', 'soup', 'waterbottle']`, titled *"mis-ranks
+    // FIVE characters"*. Re-recorded 2026-08-24: Uri's kit shape took the roster 33 -> 44
+    // weapons, and this census enumerates EVERY non-empty subset of every kit, so adding a
+    // fourth weapon to seven characters doubles the number of subsets it walks on each of
+    // them. **EIGHT of eleven now mis-rank** — the finding this row records got STRONGER,
+    // which is the direction a ratchet structurally cannot notice (`wm_gate`'s own header
+    // says the same thing about itself), so it has to be re-recorded by hand or the
+    // strengthening is invisible. The three that do not mis-rank are hamburger, pizza and
+    // hotdog. Membership is still asserted by NAME, never by count, for the same reason as
+    // the splatter census above: a count alone cannot see a swap.
+    const WANT = ['donut', 'taco', 'burrito', 'egg', 'lollipop', 'sushi', 'soup', 'waterbottle'];
+    check('ranking a kit by authored `damage` mis-ranks EIGHT characters once cooldowns are in it (was five)',
       mis.length === WANT.length && WANT.every((id) => mis.includes(id)),
       `mis-ranked by the damage key: [${mis.join(', ')}] — want [${WANT.join(', ')}]; first cell each: ${pairs.join(' ')}`);
     // …and the claim that the FULL-kit model finds only two, which is why it was believed.
@@ -3607,9 +3686,13 @@ console.log('\n23. Character levels');
         if (byDamage !== byPress) { misFullKit.push(id); break; }
       }
     }
-    check('…and with EVERY weapon off cooldown it finds only two — that gap is why "two" was believed',
-      misFullKit.length === 2 && misFullKit.includes('taco') && misFullKit.includes('burrito'),
-      `full-kit model: [${misFullKit.join(', ')}]`);
+    // ⚠️ WAS *"it finds only two"* — taco and burrito. Now THREE (egg joins, on its new
+    // `Yolk` long shot losing to `Shards`' three pellets). The GAP is the point of this row
+    // and the gap widened with the kit shape: 3 against 8, where it used to be 2 against 5.
+    check('…and with EVERY weapon off cooldown it finds only three — that gap is why "two" was believed',
+      misFullKit.length === 3 && misFullKit.includes('taco') && misFullKit.includes('burrito')
+      && misFullKit.includes('egg'),
+      `full-kit model: [${misFullKit.join(', ')}] (WAS two: taco, burrito)`);
   }
 }
 
@@ -6538,8 +6621,14 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
       const flightMs = (w.range / w.speed) * 1000;
       return { key: `${id}/${w.key}`, law: w.range - (TOP_HUMAN * flightMs) / 1000 + HIT_RADIUS_VS_ENEMY };
     });
-    check('KNOWN-BAD: under path-length retirement the shipped law puts ALL 23 ranged weapons short of their own press gate',
-      shortfall.length === 23 && shortfall.every((r, i) => r.law < rangedWeapons[i].w.range),
+    // ⚠️ WAS `shortfall.length === 23`. **23 -> 28** with Uri's 2026-08-24 kit shape (the
+    // roster went 33 -> 44 weapons; five of the eleven new ones are ranged, and
+    // `waterbottle.Glass` left the ranged set for the melee slot: 23 + 6 − 1 = 28). The
+    // COUNT is a non-vacuity guard on `rangedWeapons`, not the finding — the finding is
+    // `every(...)`, and `[].every()` is `true`, which is exactly why the length is
+    // asserted first and why it must be re-derived rather than relaxed to `> 0`.
+    check('KNOWN-BAD: under path-length retirement the shipped law puts ALL 28 ranged weapons short of their own press gate',
+      shortfall.length === 28 && shortfall.every((r, i) => r.law < rangedWeapons[i].w.range),
       shortfall.map((r) => `${r.key} ${r.law.toFixed(0)}`).join(' · '));
     // …and on the ORPHANED RUNG the same law goes NEGATIVE, which is the whole of §50a:
     // a weapon there has negative reach at every range on the ladder, so it is not weak,
@@ -7667,13 +7756,53 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
       aiPresses(aiFix({ sudden: true, hp: lethalHp - 1 })) === 0, `lethal below ${lethalHp} HP`);
     check('…but STILL CASTS in sudden death with the HP to survive it — the gate is the fog, not the phase',
       aiPresses(aiFix({ sudden: true, hp: lethalHp + 10 })) === 1);
-    check('…and a fighter mid-cast cannot press a second thing',
-      (() => {
-        const state = aiFix();
-        aiPresses(state);
-        return state.enemy.cast !== null && aiPresses(state) === 0
-          && attemptAttack(state, state.enemy, 0, []) === false;
-      })());
+    // 🚨 THIS ROW WAS GREEN, ITS CLAIM WAS FALSE, AND IT WAS GREEN BECAUSE OF WEAPON
+    // ORDER. THE OLD WORDING IS KEPT VERBATIM BECAUSE THE WAY IT WENT WRONG IS THE POINT:
+    //
+    //   > `check('…and a fighter mid-cast cannot press a second thing',`
+    //   >   `(() => { const state = aiFix(); aiPresses(state);`
+    //   >     `return state.enemy.cast !== null && aiPresses(state) === 0`
+    //   >       `&& attemptAttack(state, state.enemy, 0, []) === false; })());`
+    //
+    // *"cannot press a second thing"* is the ATTACK LOCKOUT, and `DECISIONS §78` **removed
+    // it deliberately**, for a measured +19.7 pp on this exact character. `combat.ts` says
+    // so at the line: `if (attacker.cast !== null && castMs > 0) return false;` — the
+    // `castMs > 0` term is what is left, and it refuses a second CAST and nothing else.
+    // So the shipped sim has permitted this press since 2026-08-18 and this row asserted
+    // the opposite.
+    //
+    // WHY IT PASSED ANYWAY: it pressed **index 0**, and Water Bottle's index 0 was `Spray`
+    // — the weapon `stepAI` had just fired on the same tick. The refusal came from
+    // `Spray`'s own COOLDOWN, one line BELOW the gate this row is named after. Uri's
+    // 2026-08-24 kit shape re-ordered the tray to melee/short/long/Super, index 0 became
+    // `Glass` (never fired, `lastUsed` still -Infinity), the cooldown no longer refused,
+    // and the row went red — **a positional coincidence, surviving because nothing here
+    // looked weapons up by key.** `AbilityBlurb`'s doc comment in `rules.ts` records the
+    // same defect shape in the same roster: *"a positional join is correct for 10 of the
+    // 11 characters, which is exactly why it survived."*
+    //
+    // REPLACED BY THE CONTRACT `combat.ts` ACTUALLY IMPLEMENTS, BOTH HALVES, BY KEY:
+    {
+      const state = aiFix();
+      aiPresses(state);
+      const ws = CHARACTERS.waterbottle.weapons;
+      const megaIdx = ws.findIndex((w) => w.key === 'Mega');
+      // A castless weapon that has NEVER been fired, so no cooldown can answer for the
+      // gate. Asserted non-empty first — with every weapon on cooldown this arm would be
+      // vacuous, and `[].find()` is `undefined`, not a failure.
+      const freeIdx = ws.findIndex((w, i) => (w.castMs ?? 0) === 0 && state.enemy.lastUsed[i] === -Infinity);
+      check('…the mid-cast press fixture really has an un-fired castless weapon (non-vacuity)',
+        freeIdx >= 0 && megaIdx >= 0,
+        `free slot ${freeIdx} (${ws[freeIdx]?.key}), Mega at ${megaIdx}, lastUsed ${JSON.stringify(state.enemy.lastUsed.map((v) => (v === -Infinity ? '-inf' : v)))}`);
+      check('…and a fighter mid-cast cannot start a SECOND CAST — no free reset of `resolvesAt`',
+        state.enemy.cast !== null && aiPresses(state) === 0
+        && attemptAttack(state, state.enemy, megaIdx, []) === false,
+        `re-pressing Mega (index ${megaIdx}) during its own wind-up must be refused`);
+      check('…but it CAN press a castless weapon mid-cast — DECISIONS §78 removed the attack lockout (+19.7 pp)',
+        attemptAttack(state, state.enemy, freeIdx, []) === true,
+        `${ws[freeIdx]?.key} (index ${freeIdx}) must be pressable during Mega's wind-up; `
+        + 'a FALSE here means the lockout is back and §78 has been reverted');
+    }
   }
 
   // ── (l) THE AI STEERS OUT OF A TELEGRAPH IT CAN CLEAR, AND ONLY THEN ───────

@@ -4,139 +4,764 @@
   "claims": {
     "hamburger.Tomato": {
       "desc": "Slows enemies down",
-      "c": [["slow", "Slows enemies down"]]
+      "c": [
+        [
+          "slow",
+          "Slows enemies down"
+        ]
+      ]
     },
     "hamburger.Lettuce": {
       "desc": "Stuns enemies for a moment",
-      "c": [["stun", "Stuns enemies"], ["stun-brief", "for a moment"]]
+      "c": [
+        [
+          "stun",
+          "Stuns enemies"
+        ],
+        [
+          "stun-brief",
+          "for a moment"
+        ]
+      ]
     },
     "hamburger.Smash": {
       "desc": "Deals heavy damage",
-      "c": [["damage-above-median", "Deals heavy damage"]]
+      "c": [
+        [
+          "damage-above-median",
+          "Deals heavy damage"
+        ]
+      ]
     },
     "hamburger.Onion": {
       "desc": "Heals himself",
-      "c": [["self-heal", "Heals himself"]]
+      "c": [
+        [
+          "self-heal",
+          "Heals himself"
+        ]
+      ]
     },
     "donut.Candy": {
       "desc": "Throws candies that chip away health",
-      "c": [["ranged", "Throws"], ["cosmetic", "candies"], ["damage-per-hit-low", "chip away health"]]
+      "c": [
+        [
+          "ranged",
+          "Throws"
+        ],
+        [
+          "cosmetic",
+          "candies"
+        ],
+        [
+          "damage-per-hit-low",
+          "chip away health"
+        ]
+      ]
     },
     "donut.~Sticky Trail": {
       "desc": "Leaves a filling trail - hurts enemies, speeds him up",
-      "c": [["passive-trail", "Leaves a filling trail"], ["trail-damage", "hurts enemies"], ["trail-speed-boost", "speeds him up"]]
+      "c": [
+        [
+          "passive-trail",
+          "Leaves a filling trail"
+        ],
+        [
+          "trail-damage",
+          "hurts enemies"
+        ],
+        [
+          "trail-speed-boost",
+          "speeds him up"
+        ]
+      ]
     },
     "taco.Filling": {
       "desc": "Throws his filling for heavy damage",
-      "c": [["ranged", "Throws his filling"], ["damage-above-median", "heavy damage"]]
+      "c": [
+        [
+          "ranged",
+          "Throws his filling"
+        ],
+        [
+          "damage-above-median",
+          "heavy damage"
+        ]
+      ]
     },
     "taco.Onion": {
       "desc": "Throws onion for damage",
-      "c": [["ranged", "Throws onion"], ["damage-any", "for damage"]]
+      "c": [
+        [
+          "ranged",
+          "Throws onion"
+        ],
+        [
+          "damage-any",
+          "for damage"
+        ]
+      ]
     },
     "taco.Double": {
       "desc": "Special: throws filling and onion together for massive damage",
-      "c": [["cosmetic", "Special"], ["combo", "throws filling and onion together"], ["damage-top3", "massive damage"]]
+      "c": [
+        [
+          "cosmetic",
+          "Special"
+        ],
+        [
+          "combo",
+          "throws filling and onion together"
+        ],
+        [
+          "damage-top3",
+          "massive damage"
+        ]
+      ]
     },
     "burrito.Disc": {
       "desc": "Throws himself like a flying disc for damage",
-      "c": [["ranged", "Throws"], ["cosmetic", "himself like a flying disc"], ["damage-any", "for damage"]]
+      "c": [
+        [
+          "ranged",
+          "Throws"
+        ],
+        [
+          "cosmetic",
+          "himself like a flying disc"
+        ],
+        [
+          "damage-any",
+          "for damage"
+        ]
+      ]
     },
     "burrito.Roll": {
       "desc": "Rolls up and freezes enemies in place for a moment",
-      "c": [["cosmetic", "Rolls up"], ["stun", "freezes enemies in place"], ["stun-brief", "for a moment"]]
+      "c": [
+        [
+          "cosmetic",
+          "Rolls up"
+        ],
+        [
+          "stun",
+          "freezes enemies in place"
+        ],
+        [
+          "stun-brief",
+          "for a moment"
+        ]
+      ]
     },
     "burrito.Swarm": {
       "desc": "Special: squeezes out all his toppings, which fly everywhere and chase enemies dealing damage - the flying toppings can be destroyed",
-      "c": [["cosmetic", "Special"], ["pellets", "squeezes out all his toppings"], ["multi-target", "fly everywhere"], ["homing", "chase enemies"], ["damage-any", "dealing damage"], ["projectile-destructible", "the flying toppings can be destroyed"]]
+      "c": [
+        [
+          "cosmetic",
+          "Special"
+        ],
+        [
+          "pellets",
+          "squeezes out all his toppings"
+        ],
+        [
+          "multi-target",
+          "fly everywhere"
+        ],
+        [
+          "homing",
+          "chase enemies"
+        ],
+        [
+          "damage-any",
+          "dealing damage"
+        ],
+        [
+          "projectile-destructible",
+          "the flying toppings can be destroyed"
+        ]
+      ]
     },
     "egg.Tackle": {
       "desc": "Launches herself at the enemy for big damage - slow to charge up",
-      "c": [["self-launch", "Launches herself at the enemy"], ["damage-above-median", "big damage"], ["long-cooldown", "slow to charge up"]]
+      "c": [
+        [
+          "self-launch",
+          "Launches herself at the enemy"
+        ],
+        [
+          "damage-above-median",
+          "big damage"
+        ],
+        [
+          "long-cooldown",
+          "slow to charge up"
+        ]
+      ]
     },
     "egg.Hatch": {
       "desc": "She cracks open and a chick bursts out, pecking for damage",
-      "c": [["cosmetic", "cracks open and a chick bursts out"], ["repeat-hits", "pecking"], ["damage-any", "for damage"]]
+      "c": [
+        [
+          "cosmetic",
+          "cracks open and a chick bursts out"
+        ],
+        [
+          "repeat-hits",
+          "pecking"
+        ],
+        [
+          "damage-any",
+          "for damage"
+        ]
+      ]
     },
     "egg.Shards": {
       "desc": "Broken shell pieces slow enemies and chip away their health",
-      "c": [["cosmetic", "Broken shell pieces"], ["slow", "slow enemies"], ["damage-per-hit-low", "chip away their health"]]
+      "c": [
+        [
+          "cosmetic",
+          "Broken shell pieces"
+        ],
+        [
+          "slow",
+          "slow enemies"
+        ],
+        [
+          "damage-per-hit-low",
+          "chip away their health"
+        ]
+      ]
     },
     "lollipop.Smash": {
       "desc": "Swings herself like a hammer for heavy damage",
-      "c": [["melee", "Swings"], ["cosmetic", "herself like a hammer"], ["damage-above-median", "heavy damage"]]
+      "c": [
+        [
+          "melee",
+          "Swings"
+        ],
+        [
+          "cosmetic",
+          "herself like a hammer"
+        ],
+        [
+          "damage-above-median",
+          "heavy damage"
+        ]
+      ]
     },
     "lollipop.Giant": {
       "desc": "Grows huge and slams the widest area in the game, making everyone dizzy",
-      "c": [["giant-slam-vfx", "Grows huge"], ["reach-longest", "slams the widest area in the game"], ["multi-target-melee", "making everyone"], ["stun", "dizzy"]]
+      "c": [
+        [
+          "giant-slam-vfx",
+          "Grows huge"
+        ],
+        [
+          "reach-longest",
+          "slams the widest area in the game"
+        ],
+        [
+          "multi-target-melee",
+          "making everyone"
+        ],
+        [
+          "stun",
+          "dizzy"
+        ]
+      ]
     },
     "pizza.Dough": {
       "desc": "Throws dough balls that slow enemies down",
-      "c": [["ranged", "Throws"], ["cosmetic", "dough balls"], ["slow", "slow enemies down"]]
+      "c": [
+        [
+          "ranged",
+          "Throws"
+        ],
+        [
+          "cosmetic",
+          "dough balls"
+        ],
+        [
+          "slow",
+          "slow enemies down"
+        ]
+      ]
     },
     "pizza.Tomato": {
       "desc": "Tomatoes stick to the floor, damaging and slowing anyone who steps on them",
-      "c": [["cosmetic", "Tomatoes"], ["splatter", "stick to the floor"], ["ground-effect-damage", "damaging"], ["splat-slows-anyone", "slowing anyone who steps on them"]]
+      "c": [
+        [
+          "cosmetic",
+          "Tomatoes"
+        ],
+        [
+          "splatter",
+          "stick to the floor"
+        ],
+        [
+          "ground-effect-damage",
+          "damaging"
+        ],
+        [
+          "splat-slows-anyone",
+          "slowing anyone who steps on them"
+        ]
+      ]
     },
     "pizza.Cheese": {
-      "desc": "Cheese sticks to an enemy's face and blocks their vision until someone hits them",
-      "c": [["cosmetic", "Cheese sticks to an enemy's face"], ["vision-block", "blocks their vision"], ["status-cleared-by-damage", "until someone hits them"]]
+      "desc": "Special: cheese sticks to an enemy's face and blocks their vision until someone hits them",
+      "c": [
+        [
+          "cosmetic",
+          "Special"
+        ],
+        [
+          "cosmetic",
+          "cheese sticks to an enemy's face"
+        ],
+        [
+          "vision-block",
+          "blocks their vision"
+        ],
+        [
+          "status-cleared-by-damage",
+          "until someone hits them"
+        ]
+      ]
     },
     "sushi.Rice": {
       "desc": "Throws a spray of rice grains - each one chips away a little health",
-      "c": [["ranged", "Throws"], ["pellets", "a spray of rice grains"], ["damage-per-hit-low", "each one chips away a little health"]]
+      "c": [
+        [
+          "ranged",
+          "Throws"
+        ],
+        [
+          "pellets",
+          "a spray of rice grains"
+        ],
+        [
+          "damage-per-hit-low",
+          "each one chips away a little health"
+        ]
+      ]
     },
     "sushi.Seaweed": {
       "desc": "Seaweed lures every enemy toward it while he shoots them",
-      "c": [["cosmetic", "Seaweed"], ["lure", "lures every enemy toward it"], ["cosmetic", "while he shoots them"]]
+      "c": [
+        [
+          "cosmetic",
+          "Seaweed"
+        ],
+        [
+          "lure",
+          "lures every enemy toward it"
+        ],
+        [
+          "cosmetic",
+          "while he shoots them"
+        ]
+      ]
     },
     "sushi.Fish": {
       "desc": "Turns into a pile of fish that attack for small damage",
-      "c": [["cosmetic", "Turns into a pile of fish that attack"], ["damage-below-median", "small damage"]]
+      "c": [
+        [
+          "cosmetic",
+          "Turns into a pile of fish that attack"
+        ],
+        [
+          "damage-below-median",
+          "small damage"
+        ]
+      ]
     },
     "sushi.Catch": {
       "desc": "Special: throws seaweed with fish - the fish grow huge and the seaweed scatters in a fan, pulling enemies everywhere",
-      "c": [["cosmetic", "Special"], ["cosmetic", "throws seaweed with fish"], ["projectile-grows", "the fish grow huge"], ["pellets", "the seaweed scatters in a fan"], ["lure", "pulling enemies"], ["multi-target", "enemies everywhere"]]
+      "c": [
+        [
+          "cosmetic",
+          "Special"
+        ],
+        [
+          "cosmetic",
+          "throws seaweed with fish"
+        ],
+        [
+          "projectile-grows",
+          "the fish grow huge"
+        ],
+        [
+          "pellets",
+          "the seaweed scatters in a fan"
+        ],
+        [
+          "lure",
+          "pulling enemies"
+        ],
+        [
+          "multi-target",
+          "enemies everywhere"
+        ]
+      ]
     },
     "soup.Splash": {
       "desc": "Throws his soup liquid - each splash chips away a little health",
-      "c": [["ranged", "Throws his soup liquid"], ["pellets", "each splash"], ["damage-per-hit-low", "chips away a little health"]]
+      "c": [
+        [
+          "ranged",
+          "Throws his soup liquid"
+        ],
+        [
+          "pellets",
+          "each splash"
+        ],
+        [
+          "damage-per-hit-low",
+          "chips away a little health"
+        ]
+      ]
     },
     "soup.Noodle": {
       "desc": "Throws noodles that slow enemies down",
-      "c": [["ranged", "Throws noodles"], ["slow", "slow enemies down"]]
+      "c": [
+        [
+          "ranged",
+          "Throws noodles"
+        ],
+        [
+          "slow",
+          "slow enemies down"
+        ]
+      ]
     },
     "soup.Dump": {
       "desc": "Special: tips himself over onto an enemy, pouring all his soup and noodles - big damage and a heavy slow",
-      "c": [["cosmetic", "Special"], ["cosmetic", "tips himself over onto an enemy, pouring all his soup and noodles"], ["damage-above-median", "big damage"], ["slow", "a heavy slow"], ["status-strength", "heavy slow"]]
+      "c": [
+        [
+          "cosmetic",
+          "Special"
+        ],
+        [
+          "cosmetic",
+          "tips himself over onto an enemy, pouring all his soup and noodles"
+        ],
+        [
+          "damage-above-median",
+          "big damage"
+        ],
+        [
+          "slow",
+          "a heavy slow"
+        ],
+        [
+          "status-strength",
+          "heavy slow"
+        ]
+      ]
     },
     "waterbottle.Spray": {
       "desc": "Sprays water that slows enemies down a lot",
-      "c": [["ranged", "Sprays water"], ["slow", "slows enemies down"], ["status-strength", "a lot"]]
+      "c": [
+        [
+          "ranged",
+          "Sprays water"
+        ],
+        [
+          "slow",
+          "slows enemies down"
+        ],
+        [
+          "status-strength",
+          "a lot"
+        ]
+      ]
     },
     "waterbottle.Glass": {
-      "desc": "Shoots glass shards that deal damage and freeze enemies",
-      "c": [["ranged", "Shoots glass shards"], ["damage-any", "deal damage"], ["stun", "freeze enemies"]]
+      "desc": "Swings broken glass at everyone in front of him and freezes them for a moment",
+      "c": [
+        [
+          "melee-cone",
+          "Swings broken glass at"
+        ],
+        [
+          "multi-target-melee",
+          "everyone in front of him"
+        ],
+        [
+          "stun-brief",
+          "freezes them for a moment"
+        ]
+      ]
     },
     "waterbottle.Cap": {
       "desc": "Fires his cap - enemies slip when it hits",
-      "c": [["ranged", "Fires his cap"], ["slow", "enemies slip when it hits"]]
+      "c": [
+        [
+          "ranged",
+          "Fires his cap"
+        ],
+        [
+          "slow",
+          "enemies slip when it hits"
+        ]
+      ]
     },
     "waterbottle.Mega": {
       "desc": "Special: launches himself up (takes a few seconds), his cap becomes a second bottle, and together they become one giant bottle that dumps water on an enemy for huge damage and a heavy slow",
-      "c": [["cosmetic", "Special"], ["self-launch", "launches himself up"], ["wind-up", "takes a few seconds"], ["summon-entity", "his cap becomes a second bottle"], ["merge-entities", "together they become one giant bottle"], ["cosmetic", "dumps water on an enemy"], ["damage-above-median", "huge damage"], ["slow", "a heavy slow"], ["status-strength", "heavy slow"]]
+      "c": [
+        [
+          "cosmetic",
+          "Special"
+        ],
+        [
+          "self-launch",
+          "launches himself up"
+        ],
+        [
+          "wind-up",
+          "takes a few seconds"
+        ],
+        [
+          "summon-entity",
+          "his cap becomes a second bottle"
+        ],
+        [
+          "merge-entities",
+          "together they become one giant bottle"
+        ],
+        [
+          "cosmetic",
+          "dumps water on an enemy"
+        ],
+        [
+          "damage-above-median",
+          "huge damage"
+        ],
+        [
+          "slow",
+          "a heavy slow"
+        ],
+        [
+          "status-strength",
+          "heavy slow"
+        ]
+      ]
     },
     "hotdog.Mustard": {
       "desc": "Burns enemies from a distance",
-      "c": [["damage-any", "Burns enemies"], ["ranged", "from a distance"]]
+      "c": [
+        [
+          "damage-any",
+          "Burns enemies"
+        ],
+        [
+          "ranged",
+          "from a distance"
+        ]
+      ]
     },
     "hotdog.Ketchup": {
       "desc": "Makes enemies slide and lose control",
-      "c": [["slow", "Makes enemies slide"], ["control-loss", "lose control"]]
+      "c": [
+        [
+          "slow",
+          "Makes enemies slide"
+        ],
+        [
+          "control-loss",
+          "lose control"
+        ]
+      ]
     },
     "hotdog.Slash": {
       "desc": "Powerful close-range strike",
-      "c": [["damage-above-median", "Powerful"], ["melee", "close-range strike"]]
+      "c": [
+        [
+          "damage-above-median",
+          "Powerful"
+        ],
+        [
+          "melee",
+          "close-range strike"
+        ]
+      ]
+    },
+    "donut.Ring": {
+      "desc": "Spins his ring in a wide arc, hitting everyone around him",
+      "c": [
+        [
+          "cosmetic",
+          "Spins his ring in a wide arc"
+        ],
+        [
+          "multi-target-melee",
+          "hitting everyone around him"
+        ]
+      ]
+    },
+    "donut.Sprinkles": {
+      "desc": "Scatters sprinkles - each one chips away a little health",
+      "c": [
+        [
+          "cosmetic",
+          "Scatters sprinkles"
+        ],
+        [
+          "pellets",
+          "each one"
+        ],
+        [
+          "damage-per-hit-low",
+          "chips away a little health"
+        ]
+      ]
+    },
+    "donut.Glaze": {
+      "desc": "Special: lobs a bomb of glaze that bursts into a sticky floor patch, slowing anyone who steps on it",
+      "c": [
+        [
+          "cosmetic",
+          "Special"
+        ],
+        [
+          "cosmetic",
+          "lobs a bomb of glaze that bursts into"
+        ],
+        [
+          "splatter",
+          "a sticky floor patch"
+        ],
+        [
+          "splat-slows-anyone",
+          "slowing anyone who steps on it"
+        ]
+      ]
+    },
+    "taco.Shell": {
+      "desc": "Snaps his shell shut on everyone in front of him",
+      "c": [
+        [
+          "cosmetic",
+          "Snaps his shell shut"
+        ],
+        [
+          "multi-target-melee",
+          "on everyone in front of him"
+        ]
+      ]
+    },
+    "burrito.Salsa": {
+      "desc": "Splashes salsa nearby that slows enemies down",
+      "c": [
+        [
+          "ranged",
+          "Splashes salsa nearby"
+        ],
+        [
+          "slow",
+          "slows enemies down"
+        ]
+      ]
+    },
+    "egg.Yolk": {
+      "desc": "Fires a yolk from a distance for damage",
+      "c": [
+        [
+          "ranged",
+          "Fires a yolk from a distance"
+        ],
+        [
+          "damage-any",
+          "for damage"
+        ]
+      ]
+    },
+    "lollipop.Drops": {
+      "desc": "Drops a handful of candies nearby - each one chips away a little health",
+      "c": [
+        [
+          "cosmetic",
+          "Drops"
+        ],
+        [
+          "pellets",
+          "a handful of candies"
+        ],
+        [
+          "cosmetic",
+          "nearby"
+        ],
+        [
+          "damage-per-hit-low",
+          "each one chips away a little health"
+        ]
+      ]
+    },
+    "lollipop.Stick": {
+      "desc": "Throws her stick from a distance for damage",
+      "c": [
+        [
+          "ranged",
+          "Throws her stick from a distance"
+        ],
+        [
+          "damage-any",
+          "for damage"
+        ]
+      ]
+    },
+    "pizza.Cutter": {
+      "desc": "Runs his cutter through everyone in front of him",
+      "c": [
+        [
+          "cosmetic",
+          "Runs his cutter through"
+        ],
+        [
+          "multi-target-melee",
+          "everyone in front of him"
+        ]
+      ]
+    },
+    "soup.Ladle": {
+      "desc": "Swings his ladle at everyone in front of him",
+      "c": [
+        [
+          "cosmetic",
+          "Swings his ladle at"
+        ],
+        [
+          "multi-target-melee",
+          "everyone in front of him"
+        ]
+      ]
+    },
+    "hotdog.Works": {
+      "desc": "Special: piles on every topping at once, hitting everyone around him for heavy damage and shoving them away",
+      "c": [
+        [
+          "cosmetic",
+          "Special"
+        ],
+        [
+          "cosmetic",
+          "piles on every topping at once"
+        ],
+        [
+          "multi-target-melee",
+          "hitting everyone around him"
+        ],
+        [
+          "damage-above-median",
+          "heavy damage"
+        ],
+        [
+          "control-loss",
+          "shoving them away"
+        ]
+      ]
     }
   }
 }
