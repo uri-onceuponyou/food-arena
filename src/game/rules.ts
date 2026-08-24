@@ -2617,6 +2617,45 @@ export type WeaponType = 'melee' | 'ranged' | 'self';
  *   long    type 'ranged'  range ∈ { rangedLong 128, rangedMax 140 }
  *   super   any type       cooldown >= SUPER_MIN_COOLDOWN_MS and >= every other slot's
  *
+ * ── 🔴 WHAT THE SHAPE COST, AT SIX SEATS — THE COUNT URI ACTUALLY PLAYS ─────
+ *
+ * `nf_ffa --n 6 --rosters 60`, 360 matches per arm, both arms on DETACHED WORKTREES
+ * (`ce0c665` and this commit's parent), shipped bot policy on every seat. MEAN PLACEMENT,
+ * 1 = won, fair = 3.50. The paired per-config delta is EXACT and is a DIFFERENT QUANTITY
+ * from the aggregate table; both are given and neither is added to the other.
+ *
+ *     char          before   after    paired Δ      char          before   after   paired Δ
+ *     donut          4.425   1.381    −3.044        hotdog         3.484   3.357   −0.127
+ *     lollipop       3.907   2.673    −1.233        sushi          4.318   4.220   −0.098
+ *     egg            3.793   3.533    −0.260        burrito        4.080   4.327   +0.247
+ *     pizza          2.652   2.939    +0.288        soup           2.947   3.288   +0.341
+ *     hamburger      3.300   4.481    +1.181        waterbottle    3.311   4.492   +1.182
+ *     taco           2.461   4.390    +1.929
+ *     roster spread (best..worst)  1.964 → **3.112 places**
+ *
+ * Five clear the published single-phase placement floor of **0.978 places** — donut,
+ * taco, lollipop, waterbottle, hamburger. The other six sit inside it and say nothing.
+ * 360 of 360 configs moved. Endings unchanged: ko 360 / timeout 0 / **0 total wipes**.
+ *
+ * 🚨 **TWO OUTLIERS, AND THE SIX-SEAT ONE IS NOT THE ONE THE 1v1 LADDER NAMED.**
+ *   * **Donut is now dominant at six seats** — placement **1.381** and an **83.1% win
+ *     rate**, from LAST in the roster (4.425) before. It gained three weapons, and two of
+ *     its four carry `trailBoosted` on the one character with `hasTrail`.
+ *   * **Water Bottle reads 0.0% on the 1v1 ladder but 4.492 places at six** — weakest,
+ *     not absent. `DECISIONS §81` established that win rate and placement are different
+ *     quantities that can move in opposite directions, and this is the same lesson: a
+ *     character that wins no duels still finishes mid-pack when four other fighters are
+ *     also being shot at.
+ *
+ * **Neither is compensated.** `DECISIONS §77` withholds permission to re-tune the roster
+ * to absorb a structural change and `§85` is the precedent: ship it, price it, say so.
+ *
+ * ⚠️ AND ONE INSTRUMENT NOTE WORTH MORE THAN THE NUMBERS: `kitDps` is **REACH-BLIND**.
+ * `waterbottle`'s is **28.76 before and 28.76 after** — no damage and no cooldown moved —
+ * while `--why waterbottle` shows `Glass` going from **4.55 to 1.38 presses a match**,
+ * because it lost 46 wu of the range it was actually pressed at. A kit metric that prices
+ * every weapon "at a range where every part lands" cannot see a reach change at all.
+ *
  * and `short.range < long.range` is asserted per character on top of the bands, because
  * two weapons could sit in different bands and still be one rung apart the wrong way if
  * the bands were ever widened.
