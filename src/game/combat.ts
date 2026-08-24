@@ -22,6 +22,7 @@
 import {
   CHARACTERS,
   CONCEAL_ATTACK_REVEAL_MS,
+  MEDIKIT,
   SLOW_DURATION_MS,
   SLOW_GRACE_MS,
   STATUS_DR_SCALES,
@@ -33,9 +34,9 @@ import {
   type StatusEffect,
   type Weapon,
 } from './rules.ts';
-import type { DamageSource, Fighter, GameEvent, MatchState, Vec2 } from './state.ts';
+import type { DamageSource, Fighter, GameEvent, MatchState, Medikit, Vec2 } from './state.ts';
 import { isLivingOpponentOf, lastFighterStanding, nearestLivingOpponent } from './state.ts';
-import { breakConcealment, displaceFighter } from './movement.ts';
+import { boxesOverlap, breakConcealment, displaceFighter } from './movement.ts';
 
 const RAD2DEG = 180 / Math.PI;
 const DEG2RAD = Math.PI / 180;
@@ -407,6 +408,21 @@ export function applyDamage(
     if (target.cast !== null) {
       cancelCast(target, 'death', events);
     }
+    // ── THE BODY DROPS ITS KITS ───────────────────────────────────────────────
+    //
+    // BELOW every terminator and ABOVE the victor block, and both edges are deliberate.
+    // Below the terminators because they own the corpse's own bookkeeping and this is a
+    // statement about the WORLD, not about the fighter. Above the victor block because
+    // `match-ended` should stay the last event of the tick it fires on — several consumers
+    // read it as a terminator of the stream, and `medikit-dropped` arriving after it would
+    // make the death that ended the match the one death whose kits are announced out of
+    // order.
+    //
+    // ⚠️ UNGATED ON PHASE, matching the `death` event immediately above it: a kit dropped by
+    // a final knockout is drawn, is never collectable (`sim.ts:stepMedikits` runs only while
+    // `playing`), and expires. Gating it here would make the last body in a match the one
+    // body that leaves nothing behind, which reads on screen as a bug.
+    dropMedikits(state, target, events);
     if (state.phase === 'playing') {
       // ── ⚠️ A KNOCKOUT IS NO LONGER THE END OF THE MATCH. IT USED TO SAY: ─────
       //
@@ -433,6 +449,73 @@ export function applyDamage(
         events.push({ type: 'match-ended', winner: victor.role, winnerId: victor.id });
       }
     }
+  }
+}
+
+/**
+ * ── THE POP. `MEDIKIT.count` KITS OUT OF ONE BODY, COMPUTED ──────────────────
+ *
+ * Called from the death block above, once per death, and it is the ONLY place a medikit is
+ * created. `rules.ts:MEDIKIT` carries every number and the whole design argument; this
+ * function is the geometry.
+ *
+ * 🚨 **THERE IS NO ROLL HERE AND THERE CANNOT BE ONE.** `rules.ts` records the rule under
+ * CONCEALMENT — *"NO ROLL. NOT NEGOTIABLE"* — and it is not a preference:
+ * `grep -rn 'Math.random' src/game/{sim,state,combat,ai,movement}.ts` returns NOTHING, and
+ * the sim carries no seeded generator either. The "seeds" every paired balance delta in this
+ * repo is measured on belong to `tools/tmp/scripted_player.mjs`, the DRIVER. So a scattered
+ * drop is not a thing this simulation can express, and the fan below is what replaces it:
+ *
+ *   * `count` bearings **evenly spaced around the full circle**, so no direction is
+ *     favoured and no fighter gains from where the body happened to fall;
+ *   * **phase-locked to the victim's own `facing`**, which is a fact about the fighter that
+ *     died rather than about whoever killed it, and is a unit vector for the whole life of a
+ *     match by construction (`ai.ts:hasBearing`, `sim.ts:applyAim` — both refuse to write a
+ *     zero one, and `createFighter` seeds one);
+ *   * at `MEDIKIT.popDistance`, so with the shipped `count: 2` the pair straddles the corpse
+ *     `2 × 70 = 140 wu` apart — exactly `REACH.rangedMax`.
+ *
+ * ⚠️ **THE FALLBACK MATTERS MORE THAN IT LOOKS.** A bearing can put a kit inside a crate or
+ * through a wall, and a kit nobody can reach is worse than no kit — it is a promise on
+ * screen the game will not keep. Both are answered by falling back to the DEATH POINT, which
+ * is standable by proof rather than by argument: a fighter was standing on it one tick ago.
+ * (Two kits can therefore land on the same spot in a tight corner. Deterministic, rare, and
+ * the honest outcome — you got both because there was nowhere for the second one to go.)
+ */
+function dropMedikits(state: MatchState, victim: Fighter, events: GameEvent[]): void {
+  const base = Math.atan2(victim.facing.y, victim.facing.x);
+  const r = MEDIKIT.pickupRadius;
+  for (let i = 0; i < MEDIKIT.count; i++) {
+    const angle = base + (i * 2 * Math.PI) / MEDIKIT.count;
+    // Clamp into the arena FIRST, then test cover on the clamped point — the other order
+    // would test a point the kit is not going to end up on.
+    let x = Math.min(state.arena.width - r, Math.max(r, victim.x + Math.cos(angle) * MEDIKIT.popDistance));
+    let y = Math.min(state.arena.height - r, Math.max(r, victim.y + Math.sin(angle) * MEDIKIT.popDistance));
+    // The kit as an `r × r` box against `arena.cover`, i.e. the same predicate
+    // `movement.ts:collidesWithCover` runs for a fighter, through the exported primitive it
+    // is built out of. `collidesWithCover` itself is module-private; `boxesOverlap` is the
+    // shared rule, and calling it here rather than re-deriving the AABB test is the same
+    // choice `terrainSlowAt` records — one implementation, several callers.
+    for (const box of state.arena.cover) {
+      if (boxesOverlap(x, y, r, r, box.x, box.y, box.w, box.h)) { x = victim.x; y = victim.y; break; }
+    }
+    const kit: Medikit = {
+      id: state.nextId++,
+      sourceId: victim.id,
+      x, y,
+      fromX: victim.x,
+      fromY: victim.y,
+      armsAt: state.elapsed + MEDIKIT.popMs,
+      expiresAt: state.elapsed + MEDIKIT.popMs + MEDIKIT.durationMs,
+    };
+    state.medikits.push(kit);
+    events.push({
+      type: 'medikit-dropped', id: kit.id,
+      sourceRole: victim.role, sourceId: victim.id,
+      fromX: kit.fromX, fromY: kit.fromY,
+      x: kit.x, y: kit.y,
+      popMs: MEDIKIT.popMs,
+    });
   }
 }
 

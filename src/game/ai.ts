@@ -151,13 +151,15 @@ import {
   CHARACTER_IDS,
   FOG_DPS,
   HIT_RADIUS_VS_PLAYER,
+  levelHealthMultiplier,
+  MEDIKIT,
   speedFor,
   suddenDeathActive,
   TRAIL,
   type Weapon,
   type WeaponType,
 } from './rules.ts';
-import type { Fighter, GameEvent, MatchState } from './state.ts';
+import type { Fighter, GameEvent, MatchState, Medikit } from './state.ts';
 import { isCasting, movementLocked, nearestLivingOpponent, sightingIndex } from './state.ts';
 import { attemptAttack, isOnOwnTrail } from './combat.ts';
 import { isVisibleFrom, moveToward, terrainSlowAt } from './movement.ts';
@@ -1267,8 +1269,86 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
   // this telegraph in time?" test uses the same number the movement below will use; a
   // conservative guess there would be a second, quieter statement of the AI's own speed.
   const ownSpeed = speedFor(self.characterId, fleeing ? AI_FLEE_SPEED : AI_CHASE_SPEED) * aiSpeedMult;
-  const danger = dangerSteer(state, self,
-    (intentSign * adx) / adist, (intentSign * ady) / adist, ownSpeed);
+
+  /**
+   * ── 🚨 MEDIKITS, AND THE ONLY REASON THIS BLOCK EXISTS IS THAT THE LAST TIME
+   *    SOMETHING SHIPPED WITHOUT IT, IT COST 7.2 PERCENTAGE POINTS ────────────
+   *
+   * This file's oldest and most expensive defect shape is *a rule stated once in `rules.ts`
+   * and implemented for one seat only*. It has fired at least seven times: the terrain slow
+   * that reached the human and not the bot (measured one-tick control, **player 0.450000 /
+   * enemy 1.000000**), the trail boost that survived the very pass that fixed it
+   * (1.35 / 1.00), the stun that silenced the bot and not the player, `self` weapons the AI
+   * could not select at all (0 fires across 17,677 ticks). **A consumable the human can pick
+   * up and the bots cannot is that shape again**, and it would be worse than the others,
+   * because it is not a handicap the bot suffers — it is a resource the player gets for free
+   * and no aggregate would call it a bug.
+   *
+   * So the bot understands kits, and the rule it uses is a QUESTION, not a constant:
+   *
+   *   **CAN I GET THERE BEFORE IT VANISHES, AND WILL IT ALL FIT IN MY POOL?**
+   *
+   *   * **Reach:** `distance <= (expiresAt − now) × ownSpeed`. This introduces no new radius
+   *     and cannot go stale: `MEDIKIT.durationMs` is itself derived as
+   *     `GUARANTEED_VISIBLE_RADIUS / AI_CHASE_SPEED`, so the reachable set is bounded by the
+   *     screen-guaranteed disc by construction, and it shrinks correctly as the kit ages, as
+   *     the fighter is slowed, and per character. A hardcoded `aiSeekRadius` would have been
+   *     a second, quieter statement of the kit's own lifetime.
+   *   * **Worth it:** missing at least a full kit. Exactly the rule
+   *     `rules.ts:AI_SELF_HEAL_HP_FRACTION` already states for the roster's heal Super
+   *     (*"missing at least the full `healAmount`, so a heal is never partly wasted"*) —
+   *     reused rather than reinvented, because a bot that detours 190 wu for 2 HP is a bot
+   *     that has stopped fighting. ⚠️ It is deliberately STRICTER than the sim's PICKUP rule,
+   *     which is a bare `hp < maxHp`: walking over a kit and taking it, and crossing the
+   *     arena to get one, are different questions and they get different answers. The human
+   *     is never refused a pickup it stepped on.
+   *   * **Armed or arming:** a kit still in its `popMs` is included. Walking toward one that
+   *     lands in 350 ms is correct — refusing it would make the bot ignore exactly the kits
+   *     that just dropped out of the fight it is standing in.
+   *
+   * ⚠️ **NO PERCEPTION GATE, AND THAT IS CONSISTENT RATHER THAN GENEROUS.** Concealment
+   * hides FIGHTERS (`isVisibleFrom`, four readers, all of them about a fighter). Ground
+   * objects have never been hidden from anybody — `terrainSlowAt` reads every splat and every
+   * puddle for both seats — and the human sees kits drawn on the floor with no fog test
+   * either. Gating the bot's knowledge here and not the human's would be this file's oldest
+   * bug wearing a fairness argument.
+   *
+   * ⚠️ **IT CHANGES WHERE THE BOT WALKS, NEVER WHETHER IT SHOOTS.** The chase branch fires
+   * OR moves; that arbitration is untouched, so a bot with a weapon ready still takes the
+   * shot and collects the kit on a tick it was going to spend walking anyway. Making the kit
+   * outrank the shot is a second, larger design change (it would be a third clause in
+   * "surviving outranks shooting") and it is deliberately not taken here — the measured
+   * pickup split in the commit message is what says whether it is needed.
+   */
+  const seekKit = ((): Medikit | null => {
+    // NON-EMPTY FIRST. `[].reduce` has no identity to return and `for…of` over an empty list
+    // silently yields `null`, which is indistinguishable from "nothing was worth it" — the
+    // vacuity trap `CLAUDE.md` rule 6 records firing three times in three files in one
+    // session. The cheap guard is the early return, and §40(f) drives the populated case.
+    if (state.medikits.length === 0) return null;
+    if (self.maxHp - self.hp < MEDIKIT.heal * levelHealthMultiplier(self.level)) return null;
+    let best: Medikit | null = null;
+    let bestD = Infinity;
+    for (const kit of state.medikits) {
+      const d = Math.hypot(kit.x - self.x, kit.y - self.y);
+      if (d >= bestD) continue;
+      // ⚠️ `ownSpeed`, which already carries this tick's slow multiplier and this
+      // character's own `stats.speed` — the same number the movement below will use, for
+      // the same reason `dangerSteer` is handed it rather than guessing.
+      if (d > (kit.expiresAt - now) * ownSpeed) continue;
+      best = kit;
+      bestD = d;
+    }
+    return best;
+  })();
+  // The intent handed to the hazard blender is WHERE THIS FIGHTER WANTS TO GO. When a kit is
+  // the goal that is the kit, not the opponent — otherwise `dangerSteer` would round a
+  // hazard on the side that makes progress toward a destination the fighter is not heading
+  // for, and the two would fight each other every tick inside a margin.
+  const kitDist = seekKit === null ? 0 : Math.hypot(seekKit.x - self.x, seekKit.y - self.y) || 1;
+  const wantX = seekKit === null ? (intentSign * adx) / adist : (seekKit.x - self.x) / kitDist;
+  const wantY = seekKit === null ? (intentSign * ady) / adist : (seekKit.y - self.y) / kitDist;
+  const danger = dangerSteer(state, self, wantX, wantY, ownSpeed);
   const urgent = danger >= AI_ESCAPE_PRIORITY;
   /**
    * Blend `DANGER` into a desired heading and nav target, in place. Writes `STEER` rather
@@ -1356,7 +1436,13 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
       // heading degenerates to zero and the nav target lands on the fighter's own feet.
       // That is unchanged by the aim fix and is the movement half of the same degeneracy
       // `hasBearing` answers for the aim — see the facing block.
-      steer(-adx / adist, -ady / adist,
+      // ⚠️ A KIT OUTRANKS "DIRECTLY AWAY" IN THIS BRANCH, and that is the branch where it
+      // matters most: `fleeing` means below `AI_FLEE_HP_FRACTION`, i.e. the exact state a
+      // medikit exists to answer. Retreating to a point that heals you is strictly better
+      // than retreating to a point that does not, and the shot is unaffected — this branch
+      // has always moved AND fired in the same tick.
+      if (seekKit !== null) steer(wantX, wantY, seekKit.x, seekKit.y);
+      else steer(-adx / adist, -ady / adist,
         self.x - (adx / adist) * STEER_LEAD, self.y - (ady / adist) * STEER_LEAD);
       moveToward(self, STEER.dirX, STEER.dirY, step, state.arena, STEER.navX, STEER.navY);
       attemptedMove = true;
@@ -1394,7 +1480,13 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
       // ⚠️ `tx, ty`, NOT `player.x, player.y`. This is site 3 of the three named in the
       // perception block above, and it was the DIRECT read — the one an implementation
       // that only replaced `adx/ady` would have left pointing at the truth.
-      steer(adx / adist, ady / adist, tx, ty);
+      //
+      // ⚠️ A KIT REPLACES THE NAV TARGET, NOT THE SHOT. This line is only reached when
+      // `pickWeapon` returned nothing — the tick was going to be spent walking either way —
+      // so seeking a kit here costs no damage. It routes through `moveToward` and therefore
+      // through the flow field, so a kit behind a crate is walked AROUND rather than into.
+      if (seekKit !== null) steer(wantX, wantY, seekKit.x, seekKit.y);
+      else steer(adx / adist, ady / adist, tx, ty);
       moveToward(self, STEER.dirX, STEER.dirY, step, state.arena, STEER.navX, STEER.navY);
       attemptedMove = true;
     }

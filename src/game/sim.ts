@@ -77,7 +77,9 @@ import {
   clampLevel,
   fogRadiusAt,
   LEVEL_MIN,
+  levelHealthMultiplier,
   MATCH_DURATION_MS,
+  MEDIKIT,
   minSafeRadiusFor,
   maxHpFor,
   PLAYER_MAX_HP,
@@ -98,8 +100,8 @@ import {
 } from './rules.ts';
 import type { ArenaDefinition } from '../arena/types.ts';
 import type {
-  Controller, Fighter, FighterId, GameEvent, MatchInput, MatchInputs, MatchState, Projectile,
-  Sighting, Splat, TrailMark, Vec2,
+  Controller, Fighter, FighterId, GameEvent, MatchInput, MatchInputs, MatchState, Medikit,
+  Projectile, Sighting, Splat, TrailMark, Vec2,
 } from './state.ts';
 import {
   createFighter, fighterBit, isCasting, isLivingOpponentOf, MAX_FIGHTERS, MIN_FIGHTERS,
@@ -387,6 +389,7 @@ function createMatchFromList(arena: ArenaDefinition, configs: readonly FighterCo
     projectiles: [],
     splats: [],
     trailMarks: [],
+    medikits: [],
     winner: null,
     winnerId: null,
     arena,
@@ -735,6 +738,20 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
     // Placed here, before `stepProjectiles`, so the fog keeps its existing position in
     // the tick relative to shots already in the air.
     if (suddenDeathActive(state.timeRemaining)) applySuddenDeathFog(state, dt, events);
+    // ── MEDIKITS ARE COLLECTED AFTER EVERYTHING THAT CAN MOVE A FIGHTER ──────
+    //
+    // After the loop, so a kit is taken from where a fighter ENDED the tick — including
+    // where a knockback or a lure PUT it, since `stepPush` resolves inside that loop. A
+    // fighter shoved onto a kit collects it, which is the answer a player would expect from
+    // a thing lying on the floor.
+    //
+    // ⚠️ AFTER `applySuddenDeathFog` AND BEFORE `stepProjectiles`, and both edges are
+    // deliberate. Before the fog and a kit would undo the tick's burn on the fighter the fog
+    // is about to resolve HP order between — "the one who has more HP wins" is a sentence
+    // about the state at the moment of the collapse, and healing inside it would move the
+    // answer. After projectiles and a shot already in the air would be resolving against an
+    // HP total from before the pickup, which is the same disagreement one tick earlier.
+    stepMedikits(state, events);
   }
 
   // Projectiles update every tick regardless of match phase — faithfully
@@ -934,6 +951,101 @@ function expireGroundEffects(state: MatchState): void {
   }
   for (let i = state.trailMarks.length - 1; i >= 0; i--) {
     if (state.elapsed >= state.trailMarks[i].expiresAt) state.trailMarks.splice(i, 1);
+  }
+  // Medikits expire on the same unconditional pass, for the same reason: a kit that ran out
+  // while the match was ending must not still be lying there when the next tick draws.
+  // ⚠️ Expiry is PHASE-FREE and collection (`stepMedikits`) is not. A kit dropped by the
+  // final knockout therefore rots on the floor rather than being collectable after the
+  // whistle — which is the same asymmetry `stepProjectiles` (unconditional) and the fighter
+  // loop (gated on `playing`) already have.
+  for (let i = state.medikits.length - 1; i >= 0; i--) {
+    if (state.elapsed >= state.medikits[i].expiresAt) state.medikits.splice(i, 1);
+  }
+}
+
+/**
+ * ── COLLECTION. WHO GETS WHICH KIT, THIS TICK ────────────────────────────────
+ *
+ * Runs after the fighter loop, so a kit is collected from where a fighter ENDED the tick,
+ * not from where it started — the same choice `applyWorldTick`'s hazard and trail tests
+ * already make, and the only one that matches what the player sees.
+ *
+ * ── THE THREE RULES, AND WHY EACH IS THE RULE ────────────────────────────────
+ *
+ * **1. ARMED.** A kit inside its own `popMs` is in the air and cannot be taken. Without
+ * this the pop is decoration on a pickup that already happened, and a killer standing on
+ * the body would collect both kits on the tick it died — which is precisely the snowball
+ * this feature has to price.
+ *
+ * **2. HURT.** `hp < maxHp`, and nothing stronger. A fighter at full health walks straight
+ * over a kit and leaves it, so **a healthy fighter cannot deny one by standing on it** and
+ * a player is never handed a wasted pickup. ⚠️ It is the DEFICIT and not "enough deficit to
+ * use the whole kit": partial healing is capped below, and the alternative — refusing a kit
+ * to a fighter missing 3 HP — is a rule the player would experience as the game ignoring an
+ * input. (`ai.ts` applies the stricter "worth the walk" test to its own DETOUR, which is a
+ * different question and is answered in a different place, deliberately.)
+ *
+ * **3. NEEDIEST FIRST, THEN SLOT.** Two fighters can touch one kit on one tick, and
+ * something has to decide. Lower HP FRACTION wins, with the slot as the final tiebreak.
+ *
+ * 🚨 **SLOT ORDER ALONE WOULD HAVE BEEN A SEAT ADVANTAGE, AND THIS PROJECT HAS ALREADY
+ * PRICED ONE.** `tools/tmp/kx_seatfair.mjs` measured the spawn set at **2.680 places out of
+ * 6** before it was fixed, on a mechanism nobody predicted; `TrailMark.damagedMask` exists
+ * in this very file because a boolean there silently meant *"the first victim in slot order
+ * consumes it and everyone else walks through free"*. A kit handed to the lowest slot in a
+ * tie is that shape a third time, and slot 0 is the human seat. HP fraction is a property of
+ * the fighter rather than of where it was seated, so the tiebreak is seat-neutral; the slot
+ * rung below it is reached only when two fighters are on identical HP fractions, and exists
+ * so the rule is TOTAL rather than order-dependent.
+ */
+function stepMedikits(state: MatchState, events: GameEvent[]): void {
+  // Front to back, in drop order, and `i` only advances when nothing was taken — so a kit
+  // removed here cannot let the next one skip its turn. See `MatchState.medikits`.
+  for (let i = 0; i < state.medikits.length;) {
+    const kit = state.medikits[i];
+    if (state.elapsed < kit.armsAt) { i++; continue; }
+
+    let taker: Fighter | null = null;
+    for (const f of state.fighters) {
+      if (!f.alive || f.hp >= f.maxHp) continue;
+      if (Math.hypot(f.x - kit.x, f.y - kit.y) > MEDIKIT.pickupRadius) continue;
+      if (taker === null) { taker = f; continue; }
+      // Rung 1: HP FRACTION, not absolute HP. The pools differ by role (100 vs 90) and by
+      // character and by level, so "who is hurt worse" is only a comparable question as a
+      // fraction of each fighter's own pool. Rung 2: the slot, which is the order this loop
+      // already walks — so `>` and not `>=` keeps the earlier slot on an exact tie without
+      // a second comparison.
+      if (f.hp / f.maxHp < taker.hp / taker.maxHp) taker = f;
+    }
+
+    if (taker === null) { i++; continue; }
+
+    // ⚠️ `levelHealthMultiplier(taker.level)`, and NOT `damageMul`, for exactly the reason
+    // `combat.ts`'s `healAmount` block records at length: the two constants are numerically
+    // identical today (both 0.05 per level) and SEPARATELY DECLARED, and the invariant that
+    // keeps a mirrored level ladder flat is heal-as-a-FRACTION-OF-POOL held constant. Only
+    // the health ladder does that. It is exactly 1.0 at `LEVEL_MIN`, so every level-1
+    // measurement — which is every balance number quoted for this feature — is unaffected
+    // by this term being here.
+    //
+    // Written as a clamped assignment and a DIFFERENCE, not as `hp += min(heal, deficit)`,
+    // which is the same arithmetic in exact reals and not in floats — `hp + (maxHp - hp)`
+    // can land an ulp above `maxHp`. This is the shape the regen block a few hundred lines
+    // up already uses, and `amount` is then what the fighter actually GAINED, which is the
+    // contract `medikit-taken` publishes.
+    const before = taker.hp;
+    taker.hp = Math.min(taker.maxHp, taker.hp + MEDIKIT.heal * levelHealthMultiplier(taker.level));
+    const amount = taker.hp - before;
+    state.medikits.splice(i, 1);
+    // BOTH events, and the split is documented on `medikit-taken` in `state.ts`: `heal` is
+    // what `audio/director.ts` already listens to (and its regen/deliberate split is
+    // `amount <= REGEN_AMOUNT`, which 9 clears), `medikit-taken` is the kit-specific beat.
+    events.push({ type: 'heal', fighterRole: taker.role, fighterId: taker.id, amount });
+    events.push({
+      type: 'medikit-taken', id: kit.id,
+      fighterRole: taker.role, fighterId: taker.id,
+      x: kit.x, y: kit.y, amount,
+    });
   }
 }
 

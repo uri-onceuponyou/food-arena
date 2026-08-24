@@ -2582,6 +2582,128 @@ export function projectileMaxAgeMs(w: Weapon): number {
 export const CONCEAL_ATTACK_REVEAL_MS = FLIGHT_MS.normal;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Medikits — the consumable a corpse leaves behind
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ── MEDIKITS. Uri, 2026-08-24: *"Add medikits that jump out of dead people as
+ *    consumables."* ────────────────────────────────────────────────────────────
+ *
+ * A fighter dies, `count` kits pop out of the body, they land, and any HURT fighter can
+ * walk over one to heal. Every number below is derived from something already in this
+ * file; none of them is a taste pick, and each derivation is asserted in
+ * `sim.test.mjs` §40 rather than restated here, so re-tuning the thing it comes from
+ * surfaces as a red row instead of a stale constant.
+ *
+ * ── 🚨 THE POP IS COSMETIC. THE SIM DECIDES THE LANDING SPOT AT THE INSTANT OF
+ *    DEATH, AND THAT IS A CHOICE, NOT AN OVERSIGHT ────────────────────────────
+ *
+ * `rules.ts:CONCEAL_REVEAL_RADIUS`'s neighbour records this project's hardest sim rule —
+ * *"NO ROLL. NOT NEGOTIABLE"* — and `grep -rn 'Math.random' src/game/{sim,state,combat,ai,
+ * movement}.ts` returns NOTHING, re-derived on this tree. **There is no RNG in the
+ * simulation at all** — not an unseeded one, and not a seeded one either. The seeds every
+ * balance number in this repo is paired on belong to `tools/tmp/scripted_player.mjs`, the
+ * DRIVER, not to the sim. So "the kits scatter randomly" is not merely discouraged here,
+ * it has nothing to draw from.
+ *
+ * So the landing points are **computed**: `count` bearings spaced evenly around the full
+ * circle, phase-locked to the dying fighter's own `facing`, at `popDistance` from the body.
+ * `combat.ts:dropMedikits` is the whole of it. What the sim stores is the LANDING point;
+ * `from` is the death point, carried only so the presentation layer can draw an arc, and
+ * `armsAt` is when the arc is over.
+ *
+ * Three consequences, stated because they are what a player will feel:
+ *
+ *   1. **You cannot catch a kit in the air.** For `popMs` after a death the kit exists,
+ *      is drawn, and cannot be taken. That is the arming delay AND the flight time, one
+ *      quantity, because they describe the same 350 ms.
+ *   2. **The scatter is fair.** Evenly spaced around a circle means no fighter is favoured
+ *      by where the body happened to fall, and the phase is the victim's own facing, which
+ *      is a fact about the victim rather than about whoever killed it.
+ *   3. **It replays.** Same inputs, same kits, same landing points, forever — which is the
+ *      property `roster_lab`'s 110×32 paired deltas and `sim.test.mjs`'s seeded rows both
+ *      rest on.
+ *
+ * ── WHY EACH NUMBER IS THE NUMBER ───────────────────────────────────────────
+ *
+ * **`count: 2`** — Uri said *"medikits"*, plural, and one kit cannot be contested: whoever
+ * is standing on the corpse takes it and the mechanic has no decision in it. Two is the
+ * smallest number that puts a kit on the far side of the body from the killer.
+ *
+ * **`heal: 9`** — DERIVED: `18 / count`, where 18 is `hamburger.Onion`'s `healAmount`, the
+ * roster's ONLY heal and a number priced to ±3 HP over a measured ladder (see it in the
+ * roster below). So **one corpse yields exactly one Onion Ring, divided into `count`
+ * contestable pieces.** Each single piece is therefore strictly weaker than a character's
+ * dedicated heal Super — a free pickup must not outclass the thing a whole character is
+ * built around — while taking the entire drop equals it and costs you the walk across a
+ * fresh corpse. ⚠️ Written as a literal and NOT as `CHARACTERS.hamburger…/count`, which
+ * would be a temporal-dead-zone `ReferenceError` at import: `CHARACTERS` is declared some
+ * 1,400 lines below this and a `const` cannot be read before its initialiser runs (the same
+ * hazard `CONCEAL_ATTACK_REVEAL_MS` above records for `FLIGHT_MS`). §40(a) asserts the
+ * identity against the LIVE roster instead, so the day Onion Ring is re-tuned this goes red.
+ *
+ * **`popDistance: REACH.meleeStrong`** (70) — one standard brawler swing clear of the body.
+ * Far enough that a kit is visibly its own object rather than something inside the corpse,
+ * and far enough that standing on the body does not collect it. With `count: 2` the pair
+ * lands `2 × 70 = 140 wu` apart, which is exactly `REACH.rangedMax`: **collecting both
+ * means crossing the longest weapon reach in the game, in the open, over a fresh kill.**
+ *
+ * **`popMs: FLIGHT_MS.fast`** (350) — the pop IS a quick lob, so it takes the quick-lob
+ * rung. 1.67 evade windows: long enough to read as an arc, too short to feel like a wait.
+ *
+ * **`durationMs: GUARANTEED_VISIBLE_RADIUS / AI_CHASE_SPEED`** (3794.67 ms) — the answer to
+ * *"can it be denied?"*, expressed as a distance instead of a duration. A kit lives exactly
+ * as long as it takes to cross the disc every supported aspect ratio is guaranteed to show
+ * (199.22 wu), at the SLOWEST speed any fighter travels at (the bot's chase). So **anyone
+ * who could see the kill can reach the kit, and nobody who could not, can.** It is a race
+ * with a stated finish line rather than a timer somebody liked the feel of.
+ * ⚠️ `speedFor` scales this by the character's own `stats.speed`, so the guarantee is exact
+ * for a 1.00 mover and ±12% either side of it. Stated, not hidden.
+ *
+ * **`pickupRadius`** — `max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY)` = 26, the same
+ * `max()` over the same pair that `ENDGAME_STANDOFF` takes, and for the same reason: a
+ * thing lying on the floor does not know who is standing on it, so it cannot have one
+ * radius for the human seat and another for the bots. That is `sim.ts:terrainSlowFactor`'s
+ * lesson (*"a floor does not know who is standing on it"*) applied before the fact rather
+ * than after a measured 0.450000/1.000000 split.
+ *
+ * ── WHAT IS DELIBERATELY NOT HERE ───────────────────────────────────────────
+ *
+ *   * **No `tune()` wrapper.** `docs/HANDOVER.md` records that `register()` validates
+ *     OVERRIDES against `min`/`max` and never the authored default, so a tunable constant
+ *     is a live trap the first time anything rescales. Balance sweeps stage this through
+ *     `roster_table --sim <dir>` instead, which is what that flag is for.
+ *   * **No per-kit `heal` field on the object.** One source of truth; a kit already on the
+ *     floor and a kit about to drop cannot disagree.
+ *   * **No `role` mirror on the object.** `net/wire.ts:validateMatchState` checks a
+ *     `role`/`id` mirror on every projectile and trail mark it can see; a third mirror
+ *     would be a third thing that can go stale, in a file this owner does not have. The
+ *     kit carries `sourceId` only, and the EVENT carries the role, derived at emit time.
+ */
+export const MEDIKIT = {
+  /** Kits per death. */
+  count: 2,
+  /** HP per kit, BEFORE the picker's level multiplier. `hamburger.Onion.healAmount / count`. */
+  heal: 9,
+  /** How far from the body a kit lands. One standard swing. */
+  popDistance: REACH.meleeStrong,
+  /** Flight time of the cosmetic arc, and therefore the arming delay. */
+  popMs: FLIGHT_MS.fast,
+  /** How long a kit stays takeable once it has landed. */
+  durationMs: GUARANTEED_VISIBLE_RADIUS / AI_CHASE_SPEED,
+  /** Touch radius. One number for every fighter. */
+  pickupRadius: Math.max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY),
+} as const;
+
+/**
+ * The `healAmount` a medikit's `heal` is derived FROM — `hamburger.Onion`, the roster's
+ * only heal. Declared here so `sim.test.mjs` §40(a) can assert the derivation against the
+ * live roster without either side hardcoding 18, and so the comment above has a machine
+ * -checkable referent. ⚠️ It is NOT read by the sim; `MEDIKIT.heal` is.
+ */
+export const MEDIKIT_HEAL_SOURCE_KEY = 'Onion';
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Weapon / character types
 // ─────────────────────────────────────────────────────────────────────────────
 

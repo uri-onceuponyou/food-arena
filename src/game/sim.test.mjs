@@ -146,6 +146,15 @@ import {
   // used as the KNOWN-BAD the roster guard is shown to reject — a guard nothing has ever
   // failed is not a guard.
   SPEED,
+  // Section 40: MEDIKITS. Every one of `MEDIKIT`'s six fields is DERIVED from something
+  // else in `rules.ts`, and §40(a) asserts the derivations rather than the numbers — the
+  // same rule as `CONCEAL_ATTACK_REVEAL_MS`, `REACH.ultimateSlam` and `minSafeRadiusFor`
+  // above. A literal 9 / 70 / 350 / 3794.67 / 26 here would keep passing after the reach
+  // ladder, the flight ladder, the camera or the roster's own heal moved out from under it,
+  // which is exactly how a constant comes to be documented as derived and is not.
+  // `MEDIKIT_HEAL_SOURCE_KEY` exists so the heal derivation can be checked against the LIVE
+  // roster without either side writing 18.
+  MEDIKIT, MEDIKIT_HEAL_SOURCE_KEY,
 } from './rules.ts';
 // Section 26(b) needs a bare fighter to walk across a concealment box with `tryMove`, with
 // no match, no AI and no `stepMatch` around it — the factory is imported so the thing being
@@ -10351,6 +10360,542 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
     check('(h) 🔴 …and nothing beyond `range` connects, all the way past where a launch would have reached',
       results.every((r) => (r.s > W.range + 1e-9 ? !r.hit : true)),
       `${results.filter((r) => r.s > W.range && r.hit).length} illegal hits beyond ${W.range} wu`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 40. MEDIKITS — the consumable a corpse leaves behind
+//
+// Uri, 2026-08-24: *"Add medikits that jump out of dead people as consumables."*
+//
+// ── WHAT THIS SECTION IS FOR ────────────────────────────────────────────────
+//
+// Three of the rows below exist because of a defect class this file is named after and
+// none of them would have been written by testing the feature as a player experiences it:
+//
+//   * **(f) THE BOT MUST UNDERSTAND KITS.** `ai.ts` has shipped at least seven instances of
+//     *a rule stated once in `rules.ts` and implemented for one seat only* — the terrain
+//     slow (player 0.450000 / enemy 1.000000), the trail boost (1.35 / 1.00), the stun that
+//     silenced only the bot, `self` weapons the AI could not select at all. A consumable
+//     only the human collects is that shape again and it is WORSE than the others, because
+//     it does not look like a handicap — it looks like the player being good at the game.
+//   * **(g) THE TIE-BREAK MUST NOT BE THE SLOT.** `TrailMark.damagedMask` exists in this
+//     codebase because a boolean silently meant *"the first victim in slot order consumes it
+//     and everybody else walks through free"*, and `kx_seatfair` measured the spawn set at
+//     **2.680 places out of 6** on a seat advantage nobody predicted. Slot 0 is the human.
+//     The row is run with the needier fighter in slot 0 AND in the higher slot, because a
+//     slot-order implementation passes one of those two and only one.
+//   * **(k) THERE IS NO ROLL, AND IT IS SCANNED RATHER THAN ASSERTED.** `rules.ts` states
+//     *"NO ROLL. NOT NEGOTIABLE"* and the design of the pop rests on it entirely. "Nobody
+//     added one" is a claim about people; §26(m) and §33(e) already scan the source for
+//     exactly that reason.
+//
+// ⚠️ Every filtered set below is asserted NON-EMPTY before anything quantifies over it.
+// `[].every()` is `true`, and `CLAUDE.md` rule 6 records that trap firing three times in
+// three files in one session, always green.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const DT = 16.667;
+  const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  const idleFor = (st) => st.fighters.map(() => NEUTRAL);
+  // Big, empty and effectively ringless: every row here is about the kit, and a fog edge or
+  // a hazard inside the frame would be a second thing moving HP.
+  const openArena = (over = {}) => makeArena({ width: 4000, height: 4000, maxSafeRadius: 50_000, ...over });
+  const KILL = { kind: 'hazard' };
+  /** Kill `f` outright through the sim's own single choke point, and return the events. */
+  const kill = (st, f) => {
+    const evs = [];
+    applyDamage(st, f, f.maxHp * 10, null, KILL, evs);
+    return evs;
+  };
+  const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+
+  // ── (a) EVERY NUMBER IS DERIVED, AND THE DERIVATION IS WHAT IS ASSERTED ────
+  {
+    const onion = CHARACTERS.hamburger.weapons.filter((w) => w.key === MEDIKIT_HEAL_SOURCE_KEY);
+    check('(a) the roster still HAS the heal the kit is derived from (non-vacuity — an empty filter proves nothing)',
+      onion.length === 1 && (onion[0].healAmount ?? 0) > 0,
+      `${onion.length} weapon(s) keyed ${MEDIKIT_HEAL_SOURCE_KEY}, healAmount ${onion[0]?.healAmount}`);
+    check('(a) 🔴 one corpse yields exactly ONE dedicated heal, split into `count` pieces',
+      MEDIKIT.heal * MEDIKIT.count === onion[0].healAmount,
+      `${MEDIKIT.heal} x ${MEDIKIT.count} = ${MEDIKIT.heal * MEDIKIT.count} vs healAmount ${onion[0].healAmount}`);
+    check('(a) …so a single kit is STRICTLY WEAKER than the heal Super a whole character is built around',
+      MEDIKIT.heal < onion[0].healAmount, `${MEDIKIT.heal} < ${onion[0].healAmount}`);
+    check('(a) a kit cannot be contested unless there is more than one of it',
+      MEDIKIT.count >= 2, `count ${MEDIKIT.count}`);
+    check('(a) `popDistance` is one standard swing — `REACH.meleeStrong`, not a picked number',
+      MEDIKIT.popDistance === REACH.meleeStrong, `${MEDIKIT.popDistance} vs ${REACH.meleeStrong}`);
+    check('(a) …and with the shipped `count` the pair straddles the body by exactly `REACH.rangedMax`',
+      MEDIKIT.count !== 2 || approx(2 * MEDIKIT.popDistance, REACH.rangedMax, 1e-9),
+      `${2 * MEDIKIT.popDistance} vs rangedMax ${REACH.rangedMax}`);
+    check('(a) the pop takes the quick-lob rung of the flight ladder',
+      MEDIKIT.popMs === FLIGHT_MS.fast, `${MEDIKIT.popMs} vs ${FLIGHT_MS.fast}`);
+    check('(a) 🔴 a kit lives exactly as long as the guaranteed-visible disc takes to cross at the slowest speed',
+      approx(MEDIKIT.durationMs, GUARANTEED_VISIBLE_RADIUS / AI_CHASE_SPEED, 1e-9),
+      `${MEDIKIT.durationMs} vs ${GUARANTEED_VISIBLE_RADIUS / AI_CHASE_SPEED}`);
+    check('(a) the touch radius is ONE number for every fighter — the `ENDGAME_STANDOFF` max()',
+      MEDIKIT.pickupRadius === Math.max(HIT_RADIUS_VS_PLAYER, HIT_RADIUS_VS_ENEMY),
+      `${MEDIKIT.pickupRadius} vs max(${HIT_RADIUS_VS_PLAYER}, ${HIT_RADIUS_VS_ENEMY})`);
+    // `audio/director.ts` splits regen from a deliberate heal on `amount <= REGEN_AMOUNT`.
+    // A kit that landed at or below that would be voiced as passive regeneration, silently,
+    // in a file this owner does not have.
+    check('(a) 🔴 a kit clears `REGEN_AMOUNT`, so `audio/director.ts` voices it as a DELIBERATE heal',
+      MEDIKIT.heal > REGEN_AMOUNT, `heal ${MEDIKIT.heal} vs REGEN_AMOUNT ${REGEN_AMOUNT}`);
+  }
+
+  // ── (b) THE DROP — count, geometry, and the two timestamps ────────────────
+  {
+    const st = createMatch(openArena(), [
+      { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2000 } },
+      { characterId: 'sushi', controller: 'human', spawn: { x: 3400, y: 2000 } },
+    ]);
+    st.phase = 'playing';
+    st.elapsed = 12_345;
+    const victim = st.fighters[0];
+    // 🚨 NOT `{ x: 1, y: 0 }`, AND THE REASON IS A DEFECT `mk_knownbad` FOUND IN THIS ROW.
+    // `atan2(0, 1)` is 0, so a broken implementation whose fan phase is the CONSTANT 0 —
+    // i.e. one that ignores the victim entirely — produces byte-identical kits against a
+    // due-east fixture. The `fixed-fan` arm read PASS on the phase-lock row below while the
+    // phase was provably not locked to anything. That is `CLAUDE.md` rule 6's *"a known-bad
+    // planted where the bug cannot express itself"*, and the fix is the FIXTURE: an angle
+    // that is not the origin of the coordinate system. (0.6, −0.8) is a unit vector at
+    // −53.13°, which no plausible constant equals.
+    victim.facing = { x: 0.6, y: -0.8 };
+    check('(b) the floor starts EMPTY — a pre-existing kit would make every count below meaningless (non-vacuity)',
+      st.medikits.length === 0, `${st.medikits.length} kits`);
+    const evs = kill(st, victim);
+    const dropped = evs.filter((e) => e.type === 'medikit-dropped');
+    check('(b) 🔴 a death drops exactly `MEDIKIT.count` kits, and announces every one of them',
+      st.medikits.length === MEDIKIT.count && dropped.length === MEDIKIT.count,
+      `${st.medikits.length} on the floor, ${dropped.length} events`);
+    // ⚠️ THIS ROW FIRST ASSERTED `evs[0] === 'death'` AND WAS RED, CORRECTLY: the real
+    // stream is `hit-landed -> death -> medikit-dropped x2 -> match-ended`, because
+    // `applyDamage` publishes the hit before it tests for death. The CLAIM was never about
+    // absolute position — it is that the drop sits BETWEEN the terminators and the death
+    // event, and that `match-ended` stays last. Stated relatively, it is true and it is what
+    // `combat.ts`'s placement comment argues for.
+    const order = evs.map((e) => e.type);
+    check('(b) 🔴 the drop lands AFTER the `death` it came from and BEFORE `match-ended`, which stays last',
+      order.indexOf('death') < order.indexOf('medikit-dropped')
+      && order.lastIndexOf('medikit-dropped') < order.indexOf('match-ended')
+      && order[order.length - 1] === 'match-ended',
+      order.join(' -> '));
+    check('(b) every kit carries a UNIQUE id from the shared counter',
+      new Set(st.medikits.map((k) => k.id)).size === MEDIKIT.count,
+      st.medikits.map((k) => k.id).join(','));
+    check('(b) 🔴 every kit lands exactly `popDistance` from the body',
+      st.medikits.every((k) => approx(dist(k.x, k.y, victim.x, victim.y), MEDIKIT.popDistance, 1e-9)),
+      st.medikits.map((k) => dist(k.x, k.y, victim.x, victim.y).toFixed(6)).join(', '));
+    check('(b) 🔴 …evenly spaced around the full circle, phase-locked to the victim\'s own facing',
+      st.medikits.every((k, i) => {
+        const want = Math.atan2(victim.facing.y, victim.facing.x) + (i * 2 * Math.PI) / MEDIKIT.count;
+        return approx(victim.x + Math.cos(want) * MEDIKIT.popDistance, k.x, 1e-9)
+          && approx(victim.y + Math.sin(want) * MEDIKIT.popDistance, k.y, 1e-9);
+      }),
+      st.medikits.map((k) => `(${k.x.toFixed(2)},${k.y.toFixed(2)})`).join(' '));
+    check('(b) the arc\'s START is the death point, on every kit — that is the only thing `from` is for',
+      st.medikits.every((k) => k.fromX === victim.x && k.fromY === victim.y),
+      `victim at (${victim.x}, ${victim.y})`);
+    check('(b) `armsAt` and `expiresAt` are DERIVED from the drop tick, not stamped independently',
+      st.medikits.every((k) => k.armsAt === 12_345 + MEDIKIT.popMs
+        && approx(k.expiresAt, 12_345 + MEDIKIT.popMs + MEDIKIT.durationMs, 1e-9)),
+      st.medikits.map((k) => `${k.armsAt}/${k.expiresAt}`).join(' '));
+    check('(b) the kit carries the victim\'s SLOT and no role mirror beside it',
+      st.medikits.every((k) => k.sourceId === victim.id && !('sourceRole' in k)),
+      Object.keys(st.medikits[0]).join(','));
+    check('(b) …while the EVENT carries the role, derived once at emit time',
+      dropped.every((e) => e.sourceRole === victim.role && e.sourceId === victim.id && e.popMs === MEDIKIT.popMs),
+      JSON.stringify(dropped[0]));
+    // Rotate the victim and the whole fan rotates with it: the phase is the facing and
+    // nothing else. Without this the previous row is satisfied by ANY fixed fan.
+    const st2 = createMatch(openArena(), [
+      { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2000 } },
+      { characterId: 'sushi', controller: 'human', spawn: { x: 3400, y: 2000 } },
+    ]);
+    st2.phase = 'playing';
+    st2.fighters[0].facing = { x: 0, y: 1 };
+    kill(st2, st2.fighters[0]);
+    check('(b) 🔴 turn the victim 90° and the WHOLE FAN turns with it — the phase is the facing',
+      approx(st2.medikits[0].x, 2000, 1e-9) && approx(st2.medikits[0].y, 2000 + MEDIKIT.popDistance, 1e-9),
+      `(${st2.medikits[0].x.toFixed(3)}, ${st2.medikits[0].y.toFixed(3)})`);
+  }
+
+  // ── (c) DETERMINISM — the pop is COMPUTED, so it replays exactly ──────────
+  //
+  // The whole design of the pop rests on this: `docs/` records the sim as carrying no RNG
+  // of any kind, and every paired balance delta in this repo rests on the same property.
+  {
+    const run = () => {
+      const st = createMatch(openArena(), [
+        { characterId: 'taco', controller: 'human', spawn: { x: 1234.5, y: 987.25 } },
+        { characterId: 'donut', controller: 'human', spawn: { x: 3000, y: 3000 } },
+      ]);
+      st.phase = 'playing';
+      st.elapsed = 4321;
+      st.fighters[0].facing = { x: 0.6, y: -0.8 };
+      kill(st, st.fighters[0]);
+      return JSON.stringify(st.medikits);
+    };
+    const a = run(); const b = run();
+    check('(c) 🔴 the same death produces bit-identical kits, twice — there is nothing to roll',
+      a === b, `${a}\n         vs\n         ${b}`);
+  }
+
+  // ── (d) ARMING — you cannot catch a kit in the air ────────────────────────
+  //
+  // 🚨 THREE SEATS, AND THE FIRST DRAFT OF THIS ROW USED TWO AND WAS VACUOUS. At N=2 the
+  // death that drops the kit is the LAST death, so `phase` goes to `'ended'` and
+  // `stepMedikits` — which is gated on `playing` — never runs. Both halves of the arming
+  // rule then "pass": the kit is not collected before `armsAt` because nothing is ever
+  // collected. It was caught only because the paired positive row went red. Every
+  // collection row below seats three for this reason. `docs/HANDOVER.md`'s dominant defect
+  // class, one seat lower than usual.
+  {
+    const st = createMatch(openArena(), [
+      { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2000 } },
+      { characterId: 'sushi', controller: 'human', spawn: { x: 3400, y: 2000 } },
+      { characterId: 'taco', controller: 'human', spawn: { x: 2000, y: 3400 } },
+    ]);
+    st.phase = 'playing';
+    st.fighters[0].facing = { x: 1, y: 0 };
+    kill(st, st.fighters[0]);
+    check('(d) the match SURVIVED the death that dropped the kit — at two seats this row is vacuous (non-vacuity)',
+      st.phase === 'playing', st.phase);
+    const kit = st.medikits[0];
+    const taker = st.fighters[1];
+    taker.hp = 1;                       // hurt, so eligibility is not what is being tested
+    taker.x = kit.x; taker.y = kit.y;   // standing exactly on the landing point
+    check('(d) the taker really is on the kit and really is hurt (non-vacuity)',
+      dist(taker.x, taker.y, kit.x, kit.y) === 0 && taker.hp < taker.maxHp && st.medikits.length > 0,
+      `hp ${taker.hp}/${taker.maxHp}, ${st.medikits.length} kits`);
+    // Step to one tick BEFORE it arms. `stepMatch` advances `elapsed` first, so stop short.
+    //
+    // ⚠️ SCORED ON `medikit-taken`, NOT ON HP, AND THE FIRST DRAFT WAS SCORED ON HP AND WENT
+    // RED FOR A REASON THAT IS NOT THE KIT: `createFighter` seeds `lastDamagedAt` at
+    // `-Infinity`, so `elapsed - lastDamagedAt > REGEN_DELAY_MS` is TRUE from tick one and a
+    // fighter that has never been hit regenerates immediately. The fighter went 1 -> 3 HP
+    // with no kit involved. Scoring a pickup on "did HP rise" would have made this row a
+    // measurement of the regen clock; the event is the thing that says a kit was taken.
+    let guard = 0;
+    const seen = [];
+    const step = () => { for (const e of stepMatch(st, DT, idleFor(st))) seen.push(e.type); };
+    while (st.elapsed + DT < kit.armsAt && guard++ < 500) step();
+    check('(d) 🔴 a kit still in the air is NOT collected, however long you stand on it',
+      st.medikits.length === MEDIKIT.count && !seen.includes('medikit-taken'),
+      `elapsed ${st.elapsed.toFixed(2)} < armsAt ${kit.armsAt}, ${st.medikits.length} kits, events {${[...new Set(seen)].join(',')}}`);
+    while (st.elapsed < kit.armsAt && guard++ < 500) step();
+    step();
+    check('(d) 🔴 …and it IS collected on the first tick at or after `armsAt`',
+      seen.includes('medikit-taken') && st.medikits.length < MEDIKIT.count,
+      `${st.medikits.length} kits left at elapsed ${st.elapsed.toFixed(2)}, events {${[...new Set(seen)].join(',')}}`);
+  }
+
+  // ── (e) HURT ONLY — a healthy fighter cannot deny a kit by standing on it ─
+  {
+    const build = () => {
+      // THREE SEATS — see (d). At two the match ends on the drop and BOTH halves of this
+      // rule pass for the wrong reason.
+      const st = createMatch(openArena(), [
+        { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2000 } },
+        { characterId: 'sushi', controller: 'human', spawn: { x: 3400, y: 2000 } },
+        { characterId: 'taco', controller: 'human', spawn: { x: 2000, y: 3400 } },
+      ]);
+      st.phase = 'playing';
+      st.fighters[0].facing = { x: 1, y: 0 };
+      kill(st, st.fighters[0]);
+      const kit = st.medikits[0];
+      const f = st.fighters[1];
+      f.x = kit.x; f.y = kit.y;
+      st.elapsed = kit.armsAt;
+      return { st, f, kit };
+    };
+    const full = build();
+    check('(e) the healthy fighter starts at FULL hp, on an ARMED kit, in a RUNNING match (non-vacuity)',
+      full.f.hp === full.f.maxHp && full.st.elapsed >= full.kit.armsAt
+      && full.st.medikits.length > 0 && full.st.phase === 'playing',
+      `hp ${full.f.hp}/${full.f.maxHp}, phase ${full.st.phase}`);
+    for (let i = 0; i < 30; i++) stepMatch(full.st, DT, idleFor(full.st));
+    check('(e) 🔴 a fighter at FULL HP walks over a kit and leaves it — denial by a healthy body is impossible',
+      full.st.medikits.length === MEDIKIT.count,
+      `${full.st.medikits.length} kits after 30 ticks standing on one`);
+    const hurt = build();
+    hurt.f.hp = hurt.f.maxHp - 1;   // missing ONE hp: the pickup rule is a deficit, not a threshold
+    stepMatch(hurt.st, DT, idleFor(hurt.st));
+    check('(e) 🔴 …and one point of damage is enough to take it — the rule is `hp < maxHp`, not a threshold',
+      hurt.st.medikits.length === MEDIKIT.count - 1 && hurt.f.hp === hurt.f.maxHp,
+      `${hurt.st.medikits.length} kits, hp ${hurt.f.hp}/${hurt.f.maxHp}`);
+  }
+
+  // ── (f) 🔴 THE BOT UNDERSTANDS KITS — the seven-times defect, pre-empted ──
+  //
+  // Driven through `stepAI` directly rather than through a whole match: the claim is about
+  // WHERE THE BOT WALKS, and a match would confound it with whether the kit ever dropped
+  // near enough. Both directions are asserted, because a bot that walked toward everything
+  // would pass the first row alone.
+  {
+    const seekRig = ({ hurt }) => {
+      const st = createMatch(openArena(), [
+        { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2000 } },
+        { characterId: 'sushi', controller: 'ai', spawn: { x: 2000, y: 2400 } },
+      ]);
+      st.phase = 'playing';
+      const bot = st.fighters[1];
+      if (hurt) bot.hp = bot.maxHp * 0.5;
+      // A kit 120 wu due EAST of the bot, i.e. perpendicular to the opponent it would
+      // otherwise walk at. A kit on the line between them could not tell the two apart.
+      st.medikits.push({
+        id: 999, sourceId: 0,
+        x: bot.x + 120, y: bot.y,
+        fromX: bot.x + 120, fromY: bot.y,
+        armsAt: st.elapsed, expiresAt: st.elapsed + MEDIKIT.durationMs,
+      });
+      const x0 = bot.x, y0 = bot.y;
+      for (let i = 0; i < 40; i++) stepAI(st, bot, DT, []);
+      return { bot, dx: bot.x - x0, dy: bot.y - y0, kit: st.medikits[0] };
+    };
+    const kitReach = MEDIKIT.durationMs * AI_CHASE_SPEED;
+    check('(f) the rig\'s kit is inside the reach the seek rule derives, or the bot is right to ignore it (non-vacuity)',
+      120 < kitReach && MEDIKIT.heal > 0, `120 wu vs derived reach ${kitReach.toFixed(1)} wu`);
+    const hurtRun = seekRig({ hurt: true });
+    check('(f) …and the hurt bot actually MOVED, so "did not close" cannot be "did not step" (non-vacuity)',
+      Math.hypot(hurtRun.dx, hurtRun.dy) > 1, `moved ${Math.hypot(hurtRun.dx, hurtRun.dy).toFixed(2)} wu`);
+    check('(f) 🔴 A HURT BOT WALKS TO THE KIT — it goes EAST, not at the opponent to its north',
+      hurtRun.dx > 0 && hurtRun.dx > Math.abs(hurtRun.dy),
+      `dx ${hurtRun.dx.toFixed(2)}, dy ${hurtRun.dy.toFixed(2)} (opponent is due north)`);
+    const wellRun = seekRig({ hurt: false });
+    check('(f) 🔴 …and a bot with NOTHING TO HEAL ignores it and goes at the opponent — the rule is not "walk at kits"',
+      wellRun.dy < 0 && Math.abs(wellRun.dy) > Math.abs(wellRun.dx),
+      `dx ${wellRun.dx.toFixed(2)}, dy ${wellRun.dy.toFixed(2)} (opponent is due north)`);
+    // The reach test is a QUESTION about the kit's remaining life, not a radius. A kit that
+    // is about to expire is not worth walking to however close it is — and a hardcoded
+    // radius would pass the row above and fail this one.
+    const st = createMatch(openArena(), [
+      { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2000 } },
+      { characterId: 'sushi', controller: 'ai', spawn: { x: 2000, y: 2400 } },
+    ]);
+    st.phase = 'playing';
+    const bot = st.fighters[1];
+    bot.hp = bot.maxHp * 0.5;
+    st.medikits.push({
+      id: 998, sourceId: 0, x: bot.x + 120, y: bot.y, fromX: bot.x + 120, fromY: bot.y,
+      armsAt: st.elapsed, expiresAt: st.elapsed + 1,   // 1 ms of life left
+    });
+    const x0 = bot.x;
+    for (let i = 0; i < 10; i++) stepAI(st, bot, DT, []);
+    check('(f) 🔴 a kit it CANNOT REACH IN TIME is ignored — the seek rule is a race, not a radius',
+      bot.x - x0 <= 0, `dx ${(bot.x - x0).toFixed(3)} toward a kit with 1 ms left`);
+  }
+
+  // ── (g) 🔴 THE TIE-BREAK IS NEED, NOT SEAT ───────────────────────────────
+  //
+  // Run BOTH WAYS ROUND. A slot-order implementation passes exactly one of these two rows,
+  // which is the entire reason there are two.
+  {
+    const tieRig = (needierSlot) => {
+      const st = createMatch(openArena(), [
+        { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2000 } },
+        { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2001 } },
+        { characterId: 'sushi', controller: 'human', spawn: { x: 3400, y: 2000 } },
+      ]);
+      st.phase = 'playing';
+      const a = st.fighters[0], b = st.fighters[1];
+      // Same character, so the pools are identical and "fraction" and "absolute" agree —
+      // the row is about the ORDER the loop resolves them in, nothing else.
+      a.hp = a.maxHp * (needierSlot === 0 ? 0.2 : 0.8);
+      b.hp = b.maxHp * (needierSlot === 1 ? 0.2 : 0.8);
+      st.medikits.push({
+        id: 1000, sourceId: 2, x: 2000, y: 2000.5, fromX: 2000, fromY: 2000.5,
+        armsAt: st.elapsed, expiresAt: st.elapsed + MEDIKIT.durationMs,
+      });
+      const before = [a.hp, b.hp];
+      stepMatch(st, DT, idleFor(st));
+      return { a, b, before, kits: st.medikits.length };
+    };
+    for (const needier of [0, 1]) {
+      const r = tieRig(needier);
+      const gained = [r.a.hp - r.before[0], r.b.hp - r.before[1]];
+      check(`(g) both fighters really were touching the same kit, and exactly one kit was taken (non-vacuity, needier=slot ${needier})`,
+        r.kits === 0 && gained[0] + gained[1] > 0,
+        `${r.kits} kits left, gained ${gained.map((g) => g.toFixed(3)).join(' / ')}`);
+      check(`(g) 🔴 the NEEDIER fighter takes it — slot ${needier} is the hurt one and slot ${needier} gets it`,
+        gained[needier] > 0 && gained[1 - needier] === 0,
+        `slot0 +${gained[0].toFixed(3)}, slot1 +${gained[1].toFixed(3)}`);
+    }
+  }
+
+  // ── (h) THE HEAL IS CAPPED AT THE DEFICIT, AND THE EVENT SAYS SO ─────────
+  {
+    const st = createMatch(openArena(), [
+      { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2000 } },
+      { characterId: 'sushi', controller: 'human', spawn: { x: 3400, y: 2000 } },
+    ]);
+    st.phase = 'playing';
+    const f = st.fighters[0];
+    f.hp = f.maxHp - 1;
+    st.medikits.push({
+      id: 1001, sourceId: 1, x: f.x, y: f.y, fromX: f.x, fromY: f.y,
+      armsAt: st.elapsed, expiresAt: st.elapsed + MEDIKIT.durationMs,
+    });
+    check('(h) the deficit really is SMALLER than a whole kit, or the cap is not under test (non-vacuity)',
+      1 < MEDIKIT.heal, `deficit 1 hp vs kit ${MEDIKIT.heal}`);
+    const evs = stepMatch(st, DT, idleFor(st));
+    const taken = evs.filter((e) => e.type === 'medikit-taken');
+    const heals = evs.filter((e) => e.type === 'heal');
+    check('(h) 🔴 HP is capped at the pool — an over-heal cannot push a fighter above `maxHp`',
+      f.hp === f.maxHp, `${f.hp}/${f.maxHp}`);
+    check('(h) 🔴 `medikit-taken.amount` is what the fighter GAINED, not what the kit is worth',
+      taken.length === 1 && approx(taken[0].amount, 1, 1e-9),
+      `${taken.length} events, amount ${taken[0]?.amount}`);
+    check('(h) …and a `heal` event is emitted beside it, so `audio/director.ts` needs no change',
+      heals.length === 1 && heals[0].amount === taken[0].amount && heals[0].fighterId === f.id,
+      `${heals.length} heal events`);
+  }
+
+  // ── (i) THE LEVEL TERM — the same one `combat.ts` applies to the roster heal ─
+  {
+    const at = (level) => {
+      const st = createMatch(openArena(), [
+        { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2000 }, level },
+        { characterId: 'sushi', controller: 'human', spawn: { x: 3400, y: 2000 } },
+      ]);
+      st.phase = 'playing';
+      const f = st.fighters[0];
+      f.hp = 1;
+      st.medikits.push({
+        id: 1002, sourceId: 1, x: f.x, y: f.y, fromX: f.x, fromY: f.y,
+        armsAt: st.elapsed, expiresAt: st.elapsed + MEDIKIT.durationMs,
+      });
+      const evs = stepMatch(st, DT, idleFor(st));
+      return evs.filter((e) => e.type === 'medikit-taken')[0]?.amount;
+    };
+    check('(i) 🔴 at LEVEL_MIN a kit heals exactly its base — every balance number here is measured there',
+      approx(at(LEVEL_MIN), MEDIKIT.heal, 1e-9), `${at(LEVEL_MIN)} vs ${MEDIKIT.heal}`);
+    check('(i) 🔴 …and it scales with the HEALTH ladder, so heal-as-a-fraction-of-pool is level-flat',
+      approx(at(LEVEL_MAX), MEDIKIT.heal * levelHealthMultiplier(LEVEL_MAX), 1e-9),
+      `${at(LEVEL_MAX)} vs ${MEDIKIT.heal * levelHealthMultiplier(LEVEL_MAX)}`);
+  }
+
+  // ── (j) EXPIRY, AND IT IS PHASE-FREE ──────────────────────────────────────
+  {
+    const st = createMatch(openArena(), [
+      { characterId: 'pizza', controller: 'human', spawn: { x: 2000, y: 2000 } },
+      { characterId: 'sushi', controller: 'human', spawn: { x: 3400, y: 2000 } },
+    ]);
+    st.phase = 'playing';
+    st.fighters[0].facing = { x: 1, y: 0 };
+    kill(st, st.fighters[0]);
+    check('(j) there is something to expire (non-vacuity)', st.medikits.length === MEDIKIT.count,
+      `${st.medikits.length} kits`);
+    const gone = st.medikits[0].expiresAt;
+    // The kill ENDED the match at two seats, so this also proves expiry is not gated on phase.
+    check('(j) the match really has ENDED — this is the phase-free half of the claim (non-vacuity)',
+      st.phase === 'ended', st.phase);
+    let guard = 0;
+    while (st.elapsed < gone && guard++ < 2000) stepMatch(st, DT, idleFor(st));
+    check('(j) 🔴 a kit nobody takes is gone at `expiresAt`, match over or not',
+      st.medikits.length === 0, `${st.medikits.length} kits at elapsed ${st.elapsed.toFixed(1)} (expiry ${gone.toFixed(1)})`);
+  }
+
+  // ── (k) 🔴 NO ROLL — SCANNED, NOT ASSERTED ───────────────────────────────
+  //
+  // `rules.ts` states this as the reason the pop is computed instead of tumbled, and the
+  // whole determinism argument for the feature rests on it. §26(m) and §33(e) scan the
+  // source for the same reason: "nobody added one" is a claim about people.
+  {
+    const gameDir = dirname(fileURLToPath(import.meta.url));
+    const PURE = ['sim.ts', 'state.ts', 'combat.ts', 'ai.ts', 'movement.ts'];
+    const scanned = PURE.filter((f) => readdirSync(gameDir).includes(f));
+    check('(k) all five pure-sim files are on disk where the scan looks (non-vacuity)',
+      scanned.length === PURE.length, `${scanned.length}/${PURE.length}: ${scanned.join(' ')}`);
+    const offenders = scanned.filter((f) => stripComments(readFileSync(join(gameDir, f), 'utf8')).includes('Math.random'));
+    check('(k) 🔴 NOT ONE `Math.random` in the simulation — the medikit pop had nothing to roll with',
+      offenders.length === 0, offenders.join(', '));
+    // The scanner must be able to SEE one, or the row above is decoration.
+    check('(k) …and the scan can see one when there is one (known-bad on the scanner itself)',
+      stripComments('const x = Math.random();').includes('Math.random'), 'planted call not seen');
+  }
+
+  // ── (l) A KIT NEVER LANDS SOMEWHERE NOBODY CAN GET IT ────────────────────
+  {
+    const V = { x: 2000, y: 2000 };
+    // A crate placed exactly where the FIRST kit would otherwise land.
+    const BOX = { x: V.x + MEDIKIT.popDistance, y: V.y, w: 120, h: 120, kind: 'crate' };
+    const st = createMatch(openArena({ cover: [BOX] }), [
+      { characterId: 'pizza', controller: 'human', spawn: V },
+      { characterId: 'sushi', controller: 'human', spawn: { x: 3400, y: 3400 } },
+    ]);
+    st.phase = 'playing';
+    st.fighters[0].facing = { x: 1, y: 0 };
+    const insideBox = (x, y) => Math.abs(x - BOX.x) < (MEDIKIT.pickupRadius + BOX.w) / 2
+      && Math.abs(y - BOX.y) < (MEDIKIT.pickupRadius + BOX.h) / 2;
+    check('(l) the un-fallen-back bearing really WOULD have landed inside the crate (non-vacuity)',
+      insideBox(V.x + MEDIKIT.popDistance, V.y), `crate at (${BOX.x}, ${BOX.y})`);
+    kill(st, st.fighters[0]);
+    check('(l) 🔴 …so it falls back to the DEATH POINT, which a fighter was standing on one tick ago',
+      st.medikits[0].x === V.x && st.medikits[0].y === V.y,
+      `(${st.medikits[0].x}, ${st.medikits[0].y}) vs death point (${V.x}, ${V.y})`);
+    check('(l) …and the OTHER kit, whose bearing is clear, is untouched by the fallback',
+      !insideBox(st.medikits[1].x, st.medikits[1].y)
+      && approx(dist(st.medikits[1].x, st.medikits[1].y, V.x, V.y), MEDIKIT.popDistance, 1e-9),
+      `(${st.medikits[1].x.toFixed(2)}, ${st.medikits[1].y.toFixed(2)})`);
+    // The arena clamp: a body against the wall must not throw a kit through it.
+    const wall = createMatch(openArena(), [
+      { characterId: 'pizza', controller: 'human', spawn: { x: 40, y: 2000 } },
+      { characterId: 'sushi', controller: 'human', spawn: { x: 3400, y: 2000 } },
+    ]);
+    wall.phase = 'playing';
+    wall.fighters[0].facing = { x: -1, y: 0 };    // straight at the west wall
+    kill(wall, wall.fighters[0]);
+    check('(l) 🔴 a body against the wall does not throw a kit through it',
+      wall.medikits.every((k) => k.x >= MEDIKIT.pickupRadius && k.x <= wall.arena.width - MEDIKIT.pickupRadius
+        && k.y >= MEDIKIT.pickupRadius && k.y <= wall.arena.height - MEDIKIT.pickupRadius),
+      wall.medikits.map((k) => `(${k.x.toFixed(1)},${k.y.toFixed(1)})`).join(' '));
+  }
+
+  // ── (m) SIX SEATS — the count this project's dominant defect class hides in ─
+  //
+  // Everything above is correct at two seats and several of the rows would be VACUOUS
+  // there: at N=2 a death ends the match, so nobody is left alive to contest a kit and the
+  // "somebody other than the killer got it" case cannot occur at all.
+  {
+    const seats = [];
+    for (let i = 0; i < MAX_FIGHTERS; i++) {
+      seats.push({
+        characterId: CHARACTER_IDS[i % CHARACTER_IDS.length],
+        controller: 'human',
+        spawn: { x: 1000 + (i % 3) * 700, y: 1200 + Math.floor(i / 3) * 700 },
+      });
+    }
+    const st = createMatch(openArena(), seats);
+    st.phase = 'playing';
+    const victim = st.fighters[5];
+    victim.facing = { x: 1, y: 0 };
+    // A BYSTANDER, not the killer — the source is a hazard, and the fighter placed on the
+    // kit is a third party. At two seats this fighter does not exist.
+    const evs = kill(st, victim);
+    check('(m) six seats, one death, and the match is STILL RUNNING — the two-seat version of this row is vacuous',
+      st.phase === 'playing' && st.fighters.filter((f) => f.alive).length === MAX_FIGHTERS - 1,
+      `phase ${st.phase}, ${st.fighters.filter((f) => f.alive).length} alive`);
+    check('(m) the kits really dropped at six seats (non-vacuity)',
+      st.medikits.length === MEDIKIT.count && evs.filter((e) => e.type === 'medikit-dropped').length === MEDIKIT.count,
+      `${st.medikits.length} kits`);
+    const kit = st.medikits[0];
+    const bystander = st.fighters[2];
+    bystander.hp = bystander.maxHp * 0.4;
+    bystander.x = kit.x; bystander.y = kit.y;
+    st.elapsed = kit.armsAt;
+    const hp0 = bystander.hp;
+    const evs2 = stepMatch(st, DT, idleFor(st));
+    check('(m) 🔴 a BYSTANDER collects a kit off a body it had nothing to do with',
+      bystander.hp > hp0 && evs2.some((e) => e.type === 'medikit-taken' && e.fighterId === bystander.id),
+      `slot ${bystander.id} hp ${hp0.toFixed(1)} -> ${bystander.hp.toFixed(1)}`);
+    // Several corpses at once is the six-seat state that two seats cannot reach.
+    kill(st, st.fighters[4]);
+    kill(st, st.fighters[3]);
+    check('(m) 🔴 kits from THREE deaths coexist on the floor and every one keeps its own clock',
+      st.medikits.length === MEDIKIT.count * 3 - 1
+      && new Set(st.medikits.map((k) => k.sourceId)).size === 3,
+      `${st.medikits.length} kits from sources {${[...new Set(st.medikits.map((k) => k.sourceId))].join(',')}}`);
   }
 }
 

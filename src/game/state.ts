@@ -722,6 +722,48 @@ export interface TrailMark {
   damaged: boolean;
 }
 
+/**
+ * A MEDIKIT lying on the floor. Dropped by `combat.ts:dropMedikits` when a fighter dies,
+ * expired and collected by `sim.ts:stepMedikits`. `rules.ts:MEDIKIT` holds every number.
+ *
+ * ── 🚨 `x`/`y` IS WHERE IT LANDS, NOT WHERE IT IS RIGHT NOW ──────────────────
+ *
+ * There is no "right now" in this object, and that is the design. The sim decides the
+ * landing point at the instant of death and never moves the kit again; `fromX`/`fromY` is
+ * the death point and `armsAt` is when the pop is over, and those two exist ONLY so the
+ * presentation layer can draw an arc between them. **The arc is cosmetic.** Nothing in the
+ * sim reads a position other than `x`/`y`, so a kit cannot be taken in mid-air and the
+ * renderer cannot change where it lands.
+ *
+ * That is a stated choice with a hard reason behind it: `rules.ts` records that
+ * `grep -rn 'Math.random' src/game/{sim,state,combat,ai,movement}.ts` returns NOTHING and
+ * that the sim carries no RNG of any kind, seeded or otherwise. A simulated tumble would
+ * have needed one, or a physics integrator and a second source of truth about where things
+ * are. A computed landing point needs neither and replays exactly.
+ *
+ * ⚠️ **NO `role` MIRROR, DELIBERATELY.** `Projectile` and `TrailMark` both carry a
+ * `@deprecated` role beside their slot id, and `net/wire.ts:validateMatchState` checks both
+ * mirrors on every tick it inspects. A third mirror is a third thing that can go stale, in
+ * a file this owner does not have. The slot is authoritative and it is the only copy; the
+ * `medikit-dropped` event carries the role for the presentation layers that key on it,
+ * derived once at emit time.
+ */
+export interface Medikit {
+  id: number;
+  /** Slot of the fighter whose death dropped it. Not a claim on it — anyone may take it. */
+  sourceId: FighterId;
+  /** WHERE IT LANDS. The only position the sim reads. */
+  x: number;
+  y: number;
+  /** The death point. Cosmetic: one end of the arc the renderer draws. */
+  fromX: number;
+  fromY: number;
+  /** `state.elapsed` at which the pop finishes and the kit becomes takeable. */
+  armsAt: number;
+  /** `state.elapsed` at which it vanishes. `armsAt + MEDIKIT.durationMs`. */
+  expiresAt: number;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Match
 // ─────────────────────────────────────────────────────────────────────────────
@@ -784,6 +826,13 @@ export interface MatchState {
   projectiles: Projectile[];
   splats: Splat[];
   trailMarks: TrailMark[];
+  /**
+   * Medikits on the floor, in DROP ORDER — `combat.ts` pushes, `sim.ts` splices, nothing
+   * sorts. `stepMedikits` walks it front to back, so when two kits could go to the same
+   * fighter on the same tick the older one goes first. Order-dependent by construction and
+   * deterministic because the order is.
+   */
+  medikits: Medikit[];
   /** @deprecated legacy mirror of `winnerId`. */
   winner: FighterRole | null;
   /** Slot of the winning fighter, or null while the match is undecided. */
@@ -1188,6 +1237,52 @@ export type GameEvent =
   | { type: 'death'; fighterRole: FighterRole; fighterId: FighterId }
   | { type: 'splat-created'; x: number; y: number }
   | { type: 'trail-mark-created'; ownerRole: FighterRole; ownerId: FighterId; x: number; y: number }
+  /**
+   * A MEDIKIT POPPED OUT OF A BODY. Emitted once per kit, `MEDIKIT.count` times per death,
+   * immediately after the `death` event that caused it and before any `match-ended`.
+   *
+   * Carries BOTH ends of the arc and its duration, so the presentation layer can draw the
+   * pop without importing `rules.ts` or re-reading the kit every frame: the kit leaves
+   * (`fromX`, `fromY`) at the tick this fires and is on the ground at (`x`, `y`) `popMs`
+   * later. ⚠️ **THAT ARC IS ENTIRELY THE RENDERER'S.** The sim never places the kit
+   * anywhere but `x`/`y` — see `Medikit` — so a layer that draws a different curve, or
+   * none, changes nothing about who gets the kit. It is a decoration over a decided fact,
+   * which is the same contract `concealment-broken` and `splat-created` already have.
+   */
+  | {
+      type: 'medikit-dropped';
+      id: number;
+      sourceRole: FighterRole;
+      sourceId: FighterId;
+      fromX: number;
+      fromY: number;
+      x: number;
+      y: number;
+      popMs: number;
+    }
+  /**
+   * SOMEBODY PICKED ONE UP. `amount` is what the fighter actually GAINED — capped at its
+   * own deficit and already scaled by its level, exactly as `hit-landed.amount` is what the
+   * target actually lost — so a card, a number or a sound driven off it cannot disagree
+   * with the health bar.
+   *
+   * 🚨 **A `heal` EVENT IS EMITTED ALONGSIDE THIS ONE, AND THAT IS NOT REDUNDANCY.**
+   * `audio/director.ts` already voices `heal`, and splits regen from a deliberate heal on
+   * `amount <= REGEN_AMOUNT` (2). A kit heals 9 before level scaling, so it lands on the
+   * deliberate side of that existing split and the audio layer needs no change to sound
+   * right. This event is the kit-SPECIFIC beat — the pickup flash, the tick on the HUD —
+   * for a layer that wants to distinguish "healed" from "healed BY A KIT". A consumer must
+   * pick one; voicing both would double.
+   */
+  | {
+      type: 'medikit-taken';
+      id: number;
+      fighterRole: FighterRole;
+      fighterId: FighterId;
+      x: number;
+      y: number;
+      amount: number;
+    }
   /**
    * A concealment region was DESTROYED by the fighter hiding under it attacking from it
    * (`DECISIONS §29c`). Carries the box's own geometry, not an index, for the same reason
