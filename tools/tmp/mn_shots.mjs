@@ -5,7 +5,8 @@
  * Uri: *"Menus/Homescreen VFX still doesn't look professional. It needs all elements
  * to look top notch."* That is a vibe until somebody puts the frames side by side, so
  * this is the eye half of turning it into named defects. The measuring half lives in
- * `mn_census.mjs`.
+ * `tools/tmp/mn_occlude.mjs`. (This line said `mn_census.mjs` for one commit and NO SUCH
+ * FILE EXISTS — a citation that rotted before it was ever true.)
  *
  * Why not reuse `lu_menus.mjs`: it is LANDSCAPE ONLY (844x390 / 667x375), it waits on
  * `window.__screenReady` plus a fixed 1400 ms sleep, and `settle.mjs`'s whole docblock
@@ -69,7 +70,14 @@ async function run() {
         const path = `${OUT}/${vp.tag}--${s}.png`;
         let note = '';
         try {
-          await page.goto(`${BASE}/?screen=${s}`, { waitUntil: 'domcontentloaded', timeout: 90_000 });
+          // 🚨 PIN THE TITLE CARD — IT AUTO-ADVANCES. `opening.ts` arms
+          // `setTimeout(enter, holdMs())` on mount, and under SwiftShader the settle can
+          // outlast the hold: three captures in this file's own first runs were labelled
+          // `opening` and were actually the LOBBY. `holdMs()` reads `?hold=` for exactly
+          // this. The route assertion below stays regardless — a pin that stops working
+          // must go red, not quiet.
+          const pin = s === 'opening' ? '&hold=900000' : '';
+          await page.goto(`${BASE}/?screen=${s}${pin}`, { waitUntil: 'domcontentloaded', timeout: 90_000 });
           // The title card holds the first gesture, so it never "settles" past its own
           // infinite animations the way a mounted screen does; soft-wait it.
           const r = await captureSettled(page, { path, label: `${vp.tag}/${s}`, tool: 'mn_shots.mjs', enforce: false, settleTimeout: 60_000 });

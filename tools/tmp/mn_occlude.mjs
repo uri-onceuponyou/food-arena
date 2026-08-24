@@ -90,7 +90,13 @@ const LAUNCH = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-sw
   '--enable-webgl', '--ignore-gpu-blocklist', '--disable-gpu-sandbox'];
 
 const VIEWPORTS = {
+  // The three portrait widths `menu_accept_portrait` runs, plus landscape phone and
+  // desktop. 360 and 430 are here because the lobby's tab bar is a WIDTH-bound layout
+  // and 390 is neither the narrowest nor the widest phone in the suite — the fit that
+  // holds at 390 is not evidence about either neighbour.
+  'ph-360': { w: 360, h: 800, touch: true },
   'ph-portrait': { w: 390, h: 844, touch: true },
+  'ph-430': { w: 430, h: 932, touch: true },
   'ph-land': { w: 844, h: 390, touch: true },
   desk: { w: 1600, h: 900, touch: false },
 };
