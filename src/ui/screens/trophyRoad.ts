@@ -211,9 +211,13 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
 
   // ── The road ───────────────────────────────────────────────────────────────
 
-  /** Rebuilt wholesale on every change. 34 nodes of static markup is nothing next
-   *  to the bookkeeping a diffing path would need, and it makes "claimed" state
-   *  impossible to get out of sync with the model. */
+  /** Rebuilt wholesale on every change. A road's worth of static markup is nothing
+   *  next to the bookkeeping a diffing path would need, and it makes "claimed" state
+   *  impossible to get out of sync with the model.
+   *  ⚠️ This said "34 nodes" and the road is now 45 (Uri's 10,000 reshape). The count is
+   *  deliberately no longer written down here: it lives in `TROPHY_ROAD` and this file
+   *  has no business restating it. Three comments in this file carried it and all three
+   *  went stale in the same commit. */
   function renderRoad(centreOnPin = false): void {
     const trophies = profile.trophies;
     const owned = profile.unlocked;
@@ -273,7 +277,8 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
    * node's height is its content, so neither "how far along is the pin" nor "how far
    * is this node from the rail" can be written as a stylesheet value. The first
    * attempt at the stems used a fixed length and they shot straight through the road
-   * and out the other side. One forced layout, 34 rects, once per render.
+   * and out the other side. One forced layout, one rect per node, once per render —
+   * which is `TROPHY_ROAD.length` and is not restated here for the reason above.
    */
   function measureTrack(): void {
     const track = roadEl.querySelector<HTMLElement>('.tr-roadtrack');
@@ -320,8 +325,10 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
 
     // A node you can act on is a BUTTON; a node you cannot is a div. Not cosmetic:
     // it is what keeps "every enabled control is a real control" true, and it keeps
-    // 34 disabled buttons out of the tab order on a screen where three of them
-    // matter.
+    // every unreachable node out of the tab order on a screen where three of them
+    // matter. That mattered more after the road went 34 -> 45 nodes: the further a
+    // player is from the end, the more of the road is unreachable, and at the start it
+    // is now 44 of 45.
     const node = canClaim ? el('button', 'tr-node is-claimable') : el('div', 'tr-node');
     if (canClaim) (node as HTMLButtonElement).type = 'button';
     if (isClaimed) node.classList.add('is-claimed');
@@ -824,7 +831,7 @@ const CSS = `
 
 /* ── The road ─────────────────────────────────────────────────────────────── */
 /* The panel HUGS the track instead of stretching to the row.
-   A 34-node strip pinned to the top of a 640px cream slab is the same defect two
+   A single-row node strip pinned to the top of a 640px cream slab is the same defect two
    critics have already named on this project's other screens: the empty two-thirds
    reads as an unfinished build, not as breathing room. Hugging it turns the road
    into a deliberate band with the warm backdrop above and below — which is what the

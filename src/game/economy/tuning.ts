@@ -705,12 +705,86 @@ export interface Milestone {
 }
 
 /**
+ * WHERE THE ROSTER COMPLETES. Uri, 2026-08-24, verbatim:
+ *
+ *   *"Change the trophy road to distribute the characters across 10,000 trophies. When
+ *   you reach 10,000 you will have all of them. Add more steps and stretch the distance
+ *   between steps a bit."*
+ *
+ * This is that number, exported rather than typed into the table twice, because a
+ * retyped literal is invisible to every legality check — a wrong threshold is still a
+ * legal threshold, exactly like `CLAUDE.md`'s stale map coordinates. `TROPHY_ROAD`'s
+ * last entry IS this constant, `economy.test.mjs` §4b asserts the identity, and
+ * `tools/tmp/tr_road_probe.mjs` measures against it.
+ */
+export const ROSTER_COMPLETE_TROPHIES = 10_000;
+
+/**
+ * ── 2026-08-24: THE ROAD NOW RUNS TO 10,000 AND THE LAST CHEF IS THE LAST NODE ──
+ *
+ * Uri asked for four things and all four are measurable, so all four are measured
+ * (`tools/tmp/tr_road_probe.mjs`, and `--selftest`'s ten known-bad arms are what make
+ * the measurements worth quoting):
+ *
+ *   | he asked for            | before      | after       |
+ *   |-------------------------|-------------|-------------|
+ *   | characters by 10,000    | last @2,400 | last @10,000 (= the road end) |
+ *   | MORE steps              | 34          | **45**      |
+ *   | STRETCHED gaps          | min 10 · median 70 · mean 94.1  | min 30 · median 220 · mean 222.2 |
+ *
+ * The gap figures are quoted as all three because a mean alone cannot tell "every gap
+ * got wider" from "one enormous tail gap dragged the average up" — here the min tripled
+ * and the median more than tripled, so it is genuinely the whole road that stretched.
+ * The step gaps are also **non-decreasing for the first time**: the old road stepped
+ * 25 then 22, so it briefly sped up.
+ *
+ * 🚨 **AND THE THING URI HAS TO DECIDE IS THE WALL CLOCK, WHICH MOVED ×4.8.**
+ * Not one payout changed — `MATCH_PAYOUT` is untouched — so a ×3.13 longer road is a
+ * ×4.8 longer grind, because the trophy loss escalates with standing and the top of the
+ * road is spent at the +15/−10 cap where a 60% player nets **5.0 trophies a match**:
+ *
+ *   * FULL ROSTER — **394 → 1,891 matches**, ~3.9 h → **~18.8 h** at 35.7 s a match.
+ *   * FIRST CHARACTER — 4 → **8 matches** (~2.4 → ~4.8 min). Still one sitting.
+ *   * HALF THE ROSTER — 94 → **296 matches**, ~0.9 → **~2.9 h**.
+ *
+ * ⚠️ **This block used to argue the OPPOSITE and the old wording is kept because it is
+ * still the argument against what just shipped**: *"~3.9 hours to the full roster is
+ * the number to argue with, and it is now SHORT rather than long — deliberately shorter
+ * than any shipped brawler's (Brawl Stars is hundreds of hours) because this game has 11
+ * characters, not 90."* 18.8 h is no longer short. Whether that is right is Uri's call
+ * and nothing else in this file assumes an answer.
+ * → **If 18.8 h is too long, the dial is `MATCH_PAYOUT.trophiesWin`, not the road.**
+ * It is the only term in the 5.0/match figure that is not a loss cap, and moving it
+ * rescales the whole clock without disturbing a single threshold, the ordering, the
+ * rarity ladder or the reward mix.
+ *
+ * ── WHERE THE BUNDLE WENT ───────────────────────────────────────────────────
+ * The capstone bundle used to be the road's LAST node. It is now second-to-last, at
+ * 9,565, because "when you reach 10,000 you will have all of them" reads best when the
+ * node AT 10,000 is the final chef — the roster completing is the climax, and a
+ * "Grand Prize" sitting after it would upstage it. Two thresholds cannot share a value,
+ * so one of the two had to move and the character won.
+ * ⚠️ The alternative was folding the character INTO the bundle at 10,000. It was
+ * rejected on cost, not taste: `milestoneFace`, the node renderer and §9's pacing sim
+ * all match on `reward.type === 'character'`, and a character hidden inside a bundle is
+ * invisible to every one of them — a pacing sim that measures nine characters and calls
+ * it ten. `tr_road_probe.mjs` arm I plants exactly that bug to keep the option honest if
+ * anyone takes it later.
+ *
  * ── The curve, and the arithmetic behind it ─────────────────────────────────
  *
  * The prototype's road runs to 25,000 trophies. At its own +15 a win that is ~1,670
  * wins BEFORE counting losses, and it unlocks only 6 of the 11 characters. Uri's
  * constraint is the opposite: a first unlock inside one sitting, and no implication
  * of hundreds of hours to see the roster. So the road was rebuilt, not rescaled.
+ *
+ * ⚠️ **THE PARAGRAPH ABOVE IS NOW HALF-TRUE AND IS KEPT FOR THE HALF THAT SURVIVES.**
+ * "A first unlock inside one sitting" survives exactly (8 matches). "No implication of
+ * hundreds of hours" survives (18.8 h is not hundreds). What does NOT survive is the
+ * implied contrast with the prototype's LENGTH: at 10,000 trophies and +15 a win this
+ * road is now the same *kind* of object the prototype was, and the thing that still
+ * separates them is that **all ten unlockable chefs are on it** where the prototype
+ * placed six and left five to a paid shop.
  *
  * Assumptions used to derive it — CHANGE THESE AND THE NUMBERS BELOW MOVE:
  *   * 60% win rate against the current AI.
@@ -761,6 +835,31 @@ export interface Milestone {
  * hours) because this game has 11 characters, not 90. **The long tail is no longer the
  * road at all: it is levelling** (`LEVEL_UP`).
  *
+ * ── ⚠️ AND THE FOUR LINES ABOVE ARE THE **3,200-TROPHY** ROAD. ALL FOUR MOVED. ──
+ *
+ * Kept per house style, because the pair is the record of what Uri's 10,000 instruction
+ * actually cost. Re-measured 2026-08-24 on the same seeded model, same
+ * `SECONDS_PER_MATCH` = 35.7 s, so every difference below is the ROAD and nothing else:
+ *
+ *   * FIRST CHARACTER (Donut, **100** trophies) —    **8** matches, ~4.8 min. One sitting.
+ *   * HALF THE ROSTER (Water Bottle, **1,950**) —  **296** matches, **~2.9 h**.
+ *   * FULL ROSTER (Hot Dog, **10,000**)         — **1,891** matches, **~18.8 h**.
+ *   * ROAD COMPLETE (**10,000**)                — **1,891** matches, **~18.8 h**.
+ *
+ * ⚠️ **FULL ROSTER AND ROAD COMPLETE ARE NOW THE SAME NUMBER, AND THAT IS STRUCTURAL,
+ * NOT A COINCIDENCE TO BE READ INTO.** The last chef IS the last node, so the two events
+ * are the same event. They were 394 and 636 before because three reward nodes sat past
+ * the final character. Anyone quoting them as two independent corroborating figures is
+ * quoting one figure twice.
+ *
+ * ⚠️ **DONUT MOVED 60 → 100 AND IT WAS FORCED, NOT CHOSEN.** §9 asserts the character
+ * gaps never shrink and never more than **1.6×** the one before. With ten gaps summing to
+ * 10,000, the biggest reachable total from a 60-trophy first gap is 60 × Σ1.6ⁱ = **10,895**
+ * — so 10,000 is reachable from 60 only by pinning almost every ratio at the 1.6 ceiling,
+ * which turns the guard into a tautology and buys a 3,700-trophy final gap. At 100 the
+ * curve closes at a max ratio of **1.556** with real margin. The first unlock costs four
+ * more minutes; the alternative was a guard that could no longer fail.
+ *
  * 💰 **AND THIS IS THE HALF OF URI'S PENDING EARN-RATE DECISION THAT IS NOW CONCRETE.**
  * The question parked for him is whether the earn rate falling is acceptable. It has two
  * independent halves and they must not be added together:
@@ -797,10 +896,37 @@ export interface Milestone {
  * coincidence written up as a finding — caught here only because the greedy sim two
  * sections down runs a DIFFERENT seed and printed a different number.
  *
+ * 🚨 **THE 10,000 ROAD REVERSES THAT PAIRING OUTRIGHT — THE ROAD IS NOW THE BIGGER
+ * PROJECT, BY 2.5×.** Kept above because "they are the same size" was true and is the
+ * clearest statement of what changed. Measured on the greedy career in
+ * `economy.test.mjs` §13 (seed 20260805): **road complete 1,747 matches · Lv15 on the
+ * starter at 709**. The assertion there has been reversed with its old wording kept.
+ * ⚠️ And re-derive the run-to-run spread before comparing across the two roads: **sd is
+ * roughly proportional to career length**, so the old road's sd 51 does not describe
+ * this one. Measured with a matched instrument over 40 seeds
+ * (`tr_road_probe.mjs --seatnull 40`): old road **mean 580.5, sd 43.3 (cv 7.45%)**;
+ * this road **mean 1,923.0, sd 102.0 (cv 5.30%)**.
+ *
  * "More than the entire road pays out" SURVIVES the flattening and is worth stating
  * precisely, because it is the load-bearing claim: the road hands over **9,700** coins
  * directly, or **24,328** counting every chest, box and duplicate at expected value. One
  * maxed character is **4.6x** the former and **1.8x** the latter.
+ *
+ * ⚠️ **ON THE 10,000 ROAD THAT CLAIM IS STILL TRUE AND IS NOW TRUE BY 2.7%.** Re-derived
+ * by `tr_road_probe.mjs --payout`, which reproduces all four numbers above exactly on the
+ * old table before being trusted on the new one: direct **26,900** coins, **43,571**
+ * counting chests, boxes and duplicates. One maxed character is **1.66x** the former and
+ * **1.03x** the latter.
+ * → **This is a scale artefact, not a regression, and the distinction matters.** Not one
+ * payout RATE moved. The road is ×3.13 longer so it pays ×2.77 more, while `costToMax`
+ * is a fixed 44,770 that does not know the road exists. The invariant that actually
+ * carries the design — *the road is a bonus, not the coin faucet* — is unchanged: road
+ * coins are **32%** of what the same career earns from matches (26,900 against
+ * 1,891 × 44), where they were **35%** (9,700 against 636 × 44).
+ * → But at 1.03x the HEADLINE has nearly no margin left, and one more road-lengthening
+ * or one cut to `LEVEL_UP` would invert it. **If it inverts, levelling stops being the
+ * long tail** — which is the sentence four paragraphs up. Flagged for Uri rather than
+ * pre-emptively retuned, because the fix is a payout decision and he did not ask for one.
  *
  * (Before §26: a Cyber was 201,460 coins / 4,134 matches mean / ~29.3 h, and the roster
  * 1,208,810 / 27,048 / ~191.6 h. Flattening cut the roster's bill **59.3%** and cost the
@@ -819,50 +945,74 @@ export interface Milestone {
  * home here.
  */
 export const TROPHY_ROAD: Milestone[] = [
-  { trophies: 10, reward: { type: 'container', kind: 'chest', count: 1 } },
-  { trophies: 25, reward: { type: 'coins', amount: 150 } },
-  { trophies: 42, reward: { type: 'gems', amount: 5 } },
-  { trophies: 60, reward: { type: 'character', id: 'donut' } },
-  { trophies: 85, reward: { type: 'container', kind: 'hamburgerBox', count: 1 } },
-  { trophies: 107, reward: { type: 'coins', amount: 250 } },
-  { trophies: 130, reward: { type: 'character', id: 'taco' } },
-  { trophies: 160, reward: { type: 'gems', amount: 10 } },
-  { trophies: 190, reward: { type: 'container', kind: 'chest', count: 1 } },
-  { trophies: 220, reward: { type: 'character', id: 'burrito' } },
-  { trophies: 260, reward: { type: 'coins', amount: 400 } },
-  { trophies: 300, reward: { type: 'container', kind: 'hamburgerBox', count: 1 } },
-  { trophies: 345, reward: { type: 'character', id: 'soup' } },
-  { trophies: 400, reward: { type: 'gems', amount: 20 } },
-  { trophies: 455, reward: { type: 'container', kind: 'chest', count: 1 } },
-  { trophies: 510, reward: { type: 'character', id: 'sushi' } },
-  { trophies: 580, reward: { type: 'coins', amount: 700 } },
-  { trophies: 650, reward: { type: 'container', kind: 'pineappleBox', count: 1 } },
-  { trophies: 725, reward: { type: 'character', id: 'waterbottle' } },
-  { trophies: 815, reward: { type: 'gems', amount: 35 } },
-  { trophies: 905, reward: { type: 'container', kind: 'chest', count: 1 } },
-  { trophies: 1000, reward: { type: 'character', id: 'pizza' } },
-  { trophies: 1105, reward: { type: 'coins', amount: 1200 } },
-  { trophies: 1220, reward: { type: 'container', kind: 'redBox', count: 1 } },
-  { trophies: 1340, reward: { type: 'character', id: 'egg' } },
-  { trophies: 1485, reward: { type: 'gems', amount: 60 } },
-  { trophies: 1630, reward: { type: 'container', kind: 'pineappleBox', count: 1 } },
-  { trophies: 1780, reward: { type: 'character', id: 'lollipop' } },
-  { trophies: 1980, reward: { type: 'coins', amount: 2000 } },
-  { trophies: 2190, reward: { type: 'container', kind: 'redBox', count: 1 } },
-  { trophies: 2400, reward: { type: 'character', id: 'hotdog' } },
-  { trophies: 2650, reward: { type: 'gems', amount: 100 } },
-  { trophies: 2900, reward: { type: 'container', kind: 'fireBox', count: 1 } },
+  // ── to the first chef ──────────────────────────────────────── gaps 30·35·35 ──
+  { trophies: 30, reward: { type: 'container', kind: 'chest', count: 1 } },
+  { trophies: 65, reward: { type: 'coins', amount: 150 } },
+  { trophies: 100, reward: { type: 'character', id: 'donut' } },           // Normal
+  // ── 45·50·55 ────────────────────────────────────────────────────────────────
+  { trophies: 145, reward: { type: 'gems', amount: 5 } },
+  { trophies: 195, reward: { type: 'container', kind: 'hamburgerBox', count: 1 } },
+  { trophies: 250, reward: { type: 'character', id: 'taco' } },            // Rare
+  // ── 65·75·90 ────────────────────────────────────────────────────────────────
+  { trophies: 315, reward: { type: 'coins', amount: 250 } },
+  { trophies: 390, reward: { type: 'container', kind: 'chest', count: 1 } },
+  { trophies: 480, reward: { type: 'character', id: 'burrito' } },         // Rare
+  // ── 95·110·115 ──────────────────────────────────────────────────────────────
+  { trophies: 575, reward: { type: 'gems', amount: 10 } },
+  { trophies: 685, reward: { type: 'container', kind: 'hamburgerBox', count: 1 } },
+  { trophies: 800, reward: { type: 'character', id: 'soup' } },            // Epic
+  // ── 140·150·160 ─────────────────────────────────────────────────────────────
+  { trophies: 940, reward: { type: 'coins', amount: 400 } },
+  { trophies: 1090, reward: { type: 'container', kind: 'pineappleBox', count: 1 } },
+  { trophies: 1250, reward: { type: 'character', id: 'sushi' } },          // Legendary
+  // ── 170·175·175·180 ─────────────────────────────────────────────────────────
+  { trophies: 1420, reward: { type: 'gems', amount: 20 } },
+  { trophies: 1595, reward: { type: 'container', kind: 'chest', count: 1 } },
+  { trophies: 1770, reward: { type: 'coins', amount: 700 } },
+  { trophies: 1950, reward: { type: 'character', id: 'waterbottle' } },    // Legendary
+  // ── 190·200·210·220·230 ─────────────────────────────────────────────────────
+  { trophies: 2140, reward: { type: 'container', kind: 'pineappleBox', count: 1 } },
+  { trophies: 2340, reward: { type: 'gems', amount: 35 } },
+  { trophies: 2550, reward: { type: 'coins', amount: 1200 } },
+  { trophies: 2770, reward: { type: 'container', kind: 'chest', count: 2 } },
+  { trophies: 3000, reward: { type: 'character', id: 'pizza' } },          // Neon
+  // ── 235·240·250·255·260·260 ─────────────────────────────────────────────────
+  { trophies: 3235, reward: { type: 'container', kind: 'redBox', count: 1 } },
+  { trophies: 3475, reward: { type: 'coins', amount: 1800 } },
+  { trophies: 3725, reward: { type: 'gems', amount: 50 } },
+  { trophies: 3980, reward: { type: 'container', kind: 'pineappleBox', count: 1 } },
+  { trophies: 4240, reward: { type: 'coins', amount: 2400 } },
+  { trophies: 4500, reward: { type: 'character', id: 'egg' } },            // Neon
+  // ── 280·300·310·320·330·340·370 ─────────────────────────────────────────────
+  { trophies: 4780, reward: { type: 'gems', amount: 70 } },
+  { trophies: 5080, reward: { type: 'container', kind: 'redBox', count: 1 } },
+  { trophies: 5390, reward: { type: 'coins', amount: 3000 } },
+  { trophies: 5710, reward: { type: 'container', kind: 'chest', count: 3 } },
+  { trophies: 6040, reward: { type: 'gems', amount: 90 } },
+  { trophies: 6380, reward: { type: 'container', kind: 'pineappleBox', count: 2 } },
+  { trophies: 6750, reward: { type: 'character', id: 'lollipop' } },       // Cyber
+  // ── the last stretch — 375·385·395·405·415·420·420·435 ──────────────────────
+  { trophies: 7125, reward: { type: 'coins', amount: 4000 } },
+  { trophies: 7510, reward: { type: 'container', kind: 'redBox', count: 1 } },
+  { trophies: 7905, reward: { type: 'gems', amount: 120 } },
+  { trophies: 8310, reward: { type: 'coins', amount: 5000 } },
+  { trophies: 8725, reward: { type: 'container', kind: 'fireBox', count: 1 } },
+  { trophies: 9145, reward: { type: 'gems', amount: 150 } },
   {
-    trophies: 3200,
+    // The capstone haul. It is now the SECOND-TO-LAST node rather than the last —
+    // see "WHERE THE BUNDLE WENT" above.
+    trophies: 9565,
     reward: {
       type: 'bundle',
       parts: [
-        { type: 'coins', amount: 5000 },
-        { type: 'gems', amount: 150 },
+        { type: 'coins', amount: 8000 },
+        { type: 'gems', amount: 250 },
         { type: 'container', kind: 'fireBox', count: 1 },
       ],
     },
   },
+  // ── 10,000: THE ROSTER IS COMPLETE. This node is the whole point of the road. ──
+  { trophies: ROSTER_COMPLETE_TROPHIES, reward: { type: 'character', id: 'hotdog' } }, // Cyber
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

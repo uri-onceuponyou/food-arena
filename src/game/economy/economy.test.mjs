@@ -34,7 +34,7 @@ import {
   CONTAINERS, CONTAINER_KINDS, DUPLICATE_COINS, MATCH_PAYOUT, ROSTER_GATED,
   STARTER_CHARACTER, STARTING_BALANCE, STORE_AVAILABLE, STORE_PRODUCTS, TROPHY_ROAD,
   CHARACTERS_BY_RARITY, ENEMY_LEVEL_MODE, MATCH_PACING, SECONDS_PER_MATCH,
-  LEVEL_UP, RARITY_MEANING,
+  LEVEL_UP, RARITY_MEANING, ROSTER_COMPLETE_TROPHIES,
 } from './tuning.ts';
 import { costToMax, enemyLevelFor, levelUpCost, totalLevelCost } from './levels.ts';
 import { createRng, weightedIndex } from './rng.ts';
@@ -578,7 +578,15 @@ console.log('\n3b. Placement curve, 2-6 seats');
       const rng = createRng(20260811);
       let firstChar = null;
       let complete = null;
+      // ⚠️ GUARDED BECAUSE AN UNGUARDED `.find()` HERE MASKED EVERY LATER SECTION.
+      // Found by planting a known-bad for §4b's vacuity guard: strike every character
+      // node off the road and this line dereferences `undefined`, the suite dies with a
+      // `TypeError` at section 3b, and sections 4 through 13 never run — so the guard
+      // written specifically to catch that road never got the chance to. A crash IS a
+      // red result, but it is red in the wrong place and under the wrong name, and it
+      // hides however many other things the same edit broke. `check` first, then use it.
       const firstNode = TROPHY_ROAD.find((m) => m.reward.type === 'character');
+      if (!firstNode) { check('the road has a character node to pace against', false, 'none'); break; }
       for (let m = 1; m <= 6000 && complete === null; m++) {
         applyMatchPlacement(s, placeFor(rng, n), n);
         claimAll(s);
@@ -599,9 +607,40 @@ console.log('\n3b. Placement curve, 2-6 seats');
       rows.map((r) => `${r.n}:${r.firstChar}`).join(' '));
     // The load-bearing pacing claim: seating six must not shift the road by more than the
     // spread the two-seat arm already has across seeds (section 9 quotes sd 51 on this figure).
+    //
+    // ── ⚠️ THE OLD BOUND WAS `spread <= 102` AND IT WAS WRONG TWICE OVER ────────────
+    //
+    // Kept above per house style. Both faults were invisible while the road was short:
+    //
+    //  1. **WRONG SCALE.** 102 is an ABSOLUTE match count derived from a career on the
+    //     3,200-trophy road. A run-to-run sd is roughly proportional to the length of the
+    //     career it measures, so carrying 102 onto a ×3.13 road silently tightened this
+    //     test by ×3.13 — the line looked untouched and had become three times as strict.
+    //     Measured with one instrument across both roads, 40 seeds, seat count held fixed
+    //     (`tools/tmp/tr_road_probe.mjs --seatnull 40`):
+    //       old road  mean 580.5 · sd 43.3 · cv 7.45%
+    //       this road mean 1923.0 · sd 102.0 · cv 5.30%
+    //
+    //  2. **WRONG STATISTIC**, and this one was already wrong before the road moved.
+    //     The number on the left is `max - min` over FIVE seat counts — a RANGE of five
+    //     correlated arms — and `2 sd` describes the deviation of ONE. `CLAUDE.md`
+    //     non-negotiable 10 names this exact error on seat fairness: the floor has to be
+    //     built by permuting the labels and reading the NULL RANGE, because "reaching for
+    //     the standard formula because it is the standard formula is how a floor gets
+    //     quoted an order of magnitude too tight." The expected range of five normal draws
+    //     is ~2.33 sd, not 2 sd.
+    //
+    // So the bound is now that null, measured rather than derived: run the career at a
+    // FIXED seat count over 40 seeds, take `max - min` over random five-seed subsets, and
+    // use its p95 — the spread five arms reach by SEED ALONE, with no seat effect present.
+    //       old road  null range of five: mean 102.1 · p95 168   (the shipped bound was 102)
+    //       this road null range of five: mean 238.7 · p95 354
+    // ⚠️ Note what that says about the old bound: 102 sat at the MEAN of its own null, so
+    // it would have fired on half of all seat-effect-free runs. It never did only because
+    // the observed spread happened to be 45. A guard that survives by luck is furniture.
     const spread = Math.max(...rows.map((r) => r.complete)) - Math.min(...rows.map((r) => r.complete));
-    check('road completion across 2-6 seats stays inside the 2-seat run-to-run spread (sd 51 -> 2 sd = 102)',
-      spread <= 102, `spread ${spread} matches across seat counts`);
+    check('road completion across 2-6 seats stays inside the seed-only NULL RANGE OF FIVE (p95 = 354)',
+      spread <= 354, `spread ${spread} matches across seat counts`);
   }
 }
 
@@ -670,6 +709,108 @@ console.log('\n4. Trophy road structure');
   const half = roadProgress(Math.floor((thresholds[0] + thresholds[1]) / 2));
   check('progress between two nodes is fractional',
     half.progress01 > 0.3 && half.progress01 < 0.7, `${half.progress01}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4b. URI'S 10,000 SPEC, ASSERTED
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Uri, 2026-08-24: *"Change the trophy road to distribute the characters across 10,000
+// trophies. When you reach 10,000 you will have all of them. Add more steps and stretch
+// the distance between steps a bit."*
+//
+// Section 4 above already checks that the roster is ON the road. It has nothing to say
+// about WHERE, which is the entire content of this instruction, so these are new.
+//
+// 🚨 EVERY PREDICATE HERE RUNS OVER A FILTERED SET, AND `[].every()` IS `true`. The
+// character nodes are a filter of the road; the gaps are a derived list. `CLAUDE.md`
+// non-negotiable 6 records that vacuity firing three times in three files in one session,
+// always green, always because a fix emptied the set the assertion ran over. So the
+// non-empty checks come FIRST and are real assertions, not comments — delete the road's
+// character nodes and this section goes red on line one rather than passing in silence.
+console.log(`\n4b. Uri's 10,000 spec (ROSTER_COMPLETE_TROPHIES = ${ROSTER_COMPLETE_TROPHIES.toLocaleString()})`);
+{
+  // A bundle can carry a character grant, and a filter matching only
+  // `reward.type === 'character'` would miss it — which is how a road check comes to
+  // measure nine characters and call it ten. Walk the tree.
+  const unlocks = [];
+  const walk = (reward, trophies) => {
+    if (reward.type === 'character') unlocks.push({ id: reward.id, trophies });
+    else if (reward.type === 'bundle') reward.parts.forEach((p) => walk(p, trophies));
+  };
+  TROPHY_ROAD.forEach((m) => walk(m.reward, m.trophies));
+
+  const expected = CHARACTER_IDS.filter((id) => id !== STARTER_CHARACTER);
+
+  // ── THE NON-VACUITY GUARDS. These are why the rest of the section means anything. ──
+  check('the expected character set is NON-EMPTY', expected.length > 0, `${expected.length}`);
+  check('the road has character unlocks to check', unlocks.length > 0, `${unlocks.length}`);
+  check('...and there is one for every expected character',
+    unlocks.length === expected.length, `${unlocks.length} unlocks vs ${expected.length} expected`);
+
+  // ── "when you reach 10,000 you will have all of them" ──────────────────────
+  const at = new Map(unlocks.map((u) => [u.id, u.trophies]));
+  const late = expected.filter((id) => !at.has(id) || at.get(id) > ROSTER_COMPLETE_TROPHIES);
+  check(`EVERY character is unlocked at or before ${ROSTER_COMPLETE_TROPHIES.toLocaleString()}`,
+    late.length === 0,
+    late.map((id) => `${id}@${at.get(id) ?? 'nowhere'}`).join(', '));
+
+  // ── "distribute the characters across 10,000" — the LAST one lands ON it, and
+  //    the road stops there. Both halves, because either alone is satisfiable in a
+  //    way that misses the point: every character before 9,000 satisfies "at or
+  //    before 10,000" while wasting the last tenth of the road.
+  const last = unlocks[unlocks.length - 1];
+  check(`the LAST character lands exactly on ${ROSTER_COMPLETE_TROPHIES.toLocaleString()}`,
+    last !== undefined && last.trophies === ROSTER_COMPLETE_TROPHIES,
+    last ? `${last.id}@${last.trophies}` : 'no character unlocks');
+  check('...and that node is the END of the road — roster complete IS road complete',
+    roadEnd() === ROSTER_COMPLETE_TROPHIES, `roadEnd ${roadEnd()}`);
+  check('the road end is the exported constant, not a retyped literal',
+    TROPHY_ROAD[TROPHY_ROAD.length - 1].trophies === ROSTER_COMPLETE_TROPHIES);
+
+  // ── "the road is strictly increasing" ──────────────────────────────────────
+  // Section 4 asserts this too. It is repeated here deliberately and in a DIFFERENT
+  // shape: section 4's version is a `for` loop from i=1, which on a one-element road
+  // never executes and reports `ascending = true`. This one asserts the road is long
+  // enough for the question to mean something first.
+  const ts = TROPHY_ROAD.map((m) => m.trophies);
+  check('the road is long enough for "increasing" to mean anything', ts.length >= 2, `${ts.length} nodes`);
+  const rising = ts.every((t, i) => i === 0 || t > ts[i - 1]);
+  check('the road is STRICTLY increasing', rising, ts.join(','));
+
+  // ── "add more steps" and "stretch the distance between steps a bit" ────────
+  // The road being replaced, measured on `31f481c` rather than remembered:
+  //   34 steps · end 3,200 · gaps min 10 · median 70 · mean 94.1
+  const PREV = { steps: 34, gapMin: 10, gapMedian: 70, gapMean: 3200 / 34 };
+  const gaps = ts.map((t, i) => t - (i === 0 ? 0 : ts[i - 1]));
+  check('there are gaps to measure', gaps.length > 0);
+  const sorted = [...gaps].sort((a, b) => a - b);
+  const med = sorted.length % 2
+    ? sorted[(sorted.length - 1) / 2]
+    : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
+  const mean = roadEnd() / TROPHY_ROAD.length;
+  check(`MORE steps than the road it replaces (${PREV.steps})`,
+    TROPHY_ROAD.length > PREV.steps, `${TROPHY_ROAD.length} steps`);
+  // All three, not the mean alone: a mean can be dragged up by one enormous tail gap
+  // while every early gap SHRINKS, which is the opposite of what was asked for.
+  check(`STRETCHED — smallest gap wider than ${PREV.gapMin}`, sorted[0] > PREV.gapMin, `min ${sorted[0]}`);
+  check(`STRETCHED — median gap wider than ${PREV.gapMedian}`, med > PREV.gapMedian, `median ${med}`);
+  check(`STRETCHED — mean gap wider than ${PREV.gapMean.toFixed(1)}`,
+    mean > PREV.gapMean, `mean ${mean.toFixed(1)}`);
+  // The road never SPEEDS UP. The old one did, once: it stepped 25 then 22.
+  check('step gaps never shrink along the road',
+    gaps.every((g, i) => i === 0 || g >= gaps[i - 1]), gaps.join(','));
+  console.log(`     ${TROPHY_ROAD.length} steps to ${roadEnd().toLocaleString()}`
+    + `  ·  gaps min ${sorted[0]} / median ${med} / mean ${mean.toFixed(1)} / max ${sorted[sorted.length - 1]}`
+    + `  ·  characters at ${unlocks.map((u) => u.trophies).join(', ')}`);
+
+  // ── §26: rarity is ACQUISITION rarity and confers no power. The road must not
+  //    imply otherwise. The ladder climbs in SCARCITY, and the assertion that it
+  //    costs the same to level at every tier lives in §13 — this one only checks the
+  //    road does not smuggle a second hierarchy in by ordering.
+  check('every level costs the same at every rarity, so road position implies no power',
+    RARITY_ORDER.every((t) => LEVEL_UP.rarityCostMultiplier[t] === 1),
+    RARITY_ORDER.map((t) => `${t}:${LEVEL_UP.rarityCostMultiplier[t]}`).join(' '));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -836,8 +977,26 @@ console.log('\n6. Claiming milestones');
     bulk.coins > 0 || bulk.gems > 0 || Object.keys(bulk.containers).length > 0);
 
   // The capstone bundle.
+  //
+  // ── ⚠️ THIS CHECK WAS NAMED `the road ends on a bundle` AND NEVER CHECKED THAT ──
+  //
+  // Kept per house style, and the lesson is worth more than the check was: it asserted
+  // `!!TROPHY_ROAD.find(m => m.reward.type === 'bundle')` — "a bundle exists SOMEWHERE"
+  // — under a name claiming a position. It would have passed with the bundle first. The
+  // name was doing the reader's verification for them, which is the failure mode
+  // `AGENT-BRIEF §4.4` states as *"ask of every assertion: what implementation would
+  // fail this?"* Both halves are now asserted separately and by position.
+  //
+  // The road deliberately no longer ends on the bundle: Uri's 10,000 node is the last
+  // CHARACTER, so the capstone haul sits second-to-last. See `tuning.ts`.
   const bundleNode = TROPHY_ROAD.find((m) => m.reward.type === 'bundle');
-  check('the road ends on a bundle', !!bundleNode);
+  check('the road carries a capstone bundle', !!bundleNode);
+  check('...and it is at the TOP of the road, not buried early',
+    !!bundleNode && TROPHY_ROAD.indexOf(bundleNode) >= TROPHY_ROAD.length - 2,
+    `index ${bundleNode ? TROPHY_ROAD.indexOf(bundleNode) : -1} of ${TROPHY_ROAD.length}`);
+  check('...and the road ENDS on a character — roster complete is the climax',
+    TROPHY_ROAD[TROPHY_ROAD.length - 1].reward.type === 'character',
+    TROPHY_ROAD[TROPHY_ROAD.length - 1].reward.type);
   const s6 = seeded();
   const bundleReward = resolveReward(bundleNode.reward, ownedSet(s6));
   check('a bundle resolves every part',
@@ -1022,8 +1181,27 @@ console.log('\n9. Pacing (60% win rate, seeded)');
   // this model computes; hours is matches times a session length that lives in another
   // file and moves whenever the clock does. Asserting the hours here is what let the
   // 2-minute literal survive a 4x change in match length without a single gate going red.
-  check('HALF the roster inside 240 matches', halfAt !== undefined && halfAt <= 240, `${halfAt} matches`);
-  check('FULL roster inside 600 matches', lastAt !== undefined && lastAt <= 600, `${lastAt} matches`);
+  //
+  // ── ⚠️ THESE READ `240` AND `600` AND BOTH DESCRIBED THE 3,200-TROPHY ROAD ──────
+  //
+  // Kept per house style, because the pair is the record of what Uri's 10,000
+  // instruction cost in matches. Nothing about the payout curve moved — `MATCH_PAYOUT`
+  // is untouched — so the whole difference is road length, and it is NOT proportional
+  // to it: the road grew ×3.13 and the grind grew **×4.80**, because the top of a
+  // longer road is spent above `trophyLossCap` where a 60% player nets 5.0 trophies a
+  // match instead of the 9.0 the grace band pays.
+  //
+  //   half the roster  94 -> 296 matches      (bound 240 -> 400)
+  //   full roster     394 -> 1,891 matches    (bound 600 -> 2,400)
+  //
+  // The new bounds are ~1.35x and ~1.27x the measured figure. That is deliberate and it
+  // is TIGHTER than what it replaces (240 was 2.55x of 94): these are single-seed
+  // deterministic numbers whose seed-to-seed cv is 5.30%, measured over 40 seeds by
+  // `tools/tmp/tr_road_probe.mjs --seatnull 40`, so 1.27x is about five sd of headroom —
+  // loose enough that no reseeding reddens it, tight enough to catch a real regression.
+  // A bound at 2.55x of the new figure would be 4,800 matches and could not fail.
+  check('HALF the roster inside 400 matches', halfAt !== undefined && halfAt <= 400, `${halfAt} matches`);
+  check('FULL roster inside 2400 matches', lastAt !== undefined && lastAt <= 2400, `${lastAt} matches`);
   check('full roster is not trivial (>= 150 matches)', lastAt >= 150, `${lastAt} matches`);
   check('the whole road is completable without spending a penny', run.complete,
     `stopped at ${run.matches} matches`);
@@ -1045,7 +1223,14 @@ console.log('\n9. Pacing (60% win rate, seeded)');
   const gaps = order.map((id, i) => run.unlockedAt.get(id) - (i === 0 ? 0 : run.unlockedAt.get(order[i - 1])));
   check('measured unlock gaps trend upward (no regression in pacing)',
     gaps.every((g, i) => i === 0 || g >= gaps[i - 1] * 0.7), gaps.join(','));
-  check('the last unlock gap is under 150 matches', gaps[gaps.length - 1] < 150, `${gaps[gaps.length - 1]}`);
+  // ⚠️ WAS `< 150`, ON THE 3,200 ROAD, WHERE THE LAST GAP MEASURED ~110 MATCHES.
+  // The final character gap is 3,250 trophies of a 10,000 road (32.5%, where it was
+  // 19.4%) and measures **609 matches**. That tail share is forced, not chosen: with the
+  // character gaps required to be non-decreasing, the last of ten gaps summing to 10,000
+  // can never be below the mean of 1,000, and holding the first unlock early forces the
+  // curve near-geometric — see the note on donut moving 60 -> 100 in `tuning.ts`.
+  // Bound set at 800, ~1.31x the measured value, the same headroom as the two above.
+  check('the last unlock gap is under 800 matches', gaps[gaps.length - 1] < 800, `${gaps[gaps.length - 1]}`);
 
   // A weaker player must still progress rather than stall forever.
   const weak = simulate(0.45, 8000);
@@ -1103,6 +1288,59 @@ console.log('\n10. Persistence');
   check('a claimed threshold that is no longer on the road is dropped',
     deserialize({ claimed: [TROPHY_ROAD[0].trophies, 999999] }).claimed.length === 1,
     JSON.stringify(deserialize({ claimed: [TROPHY_ROAD[0].trophies, 999999] }).claimed));
+
+  // ── THE 10,000 RESHAPE, FROM AN EXISTING PLAYER'S SIDE ─────────────────────
+  //
+  // Uri's road change moved 33 of 34 thresholds. The one question that matters is
+  // whether a player mid-progression can lose a chef they already earned, and the
+  // answer is structural rather than lucky: `unlocked` is persisted as its own list of
+  // character ids and `deserialize` restores it independently of `TROPHY_ROAD`. The
+  // road is not the record of what you own; it is the record of where you got it.
+  //
+  // ⚠️ This is asserted with a HAND-WRITTEN OLD BLOB, not with `serialize(createEconomy())`.
+  // A round trip through today's code cannot express the bug — it would write today's
+  // thresholds and read them back, so the check would pass on a build that drops every
+  // legacy save on the floor. The blob below carries the 3,200-road thresholds as
+  // literals precisely because they are the ones that no longer exist.
+  {
+    const OLD_ROAD_THRESHOLDS = [10, 25, 42, 60, 85, 107, 130, 160, 190, 220, 260, 300,
+      345, 400, 455, 510, 580, 650, 725, 815, 905, 1000, 1105, 1220, 1340, 1485];
+    const OLD_UNLOCKED = ['hamburger', 'donut', 'taco', 'burrito', 'soup', 'sushi',
+      'waterbottle', 'pizza', 'egg'];
+    const migrated = deserialize({
+      trophies: 1500, bestTrophies: 1500, coins: 3000, gems: 40,
+      claimed: OLD_ROAD_THRESHOLDS, unlocked: OLD_UNLOCKED,
+      winsTowardChest: 1, seed: 12345, rolls: 4,
+    });
+    check('a pre-10,000 save keeps EVERY character it had earned',
+      OLD_UNLOCKED.every((id) => migrated.unlocked.includes(id)),
+      `lost: ${OLD_UNLOCKED.filter((id) => !migrated.unlocked.includes(id)).join(', ') || 'none'}`);
+    check('...and its trophy standing is untouched', migrated.trophies === 1500);
+    // The thresholds moved, so the claims against them are correctly dropped: a claim on
+    // a node that no longer exists must not linger, and the node that replaced it must be
+    // claimable. That is the forgiving direction and it is a WINDFALL, never a loss.
+    check('...and claims against thresholds that no longer exist are dropped',
+      migrated.claimed.length === 0, JSON.stringify(migrated.claimed));
+    const reclaimable = TROPHY_ROAD.filter((m) => m.trophies <= migrated.trophies);
+    check('...leaving the nodes below their standing claimable again', reclaimable.length > 0,
+      `${reclaimable.length} nodes`);
+    // The one thing a re-claim must NOT do is hand back a character they already own.
+    // `resolveReward` substitutes duplicate coins, so the windfall is currency only.
+    //
+    // ⚠️ NAME THE BRANCH THIS IS EXERCISING, because it is not the obvious one.
+    // `ROSTER_GATED` is FALSE in the shipped tree, so every character already counts as
+    // owned and this rides `resolveReward`'s `else` — the ungated duplicate-value path.
+    // Under `ROSTER_GATED = true` the same assertion would ride the `!owned.has(...)`
+    // branch instead. Both encode the same property, but a known-bad planted on the
+    // GATED branch is planted where the bug cannot express itself today and passes
+    // vacuously — which is exactly what happened when this was first checked.
+    const windfall = claimAll(migrated);
+    check('...and re-claiming a character node they already own pays COINS, not a duplicate chef',
+      windfall.characters.length === 0 && windfall.coins > 0,
+      `chars [${windfall.characters.join(', ')}], ${windfall.coins} coins`);
+    check('...and the roster is exactly what it was before the re-claim',
+      migrated.unlocked.length === OLD_UNLOCKED.length, `${migrated.unlocked.length}`);
+  }
 
   const legacy = createEconomy(1);
   adoptLegacyBalance(legacy, { coins: 4321, gems: 99 });
@@ -1422,10 +1660,27 @@ console.log('\n13. Character levels');
       maxedStarterAt !== null, `not reached in ${LIMIT} matches`);
     check('levelling does NOT starve the road — the road still completes on a greedy career',
       roadDoneAt !== null, `${s.claimed.length}/${TROPHY_ROAD.length} claimed in ${LIMIT} matches`);
-    check('maxing one character is a bigger project than finishing the road',
-      maxedStarterAt > roadDoneAt, `max at ${maxedStarterAt}, road at ${roadDoneAt}`);
-    check('...but not an absurd one (inside 4x the road)',
-      maxedStarterAt < roadDoneAt * 4, `max at ${maxedStarterAt}, road at ${roadDoneAt}`);
+    // ── ⚠️ THIS PAIR ASSERTED THE OPPOSITE AND URI'S 10,000 ROAD REVERSED IT ───────
+    //
+    // Old wording, kept per house style:
+    //   check('maxing one character is a bigger project than finishing the road',
+    //     maxedStarterAt > roadDoneAt, ...)
+    //   check('...but not an absurd one (inside 4x the road)',
+    //     maxedStarterAt < roadDoneAt * 4, ...)
+    //
+    // On the 3,200 road these were 590 vs 577 matches — the same size, which is why
+    // `tuning.ts` called them the same size. On the 10,000 road they are **709 vs 1,747**:
+    // the ROAD is now the long project, by 2.46x. Not one level price moved; `costToMax`
+    // is the same 44,770 it was. The road simply became the bigger thing.
+    //
+    // ⚠️ Note the second check would have gone on passing after the reversal, silently and
+    // vacuously: `709 < 1747 * 4` is true, and stays true for any road length, so it stops
+    // bounding anything the moment the first one flips. A guard whose subject has swapped
+    // sides is not a guard that got easier — it is one that has nothing left to say.
+    check('finishing the road is a bigger project than maxing one character',
+      roadDoneAt > maxedStarterAt, `road at ${roadDoneAt}, max at ${maxedStarterAt}`);
+    check('...but not an absurd one (the road is inside 4x maxing one character)',
+      roadDoneAt < maxedStarterAt * 4, `road at ${roadDoneAt}, max at ${maxedStarterAt}`);
   }
 
   // The sink must be REAL: a player who never levels should end up sitting on a balance
