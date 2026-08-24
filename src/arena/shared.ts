@@ -2316,6 +2316,57 @@ export function addConceal(
  * fighter are all still visible THROUGH it, while the near rails, the valance and the
  * hanging pans cross the fighter's silhouette and put something unmistakably above him.
  *
+ * ── 🚨 AND THE OWNER HAS NOW REJECTED THAT PARAGRAPH TOO. FOURTH REPORT. ────
+ *
+ * Uri, playing the shipped build with this rack in it: *"the bushes are to transparent,
+ * players are visible through them, so it makes no point."*
+ *
+ * The paragraph above survived the FIRST reversal by moving the argument from *lowness* to
+ * *openness*. Openness is what he is now describing. **It is a geometric fact and here is
+ * the number, computed from this function's own constants and checkable against them:**
+ *
+ *   RACK_Y underside          2.990 m      = CHARACTER_HEIGHT + DUCK_CLEAR_M + HANG_MAX
+ *   lowest hanging pot        2.550 m
+ *   valance bottom            2.470 m      = RACK_Y − VAL_DROP
+ *   ── a 2.10 m character's head ──────────────────────────────────────────────
+ *   tallest ground clutter    0.620 m      CLUTTER's largest `h`
+ *
+ * So in the **BODY BAND — 0.62 m to 2.10 m, which is 70.5% of the character's height** —
+ * the only geometry this patch contains is **four `POST`-square corner poles**:
+ * `4 × 0.21² = 0.176 m²` against a `6.5 × 6.5 m` footprint at 130 wu.
+ * **0.42% of the plan area** (0.58% at the 110 wu size). Everything else is on the floor or
+ * above his head **by construction** — `DUCK_CLEAR_M` guarantees the clearance, which is
+ * the same line that guarantees nothing can interpenetrate a character.
+ *
+ * **99.6% of this patch has nothing at all at body height**, and that is exactly what
+ * *"players are visible through them"* describes. The ~22% plan figure above is real and
+ * it is the wrong statistic: it counts what is above the fighter, not what is beside him.
+ *
+ * ── WHAT IS *NOT* THE PROBLEM, MEASURED, SO NOBODY SPENDS A ROUND ON IT ─────
+ * `tools/tmp/cn_reveal.mjs` (six seats, 40 matches, 1.6 M ordered living pairs) and
+ * `tools/tmp/cw_conceal_view.mjs` (25/0, S/N 11.3× on pixels):
+ *   * **The mechanic is not broken.** When a fighter is standing under a rack it hides
+ *     them **92.7%** of the time at N=6 and **100%** at N=2; the opponent's model, radar
+ *     blip and HP pill all go.
+ *   * **`CONCEAL_REVEAL_RADIUS` is not the lever.** The denied share is **flat to 0.006 pp
+ *     across R = 0…128 wu**, against a 0.011 pp floor from a disjoint-seed null arm. Not
+ *     one in-region pair is within 128 wu of an observer. Changing that constant buys
+ *     nothing, and it is pinned in `rules.ts` between melee 84 and ranged 98 anyway.
+ *   * **What IS wrong is UPTAKE.** Fighters are inside a region on **5.08%** of pair-ticks
+ *     against a **7.03%** share of standable area — a **LIFT of −2.33 pp at N=6** and
+ *     −0.10 pp at N=2. `conceal_lab --occupancy`'s own criterion is *"zero means
+ *     decoration"*; below zero means fighters enter them LESS than they would enter an
+ *     equal area of paint.
+ *
+ * 🔴 **THE CHANGE THIS IMPLIES IS A DESIGN REVERSAL AND IT IS NOT TAKEN HERE.** Putting
+ * mass in the body band is precisely what the ORIGINAL header argued against (*"a canopy
+ * tall enough to physically cover a fighter would also hide the floor the fighter stands
+ * on"*), and that objection is still true — it is a trade, not a bug. Two reversals of the
+ * same paragraph without the owner's eye is how this reached four reports. `DECISIONS §29a`
+ * is where it belongs, with these numbers attached.
+ * ⚠️ And whoever takes it: **the constraint is the 0.62–2.10 m band, not the plan area.**
+ * A denser canopy at 3 m moves the ~22% figure and changes nothing Uri can see.
+ *
  * ── THE HEIGHTS ARE DERIVED FROM `CHARACTER_HEIGHT`, NEVER TYPED ────────────
  * `RACK_Y = CHARACTER_HEIGHT + DUCK_CLEAR_M + HANG_MAX`. Two properties fall out of that
  * and both are the point of writing it this way:

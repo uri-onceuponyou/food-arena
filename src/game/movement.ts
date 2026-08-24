@@ -99,27 +99,38 @@ export interface ConcealBox {
 }
 
 /**
- * ⚠️ `ArenaDefinition` DOES NOT DECLARE `concealment` YET, AND THAT IS ON PURPOSE.
+ * 🚨 **THE ARENA OWNER HAS SINCE DECLARED THE FIELD, AND THIS BLOCK LEFT INSTRUCTIONS
+ *    FOR EXACTLY THAT DAY. THEY ARE CARRIED OUT HERE.**
  *
- * `src/arena/types.ts` belongs to the arena file set, which was mid-measurement when this
- * landed, and this project's hardest constraint is one owner per file set. So the sim
- * reads the field STRUCTURALLY through this one accessor instead. Every other module goes
- * through `isConcealed`/`isVisibleFrom` and never touches the cast.
+ * THE OLD HEADER, kept verbatim per `CLAUDE.md`'s rule about an assertion — or a
+ * comment — that encodes a premise which has been reversed:
  *
- * WHEN THE ARENA OWNER ADDS `concealment?: ConcealBox[]` TO `ArenaDefinition`, delete
- * `ConcealArena` and the intersection below; nothing else changes, and `tsc` will point at
- * the two lines. Until then an arena that supplies the field works, an arena that does not
- * gets an empty list, and — this is the acceptance test, not an assumption — an empty list
- * is bit-identical to no field at all.
+ *   > *"⚠️ `ArenaDefinition` DOES NOT DECLARE `concealment` YET, AND THAT IS ON PURPOSE.
+ *   > `src/arena/types.ts` belongs to the arena file set, which was mid-measurement when
+ *   > this landed, and this project's hardest constraint is one owner per file set. So
+ *   > the sim reads the field STRUCTURALLY through this one accessor instead. Every other
+ *   > module goes through `isConcealed`/`isVisibleFrom` and never touches the cast.
+ *   >
+ *   > WHEN THE ARENA OWNER ADDS `concealment?: ConcealBox[]` TO `ArenaDefinition`, delete
+ *   > `ConcealArena` and the intersection below; nothing else changes, and `tsc` will
+ *   > point at the two lines."*
+ *
+ * `src/arena/types.ts` now declares `concealment?: ConcealBox[]` — grep it — and
+ * `kitchen.ts` supplies **20** regions. The structural cast was therefore doing nothing
+ * except suppressing type checking on a field that is now typed, which is the opposite of
+ * what it was for. **A cast that outlives its reason is a hole, not a bridge.**
+ *
+ * ⚠️ Found 2026-08-24 by an agent re-deriving a claim it had been handed as true, not by
+ * any check — the same way three other stale claims about this feature were found in one
+ * session. Nothing here can go stale in that direction again: `tsc` now owns the question.
  */
-type ConcealArena = { readonly concealment?: readonly ConcealBox[] };
 
 /** Shared empty list, so the common case allocates nothing on the hot path. */
 const NO_CONCEALMENT: readonly ConcealBox[] = [];
 
 /** This arena's concealment regions, or an empty list for an arena that has none. */
 export function concealmentOf(arena: ArenaDefinition): readonly ConcealBox[] {
-  return (arena as ArenaDefinition & ConcealArena).concealment ?? NO_CONCEALMENT;
+  return arena.concealment ?? NO_CONCEALMENT;
 }
 
 /**
@@ -292,8 +303,17 @@ export function isVisibleFrom(
  *
  * Returns the boxes destroyed by THIS call, so the caller can emit one event each without
  * re-deriving which ones they were. Empty — and allocation-free — in the overwhelmingly
- * common case where the attacker is standing in the open, and on every arena shipping
- * today, where there is nothing to be standing in at all.
+ * common case where the attacker is standing in the open.
+ *
+ * ⚠️ **THAT SENTENCE USED TO END *"…and on every arena shipping today, where there is
+ * nothing to be standing in at all"*, AND IT IS FALSE.** Kept per house style. `kitchen.ts`
+ * ships **20** regions and this path is live. Measured at six seats over 40 matches
+ * (`tools/tmp/cn_reveal.mjs --seeds 20`): **0.15 of the 20 regions are destroyed per
+ * match**, and destruction accounts for **4.63%** of the pair-ticks in which a fighter is
+ * physically standing under a rack. Small, but no longer zero — and the number matters,
+ * because a whole-playfield region planted by `--selftest` is destroyed by the FIRST
+ * attack anywhere and then accounts for **44%** of pair-ticks. Region COUNT is what keeps
+ * §29c proportionate; one big region would make this the dominant mechanic by accident.
  */
 export function breakConcealment(
   x: number,

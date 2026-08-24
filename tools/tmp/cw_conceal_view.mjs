@@ -35,8 +35,14 @@
  * `?px=/?py=` (QA player placement) puts the player a chosen distance from the enemy's
  * spawn; `?fogRadius=` skips the countdown into `playing`; `?simSpeed=0.02` all but
  * freezes the sim so the three captures are the same instant. The concealment region is
- * injected through `window.__matchArena` — the live `ArenaDefinition`, by reference —
- * because no arena declares one yet.
+ * injected through `window.__matchArena` — the live `ArenaDefinition`, by reference.
+ *
+ * ⚠️ **THIS SENTENCE USED TO END *"…because no arena declares one yet"* AND IT IS FALSE.**
+ * Kept, per house style, because the whole of this file was written under that premise and
+ * two of its assertions encoded it. `kitchen.ts` declares **20** regions (10 mirror pairs).
+ * The injection is still the right technique — a whole-playfield region needs no knowledge
+ * of where either fighter is standing — but the shipped list is now STASHED and RESTORED
+ * rather than replaced with `[]`, and the baseline is asserted CLEAN rather than EMPTY.
  *
  *   node tools/tmp/with_snapshot.mjs -- node tools/tmp/cw_conceal_view.mjs --url {URL}
  */
@@ -65,8 +71,59 @@ const LAUNCH = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-sw
  * happily reported the model "gone" from a body box that was 30% clipped. The camera
  * pitches 58 deg, so the visible world reaches much further along +y (up-screen) than
  * -y; only the horizontal axis is symmetric about the player.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  🚨 THIS WAS A TYPED CONSTANT AND IT WENT STALE WHEN THE MAP WENT ×4.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * THE OLD LINE, kept because the class is this repo's most expensive one:
+ *
+ *     const ENEMY = { x: 1240, y: 610 };   // "the kitchen's enemy spawn"
+ *
+ * `6631446` took the arena from 1400×1000 to **2800×2000** and `kitchen.ts` now reads
+ * `enemySpawn = { x: ARENA_W - 300, y: ARENA_H - 810 }` = **(2500, 1190)**. The 1×
+ * playfield is exactly the NW quadrant of the ×4 one, so (1240, 610) stayed a perfectly
+ * **LEGAL** point on the map — no legality check anywhere in this repo can see the class
+ * (`CLAUDE.md`, "STALE MAP LITERALS ARE INVISIBLE TO EVERY LEGALITY CHECK").
+ *
+ * What it actually did: `?px=`/`?py=` placed the player at `(1240 − gap, 610)` while the
+ * enemy sat at (2500, 1190) — **1,543 wu away** in the far case. `match.ts`'s
+ * `projectPointToScreen` returns `null` for a ground point outside NDC, so the probe read
+ * `no projection`, bailed out of `run()` and skipped **every one of its twelve real
+ * assertions**, in both cases, while reporting only "2 passed, 6 failed".
+ *
+ * ⚠️ **AND THAT IS NOT THE `np_nfighter` DEFECT** — measured, not assumed. `ce0c665`
+ * found a fighter at **176 wu**, INSIDE the ~199.22 wu view guarantee, failing to
+ * project; that is a real bug in `match.ts`/`camera.ts` with another owner. 1,543 wu is
+ * **7.7× the guarantee**, so `null` there is `projectPointToScreen` behaving exactly as
+ * documented. Two different causes wearing the same "no projection" message.
+ *
+ * ⚠️ **AND RETYPING `{2500, 1190}` WOULD BE THE SAME BUG ONE MAP-CHANGE LATER.** Same
+ * remedy `np_nfighter.mjs:resolveCenter` took: read it off the LIVE `ArenaDefinition` the
+ * renderer is drawing, and THROW rather than fall back — a fixture that silently defaults
+ * is a fixture that silently measures the wrong place.
  */
-const ENEMY = { x: 1240, y: 610 };
+async function resolveEnemySpawn() {
+  const browser = await chromium.launch({ args: LAUNCH });
+  try {
+    const page = await browser.newPage({ viewport: { width: 640, height: 360 } });
+    await page.goto(`${BASE}/?fogRadius=900&simSpeed=0.01&pointerLock=0`, { waitUntil: 'networkidle' });
+    await page.waitForFunction(() => window.__gameReady === true, null, { timeout: 60000 });
+    const s = await page.evaluate(() => window.__matchArena?.enemySpawn ?? null);
+    if (!s || !Number.isFinite(s.x) || !Number.isFinite(s.y)) {
+      throw new Error('resolveEnemySpawn: __matchArena.enemySpawn is not readable — refusing to '
+        + 'guess. Every coordinate in this probe is relative to it.');
+    }
+    return { x: s.x, y: s.y };
+  } finally {
+    await browser.close();
+  }
+}
+/** Filled by `resolveEnemySpawn()` below the banner. `run()` only READS it, and only
+ *  after that await has resolved, so there is no temporal-dead-zone hazard here — but a
+ *  `const` referenced above its initialiser is exactly the shape `node --check` cannot
+ *  see, so it is called out rather than left to be discovered. */
+let ENEMY = null;
 /**
  * 170 wu, and it is pinned between two numbers rather than picked:
  *
@@ -100,7 +157,23 @@ const readSurfaces = () => ({
   screen: window.__vfxDebugScreen ?? null,
   hasArenaHook: !!window.__matchArena,
   concealCount: (window.__matchArena?.concealment ?? []).length,
+  // The whole list, not just its length, because the baseline assertion below is now
+  // "the SHIPPED regions leave both probe points clear", which a count cannot answer.
+  concealBoxes: (window.__matchArena?.concealment ?? []).map(
+    (b) => ({ x: b.x, y: b.y, w: b.w, h: b.h, kind: b.kind ?? null })),
 });
+
+/**
+ * `movement.ts:isConcealed`'s membership rule, restated here for the ONE reason a probe
+ * may restate a sim rule: this file cannot import TypeScript. It is the fighter's CENTRE
+ * against the box's full extents — **not** AABB overlap and **not** full containment; the
+ * sim's header spells out why both were rejected on measurement. If that rule ever
+ * changes, this copy is wrong and the planted known-bad below is what says so.
+ */
+const centreInBox = (x, y, b) =>
+  Math.abs(x - b.x) < b.w / 2 && Math.abs(y - b.y) < b.h / 2;
+/** Every region in `boxes` whose rectangle contains (x, y). */
+const boxesCovering = (x, y, boxes) => boxes.filter((b) => centreInBox(x, y, b));
 
 /** Per-pixel |Δ| between two PNGs, plus the count of pixels that moved by more than
  *  `thresh` inside an axis-aligned region. A region rather than a whole-frame number
@@ -157,8 +230,58 @@ async function run(gap, tag) {
     const before = await page.evaluate(readSurfaces);
     check(`[${tag}] the QA arena hook is published (without it nothing here is measurable)`,
       before.hasArenaHook);
-    check(`[${tag}] no arena ships a concealment list, so the baseline has 0 regions`,
-      before.concealCount === 0, `got ${before.concealCount}`);
+    // ═══════════════════════════════════════════════════════════════════════
+    //  🚨 THIS ARM WENT RED BECAUSE THE WORLD WAS FIXED. THE TRIPWIRE WAS
+    //     RIGHT AND THE REMEDY WAS WRONG — SAME SHAPE AS `gatecount` §G7.
+    // ═══════════════════════════════════════════════════════════════════════
+    //
+    // THE OLD ASSERTION, kept verbatim per `CLAUDE.md`'s rule about an assertion that
+    // encodes a premise which has been reversed:
+    //
+    //     check(`[${tag}] no arena ships a concealment list, so the baseline has 0 regions`,
+    //       before.concealCount === 0, `got ${before.concealCount}`);
+    //
+    // It was TRUE when written — `movement.ts` shipped the mechanic before any arena had a
+    // region to act on, and this file's own header still says *"no arena declares one
+    // yet"*. `kitchen.ts` then declared **20** (10 mirror pairs, `grep -c 'addConceal(
+    // concealGroup' src/arena/kitchen.ts`), which is the DESIRED end state, and this arm
+    // reported it as a failure. A control that reads the LIVE world can only stay honest
+    // while the world keeps the defect alive; `c471efe` retired exactly that shape.
+    //
+    // ── WHAT THE ARM WAS ACTUALLY FOR, AND WHAT REPLACES IT ────────────────
+    //
+    // It was never really about the number 0. Everything below compares a BASELINE frame
+    // (enemy drawn) against an INJECTED frame (enemy concealed), so what it needs is that
+    // **no shipped region already covers either probe point** — otherwise the baseline is
+    // the treatment and the whole before/after is confounded. That is now asserted
+    // directly, against the same centre-in-box rule the sim uses.
+    //
+    // ── AND IT IS NON-VACUOUS BY CONSTRUCTION, NOT BY HOPE ─────────────────
+    //
+    // `boxesCovering(...) .length === 0` is exactly the `[].every()` shape this repo has
+    // been bitten by three times in one session: it passes just as happily against a
+    // membership test that can never fire, or against an empty region list. So a region is
+    // PLANTED on the enemy point in a COPY of the shipped list and the same predicate is
+    // required to FIRE on it, while the real list stays clean. A known-bad you construct
+    // beats a control you hope the tree still satisfies.
+    const shippedBoxes = before.concealBoxes;
+    check(`[${tag}] NON-VACUITY: the arena ships a concealment list at all `
+      + `(an empty list makes every membership assertion below vacuous)`,
+      shippedBoxes.length > 0, `got ${shippedBoxes.length} regions`);
+    const pOver = boxesCovering(px, py, shippedBoxes);
+    const eOver = boxesCovering(ENEMY.x, ENEMY.y, shippedBoxes);
+    check(`[${tag}] BASELINE IS CLEAN: neither probe point stands in a SHIPPED region, so `
+      + `the baseline frame is a genuine "visible" control`,
+      pOver.length === 0 && eOver.length === 0,
+      `player (${px},${py}) in [${pOver.map((b) => b.kind).join(',')}] · `
+      + `enemy (${ENEMY.x},${ENEMY.y}) in [${eOver.map((b) => b.kind).join(',')}]`);
+    const planted = [...shippedBoxes, { x: ENEMY.x, y: ENEMY.y, w: 40, h: 40, kind: 'planted' }];
+    check(`[${tag}] KNOWN-BAD, PLANTED: the membership predicate FIRES on a planted region `
+      + `over the enemy while the real list is clean — so the arm above is not vacuous`,
+      boxesCovering(ENEMY.x, ENEMY.y, planted).length === 1
+      && boxesCovering(ENEMY.x, ENEMY.y, shippedBoxes).length === 0,
+      `planted hits ${boxesCovering(ENEMY.x, ENEMY.y, planted).length}, `
+      + `real hits ${boxesCovering(ENEMY.x, ENEMY.y, shippedBoxes).length}`);
     // `!== 'none'` rather than `=== 'block'`: the pill is a flex row, and pinning the
     // exact display value made this assertion fail on a HUD that was working perfectly.
     check(`[${tag}] BASELINE: the enemy is drawn on the radar and as a floating pill`,
@@ -180,7 +303,16 @@ async function run(gap, tag) {
     // Whole-arena rather than a box placed on the enemy, deliberately: it needs no
     // knowledge of the enemy's world position, and it makes the ONLY thing separating
     // case F from case R the separation itself.
+    //
+    // ⚠️ **THE SHIPPED LIST IS STASHED, NOT DISCARDED.** It used to be replaced and then
+    // set to `[]`, which was harmless while no arena declared regions and is a confound
+    // now that the kitchen declares 20: the "restored" frame would be the shipped world
+    // MINUS its concealment, so the drift control would be measuring this probe's own
+    // vandalism as drift. `window.__matchArena` is the live `ArenaDefinition` BY
+    // REFERENCE — `match.ts:  window.__matchArena = this.arena` — so writing the field is
+    // writing the object every reader in the sim sees.
     await page.evaluate(() => {
+      window.__cwShipped = window.__matchArena.concealment;
       window.__matchArena.concealment = [{ x: 700, y: 500, w: 4000, h: 4000, kind: 'probe_region' }];
     });
     await page.waitForTimeout(300);
@@ -188,12 +320,20 @@ async function run(gap, tag) {
     const hidden = `${OUT}/${tag}-2-region.png`;
     await page.screenshot({ path: hidden });
 
-    // ── Remove it again: the drift control ─────────────────────────────────
-    await page.evaluate(() => { window.__matchArena.concealment = []; });
+    // ── Put the SHIPPED list back: the drift control ───────────────────────
+    await page.evaluate(() => { window.__matchArena.concealment = window.__cwShipped; });
     await page.waitForTimeout(300);
     const after = await page.evaluate(readSurfaces);
     const restored = `${OUT}/${tag}-3-restored.png`;
     await page.screenshot({ path: restored });
+    // The restore is itself asserted. Without this row a `__cwShipped` that came back
+    // `undefined` would leave `concealment` undefined, `concealmentOf` would hand every
+    // reader `NO_CONCEALMENT`, the enemy would reappear, and the drift control would go
+    // green while measuring a world the game never ships.
+    check(`[${tag}] the drift control RESTORES the shipped list, it does not delete it `
+      + `(the old build set it to [] and called that "removed")`,
+      after.concealCount === before.concealCount,
+      `before ${before.concealCount} → after ${after.concealCount}`);
 
     const regions = {
       enemy: bodyBox(before.screen.enemy),
@@ -211,7 +351,11 @@ async function run(gap, tag) {
   }
 }
 
-console.log(`\ncw_conceal_view — ${BASE} @ ${W}x${H}\n`);
+console.log(`\ncw_conceal_view — ${BASE} @ ${W}x${H}`);
+
+ENEMY = await resolveEnemySpawn();
+console.log(`enemy spawn, READ FROM THE LIVE ArenaDefinition: (${ENEMY.x}, ${ENEMY.y})`
+  + `  — never typed; see resolveEnemySpawn's header for the ×4 map failure\n`);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CASE F — separation 140 wu. Concealment applies. FULLY HIDDEN.
