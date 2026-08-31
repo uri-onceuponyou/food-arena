@@ -497,6 +497,319 @@ export type EnemyLevelMode = 'mirror' | 'fixed';
 export const ENEMY_LEVEL_MODE: EnemyLevelMode = 'mirror';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ITEMS — the loadout, and how a player OBTAINS one
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * ── URI'S SPEC, AND THE HALF OF IT THIS FILE ANSWERS ────────────────────────
+ *
+ * *"Add game items … (up to 2 items per player, he sets it up on the lobby, which ones
+ * he wants to use out of what he has). Figure out names and looks for the items based
+ * on what they do. … Add rarity to items — zombie power is the rarest. … Items can be
+ * obtained through boxes/chests and in trophy road (as a surprise, not a fixed item)."*
+ *
+ * Two halves, and they live in two files by the same split every other feature here uses:
+ *
+ *   `rules.ts`   what an item DOES in a match — the sleep duration, the 1.3× stack, the
+ *                five-second lockout. That is COMBAT, and `rules.ts` owns combat.
+ *   HERE         what an item IS to the progression system — its identity, its rarity,
+ *                which containers can produce it, what a duplicate is worth, and where
+ *                the trophy road hides one. That is PROGRESSION, and this file owns it.
+ *
+ * 🚨 **AND THE `rules.ts` HALF DOES NOT EXIST YET, WHICH IS WHY THE CATALOGUE IS HERE.**
+ * The brief that produced this work stated *"Phase 1 landed the ITEMS registry with rarity
+ * in `rules.ts` plus `docs/ITEMS.md`"*. Both were checked against the tree before anything
+ * was written and **neither exists**: `grep ITEMS src/game/rules.ts` returns nothing and
+ * there is no `docs/ITEMS.md`. So this is the FIRST catalogue, not a second copy — but it
+ * is sitting in the file that owns the acquisition half of the question rather than the
+ * behaviour half, and that is a seam somebody has to close.
+ *
+ * → **When `rules.ts` grows an item registry, `ITEM_IDS` and `ITEMS[id].rarity` must move
+ *   there and this file must IMPORT them**, exactly as it already imports `CHARACTER_IDS`
+ *   and `CHARACTERS[id].rarity` rather than restating them. `tools/tmp/ie_items.mjs`
+ *   watches that seam: it parses `rules.ts` for an item registry and, the moment one
+ *   appears, diffs the id set and the rarity map against this one and exits 1 on any
+ *   disagreement. Until then it prints SOLE-CATALOGUE. A second copy that AGREES today is
+ *   the one that goes stale next month — `CLAUDE.md`'s standing rule about counts, applied
+ *   to a table.
+ *
+ * ── ⚠️ AND THE NAMES ARE A PROPOSAL, NOT A MEASUREMENT ──────────────────────
+ * Uri asked for names "based on what they do". These are one string each and are meant to
+ * be argued with; nothing in the model reads a name, and `ie_items.mjs` asserts that
+ * (renaming every item leaves every drop rate, pool and pity figure bit-identical). The
+ * LOOKS he also asked for are a `rules.ts`/render question and are not attempted here.
+ */
+
+/**
+ * ── THE ONE PLACE THE ITEM RARITY LADDER DEPARTS FROM THE CHARACTER ONE ─────
+ *
+ * `RARITY_MEANING` below says, of FIGHTERS: *"Rarity sets how hard a fighter is to find —
+ * not how strong it is."* That sentence is load-bearing, it is on a legal-disclosure
+ * surface, and `DECISIONS §24b` is Uri reversing rarity-as-power outright because in a
+ * humans-vs-humans game it is pay-to-win.
+ *
+ * 🚨 **ITEMS DO NOT OBEY IT, AND THAT IS URI'S OWN INSTRUCTION RATHER THAN A DRIFT.**
+ * *"Add rarity to items — zombie power is the rarest"* names the single most match-altering
+ * effect in his list (a free resurrection) as the single rarest thing to obtain. Rarity for
+ * items therefore tracks IMPACT, not just scarcity, and the ladder below is ordered by how
+ * much an item changes a fight.
+ *
+ * **That reintroduces exactly the shape §24b removed**, by a narrower door: gems are the
+ * premium currency, gems buy boxes, boxes now contain items, so a payer reaches the top of
+ * the item ladder faster than a non-payer. Three things bound it, and they are the reason
+ * this is shippable rather than a blocker — but it is a DESIGN DECISION URI SHOULD SEE, not
+ * an implementation detail:
+ *
+ *   1. **`ITEM_SLOTS` is 2.** The ceiling is two items, not a collection, so the gap between
+ *      a whale and a free player is bounded by the best two items rather than by all ten.
+ *   2. **The Cyber tier is reachable free.** Six late trophy-road nodes each carry a
+ *      `late`-pool surprise with a Cyber slice, and the road costs nothing.
+ *      `tools/tmp/ie_items.mjs --career` measures what that is actually worth.
+ *   3. **A duplicate never becomes power.** It converts to coins (see
+ *      `ITEM_DUPLICATE_COINS`). There is deliberately no item-levelling path, because
+ *      "buy boxes → level the item" is the pay-to-win loop §24b closed, wearing a hat.
+ */
+export type ItemId =
+  | 'springboard'
+  | 'moldCloud'
+  | 'inkSpray'
+  | 'batterPump'
+  | 'liquoriceRope'
+  | 'hotSauce'
+  | 'chamomileMist'
+  | 'fungusShield'
+  | 'blackHole'
+  | 'zombiePower';
+
+/**
+ * Declaration order is the RARITY LADDER, ascending, and `ie_items.mjs` asserts it.
+ *
+ * Same trick `CHARACTER_IDS` uses: one array, iterated everywhere, so "every item" can
+ * never mean two different sets in two different files.
+ */
+export const ITEM_IDS = [
+  'springboard', 'moldCloud',
+  'inkSpray', 'batterPump',
+  'liquoriceRope', 'hotSauce',
+  'chamomileMist', 'fungusShield',
+  'blackHole',
+  'zombiePower',
+] as const satisfies readonly ItemId[];
+
+/**
+ * How an item occupies its slot.
+ *
+ * `'passive'` is always on for the whole match and asks nothing of the player;
+ * `'active'` is a thing you press. The distinction exists because of the assumption
+ * this work had to make and could not ask about: **a passive occupies one of the two
+ * slots exactly as an active does.** Otherwise a permanent aura is free and therefore
+ * always correct, and the loadout choice Uri asked for stops being a choice.
+ *
+ * Nothing in `economy/` branches on this — it is here so `rules.ts` and the lobby read
+ * one answer instead of two.
+ */
+export type ItemKind = 'active' | 'passive';
+
+export interface ItemDef {
+  name: string;
+  emoji: string;
+  rarity: Rarity;
+  kind: ItemKind;
+  /** One line, in the player's language, for the odds sheet and the reveal card. */
+  blurb: string;
+}
+
+/**
+ * The ten items, in ascending rarity.
+ *
+ * Each `blurb` is a restatement of Uri's own line for that item and nothing more — the
+ * numbers behind them (the 1.3× stack, the five-second lockouts, the half-screen reach)
+ * are `rules.ts`'s to own and are deliberately not repeated here, because a duration
+ * written in two files is a duration that will disagree in one of them.
+ */
+export const ITEMS: Record<ItemId, ItemDef> = {
+  // ── Normal — movement and chip. Neither ends a fight. ──
+  springboard: {
+    name: 'Pancake Springboard',
+    emoji: '🥞',
+    rarity: 'Normal',
+    kind: 'active',
+    blurb: 'Bounce a long jump in or out — close the gap, or leave it.',
+  },
+  moldCloud: {
+    name: 'Mold Cloud',
+    emoji: '🦠',
+    rarity: 'Normal',
+    kind: 'passive',
+    blurb: 'A small cloud follows you all match, chipping anyone who stands too close.',
+  },
+
+  // ── Rare — disruption. Costs the target their next few seconds, not their health. ──
+  inkSpray: {
+    name: 'Squid Ink Spray',
+    emoji: '🦑',
+    rarity: 'Rare',
+    kind: 'active',
+    blurb: "Splatters ink across whoever you hit — they can barely see what they are fighting.",
+  },
+  batterPump: {
+    name: 'Batter Pump',
+    emoji: '🧴',
+    rarity: 'Rare',
+    kind: 'active',
+    blurb: 'Gums up an opponent’s weapon for five seconds. They can still run.',
+  },
+
+  // ── Epic — control and damage. These decide a duel. ──
+  liquoriceRope: {
+    name: 'Liquorice Rope',
+    emoji: '🪢',
+    rarity: 'Epic',
+    kind: 'active',
+    blurb: 'Ties an opponent where they stand for five seconds.',
+  },
+  hotSauce: {
+    name: 'Hot Sauce',
+    emoji: '🌶️',
+    rarity: 'Epic',
+    kind: 'passive',
+    blurb: 'Every hit you land on the SAME target burns hotter than the one before it.',
+  },
+
+  // ── Legendary — long reach, or a window nobody can attack into. ──
+  chamomileMist: {
+    name: 'Chamomile Mist',
+    emoji: '😴',
+    rarity: 'Legendary',
+    kind: 'active',
+    blurb: 'Puts a distant enemy to sleep. The further away they are, the longer they stay down.',
+  },
+  fungusShield: {
+    name: 'Fungus Shield',
+    emoji: '🍄',
+    rarity: 'Legendary',
+    kind: 'active',
+    blurb: 'Grows a shell for five seconds. Everything that hits you takes the hit back.',
+  },
+
+  // ── Neon — it moves other people around the map. ──
+  blackHole: {
+    name: 'Black Hole Bagel',
+    emoji: '🕳️',
+    rarity: 'Neon',
+    kind: 'active',
+    blurb: 'Drops an opponent next to a DIFFERENT opponent. Useless in a two-player endgame.',
+  },
+
+  // ── Cyber — Uri: "zombie power is the rarest". One item, one tier, on purpose. ──
+  zombiePower: {
+    name: 'Zombie Power',
+    emoji: '🧟',
+    rarity: 'Cyber',
+    kind: 'passive',
+    blurb: 'If the player who killed you dies before the match is decided, you get back up. Once.',
+  },
+};
+
+/**
+ * How many items a player may take into a match. Uri: *"up to 2 items per player"*.
+ *
+ * Exported rather than typed into the lobby, `state.ts` and the sim separately — three
+ * copies of a cap is three places for it to be two in one of them. `state.ts:equipItem`
+ * enforces it, and it is the number that bounds the pay-to-win exposure described above.
+ */
+export const ITEM_SLOTS = 2;
+
+/**
+ * Coins paid when an item drop lands on one the player already holds.
+ *
+ * ── WHY COINS AND NOT AN UPGRADE ────────────────────────────────────────────
+ * Every route from a duplicate to POWER is the loop `DECISIONS §24b` closed: buy boxes,
+ * feed the copies into the item, own a stronger item than someone who did not pay. There
+ * is no item-levelling path in this model and adding one is a design decision rather than
+ * a feature, so a repeat pays out in the currency that already has a sink (`LEVEL_UP`).
+ *
+ * ── THE NUMBERS ─────────────────────────────────────────────────────────────
+ * ~40% of `DUPLICATE_COINS` at the same tier, rounded to readable prices: an item occupies
+ * ONE of two loadout slots where a fighter is the whole loadout, so it is worth a fraction
+ * of one and the fraction is stated rather than left implicit. Strictly ascending, which
+ * `economy.test.mjs` asserts — a ladder that is not monotone is a ladder where a rarer drop
+ * pays less, and nobody would ever notice it in the odds sheet.
+ *
+ * ⚠️ **The endgame check that matters is that this must not turn a box into a coin faucet.**
+ * A player who owns every item still gets less back from every container than they put in —
+ * `ie_items.mjs --shredder` re-derives all five containers at full ownership and asserts it.
+ */
+export const ITEM_DUPLICATE_COINS: Record<Rarity, number> = {
+  Normal: 50,
+  Rare: 100,
+  Epic: 200,
+  Legendary: 350,
+  Neon: 550,
+  Cyber: 900,
+};
+
+/**
+ * ── THE TROPHY ROAD SURPRISE — Uri: *"as a surprise, not a fixed item"* ─────
+ *
+ * A surprise node does not name what it pays. It names a POOL, the pool is a weight table
+ * over rarities, and the item inside is resolved when the player claims it.
+ *
+ * ── HOW IT RESOLVES DETERMINISTICALLY, STATED PRECISELY ─────────────────────
+ *
+ * There are two halves and only one of them is fixed in advance. Saying so exactly is the
+ * point, because "the surprise is decided the moment you see the node" is the claim a
+ * player would infer and it is only three-quarters true:
+ *
+ *   * **THE RARITY IS PINNED BY (player seed, node threshold) AND NOTHING ELSE.**
+ *     `createRng(seed + ROAD_SURPRISE_SALT + threshold)` — no dependence on `rolls`, on
+ *     claim order, on how many matches have been played, or on the wall clock. It cannot be
+ *     re-rolled by reloading the page before claiming, which is the oldest exploit in the
+ *     genre and is the same property `state.ts`'s persisted `rolls` counter buys for chests.
+ *   * **WHICH item of that rarity you receive depends on what you already own AT THE MOMENT
+ *     YOU CLAIM.** Deliberately: the road never hands you a duplicate while an unowned item
+ *     of the same rarity is sitting in the pool. That is `rollContainer()`'s existing rule
+ *     for fighters, applied unchanged, and it is why claiming two surprises in the other
+ *     order can hand you the same two items in the other order.
+ *
+ * ⚠️ `ROAD_SURPRISE_SALT` is what keeps the road's stream from colliding with the container
+ * stream, which runs on `seed + rolls`. Without it, a player at `rolls === 195` claiming the
+ * node at 195 trophies would draw from an RNG whose state a chest had already used — and
+ * `rng.ts`'s own header explains at length why near-identical seeds are the thing `mixSeed`
+ * exists to decorrelate. The value is the golden-ratio constant, arbitrary and standard; the
+ * point is that it is a NAMED constant in one place rather than a literal at a call site,
+ * so the two domains are visibly distinct.
+ */
+export const ROAD_SURPRISE_SALT = 0x9e37_79b9;
+
+export type ItemPoolId = 'early' | 'mid' | 'late';
+
+/**
+ * Rarity weights for each surprise pool. Percentages, summing to 100, exactly like
+ * `ContainerEntry.weight` — one convention for every weight table in this file, and
+ * `economy.test.mjs` asserts all four sums the same way.
+ *
+ * ── THE LADDER IS IN THE POOLS, NOT IN THE NODES ────────────────────────────
+ * `early` cannot produce anything above Epic; only `late` can produce Cyber. So the road's
+ * item track climbs for the same reason its character track does, and a 195-trophy node
+ * cannot hand a brand-new player the rarest item in the game.
+ *
+ * ── WHY CYBER IS 12 AND NOT 5 ───────────────────────────────────────────────
+ * Zombie Power is the only Cyber item, so this number IS its drop rate on a late node.
+ * The design target was stated before it was tuned: **the rarest item should be reachable
+ * on a single road completion but not expected.** Six late nodes at 12% is
+ * 1 − 0.88⁶ = **53.6%**, so it is roughly a coin flip. At the 5% first draft it was 26.5%,
+ * which makes the marquee item something three players in four complete a ~19-hour road
+ * and never see. `ie_items.mjs --career` measures the realised figure over seeded careers
+ * rather than trusting this arithmetic, because it ignores the box drops entirely.
+ */
+export const ITEM_SURPRISE_POOLS: Record<ItemPoolId, Partial<Record<Rarity, number>>> = {
+  early: { Normal: 68, Rare: 26, Epic: 6 },
+  mid: { Rare: 44, Epic: 36, Legendary: 18, Neon: 2 },
+  late: { Epic: 26, Legendary: 34, Neon: 28, Cyber: 12 },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Containers — chests and boxes
 // ─────────────────────────────────────────────────────────────────────────────
 
