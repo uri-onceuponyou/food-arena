@@ -8,7 +8,7 @@ Answer any subset. Unanswered items stay on the stated assumption.
 
 ---
 
-## 🔴 OPEN RIGHT NOW — six questions, six one-line answers
+## 🔴 OPEN RIGHT NOW — seven questions, seven one-line answers
 
 **Rebuilt 2026-08-22 against `23f8ce7`, row by row, out of the source files.** Everything else on
 this page is history; these are the live ones. **Nothing is blocking** — every one has a default in
@@ -39,6 +39,7 @@ indistinguishable from a live one, and it is the row you act on.*
 
 | # | your answer | where it landed |
 |---|---|---|
+| **§90** | 🆕 🔴 **You said "perhaps increase their HP. it should balance it out." I tested it and IT DOES NOT.** Health 9 is the TOP of the roster scale (the spread is 3-9; Water Bottle sits at the baseline 6) and it is **+30% HP, hp 100 -> 130**. At two seats it moves **0.0% -> 5.0% / 10.0%** on the two AI policies — still last by a wide margin — and **Sushi pays 8.6pp** for it. At six seats placement moves **4.538 -> 4.197 = 0.341 places against a 0.978-place floor, i.e. INSIDE THE FLOOR AND NOT RESOLVABLE**, and **win rate stays at exactly 0.0%**. Roster range 97.2pp -> 92.2pp. It survives longer (damage taken 110 -> 149) and therefore deals more (60.8 -> 90.7), but it never converts | **NOT APPLIED.** The tree is unchanged; this was measured on a staged copy | 🔴 **decide the real axis.** Water Bottle is the ONE character that gained no weapon in the 4-slot restructure — every peer went from 1-4 weapons to exactly 4, and it already had 4. The deficit looks like KIT, not survivability, and HP cannot buy a kill it has no tool to land. Options: give it a genuinely new weapon; or accept it as the designated weak pick; or tell me to ship health 9 anyway for the feel of it | one stat, or one weapon |
 | **§29a** | 2026-08-31, after looking: **_"yep, looked at it, still see through"_** — his FOURTH report | 🔨 **AUTHORISED AND IN FLIGHT.** The geometry, not the material: rack underside 2.990 m, lowest pot 2.550 m, tallest floor clutter 0.620 m, character **2.100 m** — so in the body band (0.62-2.10 m, 70.5% of him) the only mass is four posts: **0.176 m squared on a 6.5x6.5 m footprint = 0.42% of plan area. 99.6% of a bush has nothing beside you.** The old header argued concealment is answered by OPENNESS; that is the thing he has now rejected four times |
 | **§88** | **_"looks ok for now"_** | **CLOSED — leave it.** Adjacent rarity tiers stay at deltaE 5.0 with the ring as the signal. The recommendation was to leave it on the strength of his own §26, and he agreed after looking |
 | **§85 (Water Bottle)** | **_"perhaps increase their HP. it should balance it out"_** | 🔨 **IN FLIGHT, and it is the FIRST time he has authorised a compensating re-tune** — §77 withheld that permission and this is a targeted exception, not its repeal. `stats.health` 6 is the exact baseline (`healthMultiplier` = 1 + (health - 6) x 0.10, so x1.00 today); the roster spans 3-9, one point is +10% of the role pool. To be MEASURED on both policies at N=2 and N=6, not assumed |
