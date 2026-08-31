@@ -8,7 +8,7 @@ Answer any subset. Unanswered items stay on the stated assumption.
 
 ---
 
-## 🔴 OPEN RIGHT NOW — nine questions, nine one-line answers
+## 🔴 OPEN RIGHT NOW — six questions, six one-line answers
 
 **Rebuilt 2026-08-22 against `23f8ce7`, row by row, out of the source files.** Everything else on
 this page is history; these are the live ones. **Nothing is blocking** — every one has a default in
@@ -39,6 +39,9 @@ indistinguishable from a live one, and it is the row you act on.*
 
 | # | your answer | where it landed |
 |---|---|---|
+| **§29a** | 2026-08-31, after looking: **_"yep, looked at it, still see through"_** — his FOURTH report | 🔨 **AUTHORISED AND IN FLIGHT.** The geometry, not the material: rack underside 2.990 m, lowest pot 2.550 m, tallest floor clutter 0.620 m, character **2.100 m** — so in the body band (0.62-2.10 m, 70.5% of him) the only mass is four posts: **0.176 m squared on a 6.5x6.5 m footprint = 0.42% of plan area. 99.6% of a bush has nothing beside you.** The old header argued concealment is answered by OPENNESS; that is the thing he has now rejected four times |
+| **§88** | **_"looks ok for now"_** | **CLOSED — leave it.** Adjacent rarity tiers stay at deltaE 5.0 with the ring as the signal. The recommendation was to leave it on the strength of his own §26, and he agreed after looking |
+| **§85 (Water Bottle)** | **_"perhaps increase their HP. it should balance it out"_** | 🔨 **IN FLIGHT, and it is the FIRST time he has authorised a compensating re-tune** — §77 withheld that permission and this is a targeted exception, not its repeal. `stats.health` 6 is the exact baseline (`healthMultiplier` = 1 + (health - 6) x 0.10, so x1.00 today); the roster spans 3-9, one point is +10% of the role pool. To be MEASURED on both policies at N=2 and N=6, not assumed |
 | **§75** | *"All characters are moving too fast"*, then **_"drop the bots as well. same rate."_** | **both halves shipped.** (a) diminishing returns `8a2d0de` — the chain lock goes **83.3% → 33.7%**. (b) `fd83a5c` — `PLAYER_SPEED` 0.12 → 0.09 and both AI speeds ×0.75, every ratio held. Price in **§85** |
 | **§81** | *"…the answer is almost, but it shouldn't catch everything in the map."* | `afad1ca` — `REACH.ultimateSlam` **400 → 157.22**, and it is **no longer a number**: it is `GUARANTEED_VISIBLE_RADIUS − BODY_LENGTH`, so it follows the camera. Slam/arena diagonal **11.6% → 4.6%** |
 | **§66** | *"We need the lobby where the gameplay is set… assign bots… the actual connection to multiplayer will be done later."* | `2d4840e`, **2026-08-12** — `src/ui/screens/lobby.ts`, routed in `shell.ts`, entered from home. 2–6 seats, bots at `enemyLevelFor`, the multiplayer seat ships **`disabled` with its reason on the control** |
