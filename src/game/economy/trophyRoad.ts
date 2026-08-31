@@ -16,8 +16,8 @@
  * table cannot silently re-lock or double-grant a player's existing progress.
  */
 
-import type { CharacterId } from '../rules.ts';
-import { CHARACTERS } from '../rules.ts';
+import type { CharacterId, ItemId, Rarity } from '../rules.ts';
+import { CHARACTERS, ITEMS, RARITY_ORDER } from '../rules.ts';
 // ⚠️ `../state.ts` is the SIM's state module, not `./state.ts` next door — two files, same
 // name, and this is the only import in `economy/` that reaches for the sim's seat bounds.
 // It is imported rather than restated for the same reason `levels.ts` imports `LEVEL_MAX`:
@@ -25,6 +25,9 @@ import { CHARACTERS } from '../rules.ts';
 import { MAX_FIGHTERS, MIN_FIGHTERS } from '../state.ts';
 import {
   CONTAINERS,
+  ITEMS_BY_RARITY,
+  ITEM_DROP_WEIGHT,
+  ITEM_DUPLICATE_COINS,
   MATCH_PAYOUT,
   ROSTER_GATED,
   TROPHY_ROAD,
@@ -32,6 +35,7 @@ import {
   type MilestoneReward,
 } from './tuning.ts';
 import { duplicateValue } from './containers.ts';
+import { createRng, roadSurpriseSeed, weightedPick } from './rng.ts';
 import { emptyReward, mergeReward, pluralise, type Reward } from './reward.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -240,6 +244,105 @@ export function roadProgress(trophies: number): {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Every loadout item at or above a rarity floor — the pool one road surprise draws from.
+ *
+ * ⚠️ **A BAND, NOT A TIER, AND THAT IS WHY IT IS NOT `ITEMS_BY_RARITY[minRarity]`.**
+ * `tuning.ts` states it twice: *"`minRarity` is a floor on the POOL, never an item id"*.
+ * A container row names ONE tier and draws uniformly inside it; a road node names a
+ * floor and draws across everything above it, weighted by `ITEM_DROP_WEIGHT`. Those are
+ * two different draws and this is the one that needed a new function.
+ *
+ * Ordered by `RARITY_ORDER` — `rules.ts`'s own ladder, imported rather than restated.
+ * ⚠️ `economy.test.mjs` §14 asserts `RARITY_ORDER` agrees with the `DUPLICATE_COINS`
+ * ladder that `STARTER_ITEM`, `ITEM_DROP_WEIGHT` and `shop.ts:RARITY_LADDER` all sort
+ * by, because two ladders over one axis is exactly the shape that drifts.
+ */
+export function itemBand(minRarity: Rarity): ItemId[] {
+  const floor = RARITY_ORDER.indexOf(minRarity);
+  if (floor < 0) return [];
+  const out: ItemId[] = [];
+  for (let i = floor; i < RARITY_ORDER.length; i++) {
+    out.push(...(ITEMS_BY_RARITY[RARITY_ORDER[i]] ?? []));
+  }
+  return out;
+}
+
+/** What one `itemSurprise` node resolved to for one player. */
+export interface RoadSurprise {
+  /** The item granted, or null when nothing new could be handed over. */
+  item: ItemId | null;
+  /** Coins paid instead. 0 whenever `item` is set. */
+  coins: number;
+  /** The already-owned item the draw landed on, when it paid coins. */
+  duplicateOf: ItemId | null;
+}
+
+/**
+ * Resolve one trophy-road surprise for one player.
+ *
+ * ── WHY THE SEED IS `seed + threshold` AND NOT `seed + rolls` ───────────────
+ * `rng.ts:ROAD_SURPRISE_STREAM` carries the full reasoning and it is a peer's, kept
+ * intact: a container roll consumes `state.rolls`, so it is fixed the moment the box is
+ * held; a road node sits claimable beside six others and **the player chooses the
+ * order**, so on the `rolls` stream that ordering IS a re-roll. Keyed on the player's
+ * seed and the node's own threshold, claim order cannot move the draw.
+ *
+ * ── ⚠️ AND ORDER STILL MOVES THE *POOL*, WHICH IS STATED RATHER THAN HIDDEN ──
+ * The draw prefers an item the player does not own — `rollContainer`'s rule for
+ * fighters, applied unchanged, because a node that hands you a duplicate while an
+ * unowned item sits in the same band is "technically fair and universally read as a
+ * bug". So the INDEX is order-independent and the ARRAY it indexes is not. That is a
+ * strictly weaker property than the seed's and it is deliberately accepted:
+ *   * the owned set only ever GROWS, so no ordering can un-own an item and re-open a
+ *     draw — every ordering converges on the same terminal set;
+ *   * the alternative (draw from the full band, convert to coins when owned) makes the
+ *     road hand out duplicates while unowned items remain, which is the defect above;
+ *   * a player cannot preview an outcome without claiming it, and claiming is recorded
+ *     in `claimed` before the reveal card renders, so there is nothing to re-roll.
+ *
+ * Pure: no wall clock, no shared counter, no mutation. Same three inputs, same result,
+ * forever — which is what "deterministic for a given player" has to mean.
+ */
+export function roadSurprise(
+  minRarity: Rarity,
+  seed: number,
+  threshold: number,
+  ownedItems: ReadonlySet<ItemId>,
+): RoadSurprise {
+  const band = itemBand(minRarity);
+  const wanted = band.filter((id) => !ownedItems.has(id));
+  const drawFrom = wanted.length > 0 ? wanted : band;
+  const rng = createRng(roadSurpriseSeed(seed, threshold));
+  const idx = weightedPick(rng, drawFrom.map((id) => ITEM_DROP_WEIGHT[ITEMS[id].rarity]));
+  if (idx < 0) {
+    // 🚨 `weightedPick` returns -1 for an empty list or a non-positive total and its
+    // header says the caller MUST handle it — "both are reachable (an exhausted band)
+    // and neither may silently become index 0". Index 0 here would be `ITEM_IDS[0]`,
+    // i.e. Tenderiser, the Legendary: a rarity floor of Neon quietly paying out a
+    // Legendary. An empty band cannot pay an item to ANYBODY, so it pays the floor's
+    // own ladder value in coins and the node is still worth claiming.
+    return { item: null, coins: ITEM_DUPLICATE_COINS[minRarity], duplicateOf: null };
+  }
+  const id = drawFrom[idx];
+  if (wanted.length > 0) return { item: id, coins: 0, duplicateOf: null };
+  return { item: null, coins: ITEM_DUPLICATE_COINS[ITEMS[id].rarity], duplicateOf: id };
+}
+
+/**
+ * Who is claiming, and everything a node needs to know about them.
+ *
+ * Bundled into one argument rather than three positional ones because `resolveReward`
+ * recurses through `bundle` and a three-argument recursion is three chances to pass the
+ * wrong one. `seed` is here for exactly one reason — the surprise draw — and it is the
+ * player's persisted `EconomyState.seed`, never a fresh one.
+ */
+export interface RoadClaimant {
+  characters: ReadonlySet<CharacterId>;
+  items: ReadonlySet<ItemId>;
+  seed: number;
+}
+
+/**
  * Turn a milestone's authored reward into the concrete payout this player gets.
  *
  * The one interesting case is a CHARACTER node the player cannot receive — either
@@ -250,8 +353,22 @@ export function roadProgress(trophies: number): {
  *
  * That substitution is why the road is honest today and why flipping `ROSTER_GATED`
  * is a one-line change: the same table, the same claim path, a different payout.
+ *
+ * ── ⚠️ `threshold` IS AN ARGUMENT, AND `resolveMilestone` EXISTS SO IT CANNOT BE THE
+ *    WRONG ONE ─────────────────────────────────────────────────────────────
+ * An `itemSurprise` is a function of the player's seed and the NODE'S OWN THRESHOLD, so
+ * this function needs a number that lives on the milestone rather than on the reward.
+ * Passing it by hand at every call site is a mismatch waiting to happen — 3,475's
+ * surprise resolved under 1,770's key is legal, silent and wrong. `resolveMilestone()`
+ * below reads it off the milestone itself and is what every non-recursive caller should
+ * use; this form stays exported for the bundle recursion and for tests that drive a
+ * synthetic reward.
  */
-export function resolveReward(reward: MilestoneReward, owned: ReadonlySet<CharacterId>): Reward {
+export function resolveReward(
+  reward: MilestoneReward,
+  claimant: RoadClaimant,
+  threshold: number,
+): Reward {
   const out = emptyReward();
   switch (reward.type) {
     case 'coins':
@@ -264,14 +381,37 @@ export function resolveReward(reward: MilestoneReward, owned: ReadonlySet<Charac
       out.containers[reward.kind] = (out.containers[reward.kind] ?? 0) + reward.count;
       break;
     case 'character':
-      if (ROSTER_GATED && !owned.has(reward.id)) out.characters.push(reward.id);
+      if (ROSTER_GATED && !claimant.characters.has(reward.id)) out.characters.push(reward.id);
       else out.coins += duplicateValue(reward.id);
       break;
     case 'bundle':
-      for (const part of reward.parts) mergeReward(out, resolveReward(part, owned));
+      for (const part of reward.parts) {
+        mergeReward(out, resolveReward(part, claimant, threshold));
+      }
       break;
+    case 'itemSurprise': {
+      const got = roadSurprise(reward.minRarity, claimant.seed, threshold, claimant.items);
+      if (got.item) out.items.push(got.item);
+      else out.coins += got.coins;
+      break;
+    }
   }
   return out;
+}
+
+/**
+ * The form every caller outside this file should use: the milestone carries its own key.
+ *
+ * ⚠️ Two `itemSurprise` parts inside ONE bundle would resolve to the same draw — same
+ * seed, same threshold — and `mergeReward` would dedupe them into a single item, so the
+ * node would silently pay half of what it declares. The road ships one surprise per node
+ * and `economy.test.mjs` §14 asserts that, after first asserting there are surprises at
+ * all. It is an assertion rather than a guard here because the fix (an ordinal mixed
+ * into the key) would change the stream `rng.ts` has already reasoned about and
+ * collision-checked, to buy a case the table does not contain.
+ */
+export function resolveMilestone(milestone: Milestone, claimant: RoadClaimant): Reward {
+  return resolveReward(milestone.reward, claimant, milestone.trophies);
 }
 
 /**

@@ -29,30 +29,35 @@
  *     `rules.ts` and this fails until the road has a home for them.
  */
 
-import { CHARACTERS, CHARACTER_IDS, LEVEL_MAX, LEVEL_MIN, RARITY_ORDER } from '../rules.ts';
+import { CHARACTERS, CHARACTER_IDS, ITEMS, LEVEL_MAX, LEVEL_MIN, RARITY_ORDER } from '../rules.ts';
 import {
   CONTAINERS, CONTAINER_KINDS, DUPLICATE_COINS, MATCH_PAYOUT, ROSTER_GATED,
   STARTER_CHARACTER, STARTING_BALANCE, STORE_AVAILABLE, STORE_PRODUCTS, TROPHY_ROAD,
   CHARACTERS_BY_RARITY, ENEMY_LEVEL_MODE, MATCH_PACING, SECONDS_PER_MATCH,
   LEVEL_UP, RARITY_MEANING, ROSTER_COMPLETE_TROPHIES,
+  ITEM_IDS, ITEMS_BY_RARITY, ITEM_DROP_WEIGHT, ITEM_DUPLICATE_COINS, STARTER_ITEM,
 } from './tuning.ts';
 import { costToMax, enemyLevelFor, levelUpCost, totalLevelCost } from './levels.ts';
-import { createRng, weightedIndex } from './rng.ts';
-import { containerOdds, containerOddsLine, formatPercent, rollContainer, totalWeight } from './containers.ts';
+import { ROAD_SURPRISE_STREAM, createRng, roadSurpriseSeed, weightedIndex, weightedPick } from './rng.ts';
+import {
+  containerOdds, containerOddsLine, formatPercent, itemDuplicateValue, rollContainer, totalWeight,
+} from './containers.ts';
 import {
   claimable, milestoneFace, nextMilestone, resolveReward, roadEnd, roadProgress,
   trophyDelta, trophyLoss,
   placementBanksChestWin, placementCoins, placementCurve, placementRank01,
   placementTrophyDelta, placementWeight01,
+  itemBand, resolveMilestone, roadSurprise,
 } from './trophyRoad.ts';
 import { MAX_FIGHTERS, MIN_FIGHTERS } from '../state.ts';
-import { describeReward, emptyReward, mergeReward, pluralise } from './reward.ts';
+import { ITEM_EMOJI, describeReward, emptyReward, mergeReward, pluralise } from './reward.ts';
 import { bonusPercent, formatPrice, grantProduct, storeAvailable, storeProducts } from './store.ts';
 import {
   applyMatchPlacement, applyMatchResult, buyContainer, claimAll, claimMilestone, createEconomy,
   deserialize, grantReward, openContainer, ownedSet, serialize, spend, totalContainers,
   winsToNextChest, adoptLegacyBalance, canLevelUp, characterLevel, coinsSpentOnLevels, levelUp,
   nextLevelPrice, rosterLevelProgress01,
+  ownedItemSet, ownsItem, roadClaimant,
 } from './state.ts';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -850,10 +855,29 @@ console.log('\n5. Containers and published odds');
   }
 
   // The disclosure must not round a real chance away to zero.
-  const cyberRow = containerOdds('redBox').find((r) => r.rarity === 'Cyber');
+  //
+  // ── ⚠️ THIS `find` WAS `(r) => r.rarity === 'Cyber'` AND IT SILENTLY RETARGETED ──
+  //
+  // Kept per house style, because the lesson outlives the check. When it was written
+  // there was exactly ONE Cyber row in the Big Smile Box — the 0.01% fighter this whole
+  // assertion is named after. The item rows added a SECOND (`Cyber item`, 0.1%), rows
+  // are sorted rarest-LAST, and `find` therefore started returning the 0.1% row: a
+  // compliance assertion about a 0.01% disclosure quietly began asserting about a
+  // different, ten-times-larger number, under the same name, and read `0.1%`.
+  //
+  // It went red rather than silently passing only because the two percentages differ.
+  // Had the item row also been 0.01% it would have been GREEN while pointed at the
+  // wrong row — `--selftest` validates a tool's LOGIC, never where it is POINTED. So
+  // both rows are now identified by their LABEL, which is the thing the player reads.
+  const cyberRow = containerOdds('redBox').find((r) => r.label === 'Cyber fighter');
   check('a 0.01% chance is published as 0.01%, not 0%',
     cyberRow && formatPercent(cyberRow.percent) === '0.01%',
     cyberRow ? formatPercent(cyberRow.percent) : 'row missing');
+  const cyberItemRow = containerOdds('redBox').find((r) => r.label === 'Cyber item');
+  check('...and the Cyber ITEM row beside it is its own published row',
+    cyberItemRow && formatPercent(cyberItemRow.percent) === '0.1%'
+      && cyberItemRow.rarity === 'Cyber' && (cyberItemRow.itemPool ?? []).length > 0,
+    cyberItemRow ? `${formatPercent(cyberItemRow.percent)} / ${(cyberItemRow.itemPool ?? []).join(',')}` : 'row missing');
   check('formatPercent never prints a bare 0% for a non-zero chance',
     formatPercent(0.004) !== '0%' && formatPercent(0.0001) !== '0%',
     `${formatPercent(0.004)} / ${formatPercent(0.0001)}`);
@@ -862,26 +886,60 @@ console.log('\n5. Containers and published odds');
     CONTAINER_KINDS.every((k) => containerOddsLine(k).length > 0));
 
   // THE LOOP THAT MATTERS: does the seeded roller actually produce the published
-  // distribution? 60k rolls against an empty owned-set (so character rows are
-  // distinguishable from currency rows).
+  // distribution? 60k rolls against an empty owned-set — of BOTH kinds, so every
+  // character row and every item row grants rather than converting, and each is
+  // distinguishable from a currency row.
+  //
+  // ── ⚠️ THIS LOOP RAN OVER FOUR OF THE FIVE SHIPPED CONTAINERS ──────────────
+  // It was written `['chest', 'hamburgerBox', 'pineappleBox', 'fireBox']` — a literal
+  // list, missing `redBox`, sitting under a comment calling itself "the loop that
+  // matters". `redBox` is the Big Smile Box: the one with the 0.01% Cyber fighter row
+  // that the disclosure check three blocks up singles out by name, and now the only box
+  // in the game with a Cyber ITEM row. So the container whose odds are quoted as the
+  // reason `formatPercent` exists was the one container never rolled against them.
+  // It is `CONTAINER_KINDS` now, which cannot fall behind `tuning.ts`.
   const owned = new Set();
-  for (const kind of ['chest', 'hamburgerBox', 'pineappleBox', 'fireBox']) {
+  const ownedItems = new Set();
+
+  /**
+   * The published label a rolled outcome corresponds to.
+   *
+   * 🚨 THIS FUNCTION IS THE CONTRACT AND IT HAD NO ITEM BRANCH, which is how the
+   * feature stayed green while being broken: a rolled item came back with `characters`
+   * empty and `coins` zero, fell through to the currency arm, and was labelled the
+   * EMPTY STRING — a label no published row carries, so "every rolled outcome is a
+   * published one" was comparing '' against the sheet. The order below mirrors
+   * `containerOdds()` exactly (character, then item, then currency), because these two
+   * functions disagreeing IS the defect this whole section exists to catch.
+   */
+  const rolledLabel = (res) => {
+    if (res.reward.characters.length > 0) {
+      return `${CHARACTERS[res.reward.characters[0]].rarity} fighter`;
+    }
+    if (res.reward.items.length > 0) return `${ITEMS[res.reward.items[0]].rarity} item`;
+    return [res.reward.coins ? `${res.reward.coins.toLocaleString()} coins` : null,
+      res.reward.gems ? `${res.reward.gems.toLocaleString()} gems` : null]
+      .filter(Boolean).join(' + ');
+  };
+
+  for (const kind of CONTAINER_KINDS) {
     const rows = containerOdds(kind);
     const seen = new Map();
     const N = 60000;
     for (let i = 0; i < N; i++) {
-      const res = rollContainer(kind, createRng(1000 + i), owned);
-      const label = res.reward.characters.length > 0
-        ? `${CHARACTERS[res.reward.characters[0]].rarity} fighter`
-        : [res.reward.coins ? `${res.reward.coins.toLocaleString()} coins` : null,
-           res.reward.gems ? `${res.reward.gems.toLocaleString()} gems` : null]
-          .filter(Boolean).join(' + ');
+      const label = rolledLabel(rollContainer(kind, createRng(1000 + i), owned, ownedItems));
       seen.set(label, (seen.get(label) ?? 0) + 1);
     }
+    // 0.01% rows need millions of samples; they are checked structurally above.
+    const sampled = rows.filter((r) => r.percent >= 1);
+    // ⚠️ NON-VACUITY FIRST. `[].every()` is true and a `worst` that no iteration ever
+    // assigns is 0, so an empty `sampled` would make the next two checks pass by having
+    // nothing to check. This is the guard `CLAUDE.md` non-negotiable 6 is about.
+    check(`${kind}: the sampled row set is non-empty`, sampled.length > 0,
+      `${rows.length} published rows, ${sampled.length} above 1%`);
     let worst = 0;
     let worstRow = '';
-    for (const row of rows) {
-      if (row.percent < 1) continue; // 0.01% rows need millions of samples; checked structurally above
+    for (const row of sampled) {
       const empirical = ((seen.get(row.label) ?? 0) / N) * 100;
       const err = Math.abs(empirical - row.percent);
       if (err > worst) { worst = err; worstRow = `${row.label}: published ${row.percent}%, rolled ${empirical.toFixed(2)}%`; }
@@ -890,17 +948,27 @@ console.log('\n5. Containers and published odds');
     check(`${kind}: every rolled outcome is a published one`,
       [...seen.keys()].every((label) => rows.some((r) => r.label === label)),
       [...seen.keys()].filter((l) => !rows.some((r) => r.label === l)).join(' | '));
+    // ── 🚨 THE CONVERSE, AND IT IS THE ONE THAT WAS MISSING ────────────────────
+    // "Every rolled outcome is published" catches a roller that invents an outcome. It
+    // CANNOT catch a sheet that publishes an outcome the roller has no branch for —
+    // which is exactly the bug that put this feature on a branch: `containerOdds()` was
+    // taught to print an item row while `rollContainer` still could not produce one, so
+    // a box gems can buy disclosed a drop rate for something unobtainable. A missing
+    // disclosure is a bug; a false one is worse. This is the direction that sees it.
+    check(`${kind}: every published row above 1% is actually produced`,
+      sampled.every((r) => (seen.get(r.label) ?? 0) > 0),
+      sampled.filter((r) => !(seen.get(r.label) > 0)).map((r) => r.label).join(' | '));
   }
 
   // Determinism at the roll level.
-  const a = rollContainer('chest', createRng(555), new Set());
-  const b = rollContainer('chest', createRng(555), new Set());
+  const a = rollContainer('chest', createRng(555), new Set(), new Set());
+  const b = rollContainer('chest', createRng(555), new Set(), new Set());
   check('the same seed opens the same chest',
     JSON.stringify(a.reward) === JSON.stringify(b.reward), JSON.stringify(a.reward));
 
   // Duplicate conversion.
   const allOwned = new Set(CHARACTER_IDS);
-  const dup = rollContainer('fireBox', createRng(77), allOwned);
+  const dup = rollContainer('fireBox', createRng(77), allOwned, new Set());
   check('a fully-owned roster converts a box to coins',
     dup.reward.characters.length === 0 && dup.reward.coins > 0 && !!dup.duplicateOf,
     JSON.stringify(dup));
@@ -913,7 +981,7 @@ console.log('\n5. Containers and published odds');
   const partial = new Set(CHARACTER_IDS.filter((id) => id !== legendaries[0]));
   let handedDuplicate = false;
   for (let i = 0; i < 400; i++) {
-    const res = rollContainer('fireBox', createRng(9000 + i), partial);
+    const res = rollContainer('fireBox', createRng(9000 + i), partial, new Set());
     if (res.duplicateOf && CHARACTERS[res.duplicateOf].rarity === 'Legendary') handedDuplicate = true;
   }
   check('a box never gives a duplicate while an unowned character shares the pool',
@@ -989,20 +1057,53 @@ console.log('\n6. Claiming milestones');
   //
   // The road deliberately no longer ends on the bundle: Uri's 10,000 node is the last
   // CHARACTER, so the capstone haul sits second-to-last. See `tuning.ts`.
-  const bundleNode = TROPHY_ROAD.find((m) => m.reward.type === 'bundle');
-  check('the road carries a capstone bundle', !!bundleNode);
+  // ── ⚠️ AND `find('bundle')` THEN STOPPED MEANING "THE CAPSTONE" ─────────────
+  //
+  // A second lesson on the same three lines, kept for the same reason. Both checks were
+  // rewritten above to stop the NAME doing the reader's verification — and both then
+  // broke anyway, because `find` still assumed the capstone was the only bundle on the
+  // road. Seven `itemSurprise` nodes were added wrapped in the `bundle` type (the right
+  // call: it reuses a type that already existed and left every trophy number untouched),
+  // the first of them sits at index 3 of 45, and `find` has returned THAT ever since. So
+  // "at the TOP of the road" was measuring a node at 145 trophies, and "a bundle
+  // resolves every part" was asserting that a 5-gems-plus-a-surprise node pays coins,
+  // gems AND a container. Both were genuinely red and neither was about items.
+  //
+  // The fix is to stop selecting by TYPE at all. The capstone is a POSITION on the road,
+  // so it is read by position — and what makes it the capstone (coins + gems + a
+  // container, all three) is asserted instead of assumed.
+  const bundleNodes = TROPHY_ROAD.filter((m) => m.reward.type === 'bundle');
+  check('the road carries bundles at all', bundleNodes.length > 0, `${bundleNodes.length}`);
+  const capstoneNode = TROPHY_ROAD[TROPHY_ROAD.length - 2];
+  check('the road carries a capstone bundle', capstoneNode.reward.type === 'bundle',
+    `${capstoneNode.trophies}: ${capstoneNode.reward.type}`);
   check('...and it is at the TOP of the road, not buried early',
-    !!bundleNode && TROPHY_ROAD.indexOf(bundleNode) >= TROPHY_ROAD.length - 2,
-    `index ${bundleNode ? TROPHY_ROAD.indexOf(bundleNode) : -1} of ${TROPHY_ROAD.length}`);
+    TROPHY_ROAD.indexOf(capstoneNode) >= TROPHY_ROAD.length - 2,
+    `index ${TROPHY_ROAD.indexOf(capstoneNode)} of ${TROPHY_ROAD.length}`);
   check('...and the road ENDS on a character — roster complete is the climax',
     TROPHY_ROAD[TROPHY_ROAD.length - 1].reward.type === 'character',
     TROPHY_ROAD[TROPHY_ROAD.length - 1].reward.type);
   const s6 = seeded();
-  const bundleReward = resolveReward(bundleNode.reward, ownedSet(s6));
+  const bundleReward = resolveMilestone(capstoneNode, roadClaimant(s6));
   check('a bundle resolves every part',
     bundleReward.coins > 0 && bundleReward.gems > 0
     && Object.values(bundleReward.containers).some((n) => n > 0),
     JSON.stringify(bundleReward));
+  // Every OTHER bundle must resolve to something too — a node that pays nothing is the
+  // defect `resolveReward`'s header is written against, and seven of the road's nine
+  // bundles are now surprise nodes whose payout comes from a branch that did not exist
+  // until this commit.
+  check('every bundle on the road pays something',
+    bundleNodes.every((m) => {
+      const r = resolveMilestone(m, roadClaimant(seeded()));
+      return r.coins > 0 || r.gems > 0 || r.items.length > 0
+        || Object.values(r.containers).some((n) => n > 0);
+    }),
+    bundleNodes.filter((m) => {
+      const r = resolveMilestone(m, roadClaimant(seeded()));
+      return !(r.coins > 0 || r.gems > 0 || r.items.length > 0
+        || Object.values(r.containers).some((n) => n > 0));
+    }).map((m) => m.trophies).join(','));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1014,13 +1115,14 @@ console.log(`\n7. Character rewards (ROSTER_GATED = ${ROSTER_GATED})`);
   const charNode = TROPHY_ROAD.find((m) => m.reward.type === 'character');
   const s = seeded();
   const owned = ownedSet(s);
+  const claimant = roadClaimant(s);
 
   if (ROSTER_GATED) {
     check('a locked character node grants the character',
-      resolveReward(charNode.reward, owned).characters[0] === charNode.reward.id);
+      resolveMilestone(charNode, claimant).characters[0] === charNode.reward.id);
     check('a new player owns only the starter', s.unlocked.length === 1);
   } else {
-    const reward = resolveReward(charNode.reward, owned);
+    const reward = resolveMilestone(charNode, claimant);
     check('while ungated, every character counts as owned', owned.size === CHARACTER_IDS.length);
     check('an ungated character node pays its duplicate value in coins',
       reward.characters.length === 0
@@ -1047,8 +1149,8 @@ console.log(`\n7. Character rewards (ROSTER_GATED = ${ROSTER_GATED})`);
   // Granting a character is idempotent.
   const s2 = seeded();
   const target = CHARACTER_IDS.find((id) => id !== STARTER_CHARACTER);
-  grantReward(s2, { coins: 0, gems: 0, containers: {}, characters: [target] });
-  grantReward(s2, { coins: 0, gems: 0, containers: {}, characters: [target] });
+  grantReward(s2, { coins: 0, gems: 0, containers: {}, characters: [target], items: [] });
+  grantReward(s2, { coins: 0, gems: 0, containers: {}, characters: [target], items: [] });
   check('unlocking the same character twice keeps one entry',
     s2.unlocked.filter((id) => id === target).length === 1);
 
@@ -1716,23 +1818,430 @@ console.log('\n13. Character levels');
 console.log('\n12. Reward helpers');
 {
   const a = emptyReward();
-  mergeReward(a, { coins: 10, gems: 1, containers: { chest: 1 }, characters: ['donut'] });
-  mergeReward(a, { coins: 5, gems: 0, containers: { chest: 2, fireBox: 1 }, characters: ['donut', 'taco'] });
+  mergeReward(a, { coins: 10, gems: 1, containers: { chest: 1 }, characters: ['donut'], items: ['pompa'] });
+  mergeReward(a, {
+    coins: 5, gems: 0, containers: { chest: 2, fireBox: 1 },
+    characters: ['donut', 'taco'], items: ['pompa', 'squid_ink'],
+  });
   check('merge sums currency', a.coins === 15 && a.gems === 1);
   check('merge sums containers', a.containers.chest === 3 && a.containers.fireBox === 1);
   check('merge dedupes characters', a.characters.length === 2);
+  check('merge dedupes items', a.items.length === 2 && a.items.join(',') === 'pompa,squid_ink',
+    a.items.join(','));
 
   const lines = describeReward(a);
   check('characters are described first', lines[0].label === CHARACTERS.donut.name);
-  check('every part of the reward is described', lines.length === 6, JSON.stringify(lines));
+  check('every part of the reward is described', lines.length === 8, JSON.stringify(lines));
+  // ⚠️ ITEMS LAST, AND THE POSITION IS THE ASSERTION. `ui/screens/trophyRoad.ts`
+  // pairs its icon array with these lines BY INDEX and only degrades safely past the
+  // end of that array — so an item emitted anywhere but the end captions somebody
+  // else's icon. `describeReward`'s header states the constraint; this pins it.
+  check('...and items are described LAST, where the icon array runs out safely',
+    lines[lines.length - 2].label === ITEMS.pompa.name
+    && lines[lines.length - 1].label === ITEMS.squid_ink.name
+    && lines[lines.length - 1].emoji === ITEM_EMOJI,
+    lines.map((l) => l.label).join('/'));
   check('a single unit is singular', describeReward({
-    coins: 1, gems: 1, containers: { chest: 1 }, characters: [],
+    coins: 1, gems: 1, containers: { chest: 1 }, characters: [], items: [],
   }).map((l) => l.label).join('/') === 'Chest/1 Coin/1 Gem');
   check('describing an empty reward gives no lines', describeReward(emptyReward()).length === 0);
 
   check('pluralise handles both container name shapes',
     pluralise('Chest', 2) === 'Chests' && pluralise('Hamburger Box', 2) === 'Hamburger Boxes'
     && pluralise('Chest', 1) === 'Chest');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 14. LOADOUT ITEMS — acquisition
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// ⚠️ THIS SECTION IS CITED FOUR TIMES AND DID NOT EXIST.
+//
+// `tuning.ts` says "`economy.test.mjs` §14 asserts it against `ITEMS`", "§14 asserts
+// every tier a shipped container REFERENCES is non-empty", "§14 prints it" and "§14
+// asserts that the result is a real member of the lowest non-empty tier"; `rng.ts` says
+// "§14 asserts the arithmetic over every real threshold instead of trusting this
+// comment". None of those was true — the agent who wrote the citations died before
+// writing the section, and four confident cross-references pointed at nothing. Every
+// one of them is discharged below, in the order they are cited.
+//
+// ── WHAT THIS SECTION IS ACTUALLY FOR ──────────────────────────────────────
+// `rules.ts` declared ten items, `tuning.ts` declared item rows in all five containers,
+// the road declared seven surprise nodes, `ITEMS_BY_RARITY` and `ITEM_DROP_WEIGHT` were
+// both derived and correct — and NOTHING COULD AWARD AN ITEM. `Reward` had no items
+// field and `rollContainer` had no item branch. That state was GREEN, because no
+// assertion anywhere asked "can a player ever hold one of these?". This section asks.
+
+console.log('\n14. Loadout items — acquisition');
+{
+  // ── 14a. The registry copy, and the two ladders ──────────────────────────
+  check('ITEM_IDS is non-empty', ITEM_IDS.length > 0, `${ITEM_IDS.length}`);
+  check('ITEM_IDS is exactly rules.ts:ITEMS',
+    ITEM_IDS.length === Object.keys(ITEMS).length
+    && ITEM_IDS.every((id) => ITEMS[id] && ITEMS[id].id === id),
+    ITEM_IDS.join(','));
+
+  const grouped = Object.values(ITEMS_BY_RARITY).flat();
+  check('ITEMS_BY_RARITY covers every item exactly once',
+    grouped.length === ITEM_IDS.length && new Set(grouped).size === ITEM_IDS.length,
+    `${grouped.length} grouped vs ${ITEM_IDS.length} items`);
+
+  // Two ladders over one axis is the shape that drifts. `RARITY_ORDER` is `rules.ts`'s
+  // and `trophyRoad.ts:itemBand` sorts by it; the `DUPLICATE_COINS` ladder is
+  // `tuning.ts`'s and `STARTER_ITEM`, `ITEM_DROP_WEIGHT` and `shop.ts:RARITY_LADDER` all
+  // sort by THAT. They agree, and this is where they are made to keep agreeing.
+  const coinLadder = [...RARITY_ORDER].sort((a, b) => DUPLICATE_COINS[a] - DUPLICATE_COINS[b]);
+  check('the DUPLICATE_COINS ladder agrees with rules.ts:RARITY_ORDER',
+    coinLadder.join(',') === RARITY_ORDER.join(','),
+    `${coinLadder.join(',')} vs ${RARITY_ORDER.join(',')}`);
+  check('...and it is strictly ascending, which is what makes "sort by it" well-defined',
+    RARITY_ORDER.every((r, i) => i === 0 || DUPLICATE_COINS[r] > DUPLICATE_COINS[RARITY_ORDER[i - 1]]));
+
+  // ── 14b. STARTER_ITEM ────────────────────────────────────────────────────
+  const lowestNonEmpty = RARITY_ORDER.find((r) => (ITEMS_BY_RARITY[r] ?? []).length > 0);
+  check('STARTER_ITEM is a real member of the lowest non-empty tier',
+    (ITEMS_BY_RARITY[lowestNonEmpty] ?? []).includes(STARTER_ITEM),
+    `${STARTER_ITEM} vs ${lowestNonEmpty}: ${(ITEMS_BY_RARITY[lowestNonEmpty] ?? []).join(',')}`);
+  check('a brand-new player owns exactly the starter item', (() => {
+    const s = createEconomy(7);
+    return s.items.length === 1 && s.items[0] === STARTER_ITEM && ownsItem(s, STARTER_ITEM);
+  })());
+
+  // ── 14c. Every tier a CONTAINER references can pay out ────────────────────
+  // The vacuity guard is the point: `[].every()` is true, so an assertion over the item
+  // rows of a table that HAS no item rows is green and means nothing. That is exactly
+  // the state this feature was in.
+  const itemRows = CONTAINER_KINDS.flatMap((kind) =>
+    CONTAINERS[kind].entries.filter((e) => e.itemRarity).map((e) => ({ kind, e })));
+  check('the set of container rows that reference an item tier is NON-EMPTY',
+    itemRows.length > 0, `${itemRows.length} rows`);
+  check('every item tier a shipped container references has at least one item',
+    itemRows.every(({ e }) => (ITEMS_BY_RARITY[e.itemRarity] ?? []).length > 0),
+    itemRows.filter(({ e }) => !(ITEMS_BY_RARITY[e.itemRarity] ?? []).length)
+      .map(({ kind, e }) => `${kind}:${e.itemRarity}`).join(' | '));
+
+  // ── 14d. THE HEADLINE: every item is genuinely obtainable ─────────────────
+  //
+  // Structural first — a union over every SOURCE — then empirically, by actually
+  // rolling. Both, because they fail differently: the structural one catches a tier no
+  // source references, and the empirical one catches a source that references a tier and
+  // cannot produce from it. The bug this feature shipped with would have passed the
+  // first and failed the second.
+  const fromContainers = new Set(itemRows.flatMap(({ e }) => ITEMS_BY_RARITY[e.itemRarity] ?? []));
+  const surpriseNodes = TROPHY_ROAD.filter((m) => JSON.stringify(m.reward).includes('itemSurprise'));
+  check('the road carries surprise nodes at all', surpriseNodes.length > 0, `${surpriseNodes.length}`);
+  const fromRoad = new Set(surpriseNodes.flatMap((m) => {
+    const floors = [];
+    const walk = (r) => {
+      if (r.type === 'itemSurprise') floors.push(r.minRarity);
+      else if (r.type === 'bundle') r.parts.forEach(walk);
+    };
+    walk(m.reward);
+    return floors.flatMap((f) => itemBand(f));
+  }));
+  const reachable = new Set([...fromContainers, ...fromRoad]);
+  check('every item in the registry is reachable from some source',
+    ITEM_IDS.every((id) => reachable.has(id)),
+    ITEM_IDS.filter((id) => !reachable.has(id)).join(','));
+
+  const rolledItems = new Set();
+  for (const kind of CONTAINER_KINDS) {
+    for (let i = 0; i < 60000; i++) {
+      const res = rollContainer(kind, createRng(500000 + i), new Set(), new Set());
+      for (const id of res.reward.items) rolledItems.add(id);
+    }
+  }
+  check('a seeded sweep of every container actually produces items', rolledItems.size > 0,
+    `${rolledItems.size}`);
+  check('...and it produces EVERY item in the registry',
+    ITEM_IDS.every((id) => rolledItems.has(id)),
+    `missing: ${ITEM_IDS.filter((id) => !rolledItems.has(id)).join(',') || 'none'}`);
+  console.log(`     boxes alone reach ${rolledItems.size}/${ITEM_IDS.length} items in 5x60k seeded rolls`);
+
+  // ── 14e. What a SECOND copy does, and why ────────────────────────────────
+  // The decision is `tuning.ts:ITEM_DUPLICATE_COINS`': an item is binary — owned or not,
+  // no levels, no shards — so a duplicate converts to coins on the SAME ladder a
+  // duplicate fighter uses. One ladder read by two things beats two ladders that drift.
+  const allItems = new Set(ITEM_IDS);
+  let dupItem = null;
+  for (let i = 0; i < 4000 && !dupItem; i++) {
+    const res = rollContainer('chest', createRng(880000 + i), new Set(CHARACTER_IDS), allItems);
+    if (res.duplicateItemOf) dupItem = res;
+  }
+  check('a fully-owned item pool converts an item row to coins', !!dupItem
+    && dupItem.reward.items.length === 0 && dupItem.reward.coins > 0,
+    JSON.stringify(dupItem));
+  check('the item duplicate pays that rarity rate, on the character ladder',
+    !!dupItem && dupItem.reward.coins
+      === ITEM_DUPLICATE_COINS[ITEMS[dupItem.duplicateItemOf].rarity]
+    && ITEM_DUPLICATE_COINS[ITEMS[dupItem.duplicateItemOf].rarity]
+      === DUPLICATE_COINS[ITEMS[dupItem.duplicateItemOf].rarity],
+    dupItem ? `${dupItem.reward.coins} for ${dupItem.duplicateItemOf}` : 'no duplicate seen');
+  check('and itemDuplicateValue agrees with the table',
+    ITEM_IDS.every((id) => itemDuplicateValue(id) === DUPLICATE_COINS[ITEMS[id].rarity]));
+
+  // Never a duplicate while an unowned item shares the pool — `rollContainer`'s fighter
+  // rule, applied unchanged. Rare has three members, so hold two and watch 600 rolls.
+  const rares = ITEMS_BY_RARITY.Rare;
+  check('the Rare tier has more than one item, so this test can express itself',
+    rares.length > 1, `${rares.join(',')}`);
+  const partialItems = new Set(ITEM_IDS.filter((id) => id !== rares[0]));
+  let handedItemDuplicate = false;
+  let handedTheMissingRare = false;
+  for (let i = 0; i < 4000; i++) {
+    const res = rollContainer('chest', createRng(770000 + i), new Set(CHARACTER_IDS), partialItems);
+    if (res.duplicateItemOf && ITEMS[res.duplicateItemOf].rarity === 'Rare') handedItemDuplicate = true;
+    if (res.reward.items.includes(rares[0])) handedTheMissingRare = true;
+  }
+  check('a box never gives a duplicate item while an unowned item shares the pool',
+    !handedItemDuplicate);
+  check('...and the rig can SEE the Rare row — it handed over the missing one',
+    handedTheMissingRare);
+
+  // ── 14f. The published sheet and the roller agree, structurally ───────────
+  // §5 checks this empirically over 60k rolls per box. This is the version that cannot
+  // be argued with: no published row may name an item tier that has no items in it.
+  const publishedItemRows = CONTAINER_KINDS.flatMap((kind) =>
+    containerOdds(kind).filter((r) => r.itemPool));
+  check('the published item rows are NON-EMPTY as a set', publishedItemRows.length > 0,
+    `${publishedItemRows.length}`);
+  check('no published item row names an empty pool',
+    publishedItemRows.every((r) => r.itemPool.length > 0));
+  check('every published item row is labelled as an item, never as "Nothing"',
+    CONTAINER_KINDS.every((kind) => containerOdds(kind).every((r) => r.label !== 'Nothing')),
+    CONTAINER_KINDS.filter((k) => containerOdds(k).some((r) => r.label === 'Nothing')).join(','));
+
+  // The chest is the free item faucet and it stops at Legendary — `tuning.ts` states
+  // both, and "no Neon or Cyber row here" is what keeps Leftovers rare.
+  const chestItemShare = CONTAINERS.chest.entries
+    .filter((e) => e.itemRarity).reduce((a, e) => a + e.weight, 0);
+  check('the chest is 5% items', approx(chestItemShare, 5, 1e-9), `${chestItemShare}%`);
+  check('...and the chest tops out at Legendary, which is what keeps Leftovers rare',
+    CONTAINERS.chest.entries.every((e) => !e.itemRarity
+      || RARITY_ORDER.indexOf(e.itemRarity) <= RARITY_ORDER.indexOf('Legendary')));
+  for (const kind of CONTAINER_KINDS.filter((k) => k !== 'chest')) {
+    const share = CONTAINERS[kind].entries
+      .filter((e) => e.itemRarity).reduce((a, e) => a + e.weight, 0);
+    check(`${kind}: gave up exactly 20% of its table to items`, approx(share, 20, 1e-9), `${share}%`);
+  }
+
+  // ── 14g. ITEM_DROP_WEIGHT — the band draw's shares, PRINTED as tuning.ts claims ──
+  const bandAll = itemBand(RARITY_ORDER[0]);
+  check('the Normal-floor band is every item', bandAll.length === ITEM_IDS.length);
+  const wTotal = bandAll.reduce((a, id) => a + ITEM_DROP_WEIGHT[ITEMS[id].rarity], 0);
+  const share = (id) => (100 * ITEM_DROP_WEIGHT[ITEMS[id].rarity]) / wTotal;
+  console.log(`     all-tier band share: ${bandAll
+    .map((id) => `${ITEMS[id].name} ${share(id).toFixed(1)}%`).join(' · ')}`);
+  const rarest = [...bandAll].sort((a, b) => share(a) - share(b))[0];
+  check('the rarest item in an all-tiers draw is the Cyber one — Uri\'s "zombie power"',
+    ITEMS[rarest].rarity === 'Cyber', `${rarest} (${ITEMS[rarest].rarity})`);
+  check('...and it is 18x rarer than the Normal item, as tuning.ts computes',
+    approx(share(STARTER_ITEM) / share(rarest), 18.33, 0.05),
+    `${(share(STARTER_ITEM) / share(rarest)).toFixed(2)}x`);
+  check('the band is monotone — a higher floor is a subset',
+    RARITY_ORDER.every((r, i) => i === 0
+      || itemBand(r).every((id) => itemBand(RARITY_ORDER[i - 1]).includes(id))));
+
+  // ── 14h. The road surprise: deterministic, order-proof, and a FLOOR ───────
+  check('exactly one itemSurprise per node — two would resolve to the same draw',
+    surpriseNodes.every((m) => {
+      let n = 0;
+      const walk = (r) => {
+        if (r.type === 'itemSurprise') n++;
+        else if (r.type === 'bundle') r.parts.forEach(walk);
+      };
+      walk(m.reward);
+      return n === 1;
+    }));
+
+  const floorOf = (m) => {
+    let f = null;
+    const walk = (r) => {
+      if (r.type === 'itemSurprise') f = r.minRarity;
+      else if (r.type === 'bundle') r.parts.forEach(walk);
+    };
+    walk(m.reward);
+    return f;
+  };
+  check('a surprise resolves to the same item every time for the same player',
+    surpriseNodes.every((m) => {
+      const a = roadSurprise(floorOf(m), 4242, m.trophies, new Set([STARTER_ITEM]));
+      const b = roadSurprise(floorOf(m), 4242, m.trophies, new Set([STARTER_ITEM]));
+      return JSON.stringify(a) === JSON.stringify(b);
+    }));
+  check('...and a different player gets a different sequence',
+    surpriseNodes.map((m) => roadSurprise(floorOf(m), 4242, m.trophies, new Set()).item).join(',')
+    !== surpriseNodes.map((m) => roadSurprise(floorOf(m), 999, m.trophies, new Set()).item).join(','));
+  check('a surprise NEVER pays below its published floor',
+    surpriseNodes.every((m) => {
+      const floor = RARITY_ORDER.indexOf(floorOf(m));
+      for (let seed = 1; seed <= 200; seed++) {
+        const got = roadSurprise(floorOf(m), seed, m.trophies, new Set());
+        if (got.item && RARITY_ORDER.indexOf(ITEMS[got.item].rarity) < floor) return false;
+      }
+      return true;
+    }));
+  check('...and the sweep that checks it actually produced items, rather than 200 nulls',
+    surpriseNodes.every((m) => {
+      for (let seed = 1; seed <= 200; seed++) {
+        if (roadSurprise(floorOf(m), seed, m.trophies, new Set()).item) return true;
+      }
+      return false;
+    }));
+
+  // Uri: the road drop is "a surprise, not a fixed item". The node must not name it.
+  check('no surprise node names the item it will pay',
+    surpriseNodes.every((m) => {
+      const face = milestoneFace(
+        m.reward.type === 'bundle' ? m.reward.parts.find((p) => p.type === 'itemSurprise') : m.reward,
+        ownedSet(seeded()),
+      );
+      return ITEM_IDS.every((id) => !face.title.includes(ITEMS[id].name));
+    }));
+  check('...but it DOES publish the rarity floor, which is what a player pushes toward',
+    surpriseNodes.every((m) => {
+      const part = m.reward.type === 'bundle'
+        ? m.reward.parts.find((p) => p.type === 'itemSurprise') : m.reward;
+      return (milestoneFace(part, ownedSet(seeded())).payoutNote ?? '').includes(part.minRarity);
+    }));
+
+  // Finishing the road GUARANTEES a Neon-or-better item — asserted, not intended.
+  {
+    const topFloor = surpriseNodes
+      .map(floorOf)
+      .sort((a, b) => RARITY_ORDER.indexOf(b) - RARITY_ORDER.indexOf(a))[0];
+    check('the road\'s last surprise is banded at Neon or better', topFloor === 'Neon', topFloor);
+    const topNode = surpriseNodes.find((m) => floorOf(m) === topFloor);
+    check('finishing the road guarantees a Neon-or-better item, on every seed tried',
+      Array.from({ length: 200 }, (_, i) => i + 1).every((seed) => {
+        const st = createEconomy(seed);
+        st.trophies = topNode.trophies;
+        const got = claimMilestone(st, topNode.trophies);
+        return got.items.length === 1
+          && RARITY_ORDER.indexOf(ITEMS[got.items[0]].rarity) >= RARITY_ORDER.indexOf('Neon');
+      }));
+  }
+
+  // ── 14i. The two RNG streams cannot collide — rng.ts's own claim, checked ──
+  // `createRng(seed + rolls)` equals `createRng(seed + ROAD_SURPRISE_STREAM + threshold)`
+  // exactly when `rolls === ROAD_SURPRISE_STREAM + threshold`. The seed cancels, so this
+  // is decidable rather than sampled.
+  const collidingRolls = TROPHY_ROAD.map((m) => roadSurpriseSeed(0, m.trophies));
+  check('the road stream cannot be reached without opening 1,000,030+ containers',
+    Math.min(...collidingRolls) >= 1_000_030,
+    `min colliding roll count ${Math.min(...collidingRolls)}`);
+  check('...and every threshold maps to its own key, so no two nodes share a draw',
+    new Set(collidingRolls).size === TROPHY_ROAD.length);
+  check('ROAD_SURPRISE_STREAM is above the whole road', ROAD_SURPRISE_STREAM > roadEnd());
+  // The -1 contract `roadSurprise` depends on. An empty band is unreachable while
+  // `rules.ts` ships a Cyber item, so the branch is asserted at its precondition.
+  check('weightedPick returns -1 for an empty list and for an all-zero one',
+    weightedPick(createRng(1), []) === -1 && weightedPick(createRng(1), [0, 0]) === -1);
+
+  // ── 14j. OWNERSHIP: persistence, and the save that predates items ─────────
+  {
+    const s = createEconomy(31337);
+    s.items.push('pompa', 'shiitake');
+    const round = deserialize(JSON.parse(JSON.stringify(serialize(s))));
+    check('items survive a serialise/deserialise round trip',
+      round.items.join(',') === s.items.join(','), round.items.join(','));
+    check('the whole blob still round-trips identically',
+      JSON.stringify(serialize(round)) === JSON.stringify(serialize(s)));
+  }
+  // 🚨 A HAND-WRITTEN OLD BLOB, not `serialize()` with a key deleted — the point is a
+  // shipped build reading something an EARLIER build wrote, and an earlier build wrote
+  // no `items` key at all because nothing could award one.
+  {
+    const preItems = deserialize({
+      trophies: 4200, bestTrophies: 4200, coins: 9000, gems: 40,
+      containers: { chest: 2 }, claimed: [30, 65, 100], unlocked: ['hamburger', 'donut'],
+      winsTowardChest: 1, levels: { hamburger: 4 }, seed: 5150, rolls: 17,
+    });
+    check('a save that predates items reads back owning exactly the starter',
+      preItems.items.length === 1 && preItems.items[0] === STARTER_ITEM,
+      preItems.items.join(','));
+    check('...and loses nothing else it was carrying',
+      preItems.trophies === 4200 && preItems.coins === 9000 && preItems.rolls === 17
+      && preItems.claimed.length === 3 && preItems.levels.hamburger === 4);
+  }
+  check('an unknown item id in a blob is dropped',
+    deserialize({ items: [STARTER_ITEM, 'zombie_power'] }).items.length === 1);
+  check('a duplicated item id in a blob collapses',
+    deserialize({ items: [STARTER_ITEM, STARTER_ITEM] }).items.length === 1);
+  check('the starter is restored even if a blob omits it',
+    deserialize({ items: ['leftovers'] }).items.includes(STARTER_ITEM));
+  check('granting the same item twice keeps one entry', (() => {
+    const st = createEconomy(9);
+    grantReward(st, { coins: 0, gems: 0, containers: {}, characters: [], items: ['pompa'] });
+    grantReward(st, { coins: 0, gems: 0, containers: {}, characters: [], items: ['pompa'] });
+    return st.items.filter((id) => id === 'pompa').length === 1;
+  })());
+  check('ownedItemSet is the real list, with no ROSTER_GATED-style override', (() => {
+    const st = createEconomy(11);
+    st.items.push('pompa');
+    const set = ownedItemSet(st);
+    return set.size === 2 && set.has(STARTER_ITEM) && set.has('pompa')
+      && set.size < ITEM_IDS.length;
+  })());
+
+  // ── 14k. END TO END: a real career actually accumulates items ─────────────
+  //
+  // Every check above drives a pure function directly. This one drives the shipped path
+  // — `applyMatchResult` -> `claimAll` -> `openContainer` — because that is where the
+  // wiring bug lived: each part was fine and nothing joined them up.
+  {
+    const st = createEconomy(20260831);
+    const rng = createRng(20260831);
+    let opened = 0;
+    for (let i = 0; i < 2000; i++) {
+      applyMatchResult(st, rng.next() < 0.60);
+      claimAll(st);
+      for (const kind of CONTAINER_KINDS) {
+        while (st.containers[kind] > 0) { openContainer(st, kind); opened++; }
+      }
+    }
+    console.log(`     a 2,000-match career: ${opened.toLocaleString()} containers opened, `
+      + `${st.items.length}/${ITEM_IDS.length} items owned, ${st.trophies.toLocaleString()} trophies`);
+    check('a real career acquires items through the shipped path',
+      st.items.length > 1, `${st.items.join(',')}`);
+    check('...and every item it acquired is a real registry id',
+      st.items.every((id) => ITEM_IDS.includes(id)), st.items.join(','));
+    check('...and it never holds a second copy of anything',
+      new Set(st.items).size === st.items.length, st.items.join(','));
+    check('a career that finishes the road owns the whole item set',
+      st.trophies >= roadEnd() && st.items.length === ITEM_IDS.length,
+      `${st.trophies} trophies, ${st.items.length}/${ITEM_IDS.length}`);
+  }
+
+  // ── 14l. WHAT THE SEVEN SURPRISE NODES COST THE GRIND: NOTHING ───────────
+  //
+  // `tuning.ts` claims the nodes are ADDITIVE — same 45 steps, same thresholds, same
+  // gaps, same road end, same 26,900 coins and 800 gems — so "time to the full roster is
+  // unchanged BY CONSTRUCTION". Re-derived here rather than believed, because that claim
+  // is the entire justification for wrapping surprises in `bundle` instead of inserting
+  // seven new nodes (which would have falsified §4b's never-shrinking gaps).
+  {
+    let coins = 0;
+    let gems = 0;
+    const walk = (r) => {
+      if (r.type === 'coins') coins += r.amount;
+      else if (r.type === 'gems') gems += r.amount;
+      else if (r.type === 'bundle') r.parts.forEach(walk);
+    };
+    for (const m of TROPHY_ROAD) walk(m.reward);
+    console.log(`     the road after seven surprise nodes: ${TROPHY_ROAD.length} steps, `
+      + `ends ${roadEnd().toLocaleString()}, ${coins.toLocaleString()} coins, ${gems} gems, `
+      + `${surpriseNodes.length} surprises`);
+    check('the road still pays exactly 26,900 coins', coins === 26900, `${coins}`);
+    check('the road still pays exactly 800 gems', gems === 800, `${gems}`);
+    check('the road still ends where the roster completes', roadEnd() === ROSTER_COMPLETE_TROPHIES);
+    check('the road is still 45 steps', TROPHY_ROAD.length === 45, `${TROPHY_ROAD.length}`);
+    // The roster is gated on TROPHIES, and no threshold moved — so time-to-full-roster
+    // is the same number §9 and §13 already print. That is the claim, and these four
+    // checks are jointly what makes it true rather than asserted.
+    check('every surprise node rides an EXISTING threshold, adding no step',
+      surpriseNodes.every((m) => TROPHY_ROAD.includes(m)));
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
