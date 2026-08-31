@@ -78,8 +78,11 @@
 import {
   CHARACTER_IDS,
   CHARACTERS,
+  ITEMS,
   RARITY_COLORS,
+  RARITY_ORDER,
   type CharacterId,
+  type ItemId,
   type Rarity,
 } from '../../game/rules';
 import {
@@ -87,9 +90,12 @@ import {
   CONTAINERS,
   CONTAINER_KINDS,
   DUPLICATE_COINS,
+  ITEMS_BY_RARITY,
+  ITEM_DUPLICATE_COINS,
   RARITY_MEANING,
   containerOdds,
   formatPercent,
+  ownedItemSet,
   totalWeight,
   type ContainerKind,
 } from '../../game/economy';
@@ -105,11 +111,24 @@ import { el } from './fx';
 /**
  * The rarity ladder, DERIVED rather than typed out.
  *
- * `Rarity` is a union type, so there is no runtime array of it anywhere in `rules.ts`,
- * and both other screens that needed an order wrote their own literal. `DUPLICATE_COINS`
- * already encodes the ladder — 120 / 260 / 520 / 900 / 1400 / 2200, strictly ascending
- * and asserted in `economy.test.mjs` — so sorting by it cannot fall out of step with a
- * rarity added or re-priced in `tuning.ts`.
+ * ── ⚠️ THIS COMMENT SAID `rules.ts` HAD NO RUNTIME RARITY ARRAY. IT ALWAYS HAS. ──
+ *
+ * Kept per house style. It read:
+ *
+ *     '`Rarity` is a union type, so there is no runtime array of it anywhere in
+ *      `rules.ts`, and both other screens that needed an order wrote their own literal.'
+ *
+ * `rules.ts` has exported `RARITY_ORDER` since the foundation commit (`33474ae`) — and
+ * `economy.test.mjs` has been IMPORTING it the whole time, so this file was asserting
+ * the non-existence of something its own test suite used. The second half was true and
+ * was true BECAUSE of the first: `ui/screens/trophyRoad.ts:86` still hand-writes the
+ * same six names. 🔴 REPORTED, not fixed — that file is a different owner's.
+ *
+ * The derivation stays, because it is still the better one HERE: this screen sorts by
+ * VALUE, and `DUPLICATE_COINS` is the thing that encodes value — 120 / 260 / 520 / 900 /
+ * 1400 / 2200, strictly ascending. `RARITY_ORDER` encodes DISPLAY order. They agree
+ * today, and `economy.test.mjs` §14 now asserts they keep agreeing rather than leaving
+ * one file to sort by price and another by position.
  */
 const RARITY_LADDER: Rarity[] = (Object.keys(DUPLICATE_COINS) as Rarity[])
   .sort((a, b) => DUPLICATE_COINS[a] - DUPLICATE_COINS[b]);
@@ -130,9 +149,15 @@ interface Outcome {
   gems: number;
   /** Set when this outcome can still grant a fighter the player does not have. */
   fighter: Rarity | null;
+  /** Set when this outcome can still grant a loadout ITEM the player does not have. */
+  item: Rarity | null;
 }
 
-function outcomes(kind: ContainerKind, owned: ReadonlySet<CharacterId>): Outcome[] {
+function outcomes(
+  kind: ContainerKind,
+  owned: ReadonlySet<CharacterId>,
+  ownedItems: ReadonlySet<ItemId>,
+): Outcome[] {
   const entries = CONTAINERS[kind].entries;
   const total = totalWeight(entries);
   return entries.map((entry) => {
@@ -144,13 +169,31 @@ function outcomes(kind: ContainerKind, owned: ReadonlySet<CharacterId>): Outcome
       if (pool.some((id) => !owned.has(id))) fighter = entry.characterRarity;
       else coins += DUPLICATE_COINS[entry.characterRarity];
     }
-    return { chance01: total > 0 ? entry.weight / total : 0, coins, gems, fighter };
+    // The item arm is `rollContainer`'s item branch read the same way the fighter arm
+    // reads its character branch: grant if anything in the tier is unowned, otherwise
+    // the duplicate value in coins. Two arms of one mirror, so they cannot drift apart.
+    let item: Rarity | null = null;
+    if (entry.itemRarity) {
+      const pool = ITEMS_BY_RARITY[entry.itemRarity] ?? [];
+      if (pool.some((id) => !ownedItems.has(id))) item = entry.itemRarity;
+      else coins += ITEM_DUPLICATE_COINS[entry.itemRarity];
+    }
+    return { chance01: total > 0 ? entry.weight / total : 0, coins, gems, fighter, item };
   });
+}
+
+/** Every loadout item a container can produce, across all of its item rows. */
+function itemPool(kind: ContainerKind): ItemId[] {
+  return [...new Set(CONTAINERS[kind].entries.flatMap(
+    (e) => (e.itemRarity ? ITEMS_BY_RARITY[e.itemRarity] ?? [] : []),
+  ))];
 }
 
 interface BoxValue {
   /** True when at least one outcome can still produce a fighter. */
   canGrantFighter: boolean;
+  /** True when at least one outcome can still produce an unowned loadout item. */
+  canGrantItem: boolean;
   /** Best and expected currency return, given the same owned set. */
   bestCoins: number;
   bestGems: number;
@@ -158,23 +201,41 @@ interface BoxValue {
   expectedGems: number;
   /** Share of the table, 0..100, that is a character row at all. */
   characterPercent: number;
+  /** Share of the table, 0..100, that is an ITEM row. */
+  itemPercent: number;
   /** The lowest rarity the table can produce, or null for a currency-only container. */
   floorRarity: Rarity | null;
+  /** The lowest ITEM rarity the table can produce, or null when it has no item rows. */
+  itemFloorRarity: Rarity | null;
+  /** Items in this box the player does not own yet, and how many the box holds at all. */
+  missingItems: number;
+  poolItems: number;
 }
 
-function boxValue(kind: ContainerKind, owned: ReadonlySet<CharacterId>): BoxValue {
-  const rows = outcomes(kind, owned);
+function boxValue(
+  kind: ContainerKind,
+  owned: ReadonlySet<CharacterId>,
+  ownedItems: ReadonlySet<ItemId>,
+): BoxValue {
+  const rows = outcomes(kind, owned, ownedItems);
+  const pool = itemPool(kind);
   const value: BoxValue = {
     canGrantFighter: false,
+    canGrantItem: false,
     bestCoins: 0,
     bestGems: 0,
     expectedCoins: 0,
     expectedGems: 0,
     characterPercent: 0,
+    itemPercent: 0,
     floorRarity: null,
+    itemFloorRarity: null,
+    missingItems: pool.filter((id) => !ownedItems.has(id)).length,
+    poolItems: pool.length,
   };
   for (const row of rows) {
     if (row.fighter) value.canGrantFighter = true;
+    if (row.item) value.canGrantItem = true;
     value.bestCoins = Math.max(value.bestCoins, row.coins);
     value.bestGems = Math.max(value.bestGems, row.gems);
     value.expectedCoins += row.chance01 * row.coins;
@@ -184,11 +245,20 @@ function boxValue(kind: ContainerKind, owned: ReadonlySet<CharacterId>): BoxValu
   // box contains does not change when a player happens to own it all.
   const total = totalWeight(CONTAINERS[kind].entries);
   for (const entry of CONTAINERS[kind].entries) {
-    if (!entry.characterRarity) continue;
-    value.characterPercent += total > 0 ? (entry.weight / total) * 100 : 0;
-    const here = RARITY_LADDER.indexOf(entry.characterRarity);
-    const have = value.floorRarity === null ? Infinity : RARITY_LADDER.indexOf(value.floorRarity);
-    if (here < have) value.floorRarity = entry.characterRarity;
+    const pct = total > 0 ? (entry.weight / total) * 100 : 0;
+    if (entry.characterRarity) {
+      value.characterPercent += pct;
+      const here = RARITY_LADDER.indexOf(entry.characterRarity);
+      const have = value.floorRarity === null ? Infinity : RARITY_LADDER.indexOf(value.floorRarity);
+      if (here < have) value.floorRarity = entry.characterRarity;
+    }
+    if (entry.itemRarity) {
+      value.itemPercent += pct;
+      const here = RARITY_LADDER.indexOf(entry.itemRarity);
+      const have = value.itemFloorRarity === null
+        ? Infinity : RARITY_LADDER.indexOf(value.itemFloorRarity);
+      if (here < have) value.itemFloorRarity = entry.itemRarity;
+    }
   }
   return value;
 }
@@ -201,11 +271,39 @@ type Currency = 'coins' | 'gems';
  * See the header. A fighter the player does not own is the reason boxes exist, so that
  * alone qualifies; otherwise the box is a currency converter and may only be sold if it
  * can at least return more than it took. Nothing here reads `ROSTER_GATED`.
+ *
+ * ── 🚨 2026-08-31: ITEMS DELIBERATELY DO **NOT** QUALIFY, AND THAT IS A PARKED
+ *    DECISION RATHER THAN AN OVERSIGHT ───────────────────────────────────────
+ *
+ * Every box is 20% loadout items now, and **items have no `ROSTER_GATED`** — a new player
+ * owns one of ten — so on the header's own wording (*"the box can hand over CONTENT the
+ * player does not own"*) every box would qualify and four Buy buttons that have been dead
+ * since this screen was built would come alive. That version was written, measured and
+ * BACKED OUT. Three reasons, in the order they decided it:
+ *
+ *   1. **The arithmetic did not move.** Measured off the model at a full roster with only
+ *      `STARTER_ITEM` owned: Hamburger Box 900 coins in, **130** back on average, 4% of
+ *      rolls an item the player lacks. Pineapple 3,200 in / **221**. Big Smile 5,600 in /
+ *      **450**. Fire 12,000 in / **745**. The founding argument of this screen is that no
+ *      presentation makes that honest to SELL, and a 4% item does not change the number.
+ *   2. **Gems buy boxes and real money will buy gems.** Switching four purchase controls
+ *      on is a monetisation decision, and it is Uri's, not a side effect of an acquisition
+ *      task. 🔴 PARKED FOR URI with the four numbers above.
+ *   3. It would have forced an edit to `tools/tmp/menu_accept.mjs` — a different owner's
+ *      file — whose `flow/shop/unavailability-is-stated-in-words` check goes RED the
+ *      moment the "Nothing here is for sale yet" banner disappears. Measured: 506/507.
+ *
+ * ⚠️ **Reversing it is exactly one clause** — `|| value.canGrantItem` on the line below —
+ * and `boxValue` already computes everything the enabled state needs. What is NOT parked
+ * is the disclosure: every sentence on this screen that described a box as "only able to
+ * pay coins back" was made false by the item rows and every one of them is corrected,
+ * because a screen may decline to sell you something but may never lie about what is in it.
  */
-function sellable(kind: ContainerKind, currency: Currency, owned: ReadonlySet<CharacterId>): boolean {
+function sellable(kind: ContainerKind, currency: Currency, owned: ReadonlySet<CharacterId>,
+  ownedItems: ReadonlySet<ItemId>): boolean {
   const price = CONTAINERS[kind].price;
   if (!price) return false;
-  const value = boxValue(kind, owned);
+  const value = boxValue(kind, owned, ownedItems);
   if (value.canGrantFighter) return true;
   return currency === 'coins' ? value.bestCoins > price.coins : value.bestGems > price.gems;
 }
@@ -285,13 +383,19 @@ export function createShopScreen(ctx: ScreenContext): Screen {
   }
 
   /** Who is actually in each pool, by name. An odds row that says "Rare fighter 10%"
-   *  without naming the four Rares is a percentage the player cannot act on. */
+   *  without naming the four Rares is a percentage the player cannot act on — and the
+   *  same is true of "Rare item 3.6%", which is why both kinds of pool are named here.
+   *  ⚠️ `row.itemPool` is a separate field from `row.pool` on purpose: both this
+   *  renderer and `trophyRoad.ts`'s do `CHARACTERS[id].name` over `pool`, so an `ItemId`
+   *  in there is a TypeError inside a screen render. See `containers.ts:OddsRow`. */
   function poolLines(kind: ContainerKind): string {
     const lines = containerOdds(kind)
-      .filter((row) => row.rarity && row.pool && row.pool.length > 0)
+      .filter((row) => row.rarity && ((row.pool && row.pool.length > 0)
+        || (row.itemPool && row.itemPool.length > 0)))
       .map((row) => `<span class="shop-pool-line"><i class="shop-odds-dot" style="background:${
         RARITY_COLORS[row.rarity as Rarity]
-      }"></i>${row.pool!.map((id) => CHARACTERS[id].name).join(', ')}</span>`)
+      }"></i>${(row.pool ?? []).map((id) => CHARACTERS[id].name)
+    .concat((row.itemPool ?? []).map((id) => ITEMS[id].name)).join(', ')}</span>`)
       .join('');
     return lines ? `<div class="shop-pool">${lines}</div>` : '';
   }
@@ -304,10 +408,14 @@ export function createShopScreen(ctx: ScreenContext): Screen {
    * Both refusals carry their reason: an unexplained disabled button is the same defect
    * as a dead live-looking one.
    */
-  function boxCard(kind: ContainerKind, owned: ReadonlySet<CharacterId>): string {
+  function boxCard(
+    kind: ContainerKind,
+    owned: ReadonlySet<CharacterId>,
+    ownedItems: ReadonlySet<ItemId>,
+  ): string {
     const def = CONTAINERS[kind];
     const price = def.price!;
-    const value = boxValue(kind, owned);
+    const value = boxValue(kind, owned, ownedItems);
 
     // "or BETTER" until 2026-08-05, and it had become a claim the model does not
     // compute. `rules.ts` DEVIATION #12 removed power from rarity at equal level
@@ -316,17 +424,37 @@ export function createShopScreen(ctx: ScreenContext): Screen {
     // road's own tier pips — but not from here, because this file had a different
     // owner. What this line has ALWAYS measured is `value.floorRarity`, the rarest-
     // ladder floor of the box's character pool, i.e. exactly "or rarer".
+    //
+    // ── ⚠️ AND "ALWAYS A FIGHTER" STOPPED BEING TRUE ON 2026-08-31 ────────────
+    // Every box gave up exactly 20% of its table to loadout items, so `characterPercent`
+    // is 80 and this chip correctly disappeared on its own — the guard was written
+    // against the TABLE rather than against a remembered fact, which is why a tuning
+    // change could not turn it into a lie. It is kept, unchanged, for the day an item-free
+    // container exists again; and the item share gets its own chip beside it rather than
+    // being folded in, because "always a fighter OR an item" would be a true statement
+    // about the table that reads as a promise about the payout — and 80% of this table
+    // pays coins while `ROSTER_GATED` is false.
     const guarantee = value.canGrantFighter && value.characterPercent >= 99.999 && value.floorRarity
       ? `<span class="shop-guarantee"><i class="shop-odds-dot" style="background:${
         RARITY_COLORS[value.floorRarity]
       }"></i>Always a fighter, ${value.floorRarity} or rarer</span>`
       : '';
 
+    // The item chip states a RATE, not a guarantee, and only when an item in this box is
+    // actually still missing. A player who owns all ten sees nothing here rather than an
+    // invitation to buy a box that can only pay them a duplicate.
+    const itemChip = value.canGrantItem && value.itemFloorRarity
+      ? `<span class="shop-guarantee shop-guarantee--item"><i class="shop-odds-dot" style="background:${
+        RARITY_COLORS[value.itemFloorRarity]
+      }"></i>${formatPercent(value.itemPercent)} loadout item, ${
+        value.itemFloorRarity} or rarer</span>`
+      : '';
+
     const buy = (currency: Currency): string => {
       const cost = currency === 'coins' ? price.coins : price.gems;
       const held = currency === 'coins' ? profile.coins : profile.gems;
       const mark = icon(currency === 'coins' ? 'coin' : 'gem');
-      const offered = sellable(kind, currency, owned);
+      const offered = sellable(kind, currency, owned, ownedItems);
       const affordable = held >= cost;
       const on = offered && affordable;
       // Every disabled control says why, even when the card's own reason block covers
@@ -349,16 +477,41 @@ export function createShopScreen(ctx: ScreenContext): Screen {
     // are made: "a guaranteed loss" is emitted when the BEST outcome is below the
     // price, and downgraded to the plain expected return when it is not.
     let why = '';
-    if (!sellable(kind, 'coins', owned) && !sellable(kind, 'gems', owned)) {
+    if (!sellable(kind, 'coins', owned, ownedItems) && !sellable(kind, 'gems', owned, ownedItems)) {
       const paysCoinsOnly = value.bestGems === 0;
       const detail = value.bestCoins < price.coins
         ? `It pays back at most ${value.bestCoins.toLocaleString()} coins for a ${price.coins.toLocaleString()} coin price, and ${Math.round(value.expectedCoins).toLocaleString()} on average.`
         : `Its average return is ${Math.round(value.expectedCoins).toLocaleString()} coins against a ${price.coins.toLocaleString()} coin price.`;
+      // ── ⚠️ "SO IT CAN ONLY PAY COINS BACK" BECAME FALSE WITHOUT THIS FILE BEING
+      //    TOUCHED, WHICH IS THE WHOLE LESSON ────────────────────────────────
+      // The old sentence, kept here because the way it broke matters more than the words:
+      //
+      //     'Every fighter this box can give is already unlocked, so it can only pay
+      //      coins back. <detail>'
+      //
+      // True the day it was written and false the day `tuning.ts` gave every box 20% item
+      // rows — a screen that reads its numbers off the model still hard-codes its NOUNS,
+      // and a noun does not go red. The refusal is unchanged and still correct (the coin
+      // arithmetic did not move); what changed is that the box now holds something the
+      // player genuinely lacks, and saying otherwise on a drop-rate surface is the one
+      // thing this screen may not do. So the sentence names the item route instead of
+      // denying the items exist.
+      const stillMissing = value.missingItems;
+      // ⚠️ WRITTEN SHORT ON PURPOSE, AND THE BUDGET IS A MEASUREMENT. The item rows
+      // roughly DOUBLED every card's odds table and added a pool line per tier, and at
+      // 1600x900 this panel hugs its content up to 759px before it starts scrolling. The
+      // disclosure is not negotiable — those rows are the drop rates a randomised paid
+      // container has to publish — so the prose is what gives way. Measured with
+      // `tools/tmp/ea_shop_shot.mjs`, which reports the scroller's own clientH/scrollH.
       why = `
         <p class="shop-why">
           <span class="shop-why-head">Not for sale</span>
-          Every fighter this box can give is already unlocked, so it can only pay
+          Every fighter here is already unlocked, so a fighter roll only pays
           ${paysCoinsOnly ? 'coins' : 'currency'} back. ${detail}
+          ${stillMissing > 0
+    ? `Its ${stillMissing} unowned loadout item${stillMissing === 1 ? '' : 's'} come from
+            Chests and the Trophy Road.`
+    : 'You own every loadout item in it too.'}
         </p>`;
     } else if (!(profile.coins >= price.coins) && !(profile.gems >= price.gems)) {
       why = `
@@ -385,14 +538,24 @@ export function createShopScreen(ctx: ScreenContext): Screen {
       // rarity tier inside this box is owned. Branching on "owns any of them" produced
       // "a repeat trades in for coins, 0 on average" — a promise of a payout the roller
       // could not have made, sitting next to the number that says so.
+      //
+      // ⚠️ AND IT NOW HAS AN ITEM CLAUSE, WHICH IS APPENDED RATHER THAN LEADING.
+      // A box is not sellable BECAUSE of its items (see `sellable`); reaching this branch
+      // still means the gate flipped and there is a fighter to win, so the fighter count
+      // stays the headline and the items are the extra. Leading with the item would have
+      // sold the box on the 20% and buried the 80%.
+      const itemNote = value.missingItems > 0
+        ? ` It also holds ${value.missingItems} loadout item${value.missingItems === 1 ? '' : 's'}
+            you do not have, at ${formatPercent(value.itemPercent)} of the table.`
+        : '';
       why = value.expectedCoins === 0
         ? `<p class="shop-why"><span class="shop-why-head">What you get</span>
-            Every roll here is a new fighter. ${missing} of the ${pool.length} are still
-            missing from your roster.</p>`
+            Every fighter roll here is a new fighter. ${missing} of the ${pool.length} are
+            still missing from your roster.${itemNote}</p>`
         : `<p class="shop-why"><span class="shop-why-head">Duplicates</span>
             ${missing} of the ${pool.length} fighters here are still missing. A repeat
             trades in for coins, ${Math.round(value.expectedCoins).toLocaleString()} on
-            average across the table.</p>`;
+            average across the table.${itemNote}</p>`;
     }
 
     return `
@@ -401,7 +564,7 @@ export function createShopScreen(ctx: ScreenContext): Screen {
           <span class="shop-card-em">${containerIcon(kind)}</span>
           <div class="shop-card-id">
             <h3 class="shop-card-name">${def.name}</h3>
-            ${guarantee}
+            ${guarantee}${itemChip}
           </div>
         </div>
         <p class="shop-blurb">${def.blurb}</p>
@@ -465,22 +628,34 @@ export function createShopScreen(ctx: ScreenContext): Screen {
 
   function render(): void {
     const owned = profile.unlocked;
+    // `profile.economy` is documented as "the live economy state. Read freely" — there is
+    // no `profile.ownedItems` getter and `profile.ts` is a different owner's file, so the
+    // set is derived here through the economy module's own accessor rather than by
+    // reaching into `state.items` and inventing a second definition of ownership.
+    const ownedItems = ownedItemSet(profile.economy);
     q('coins').textContent = profile.coins.toLocaleString();
     q('gems').textContent = profile.gems.toLocaleString();
 
     const anySellable = PRICED_KINDS.some(
-      (kind) => sellable(kind, 'coins', owned) || sellable(kind, 'gems', owned),
+      (kind) => sellable(kind, 'coins', owned, ownedItems)
+        || sellable(kind, 'gems', owned, ownedItems),
     );
 
     // The banner is the one place the whole state is stated once, in words, at the top
     // of the screen — the same move the gem store makes and the same one `menu_accept`
     // already checks there. Written from the model: the roster size is counted, not
     // typed, so an eleventh-and-a-half character cannot make this sentence wrong.
+    // ⚠️ THIS BANNER SAID "every box can only pay coins back" AND THAT WENT FALSE THE
+    // DAY BOXES GREW ITEM ROWS — same defect as the card copy below, same cause: the
+    // numbers are derived and the nouns are not. The refusal itself is unchanged and is
+    // still the measured truth (every box returns less currency than it costs), so the
+    // banner keeps its verdict and stops overstating the reason.
     const notice = anySellable ? '' : `
       <p class="shop-notice">${icon('cone')}
         <span><strong>Nothing here is for sale yet.</strong>
-        You already own all ${CHARACTER_IDS.length} fighters, so every box can only pay
-        coins back, and each one pays back less than it costs.
+        You own all ${CHARACTER_IDS.length} fighters, so a fighter roll only pays coins
+        back and every box returns less than it costs. Loadout items come from free
+        Chests and the Trophy Road.
         <span class="shop-notice-more">Buying is switched off rather than offered as a
         bad deal. Everything below is real: these are the prices and the drop rates the
         game will use.</span></span>
@@ -510,13 +685,25 @@ export function createShopScreen(ctx: ScreenContext): Screen {
              model's own string so the two surfaces cannot drift. -->
         <p class="shop-rarity">${RARITY_MEANING}</p>
         <div class="shop-grid">${CONTAINER_KINDS.map((kind) => (
-    CONTAINERS[kind].price ? boxCard(kind, owned) : chestCard(kind)
+    CONTAINERS[kind].price ? boxCard(kind, owned, ownedItems) : chestCard(kind)
   )).join('')}</div>
       </section>
     `;
 
+    // ⚠️ SHORTENED, AND THE REASON IS A MEASUREMENT, NOT TASTE. `.shop-foot-note` is
+    // `white-space: nowrap; overflow: hidden`, so this band ELLIPSES rather than wraps.
+    // The `anySellable` branch had never rendered on a phone — nothing was sellable, so
+    // the screen always took the short string — and items flipped it on: at 390px
+    // 'Coins and gems are earned by playing. Both work on every box.' clipped to
+    // '...Both work on e…'. Measured with `tools/tmp/ea_shop_shot.mjs` at 390x844, which
+    // is also how it was found. A truncated sentence is the ONE defect on this screen a
+    // reader cannot recover from, because the missing half is the half that says what
+    // the currency is for.
+    // ⚠️ The branch is unreachable again now that `sellable` excludes items — but the
+    // measurement was real and the string is one clause away from rendering, so the fix
+    // stays rather than waiting to be rediscovered by whoever flips that clause.
     q('footnote').textContent = anySellable
-      ? 'Coins and gems are earned by playing. Both work on every box.'
+      ? 'Coins and gems both work on every box.'
       : 'Boxes are earned, not bought:';
   }
 
@@ -541,7 +728,7 @@ export function createShopScreen(ctx: ScreenContext): Screen {
     const currency = buy.dataset.currency as Currency;
     // Re-checked here rather than trusted from the markup: a stale render must never be
     // able to authorise a purchase the model would refuse.
-    if (!sellable(kind, currency, profile.unlocked)) return;
+    if (!sellable(kind, currency, profile.unlocked, ownedItemSet(profile.economy))) return;
     profile.buyContainer(kind, currency);
   };
   root.addEventListener('click', onClick);
@@ -689,6 +876,14 @@ const CSS = `
   color: #3B2A18;
 }
 .fa-shop .shop-guarantee--free { color: #4E2C1B; }
+/* The item chip states a RATE, not a guarantee, and stacks under the fighter one when
+   both are present ('.shop-card-id' is a column). Same ink deliberately: the rarity
+   channel is carried by the 10px dot and never by the type — measured on this project's
+   other odds sheet, every rarity colour is below AA as text on cream.
+   NOTE THE SINGLE QUOTES: this block is inside a JS template literal and one backtick
+   terminates it — the trap this file already warns about 400 lines up, and which I
+   walked straight into while writing a comment about being careful. */
+.fa-shop .shop-guarantee--item { color: #4E2C1B; }
 
 .fa-shop .shop-blurb {
   margin: 1px 0 2px;
