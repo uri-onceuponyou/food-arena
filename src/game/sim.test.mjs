@@ -155,6 +155,10 @@ import {
   // `MEDIKIT_HEAL_SOURCE_KEY` exists so the heal derivation can be checked against the LIVE
   // roster without either side writing 18.
   MEDIKIT, MEDIKIT_HEAL_SOURCE_KEY,
+  // Section 41: LOADOUT ITEMS. Same contract as §40 — every number in `ITEM_TUNING` is
+  // derived from something else in `rules.ts`, and §41 asserts the DERIVATIONS rather than
+  // the values, so re-tuning a source turns a stale constant into a red row.
+  ITEMS, ITEM_TUNING, ITEM_SLOTS, ITEM_STATUS_MS, SUPER_MIN_COOLDOWN_MS,
 } from './rules.ts';
 // Section 26(b) needs a bare fighter to walk across a concealment box with `tryMove`, with
 // no match, no AI and no `stepMatch` around it — the factory is imported so the thing being
@@ -10897,6 +10901,142 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
       && new Set(st.medikits.map((k) => k.sourceId)).size === 3,
       `${st.medikits.length} kits from sources {${[...new Set(st.medikits.map((k) => k.sourceId))].join(',')}}`);
   }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 41. LOADOUT ITEMS — the CONTRACT, not the behaviour
+//
+// Uri's ten items. The behaviour is built by other agents on top of this registry;
+// what §41 holds is that the registry itself stays honest — that every number still
+// derives from what it claims to derive from, that the two six-seat-only items are
+// declared as such, and that the rarity story matches the economy's own box weights.
+//
+// 🚨 EVERY FILTER HERE IS ASSERTED NON-EMPTY BEFORE IT IS QUANTIFIED OVER.
+// `[].every()` is `true`, and this repo has shipped that exact vacuity three times in
+// three files in one session, green every time.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const defs = Object.values(ITEMS);
+
+  // ── (a) the registry is populated at all ─────────────────────────────────
+  check('(a) NON-VACUITY: the registry holds ten items and every id is self-consistent',
+    defs.length === 10 && defs.every((d) => ITEMS[d.id] === d),
+    `${defs.length} items`);
+  check('(a) Uri asked for two slots',
+    ITEM_SLOTS === 2, `ITEM_SLOTS ${ITEM_SLOTS}`);
+
+  // ── (b) rarity: Zombie Power is the rarest, and "rarest" is the ECONOMY's word ──
+  {
+    // The tier order is not a taste call — it is economy/tuning.ts's own box weights,
+    // restated here as an ordering so this file does not import the economy.
+    const TIERS = ['Normal', 'Rare', 'Epic', 'Legendary', 'Neon', 'Cyber'];
+    const rank = (r) => TIERS.indexOf(r);
+    check('(b) NON-VACUITY: every item carries a rarity from the shipped six-tier union',
+      defs.length > 0 && defs.every((d) => rank(d.rarity) >= 0),
+      defs.map((d) => `${d.id}:${d.rarity}`).join(' '));
+    const others = defs.filter((d) => d.id !== 'leftovers');
+    check('(b) NON-VACUITY: there are other items to compare Leftovers against',
+      others.length === 9, `${others.length} others`);
+    check('(b) 🔴 Uri: "zombie power is the rarest" — Leftovers outranks every other item',
+      others.every((d) => rank(d.rarity) < rank(ITEMS.leftovers.rarity)),
+      `leftovers ${ITEMS.leftovers.rarity}, max other ${Math.max(...others.map((d) => rank(d.rarity)))}`);
+    check('(b) …and it sits on the rarest tier the game has, not merely the rarest in use',
+      ITEMS.leftovers.rarity === TIERS[TIERS.length - 1], ITEMS.leftovers.rarity);
+  }
+
+  // ── (c) the six-seat landmine, DECLARED so no two-seat test can pass vacuously ──
+  {
+    const gated = defs.filter((d) => d.minAlive > 2);
+    check('(c) NON-VACUITY: at least one item is declared unusable at two seats',
+      gated.length > 0, gated.map((d) => `${d.id}>=${d.minAlive}`).join(' '));
+    check('(c) 🔴 Uri: "If there are only two players left, it\'s not available" — Disposal needs three',
+      ITEMS.disposal.minAlive === 3, `minAlive ${ITEMS.disposal.minAlive}`);
+    check('(c) Leftovers cannot resurrect into a decided match',
+      ITEM_TUNING.leftovers.minAliveAfterKillerDies >= 2,
+      `${ITEM_TUNING.leftovers.minAliveAfterKillerDies}`);
+  }
+
+  // ── (d) EVERY DERIVATION, asserted as an equation ─────────────────────────
+  {
+    check('(d) Warm Milk reaches exactly "half a screen" — the disc every aspect ratio guarantees',
+      ITEM_TUNING.warm_milk.range === GUARANTEED_VISIBLE_RADIUS,
+      `${ITEM_TUNING.warm_milk.range} vs ${GUARANTEED_VISIBLE_RADIUS}`);
+    check('(d) …and a Springform bounce is half of that — a repositioning, not a teleport',
+      ITEM_TUNING.springform.distance === GUARANTEED_VISIBLE_RADIUS / 2,
+      `${ITEM_TUNING.springform.distance}`);
+    check('(d) sleep is LONGER further away, and tops out at the five seconds Uri stated',
+      ITEM_TUNING.warm_milk.maxMs === ITEM_STATUS_MS
+      && ITEM_TUNING.warm_milk.minMs < ITEM_TUNING.warm_milk.maxMs,
+      `${ITEM_TUNING.warm_milk.minMs} -> ${ITEM_TUNING.warm_milk.maxMs}`);
+    check('(d) 🔴 the three durations Uri stated independently are ONE constant, not three literals',
+      ITEM_TUNING.pompa.clogMs === ITEM_STATUS_MS
+      && ITEM_TUNING.liquorice.rootMs === ITEM_STATUS_MS
+      && ITEM_TUNING.shiitake.durationMs === ITEM_STATUS_MS,
+      `${ITEM_TUNING.pompa.clogMs}/${ITEM_TUNING.liquorice.rootMs}/${ITEM_TUNING.shiitake.durationMs}`);
+    check('(d) Blue Cheese and Disposal both work at melee reach',
+      ITEM_TUNING.blue_cheese.radius === REACH.meleeHeavy
+      && ITEM_TUNING.disposal.dropDistance === REACH.meleeHeavy,
+      `${ITEM_TUNING.blue_cheese.radius} / ${ITEM_TUNING.disposal.dropDistance}`);
+    check('(d) Leftovers returns you with exactly one corpse\'s worth of medikits',
+      ITEM_TUNING.leftovers.hp === MEDIKIT.heal * MEDIKIT.count,
+      `${ITEM_TUNING.leftovers.hp} vs ${MEDIKIT.heal} x ${MEDIKIT.count}`);
+    check('(d) the Shiitake wind-up is a real telegraph, not a formality',
+      ITEM_TUNING.shiitake.windupMs >= SUPER_MIN_COOLDOWN_MS,
+      `${ITEM_TUNING.shiitake.windupMs}`);
+    check('(d) attackers take back every point they deal, per Uri — not a fraction',
+      ITEM_TUNING.shiitake.reflect === 1.0, `${ITEM_TUNING.shiitake.reflect}`);
+  }
+
+  // ── (e) 🔴 THE LIVE-ROSTER CHECK. `blue_cheese.dps` is a LITERAL because CHARACTERS is
+  //    declared ~1,400 lines below the block, so a Math.min over it there is a TDZ
+  //    ReferenceError. This is the assertion that keeps the literal honest — the same
+  //    remedy, for the same reason, that §40(a) uses for MEDIKIT.heal.
+  {
+    const dmgs = Object.values(CHARACTERS)
+      .flatMap((c) => c.weapons.map((w) => w.damage))
+      .filter((d) => typeof d === 'number' && d > 0);
+    check('(e) NON-VACUITY: the live roster actually has damaging weapons to minimise over',
+      dmgs.length > 0, `${dmgs.length} damaging weapons`);
+    check('(e) 🔴 Blue Cheese ticks for the SMALLEST hit in the game — re-tune any weapon below it and this goes red',
+      ITEM_TUNING.blue_cheese.dps === Math.min(...dmgs),
+      `dps ${ITEM_TUNING.blue_cheese.dps} vs roster min ${Math.min(...dmgs)}`);
+  }
+
+  // ── (f) the stack cap, and the reading of Uri's sentence that was chosen ──
+  {
+    const cap = ITEM_TUNING.tenderiser.stackMul ** ITEM_TUNING.tenderiser.maxStacks;
+    check('(f) NON-VACUITY: stacking is configured with a multiplier above 1 and a finite cap',
+      ITEM_TUNING.tenderiser.stackMul > 1 && ITEM_TUNING.tenderiser.maxStacks > 0,
+      `x${ITEM_TUNING.tenderiser.stackMul} cap ${ITEM_TUNING.tenderiser.maxStacks}`);
+    check('(f) 🔴 PARKED FOR URI: "1.3 up to x6 time" read as SIX COMPOUNDING APPLICATIONS = 4.827x, not 6x1.3 = 7.8x',
+      Math.abs(cap - 4.826809) < 1e-6, `ceiling x${cap.toFixed(4)}`);
+    check('(f) a streak must be able to lapse, or a stack laid at second ten is live at the death of the match',
+      ITEM_TUNING.tenderiser.decayMs > 0 && ITEM_TUNING.tenderiser.decayMs === SUPER_MIN_COOLDOWN_MS,
+      `${ITEM_TUNING.tenderiser.decayMs}`);
+  }
+
+  // ── (g) actives have cooldowns; passives and triggered items do not ───────
+  {
+    const actives = defs.filter((d) => d.kind === 'active');
+    const rest = defs.filter((d) => d.kind !== 'active');
+    check('(g) NON-VACUITY: the registry contains both actives and non-actives',
+      actives.length > 0 && rest.length > 0, `${actives.length} active / ${rest.length} other`);
+    check('(g) every ACTIVE has a positive cooldown',
+      actives.every((d) => typeof d.cooldownMs === 'number' && d.cooldownMs > 0),
+      actives.map((d) => `${d.id}:${d.cooldownMs}`).join(' '));
+    check('(g) every passive/triggered item has NO cooldown — there is no button to press',
+      rest.every((d) => d.cooldownMs === null),
+      rest.map((d) => `${d.id}:${d.cooldownMs}`).join(' '));
+    check('(g) Leftovers fires on a condition, once, rather than on a press',
+      ITEMS.leftovers.kind === 'triggered' && ITEM_TUNING.leftovers.usesPerMatch === 1,
+      `${ITEMS.leftovers.kind} x${ITEM_TUNING.leftovers.usesPerMatch}`);
+  }
+
+  // ── (h) the brief every downstream agent reads ────────────────────────────
+  check('(h) NON-VACUITY: every item carries a name, a player-facing blurb and a visual brief',
+    defs.length > 0 && defs.every((d) => d.name.length > 0 && d.blurb.length > 0 && d.look.length > 40),
+    defs.filter((d) => !(d.name && d.blurb && d.look.length > 40)).map((d) => d.id).join(' ') || 'all complete');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

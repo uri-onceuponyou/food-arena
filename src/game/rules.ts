@@ -2810,6 +2810,342 @@ export const SUPER_MIN_COOLDOWN_MS = 2500;
 export type StatusEffect = 'slow' | 'stun' | null;
 export type Rarity = 'Normal' | 'Rare' | 'Epic' | 'Legendary' | 'Neon' | 'Cyber';
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   LOADOUT ITEMS — Uri, 2026-08-31
+   ═══════════════════════════════════════════════════════════════════════════
+
+   Uri, verbatim: *"Add game items — Like Zooba has (up to 2 items per player, he sets
+   it up on the loby, which ones he wants to use out of what he has). Figure out names
+   and looks for the items based on what they do"*, then ten items by name, then *"Add
+   rarity to items — zombie power is the rarest"* and *"Items can be obtained through
+   boxes/chests and in trophy road (as a surprise, not a fixed item)"*.
+
+   ── 🚨 WHY THIS REGISTRY IS HAND-WRITTEN BY THE ORCHESTRATOR ─────────────────
+
+   It was delegated twice and died twice. Run one: the contract agent died on a
+   connection error and four builders fanned out onto a foundation that did not exist,
+   spending 945k tokens each inventing their own — the VFX file named "Spore Bloom" and
+   "Shiitake Shield", the economy file called the trampoline a "springboard", and none
+   of the three agreed. Run two: the contract agent died twice more, 304k tokens, and
+   the (now guarded) fan-out correctly refused to start. Preserved, unmerged, on branch
+   `items-groundwork` (`3c30a3b`) — the VFX header there is genuinely good and its
+   lit-material rule is carried into the visual briefs below.
+
+   **A contract four agents depend on cannot be the thing that is flaky.** So it is
+   written here, once, and everything downstream reads it.
+
+   ── EVERY NUMBER IS DERIVED, AND THE THREE THAT ARE NOT SAY SO ───────────────
+
+   `MEDIKIT` above is the house style: derive from something already in this file, and
+   assert the DERIVATION in `sim.test.mjs` rather than restating it in a comment, so
+   re-tuning the source surfaces as a red row instead of a stale constant.
+
+   🚨 `ITEM_STATUS_MS` IS URI'S NUMBER, NOT A DERIVED ONE, AND THAT IS WHY IT IS THE
+   ANCHOR. He wrote "5 secons" for Pompa, "Lasts for 5 seconds" for the Fungus Shield
+   and "for 5 seconds" for the Rope — three items, one duration, stated three times
+   independently. Deriving it from something else would be inventing a justification for
+   a decision the owner already made. Everything else that needs a duration derives from
+   THIS.
+
+   ── THE SIM HAS NO RNG AND ITEMS DO NOT GET AN EXCEPTION ────────────────────
+
+   `grep -rn "Math.random" src/game/{sim,state,combat,ai,movement}.ts` returns nothing —
+   not unseeded, not seeded. Every item effect below is a deterministic function of the
+   match state at the instant it fires. Where an item looks like it wants a roll (Black
+   Hole's destination), the rule is stated as an ORDERING over a set the sim already
+   holds. Economy-side acquisition is a different question and DOES roll — that is
+   `economy/rng.ts`, which already exists and already has published box odds.
+
+   ── RARITY HERE MEANS SOMETHING DIFFERENT FROM RARITY ON CHARACTERS ─────────
+
+   ⚠️ Uri answered `DECISIONS §26` that character rarity is ACQUISITION rarity and
+   confers no power — `rarityCostMultiplier` is 1.0 on every tier. **Item rarity is the
+   opposite by design and that is deliberate, not an oversight.** An item you equip in
+   one of two slots IS a power choice, so its rarity gates how hard it is to get. The two
+   uses of one word are reconciled by what they gate: a character's tier gates nothing,
+   an item's tier gates the drop pool. Anyone reading §26 and this block together should
+   see the distinction stated rather than infer a contradiction.
+
+   Tier order is not a taste call either — it is `economy/tuning.ts`'s own box weights:
+   Normal 120 · Rare 260 · Epic 520 · Legendary 900 · Neon 1400 · **Cyber 2200**. So
+   Cyber is the rarest tier in the game, and Uri said Zombie Power is the rarest item.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/** Equip slots per fighter. Uri: *"up to 2 items per player"*. */
+export const ITEM_SLOTS = 2;
+
+/**
+ * The duration Uri stated three times, for three different items. NOT derived — see the
+ * block above. Every other item duration is a function of this one.
+ */
+export const ITEM_STATUS_MS = 5000;
+
+/**
+ * Item ids. Stable, lowercase, and the key everything downstream joins on — the VFX
+ * layer, the icon set, the loadout screen, the drop pools and the AI all address items
+ * by this string and never by name, because a display name is a thing that gets
+ * rewritten and an id is not.
+ */
+export type ItemId =
+  | 'tenderiser' | 'springform' | 'warm_milk' | 'pompa' | 'squid_ink'
+  | 'disposal' | 'blue_cheese' | 'shiitake' | 'liquorice' | 'leftovers';
+
+/** How an item is used. */
+export type ItemKind =
+  /** Occupies a slot and is always on. No button, no cooldown. */
+  | 'passive'
+  /** The player triggers it; it then goes on cooldown. */
+  | 'active'
+  /** Always on, but fires once per match on a condition rather than on a press. */
+  | 'triggered';
+
+export interface ItemDef {
+  id: ItemId;
+  /** Display name. Chosen from what the item DOES, per Uri's instruction. */
+  name: string;
+  kind: ItemKind;
+  rarity: Rarity;
+  /** One line, player-facing. What it does, not how it is implemented. */
+  blurb: string;
+  /**
+   * The visual brief the VFX layer builds from. Silhouette, colour family, motion.
+   *
+   * 🚨 EVERY ITEM MATERIAL MUST BE LIT. This project measured its whole effects layer at
+   * 62 `MeshBasicMaterial` plus 6 more and ZERO lit, and that was the literal cause of
+   * Uri's *"projectiles and explosions look flat like pasted stickers"*. Ten new items is
+   * the single largest opportunity this codebase has ever had to re-commit that mistake
+   * at scale — the phrasing is the groundwork branch's and it was right.
+   * And overlapping `NormalBlending` members composite DARKER, which is what made the
+   * biggest mass in frame a dark hole; `31f481c` uses `CustomBlending` with
+   * `blendSrc = OneFactor` so a pile ACCUMULATES light instead of converging flat.
+   *
+   * COLOUR: characters, VFX and telegraphs own the 30–60° hue band (`pc_pal`, `d93f4e2`),
+   * so an item effect that lands ON a fighter belongs there. NEVER fix anything by
+   * desaturating — falsified five times.
+   */
+  look: string;
+  /** Cooldown between uses, ms. `null` for passives and triggered items. */
+  cooldownMs: number | null;
+  /** Minimum fighters still alive for this item to be usable at all. */
+  minAlive: number;
+}
+
+/**
+ * ⚠️ `minAlive` EXISTS BECAUSE URI SPECIFIED IT FOR ONE ITEM, AND THE FIELD IS THE
+ * HONEST WAY TO CARRY IT. *"Black hole — throws him nearby a different enemy. If there
+ * are only two players left, it's not available."* Hard-coding that check inside Black
+ * Hole's handler would make it invisible to the loadout screen, to the AI and to any
+ * test that wants to enumerate what is usable right now. Declared, not inferred — the
+ * same argument `WeaponSlot` above makes for itself.
+ *
+ * 🚨 AND IT IS A SIX-SEAT LANDMINE, STATED HERE SO NOBODY REDISCOVERS IT: two items
+ * CANNOT EXPRESS THEMSELVES AT TWO SEATS. Black Hole is unavailable at N=2 by Uri's own
+ * rule, and Zombie Power needs a killer who then dies while the match continues, which
+ * cannot happen when there were only two fighters. The 110-cell two-seat corpus every
+ * balance number in this repo rests on is STRUCTURALLY BLIND to both. The medikit track
+ * hit exactly this and its report reads "0 of 110 moved, bit-identical" — which looks
+ * like "the change did nothing" and was really "the rig cannot see it". Prove the rig
+ * can see a change before reporting a null.
+ */
+export const ITEMS: Readonly<Record<ItemId, ItemDef>> = {
+  tenderiser: {
+    id: 'tenderiser', name: 'Tenderiser', kind: 'passive', rarity: 'Legendary',
+    blurb: 'Every hit on the same target hits harder than the last.',
+    look: 'A wooden meat mallet. On each stack, a short compression ring on the VICTIM '
+      + 'in the 30-60 band, brightening per stack so the sixth is unmistakable — the '
+      + 'stack count is the whole mechanic and it must be readable at the match camera.',
+    cooldownMs: null, minAlive: 2,
+  },
+  springform: {
+    id: 'springform', name: 'Springform', kind: 'active', rarity: 'Normal',
+    blurb: 'Bounce a long way — toward a fight or out of one.',
+    look: 'A springform cake tin that snaps open underfoot. Squash-and-stretch on the '
+      + 'launch, a dust ring at the take-off point, and a landing puff. The arc is the '
+      + 'read; the tin itself is barely on screen.',
+    cooldownMs: SUPER_MIN_COOLDOWN_MS, minAlive: 2,
+  },
+  warm_milk: {
+    id: 'warm_milk', name: 'Warm Milk', kind: 'active', rarity: 'Epic',
+    blurb: 'Puts one enemy to sleep. The further away they are, the longer they sleep.',
+    look: 'A thrown mug trailing steam. On the sleeper: slow drifting Zs and heavy '
+      + 'eyelids, plus a ground pool of milk so an ATTACKER can see the state from '
+      + 'across the arena — a crowd-control state nobody else can read is a coin flip.',
+    cooldownMs: SUPER_MIN_COOLDOWN_MS * 2, minAlive: 2,
+  },
+  pompa: {
+    id: 'pompa', name: 'Pompa', kind: 'active', rarity: 'Rare',
+    blurb: 'Clogs an enemy weapon. They cannot fire for five seconds.',
+    look: 'Uri’s own word, kept: a rubber plunger. It flies flat, lands cup-first '
+      + 'and STICKS to the victim, which is the whole joke and also the state readout — '
+      + 'while the plunger is visibly attached, that fighter cannot shoot.',
+    cooldownMs: SUPER_MIN_COOLDOWN_MS * 2, minAlive: 2,
+  },
+  squid_ink: {
+    id: 'squid_ink', name: 'Squid Ink', kind: 'active', rarity: 'Rare',
+    blurb: 'Blots the target’s screen. They can barely see.',
+    look: 'THE ONLY ITEM WHOSE MAIN EXPRESSION IS NOT IN THE WORLD. A dark cloud in '
+      + 'flight, then SCREEN-SPACE blots on the victim’s own view only. Must impair '
+      + 'without nauseating, must clear cleanly on expiry, must leave your own health '
+      + 'and the clock readable, and must do something defensible when you are dead and '
+      + 'spectating someone else.',
+    cooldownMs: SUPER_MIN_COOLDOWN_MS * 2, minAlive: 2,
+  },
+  disposal: {
+    id: 'disposal', name: 'Disposal', kind: 'active', rarity: 'Legendary',
+    blurb: 'Drops an enemy next to a different enemy. Needs a crowd.',
+    look: 'A sink drain opening under the target, a hard swirl, and a spit-out at the '
+      + 'destination. BOTH ends need a telegraph: the victim must understand they were '
+      + 'moved, and the fighter they land beside must notice they have company.',
+    cooldownMs: SUPER_MIN_COOLDOWN_MS * 3,
+    /** Uri: *"If there are only two players left, it's not available."* */
+    minAlive: 3,
+  },
+  blue_cheese: {
+    id: 'blue_cheese', name: 'Blue Cheese', kind: 'passive', rarity: 'Rare',
+    blurb: 'A permanent stink cloud that hurts anyone who stands too close.',
+    look: 'A low, slowly-churning blue-green haze that follows the wearer all match. It '
+      + 'is ON SCREEN CONSTANTLY, so it is the one item that must NOT be loud — a '
+      + 'permanent effect at accent saturation would eat the frame. Read it by motion '
+      + 'and by its boundary, not by chroma.',
+    cooldownMs: null, minAlive: 2,
+  },
+  shiitake: {
+    id: 'shiitake', name: 'Shiitake Shield', kind: 'active', rarity: 'Neon',
+    blurb: 'After a long wind-up, attackers take back every point of damage they deal.',
+    look: 'Name inherited from the groundwork branch. Overlapping mushroom caps that '
+      + 'unfurl around the wearer. The WIND-UP MUST BE VISIBLE TO OPPONENTS — that is '
+      + 'what makes it counterable rather than a coin flip, and it is the reason it goes '
+      + 'through the existing cast/telegraph system instead of a bespoke timer.',
+    cooldownMs: SUPER_MIN_COOLDOWN_MS * 4, minAlive: 2,
+  },
+  liquorice: {
+    id: 'liquorice', name: 'Liquorice Rope', kind: 'active', rarity: 'Epic',
+    blurb: 'Ties an enemy in place for five seconds.',
+    look: 'A black-red coil that whips out, wraps, and stays visibly wound while the '
+      + 'root holds. It must read as ROOTED rather than STUNNED — the victim can still '
+      + 'act, they just cannot move, and those are different states.',
+    cooldownMs: SUPER_MIN_COOLDOWN_MS * 2, minAlive: 2,
+  },
+  leftovers: {
+    id: 'leftovers', name: 'Leftovers', kind: 'triggered', rarity: 'Cyber',
+    blurb: 'If whoever killed you dies while the match goes on, you come back. Once.',
+    look: 'Nothing until it fires — then a fridge-light glow at the corpse and the '
+      + 'fighter standing back up. It is the rarest item in the game and the only one '
+      + 'that fires without a press, so the moment has to be unmistakable to everyone.',
+    cooldownMs: null, minAlive: 2,
+  },
+} as const;
+
+/* ── THE TUNING, ALL OF IT DERIVED ────────────────────────────────────────── */
+
+export const ITEM_TUNING = {
+  tenderiser: {
+    /** Uri: *"increases the damage by 1.3"*. */
+    stackMul: 1.3,
+    /**
+     * Uri: *"up to x6 time (6x1.3)"*. Read as SIX APPLICATIONS, compounding, so the cap
+     * is 1.3^6 = 4.827x. ⚠️ PARKED FOR URI: the same sentence also reads as 6 x 1.3 =
+     * 7.8x flat. Both are enormous; this is the smaller of the two and the one that
+     * makes "x6 time" mean a stack count.
+     */
+    maxStacks: 6,
+    /**
+     * A streak dies if you do not land on that target again within this window. Derived
+     * from the Super floor: one full Super cooldown of silence ends it. Uri did not
+     * specify a break rule and one is structurally required, or a stack laid in the
+     * first ten seconds is still live at the death of the match.
+     */
+    decayMs: SUPER_MIN_COOLDOWN_MS,
+  },
+  springform: {
+    /** Half the disc the camera guarantees — far enough to change a fight, short of a teleport. */
+    distance: GUARANTEED_VISIBLE_RADIUS / 2,
+    /** One fast projectile flight. The jump should feel like a shot, not a walk. */
+    travelMs: FLIGHT_MS.fast,
+  },
+  warm_milk: {
+    /**
+     * Uri: *"up to half a screen away"*. `GUARANTEED_VISIBLE_RADIUS` is defined as the
+     * disc EVERY supported aspect ratio shows around you, so its edge is the furthest
+     * point he can be certain is on his screen. Derived, never typed.
+     */
+    range: GUARANTEED_VISIBLE_RADIUS,
+    /** Uri: *"the farther he is, the longer it puts him to sleep."* At the edge, the full five. */
+    maxMs: ITEM_STATUS_MS,
+    /**
+     * The floor at point-blank, so a mistimed cast is weak rather than wasted. One fifth
+     * of the ceiling: the shortest slice that is still longer than an evade window.
+     */
+    minMs: ITEM_STATUS_MS / 5,
+  },
+  /** Uri: *"clogs their weapons for 5 secons"*. */
+  pompa: { clogMs: ITEM_STATUS_MS },
+  /** Duration matched to the other two five-second states rather than invented separately. */
+  squid_ink: { blotMs: ITEM_STATUS_MS },
+  disposal: {
+    /**
+     * Where the victim lands relative to the enemy they are thrown at. One heavy melee
+     * swing: close enough that the two are immediately in a fight, far enough that
+     * neither is inside the other.
+     */
+    dropDistance: REACH.meleeHeavy,
+  },
+  blue_cheese: {
+    /** You have to be in melee range to be in the cloud. */
+    radius: REACH.meleeHeavy,
+    /**
+     * Damage per second. The weakest single hit in the game, once a second — Uri asked
+     * for *"small damage per second"* and this is the smallest unit the game already
+     * uses, so it cannot be accused of being a taste pick.
+     */
+    /**
+     * ⚠️ A LITERAL WITH A LIVE ASSERTION, not a reference, and `MEDIKIT.heal` above uses
+     * the identical remedy for the identical reason: `CHARACTERS` is declared roughly
+     * 1,400 lines BELOW this block, so `Math.min(...every weapon damage)` here is a
+     * temporal-dead-zone `ReferenceError` at import time rather than a clever
+     * derivation. `sim.test.mjs` asserts this equals the smallest non-zero `damage` on
+     * the live roster, so re-tuning any weapon down past it turns a stale constant into
+     * a red row instead of a silent lie.
+     *
+     * 🚨 AND IT ALREADY DID, ON ITS FIRST RUN. I wrote `2` from a measurement taken
+     * before the 4-slot weapon pass added eleven weapons; the live minimum is `1`. The
+     * assertion was red inside a minute of being written. That is the entire argument
+     * for asserting the derivation instead of trusting the number — a literal is stale
+     * from the moment it is typed, and this one was stale before it was committed.
+     */
+    dps: 1,
+  },
+  shiitake: {
+    /** Uri: *"Lasts for 5 seconds."* */
+    durationMs: ITEM_STATUS_MS,
+    /**
+     * Uri: *"enemies attacking him get damage on every damage they do"* — every point
+     * dealt is a point taken. 1.0, not a fraction; a partial reflect is a different
+     * design and he did not ask for one.
+     */
+    reflect: 1.0,
+    /** Uri: *"long cooldown/windup"*. One Super floor of telegraph, through the cast system. */
+    windupMs: SUPER_MIN_COOLDOWN_MS,
+  },
+  /** Uri: *"tie an opponent for 5 seconds"*. */
+  liquorice: { rootMs: ITEM_STATUS_MS },
+  leftovers: {
+    /** Uri: *"Works once per match."* */
+    usesPerMatch: 1,
+    /**
+     * HP on resurrection: one corpse's worth of medikits. You come back with exactly
+     * what the body you died next to would have dropped.
+     */
+    hp: MEDIKIT.heal * MEDIKIT.count,
+    /**
+     * Uri: *"(not the last in the game)"*. The killer's death must leave at least this
+     * many alive, so a resurrection can never happen after the match is already decided.
+     */
+    minAliveAfterKillerDies: 2,
+  },
+} as const;
+
+
 export interface ComboPart {
   color: string;
   damage: number;
