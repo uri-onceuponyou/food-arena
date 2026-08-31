@@ -22,14 +22,19 @@
  * which is the oldest exploit in the genre and is free to prevent here.
  */
 
-import { CHARACTER_IDS, CHARACTERS, LEVEL_MAX, LEVEL_MIN, clampLevel, type CharacterId } from '../rules.ts';
+import {
+  CHARACTER_IDS, CHARACTERS, LEVEL_MAX, LEVEL_MIN, clampLevel,
+  type CharacterId, type ItemId,
+} from '../rules.ts';
 import {
   CONTAINERS,
   CONTAINER_KINDS,
+  ITEM_IDS,
   MATCH_PAYOUT,
   ROSTER_GATED,
   TROPHY_ROAD,
   STARTER_CHARACTER,
+  STARTER_ITEM,
   STARTING_BALANCE,
   type ContainerKind,
 } from './tuning.ts';
@@ -38,7 +43,8 @@ import { MAX_FIGHTERS, MIN_FIGHTERS } from '../state.ts';
 import { createRng, randomSeed } from './rng.ts';
 import { rollContainer, type ContainerResult } from './containers.ts';
 import {
-  claimable, placementBanksChestWin, placementCoins, placementTrophyDelta, resolveReward,
+  claimable, placementBanksChestWin, placementCoins, placementTrophyDelta, resolveMilestone,
+  type RoadClaimant,
 } from './trophyRoad.ts';
 import { levelUpCost, type LevelPrice } from './levels.ts';
 import { emptyReward, mergeReward, type Reward } from './reward.ts';
@@ -83,6 +89,23 @@ export interface EconomyState {
   /** Trophy THRESHOLDS already claimed — see the note in `trophyRoad.ts`. */
   claimed: number[];
   unlocked: CharacterId[];
+  /**
+   * Loadout items owned, in the order they were acquired. `STARTER_ITEM` is always the
+   * first entry — see `createEconomy` and the migration note in `deserialize`.
+   *
+   * ⚠️ **THIS IS A SET, NOT AN INVENTORY.** An item is binary: you own it or you do not.
+   * There are no item levels, no shards and no counts — `tuning.ts:ITEM_DUPLICATE_COINS`
+   * states that decision and its reasoning at length, and this array's shape is the
+   * decision made structural. A second copy of an item cannot be stored here, so it
+   * cannot later be quietly given a meaning.
+   *
+   * ⚠️ **AND IT IS NOT THE EQUIPPED PAIR.** `ITEM_SLOTS` is two; this is everything the
+   * player has. Which two are equipped belongs to the loadout screen (`ui/screens/
+   * lobby.ts`, a different owner) and is not persisted here yet. 🔴 REPORTED: the equip
+   * choice must survive leaving and re-entering the lobby, per `docs/ITEMS.md`, and this
+   * blob is where it will have to live.
+   */
+  items: ItemId[];
   /** Wins banked toward the next free chest. */
   winsTowardChest: number;
   lastMatch: LastMatch | null;
@@ -117,6 +140,11 @@ export function createEconomy(seed = randomSeed()): EconomyState {
     // A brand-new player owns exactly the starter. While `ROSTER_GATED` is false
     // this list is informational rather than restrictive — see `ownedSet`.
     unlocked: [STARTER_CHARACTER],
+    // ⚠️ THE ITEM LIST HAS NO EQUIVALENT OF `ROSTER_GATED` AND IS THEREFORE REAL.
+    // One of ten, from the first match on. That asymmetry is the whole reason a box is
+    // worth opening today: every character row in every container resolves to coins,
+    // and the item rows do not.
+    items: [STARTER_ITEM],
     winsTowardChest: 0,
     lastMatch: null,
     levels: {},
@@ -142,6 +170,28 @@ export function isUnlocked(state: EconomyState, id: CharacterId): boolean {
   return ROSTER_GATED ? state.unlocked.includes(id) : true;
 }
 
+/**
+ * The items this player owns — the set every item reward path tests against.
+ *
+ * ⚠️ **Deliberately NOT the shape of `ownedSet` above.** That one ignores `unlocked`
+ * entirely while `ROSTER_GATED` is false, so every character reward converts to coins.
+ * There is no such flag for items and there must not be one: an item you have not
+ * earned is not selectable in the loadout, so "everyone owns everything" would make the
+ * feature both unearnable and free. This reads the real list, always.
+ */
+export function ownedItemSet(state: EconomyState): ReadonlySet<ItemId> {
+  return new Set(state.items);
+}
+
+export function ownsItem(state: EconomyState, id: ItemId): boolean {
+  return state.items.includes(id);
+}
+
+/** Everything the road needs to know about this player, in one argument. */
+export function roadClaimant(state: EconomyState): RoadClaimant {
+  return { characters: ownedSet(state), items: ownedItemSet(state), seed: state.seed };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Applying a reward
 // ─────────────────────────────────────────────────────────────────────────────
@@ -155,6 +205,13 @@ export function grantReward(state: EconomyState, reward: Reward): void {
   }
   for (const id of reward.characters) {
     if (!state.unlocked.includes(id)) state.unlocked.push(id);
+  }
+  // Idempotent by the same rule `unlocked` uses. A `Reward` should never carry an item
+  // the player already had — both producers convert that to coins first — but this is
+  // the single mutation point for the blob and it does not get to assume its callers
+  // are correct.
+  for (const id of reward.items) {
+    if (!state.items.includes(id)) state.items.push(id);
   }
 }
 
@@ -258,7 +315,10 @@ export function claimMilestone(state: EconomyState, threshold: number): Reward |
     .find((m) => m.trophies === threshold);
   if (!milestone) return null;
 
-  const reward = resolveReward(milestone.reward, ownedSet(state));
+  // `resolveMilestone`, never `resolveReward`: the surprise's RNG key is the node's own
+  // threshold, and reading it off the milestone is the one form that cannot pass the
+  // wrong one. See the header there.
+  const reward = resolveMilestone(milestone, roadClaimant(state));
   state.claimed.push(threshold);
   state.claimed.sort((a, b) => a - b);
   grantReward(state, reward);
@@ -291,7 +351,7 @@ export function openContainer(state: EconomyState, kind: ContainerKind): Contain
   state.containers[kind]--;
   const rng = createRng(state.seed + state.rolls);
   state.rolls++;
-  const result = rollContainer(kind, rng, ownedSet(state));
+  const result = rollContainer(kind, rng, ownedSet(state), ownedItemSet(state));
   grantReward(state, result.reward);
   return result;
 }
@@ -440,6 +500,7 @@ export function deserialize(raw: unknown): EconomyState {
     containers: emptyContainers(),
     claimed: [],
     unlocked: [STARTER_CHARACTER],
+    items: [STARTER_ITEM],
     winsTowardChest: num(o.winsTowardChest, 0),
     lastMatch: null,
     levels: {},
@@ -471,6 +532,34 @@ export function deserialize(raw: unknown): EconomyState {
         && (CHARACTER_IDS as readonly string[]).includes(id)
         && !state.unlocked.includes(id as CharacterId)) {
         state.unlocked.push(id as CharacterId);
+      }
+    }
+  }
+
+  // ── 🚨 WHAT HAPPENS TO A SAVE THAT PREDATES ITEMS, STATED RATHER THAN DEFAULTED ──
+  //
+  // Nothing is lost, because there was nothing to lose: before this commit **no code
+  // path in the economy could award an item**, so no blob in the wild carries one. A
+  // pre-items save has no `items` key, `Array.isArray(undefined)` is false, and the
+  // player reads back holding exactly `[STARTER_ITEM]` — identical to a new player, and
+  // identical to what `createEconomy` would have given them had items existed on the day
+  // they first played. There is no migration to write and no version number to bump.
+  //
+  // ⚠️ **This is the ONE field where that claim is checkable rather than assumed**, and
+  // it is worth being explicit about why: `unlocked` and `levels` both had to be careful
+  // about older builds because older builds WROTE them. The item list has no such past.
+  // `economy.test.mjs` §14 asserts the pre-items blob round-trip directly.
+  //
+  // Same rules as `unlocked` from here on: unknown ids dropped (an item deleted from
+  // `rules.ts` must not linger as an unequippable ghost), duplicates collapsed, and the
+  // starter always present — a player cannot end up with an empty loadout screen by
+  // hand-editing their save.
+  if (Array.isArray(o.items)) {
+    for (const id of o.items as unknown[]) {
+      if (typeof id === 'string'
+        && (ITEM_IDS as readonly string[]).includes(id)
+        && !state.items.includes(id as ItemId)) {
+        state.items.push(id as ItemId);
       }
     }
   }
@@ -537,6 +626,7 @@ export function serialize(state: EconomyState): Record<string, unknown> {
     containers: { ...state.containers },
     claimed: [...state.claimed],
     unlocked: [...state.unlocked],
+    items: [...state.items],
     winsTowardChest: state.winsTowardChest,
     lastMatch: state.lastMatch ? { ...state.lastMatch } : null,
     levels: { ...state.levels },

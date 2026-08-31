@@ -86,6 +86,56 @@ export function weightedIndex(rng: Rng, weights: readonly number[], total: numbe
 }
 
 /**
+ * Pick an index from a weight list where the weights are ARBITRARY positive numbers
+ * rather than percentages.
+ *
+ * `weightedIndex` above takes a pre-computed total because a container's weights are
+ * asserted to sum to 100 and the disclosure code needs that same total. A trophy-road
+ * surprise draws from a band whose membership depends on what the player already owns,
+ * so there is no fixed total to hand in and computing it at the call site would be the
+ * one number that could disagree with the array.
+ *
+ * Returns -1 for an empty list or a non-positive total, which the caller MUST handle —
+ * both are reachable (an exhausted band) and neither may silently become index 0.
+ */
+export function weightedPick(rng: Rng, weights: readonly number[]): number {
+  if (weights.length === 0) return -1;
+  let total = 0;
+  for (const w of weights) total += w > 0 ? w : 0;
+  if (total <= 0) return -1;
+  return weightedIndex(rng, weights, total);
+}
+
+/**
+ * Offset that separates the trophy road's surprise-item stream from the container stream.
+ *
+ * ── WHY THE ROAD DOES NOT USE `rolls` ───────────────────────────────────────
+ * Every container roll consumes `state.rolls`, so its outcome is fixed the moment the
+ * container is held and cannot be re-rolled by reloading. A road node is different: it
+ * sits there, claimable, next to six other claimable nodes, and **the player chooses the
+ * order**. On the `seed + rolls` stream that ordering is a re-roll — claim 3,475 first
+ * and 1,770 hands you a different item. So a road surprise is a function of the player's
+ * seed and the node's THRESHOLD, and of nothing else that a player can move.
+ *
+ * ── AND THE TWO STREAMS MUST NOT COLLIDE ────────────────────────────────────
+ * `createRng(seed + rolls)` and `createRng(seed + ROAD_SURPRISE_STREAM + threshold)`
+ * produce the same sequence exactly when `rolls === ROAD_SURPRISE_STREAM + threshold`.
+ * That condition does not mention the seed, so it is decidable rather than sampled:
+ * with thresholds bounded by the road end (10,000) and this offset at one million, a
+ * collision needs a player to have opened **1,000,030 containers**. `economy.test.mjs`
+ * §14 asserts the arithmetic over every real threshold instead of trusting this comment.
+ *
+ * The `>>> 0` wraparound inside `mixSeed` does not widen that: it is applied to both
+ * sides equally, so it maps colliding inputs to colliding inputs and nothing else.
+ */
+export const ROAD_SURPRISE_STREAM = 1_000_000;
+
+/** The seed a given player's surprise at a given road threshold is drawn from. */
+export function roadSurpriseSeed(playerSeed: number, threshold: number): number {
+  return playerSeed + ROAD_SURPRISE_STREAM + threshold;
+}
+
+/**
  * A fresh, non-reproducible seed for a brand-new player.
  *
  * The only place in this module that is allowed to be non-deterministic, and it runs

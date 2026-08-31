@@ -532,14 +532,110 @@ const PUSH_COINCIDENT_EPS = 1e-6;
  * force can be aimed along it. Choosing a direction there would be non-determinism smuggled
  * into a sim whose determinism underwrites every balance number in the project.
  */
-export function displaceFighter(fighter: Fighter, dirX: number, dirY: number, distance: number): void {
+/**
+ * ── 🚨 `opts` — AND WHY THE LOADOUT ITEMS COULD NOT USE THIS PRIMITIVE AS IT STOOD ──
+ *
+ * `docs/ITEMS.md` and the items brief both say *"the displacement primitive already exists
+ * — use it, do not rebuild"*. **It exists and it refused the job**, which is a result and is
+ * recorded here rather than worked around silently:
+ *
+ *   * `MAX_PUSH_DISTANCE` is `PLAYER_SIZE` = **42 wu**, and `ITEM_TUNING.springform.distance`
+ *     is `GUARANTEED_VISIBLE_RADIUS / 2` = **99.61 wu**. Passed through unchanged, Uri's
+ *     trampoline would have delivered **42% of its authored distance** and every test of it
+ *     would still have gone green, because a clamped push is a legal push.
+ *   * The spend rate is `PLAYER_SPEED` flat, so 99.61 wu takes **1,107 ms**.
+ *     `ITEM_TUNING.springform.travelMs` is `FLIGHT_MS.fast` = **350 ms** — *"the jump should
+ *     feel like a shot, not a walk"*. A hard-coded rate makes the authored number decoration.
+ *
+ * So the primitive takes the two numbers it was silently supplying itself. **Both default to
+ * exactly what it did before**, `opts` is absent at all four weapon call sites, and the field
+ * it adds (`PushState.speed`) holds `0` for the entire life of any match with no items in it
+ * — which is what keeps the sim bit-identical rather than merely close. `tools/tmp/is_bitid.mjs`
+ * measures that against a worktree of the parent commit instead of asserting it.
+ *
+ * ⚠️ **THE CAP IS `Math.max(cap, p.remaining)`, NOT `cap`, AND THAT CLAUSE IS LOAD-BEARING
+ * TWICE.** At the default it is a no-op — `p.remaining` can never exceed 42 in a world where
+ * every writer capped at 42, so `max(42, remaining)` is 42 and the arithmetic is unchanged to
+ * the bit. With items it is what stops a 3-damage knockback landing mid-jump from TRUNCATING
+ * a 99.61 wu trampoline to 42: the newest displacement still wins the DIRECTION (the rule
+ * above), and it still cannot ADD past its own cap, but it may not confiscate ground already
+ * owed. Without it, being clipped by any pellet would silently delete more than half of
+ * Uri's item.
+ *
+ * ⚠️ **`speed` IS THE RATE OF THE NEWEST DISPLACEMENT, for the same reason the direction is:**
+ * blending two rates has no meaning, and "the last thing that hit you decides how you move"
+ * is one rule a player can read off the screen.
+ *
+ * 🔴 **NOTHING IN THE WEAPON PATH MAY PASS `opts`.** A raised cap on a `knockback` or a `lure`
+ * would be a third movement lock by the back door — `MAX_PUSH_DISTANCE`'s header prices the
+ * whole family at 5.04 wu of stolen control authority *because* it is bounded at one body
+ * length. A `selfLaunch` is different in kind (its owner asked for it) and is exactly what
+ * Springform is. §42 asserts that `combat.ts`'s weapon sites call the 4-argument form.
+ */
+export function displaceFighter(
+  fighter: Fighter,
+  dirX: number,
+  dirY: number,
+  distance: number,
+  opts?: { cap?: number; speed?: number },
+): void {
   if (!(distance > 0)) return;
   const mag = Math.hypot(dirX, dirY);
   if (mag < PUSH_COINCIDENT_EPS) return;
   const p = fighter.push;
+  const cap = Math.max(opts?.cap ?? MAX_PUSH_DISTANCE, p.remaining);
   p.x = dirX / mag;
   p.y = dirY / mag;
-  p.remaining = Math.min(MAX_PUSH_DISTANCE, p.remaining + distance);
+  p.remaining = Math.min(cap, p.remaining + distance);
+  // 0 means "no rate of its own, use PLAYER_SPEED" — see `stepPush`. Written on EVERY
+  // displacement, so a weapon knockback landing on a fighter mid-trampoline returns the
+  // spend to the ordinary rate along with the ordinary direction, and `0` is the identity a
+  // spent push snaps back to.
+  p.speed = opts?.speed ?? 0;
+}
+
+/**
+ * PUT `fighter` DOWN AT (`x`, `y`). The one statement of "the sim moved somebody somewhere
+ * that is not a step".
+ *
+ * 🚨 **A POSITIONAL WRITE AND *NOT* THE DISPLACEMENT PRIMITIVE, AND THE BRIEF SAID
+ * OTHERWISE — SO HERE IS THE MEASUREMENT.** `ITEMS.disposal` is Uri's *"Black hole — throws
+ * him nearby a different enemy"*, across a **2800x2000** arena. `stepPush` spends at most
+ * `PLAYER_SPEED` per ms, so delivering even a quarter of that map as an impulse is **7.8
+ * seconds of sliding**, through every wall test on the way, with the victim's own input
+ * fighting it the whole time. It is not a shove at any cap; it is a relocation, and the
+ * honest implementation of a relocation is to decide the destination and write it.
+ *
+ * The precedent is already in this sim and it is exact: `state.ts:Medikit` — *"`x`/`y` IS
+ * WHERE IT LANDS, NOT WHERE IT IS RIGHT NOW … the arc is COSMETIC"*. The sim decides the
+ * endpoint at the instant of the effect; the drain, the swirl and the spit-out are the VFX
+ * track's, drawn between the two ends `item-hit` publishes, and no curve they draw can
+ * change where the victim ends up.
+ *
+ * Three things happen here and each one is a rule the rest of the file already states:
+ *
+ *   1. **CLAMPED INTO THE ARENA** by the fighter's own half-extent, exactly as `tryMove`
+ *      clamps every step — a destination computed from a bearing can otherwise sit outside
+ *      the world.
+ *   2. **DEPENETRATED.** `escapeCover` is the invariant `tryMove` assumes and this is the
+ *      only other writer of `x`/`y` in the sim, so it must hold it too. Without this a
+ *      victim dropped inside a prop is *frozen permanently and silently* — that function's
+ *      own header calls it "the worst shape a bug can have", and this is precisely the
+ *      "becomes reachable the moment anyone adds … a pull" it predicted.
+ *   3. **ANY PENDING SHOVE IS DISCARDED**, direction and rate with it. A knockback owed
+ *      from where the victim used to be standing is a vector about a place they are no
+ *      longer in, and banking it across the relocation would fire it off at the far end.
+ */
+export function placeFighterAt(fighter: Fighter, x: number, y: number, arena: ArenaDefinition): void {
+  const half = fighter.size / 2;
+  fighter.x = Math.min(arena.width - half, Math.max(half, x));
+  fighter.y = Math.min(arena.height - half, Math.max(half, y));
+  escapeCover(fighter, arena);
+  const p = fighter.push;
+  p.remaining = 0;
+  p.x = 0;
+  p.y = 0;
+  p.speed = 0;
 }
 
 /**
@@ -576,13 +672,18 @@ export function displaceFighter(fighter: Fighter, dirX: number, dirY: number, di
 export function stepPush(fighter: Fighter, dt: number, arena: ArenaDefinition, elapsed: number): boolean {
   const p = fighter.push;
   if (p.remaining <= 0) return false;
-  const full = PLAYER_SPEED * dt;
+  // ⚠️ `p.speed > 0 ? p.speed : PLAYER_SPEED` — the sentinel is 0 and NOT `PLAYER_SPEED`
+  // written into the state, so a fighter that has never carried a rate of its own holds the
+  // same bits it held before `speed` existed and a spent push snaps back to them. See
+  // `displaceFighter`'s `opts` block for why a rate is authorable at all.
+  const rate = p.speed > 0 ? p.speed : PLAYER_SPEED;
+  const full = rate * dt;
   const step = p.remaining < full ? p.remaining : full;
   p.remaining -= step;
   const moved = movementLocked(fighter, elapsed)
     ? false
     : tryMove(fighter, p.x * step, p.y * step, arena);
-  if (p.remaining <= 0) { p.remaining = 0; p.x = 0; p.y = 0; }
+  if (p.remaining <= 0) { p.remaining = 0; p.x = 0; p.y = 0; p.speed = 0; }
   return moved;
 }
 

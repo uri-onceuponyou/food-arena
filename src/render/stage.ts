@@ -16,6 +16,12 @@ import { CameraRig, SUPPORTED_ASPECT, type CameraRigOptions } from './camera';
 import { createLighting, MATCH_SHADOW_RADIUS_M, type LightingRig } from './lighting';
 import { noteGpu, onQualityChange, tierProfile, type TierProfile } from './quality';
 import { CHARACTER_RADIUS } from '../units';
+// Squid Ink's channel. `game/vfx.ts` writes it off the sim's `blotUntil`; this file
+// reads it once per frame. See `vfx/ink.ts`'s header for why the seam is a module and
+// not a constructor argument — it is an OWNERSHIP answer, not a design preference.
+// Nothing in `vfx/ink.ts` imports THREE or anything under `render/`, so this introduces
+// no cycle; `game/vfx.ts` already imports `render/toon.ts` in the other direction.
+import { INK_DISC_COUNT, inkLayout, readInk } from '../vfx/ink';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE GRADE — a saturation curve that cannot clip a channel
@@ -657,6 +663,175 @@ export class ContactAOEffect extends Effect {
   set range(v: number) { this.uniforms.get('caoRange')!.value = v; }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SQUID INK — the one item whose main expression is not in the world
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Uri, verbatim: *"Ink spray that blots their screen imparing their ability to see
+// (actual disturbance like ink blots across the screen for the users that got hit"*.
+//
+// ── WHY A POST PASS AND NOT A DOM OVERLAY, WHICH WAS A REAL CHOICE ───────────
+//
+// `src/ui/hud.ts` line 2 describes itself as *"DOM/CSS chrome laid over the WebGL
+// canvas"*, so the two candidates were a fullscreen DOM element in the HUD and a pass
+// in this chain. Four reasons, and the first is the one that decided it:
+//
+//  1. **"LEAVE YOUR OWN HEALTH AND THE CLOCK READABLE" IS THEN STRUCTURAL RATHER THAN A
+//     Z-INDEX GUESS.** The HUD is a DOM subtree painted OVER the canvas by the browser's
+//     compositor. A shader in this chain writes the canvas and cannot reach it — the
+//     health plate, the clock, the zone bar and the weapon tray are byte-identical with
+//     the ink at full strength, and that is a property of the architecture, not a value
+//     anyone tuned. A DOM overlay would have to sit at a z-index between the fog wash
+//     and the readouts, and `hud.ts`'s own comment records that getting that order wrong
+//     once *"discoloured the health bars, the weapon icons and the radar's own safe
+//     disc — i.e. the readouts you most need while it is firing."*
+//  2. **"ACTUAL DISTURBANCE" NEEDS THE FRAME, NOT A LAYER OVER IT.** Uri's word is
+//     *disturbance*. A DOM overlay can only composite alpha on top; a pass can DISPLACE
+//     the sampled uv, so the picture smears into the blots instead of being hidden
+//     behind them. `mainUv` below is that, and it costs no extra pass.
+//  3. **OWNERSHIP.** `hud.ts` belongs to another track. This file does not.
+//  4. **IT IS FREE WHEN OFF.** `inkAmount === 0` returns `inputColor` unchanged and
+//     leaves `uv` untouched, so the shipped frame with nobody inked is bit-identical to
+//     the frame before this effect existed — measured, see `tools/tmp/ev_ink.mjs`.
+//
+// ── WHY IT IS NOT NAUSEATING, WHICH IS A REQUIREMENT AND NOT A HOPE ──────────
+//
+// The blot layout is computed ONCE per cast in `vfx/ink.ts:inkLayout` and is constant
+// for the whole five seconds. Nothing here reads `time`. The only two things that move
+// are the fade envelope and a slow monotone downward sag (`inkAge`) that reads as ink
+// running down glass. There is no oscillation, no jitter and no swim anywhere in this
+// shader, because a swimming full-screen warp is the specific thing that makes a post
+// effect unplayable, and this one is applied to a player who did not choose it.
+//
+// ── AND THE WARP IS INWARD, WHICH IS ALSO NOT A TASTE CALL ───────────────────
+//
+// The displacement pulls each pixel TOWARD the nearest blot core, so the image is
+// stretched into the ink and compressed at its rim. Pushing outward would magnify what
+// is left, i.e. it would make the unblotted part of the screen show LESS arena — an
+// impairment the player cannot reason about. Pulling inward keeps the visible field
+// honest and puts the distortion where the ink already is.
+const SQUID_INK_SHADER = /* glsl */`
+uniform float inkAmount;
+uniform float inkAge;
+uniform vec3 inkDiscs[INK_DISCS];
+
+// Coverage of the blot field at an aspect-corrected point: 1 in a core, 0 outside.
+// The union is a max over discs rather than a sum, so overlapping members of one
+// cluster read as ONE mass with a single boundary instead of stacking their alphas into
+// a darker middle — the NormalBlending pile-up this project measured on ground marks.
+float inkCover(vec2 p) {
+  float cov = 0.0;
+  for (int i = 0; i < INK_DISCS; i++) {
+    vec3 d = inkDiscs[i];
+    if (d.z <= 0.0) continue;
+    // The sag: every disc drifts down by up to 3.5% of frame height across its life.
+    // Monotone in inkAge, so it never reverses and never oscillates.
+    float dist = length(p - vec2(d.x, d.y + inkAge * 0.035));
+    // Core at 0.62r, feather out to r. A hard edge reads as a decal; too soft a one
+    // reads as a bruise on the lens and stops looking like ink.
+    cov = max(cov, 1.0 - smoothstep(d.z * 0.62, d.z, dist));
+  }
+  return cov;
+}
+
+void mainUv(inout vec2 uv) {
+  if (inkAmount <= 0.0) return;
+  vec2 p = vec2(uv.x * aspect, uv.y);
+  float cov = inkCover(p);
+  // The gradient of the coverage field points out of the blot, so -grad points in.
+  // Sampled by finite difference rather than solved: the field is a max over discs and
+  // has no closed-form gradient at a seam between two of them.
+  float e = 0.004;
+  vec2 g = vec2(
+    inkCover(p + vec2(e, 0.0)) - inkCover(p - vec2(e, 0.0)),
+    inkCover(p + vec2(0.0, e)) - inkCover(p - vec2(0.0, e))
+  );
+  // Strongest at the RIM (cov around 0.5) and zero deep inside a core, where the pixel
+  // is about to be painted over anyway and displacing it would only cost bandwidth.
+  float rim = 4.0 * cov * (1.0 - cov);
+  uv += g * rim * inkAmount * 0.55;
+}
+
+void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+  if (inkAmount <= 0.0) { outputColor = inputColor; return; }
+  vec2 p = vec2(uv.x * aspect, uv.y);
+  float cov = inkCover(p);
+
+  // A deep blue-violet rather than black. Pure black reads as a hole punched in the
+  // frame — the same finding 'toon.ts:OUTLINE_INK' records for character outlines — and
+  // an ink that is a colour still says "something was thrown at me".
+  vec3 ink = vec3(0.030, 0.021, 0.055);
+
+  // The WET RIM. A thin brighter band exactly at the coverage boundary, so the blot has
+  // an edge that catches light and reads as liquid sitting ON the screen rather than as
+  // a missing region. Without it the blots read as failed geometry, which is this
+  // project's most repeated visual complaint in a different costume.
+  float rim = smoothstep(0.10, 0.34, cov) * (1.0 - smoothstep(0.34, 0.62, cov));
+  vec3 wet = vec3(0.42, 0.46, 0.72);
+
+  vec3 c = mix(inputColor.rgb, ink, cov * inkAmount);
+  c += wet * rim * inkAmount * 0.20;
+
+  // A small global cast over the WHOLE frame, blots or not. Without it the unblotted
+  // gaps look exactly like an unblotted screen and the state is ambiguous at a glance;
+  // with it, everything is a little inked and the state is unmistakable. Deliberately
+  // small — this is the term that would make the item unplayable if it grew.
+  c = mix(c, ink, 0.10 * inkAmount);
+
+  outputColor = vec4(c, inputColor.a);
+}
+`;
+
+/**
+ * The screen-space half of Squid Ink. Driven by `vfx/ink.ts`'s channel, which
+ * `game/vfx.ts` writes off `Fighter.item.blotUntil` — see that file's header for why the
+ * two halves talk through a module instead of through `match.ts`.
+ *
+ * ⚠️ **ABLATE IT WITH `amount = 0`, NEVER WITH `blendMode.opacity`.** This effect is on
+ * `BlendFunction.SRC`, whose shader is literally `return src;` and never reads the
+ * opacity argument — `contactAO` above carries the same warning and `8ca7a46` is the
+ * commit where that produced a guaranteed false zero on the grade.
+ */
+export class SquidInkEffect extends Effect {
+  constructor(discCount: number) {
+    super('SquidInkEffect', SQUID_INK_SHADER, {
+      blendFunction: BlendFunction.SRC,
+      // `INK_DISCS` is a `#define` and not a uniform because GLSL ES 1.00 requires a
+      // constant loop bound. It comes from `vfx/ink.ts:INK_DISC_COUNT` so the array the
+      // layout writes and the array the shader reads cannot disagree in length.
+      defines: new Map<string, string>([['INK_DISCS', String(discCount)]]),
+      uniforms: new Map<string, THREE.Uniform>([
+        ['inkAmount', new THREE.Uniform(0)],
+        ['inkAge', new THREE.Uniform(0)],
+        ['inkDiscs', new THREE.Uniform(
+          Array.from({ length: discCount }, () => new THREE.Vector3(-9, -9, 0)),
+        )],
+      ]),
+    });
+    // Ink over the GRADED image, in display-encoded space: the blots are an occlusion,
+    // not a lighting term, so they must not be re-saturated or re-contrasted by a grade
+    // that runs after them. `EffectPass` keeps this effect last (see `buildPost`).
+    this.inputColorSpace = THREE.SRGBColorSpace;
+  }
+
+  /** 0..1 envelope. **Exactly 0 is the identity** — see the shader's first line. */
+  get amount(): number { return this.uniforms.get('inkAmount')!.value as number; }
+  set amount(v: number) { this.uniforms.get('inkAmount')!.value = v; }
+  /** 0..1, monotone across the blot's life. Drives the sag and nothing else. */
+  get age(): number { return this.uniforms.get('inkAge')!.value as number; }
+  set age(v: number) { this.uniforms.get('inkAge')!.value = v; }
+
+  /** Write a layout. Values are aspect-corrected: x in 0..aspect, y in 0..1. */
+  setDiscs(discs: readonly { x: number; y: number; r: number }[]): void {
+    const arr = this.uniforms.get('inkDiscs')!.value as THREE.Vector3[];
+    for (let i = 0; i < arr.length; i++) {
+      const d = discs[i];
+      if (d) arr[i].set(d.x, d.y, d.r);
+      else arr[i].set(-9, -9, 0);
+    }
+  }
+}
+
 /**
  * The environment the whole cast is lit and reflected in — a sky/ground gradient
  * dome with a few bright panels in it.
@@ -1191,6 +1366,20 @@ export class Stage {
    * ablation is a GUARANTEED false zero (`8ca7a46` found exactly that on the grade).
    */
   contactAO: ContactAOEffect | null = null;
+  /**
+   * Squid Ink's screen-space pass, exposed for the same reason `grade` and `contactAO`
+   * are: a probe must be able to ablate it on ONE frozen frame without a rebuild.
+   * Null when `postFx: false` left the composer unbuilt — in which case the item still
+   * draws its world-space cloud and simply has no screen half, which is a degradation
+   * and not a break.
+   */
+  ink: SquidInkEffect | null = null;
+  /** `readInk().revision` as of the last frame that pushed a layout into `ink`. -1 so
+   * the first frame always pushes one. */
+  private inkRevision = -1;
+  /** Aspect the current layout was solved for. A resize re-solves it, or the discs
+   * stretch into ovals on the next orientation change. */
+  private inkAspect = -1;
   /** The per-fighter contact decals. Null until a match frame asks for one. */
   private contactGroup: THREE.Group | null = null;
   private readonly contactTargets: THREE.Object3D[] = [];
@@ -1669,6 +1858,14 @@ export class Stage {
     // pass: a probe would set `intensity = 0`, read a frame that did not change, and
     // report the effect as inert. That is `docs/LESSONS.md` §1's class exactly.
     this.contactAO = null;
+    // Same rule, same reason: a stale handle on a disposed pass reads as an inert effect.
+    // ⚠️ AND THE STALE-HANDLE FAILURE IS WORSE HERE THAN FOR THE GRADE, because this one
+    // is WRITTEN every frame: `applyInk` below would keep pushing `amount` into a dead
+    // uniform, the probe would read a frame that never changes, and the finding would be
+    // "the ink does not draw" about an effect that draws fine on the live pass.
+    this.ink = null;
+    this.inkRevision = -1;
+    this.inkAspect = -1;
     // Antialiasing, and WHICH kind, is decided here rather than at the SMAA pass.
     //
     // `antialias: true` on the renderer does nothing once a composer exists — the
@@ -2465,11 +2662,28 @@ export class Stage {
       blendFunction: BlendFunction.NORMAL,
     });
 
+    // ── SQUID INK, PUSHED LAST ────────────────────────────────────────────────
+    //
+    // ⚠️ **LAST IS A REQUIREMENT AND IT SURVIVES `EffectPass`'s SORT, WHICH THE
+    // PARAGRAPH BELOW EXPLAINS IS NOT GUARANTEED IN GENERAL.** The sort key is
+    // `b.attributes - a.attributes` and this effect declares `NONE` (0), exactly like the
+    // grade and the vignette; `Array.prototype.sort` has been required to be stable since
+    // ES2019, so equal keys keep insertion order and the ink stays behind both. It is
+    // asserted at the end of this function rather than trusted, for the same reason the
+    // `contactAO`-first assertion exists.
+    //
+    // It must be last because it is an OCCLUSION, not a lighting term: ink that the grade
+    // then re-saturated and re-contrasted would come back as a bruised purple wash rather
+    // than as something opaque lying on the glass, and the vignette would darken the
+    // frame's corners a second time underneath it.
+    const ink = new SquidInkEffect(INK_DISC_COUNT);
+    this.ink = ink;
+
     const effects: Effect[] = [];
     if (contactAO) effects.push(contactAO);
     if (ssao) effects.push(ssao);
     if (bloom) effects.push(bloom);
-    effects.push(grade, vignette);
+    effects.push(grade, vignette, ink);
     const fxPass = new EffectPass(this.rig.camera, ...effects);
     // 🚨 THE ORDER ABOVE IS NOT NECESSARILY THE ORDER THAT RUNS. `EffectPass` sorts on
     // `b.attributes - a.attributes`, so a `DEPTH` effect (1) is hoisted ahead of every
@@ -2482,6 +2696,16 @@ export class Stage {
     if (contactAO && (fxPass as unknown as { effects: Effect[] }).effects?.[0] !== contactAO) {
       console.warn('[stage] ContactAOEffect is no longer first in the EffectPass — '
         + 'the grade now runs before occlusion, which is not the chain that was measured.');
+    }
+    // The same assertion at the other end of the chain. Ink must composite over the
+    // graded, vignetted frame; if the library's sort ever stops being stable this still
+    // renders, it just stops being the chain that was measured.
+    {
+      const realised = (fxPass as unknown as { effects: Effect[] }).effects;
+      if (realised && realised[realised.length - 1] !== ink) {
+        console.warn('[stage] SquidInkEffect is no longer last in the EffectPass — '
+          + 'the grade now runs AFTER the ink, which re-saturates the blots.');
+      }
     }
     composer.addPass(fxPass);
 

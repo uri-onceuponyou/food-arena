@@ -120,10 +120,74 @@
  * That is why the default seat count is `MIN_FIGHTERS` and not the maximum: the lobby
  * makes the unmeasured arm REACHABLE, deliberately, but it does not make it the default
  * every player lands in.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * 5. THE LOADOUT — Uri, 2026-08-31: *"up to 2 items per player, he sets it up
+ *    on the loby, which ones he wants to use out of what he has"*
+ * ═══════════════════════════════════════════════════════════════════════════
+ * `rules.ts:ITEMS` is the registry, `ITEM_SLOTS` is the two, and this screen is the
+ * "sets it up on the lobby" half. Four things about it are decisions rather than code.
+ *
+ * ── 5a. 🚨 THE EQUIPPED SET LIVES IN ITS OWN `localStorage` KEY, AND THAT IS A
+ *        CONSEQUENCE OF FILE OWNERSHIP, NOT A DESIGN PREFERENCE ──────────────
+ * The right home for "what I take into a match" is `EconomyState`, beside `unlocked` and
+ * `levels`, reached through `PlayerProfile`. **Neither file is in this pass's owned set**
+ * and both have live editors right now, so this pass cannot put it there.
+ *
+ * ⚠️ And *"just add a key to the profile blob"* is not available either — it is a
+ * measurable trap, not a taste call. `profile.ts:PlayerProfile.commit()` serialises a
+ * FIXED SIX-FIELD OBJECT built from its own `data` (`name`, `wins`, `losses`, `xp`,
+ * `selected`, `economy`) and writes it over `food-arena.profile.v1`. Any seventh key
+ * written into that blob from outside is **destroyed by the next profile write**, which
+ * is every rename, every match result and every level purchase. A loadout stored there
+ * would survive exactly until the player did anything.
+ *
+ * So: `LOADOUT_KEY` below, read and written only here, with `loadEquipped`/`saveEquipped`
+ * exported so the match side has one function to call rather than a storage format to
+ * copy. **This is a LODGER and the eviction plan is written down**: the day one owner
+ * holds `economy/state.ts` + `profile.ts`, the array moves onto `EconomyState`,
+ * `deserialize` adopts this key once, and the two functions below become three-line
+ * delegations exactly like `characterLevel`. Recorded in the handover so it is a
+ * scheduled move rather than a second source of truth nobody remembers.
+ *
+ * ── 5b. WHAT YOU OWN IS READ FROM THE ECONOMY, NEVER INVENTED HERE ─────────
+ * `ownedItemIds()` is a SEAM against a model that is being written in parallel
+ * (`economy/tuning.ts` already carries the box drop rows). It reads the field off
+ * `EconomyState` if it is there and returns `[]` if it is not, and `[]` is the correct
+ * answer today rather than a fallback: **nothing in the shipped tree grants an item, so
+ * every player owns none**, which is also the state every new player is in forever after
+ * the faucet lands. `tools/tmp/il_seam.mjs` parses `EconomyState` and fails if the
+ * ownership field appears under a name this file does not read — so the day the
+ * acquisition track lands, a red row names the exact line to change instead of a lobby
+ * that quietly shows nothing.
+ *
+ * ── 5c. THE HONESTY LINE, AND WHY THE SLOTS ARE *NOT* `disabled` ───────────
+ * §1 above disables the multiplayer control because **pressing it could do nothing** —
+ * there is no transport to call. Equipping is not that: the press does the whole of what
+ * it claims, the choice is stored, and it survives a reload. What is NOT yet true is that
+ * a match reads it, so that sentence is on the screen (`MATCH_READS_LOADOUT`), derived
+ * from the tree by `il_seam.mjs` rather than remembered. Disabling the slots instead
+ * would make the feature unreachable in order to describe it, which is strictly worse
+ * than describing it accurately.
+ *
+ * ── 5d. THE PICKER LISTS ALL TEN, INCLUDING THE ONES YOU DO NOT OWN ────────
+ * ⚠️ Deliberate, and adjacent to a defect class this file's §1 spends fifty lines on, so
+ * it is argued rather than assumed. The shop's *"Epic or better"* was a promise about a
+ * BENEFIT that did not exist. A row reading **"Not owned yet"** claims only that the item
+ * exists in the game, which `rules.ts:ITEMS` makes true, and it carries `disabled` plus
+ * the reason on both `title` and `aria-label` — `shop.ts`'s own precedent. The
+ * alternative, a picker that renders nothing at all for the ~100% of players who own
+ * nothing, is a control that does nothing, which is the defect §1 actually names.
  */
 
-import { CHARACTER_IDS, CHARACTERS, type CharacterId } from '../../game/rules';
-import { enemyLevelFor } from '../../game/economy';
+import {
+  CHARACTER_IDS, CHARACTERS, ITEMS, ITEM_SLOTS, RARITY_COLORS, RARITY_ORDER,
+  type CharacterId, type ItemDef, type ItemId,
+} from '../../game/rules';
+import {
+  ITEM_IDS, enemyLevelFor, ownedItemSet, type EconomyState,
+} from '../../game/economy';
+import { MIN_FIGHTERS } from '../../game/state';
 import { SEAT_CHOICES, brawlRoster, seatCountFor } from './brawl';
 import type { Route, Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
@@ -143,6 +207,20 @@ declare global {
      * requires the opposite. Costs one property read per mount.
      */
     __faOpenSeat?: ((slot: number) => void) | null;
+    /**
+     * QA-only ownership injection, the same argument `__faOpenSeat` makes one line above.
+     *
+     * `ownedItemIds()` returns `[]` on the shipped tree because nothing grants an item
+     * yet, so every row about owned items would be asserted over an EMPTY SET and pass
+     * vacuously — `[].every()` is `true`, which is the failure mode `CLAUDE.md` rule 6
+     * records firing three times in three files in one session. `tools/tmp/il_accept.mjs`
+     * sets this, requires the picker and the slots to come alive, then clears it and
+     * requires the empty state back. Costs one property read per render.
+     *
+     * ⚠️ It injects what you OWN, never what is equipped: equipping still goes through
+     * the same handler a finger does, so the persistence rows measure the real path.
+     */
+    __faOwnedItems?: readonly string[] | null;
   }
 }
 

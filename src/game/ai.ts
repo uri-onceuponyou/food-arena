@@ -150,18 +150,24 @@ import {
   CHARACTERS,
   CHARACTER_IDS,
   FOG_DPS,
+  GUARANTEED_VISIBLE_RADIUS,
   HIT_RADIUS_VS_PLAYER,
+  ITEM_TUNING,
   levelHealthMultiplier,
   MEDIKIT,
   speedFor,
   suddenDeathActive,
   TRAIL,
+  type CharacterId,
+  type ItemId,
   type Weapon,
   type WeaponType,
 } from './rules.ts';
 import type { Fighter, GameEvent, MatchState, Medikit } from './state.ts';
-import { isCasting, movementLocked, nearestLivingOpponent, sightingIndex } from './state.ts';
-import { attemptAttack, isOnOwnTrail } from './combat.ts';
+import {
+  actionsLocked, isCasting, movementLocked, nearestLivingOpponent, sightingIndex, weaponsLocked,
+} from './state.ts';
+import { attemptAttack, attemptItem, isOnOwnTrail, itemUsable } from './combat.ts';
 import { isVisibleFrom, moveToward, terrainSlowAt } from './movement.ts';
 
 /**
@@ -904,6 +910,43 @@ function pickWeapon(
   const weapons = CHARACTERS[self.characterId].weapons;
   const now = state.elapsed;
 
+  /**
+   * ── 🚨 A CLOGGED BOT MUST NOT *CHOOSE* A WEAPON, AND WITHOUT THIS LINE POMPA
+   *    FREEZES IT SOLID FOR FIVE SECONDS ──────────────────────────────────────
+   *
+   * This is this file's oldest defect shape — *a rule stated once in `rules.ts` and
+   * implemented for one seat only* — arriving through a brand-new item, and it is worth
+   * spelling out because nothing about it is visible at the call sites.
+   *
+   * `combat.ts:attemptAttack` refuses every press while `state.ts:weaponsLocked` holds
+   * (Uri: *"pompa — clogs their weapons for 5 secons"*). That refusal is symmetric: it sits
+   * in the function the human and the bot share. **What is NOT symmetric is what the two
+   * sides do with the refusal.** A clogged HUMAN still moves — `sim.ts:moveFighter` is
+   * called unconditionally on its own line. A clogged BOT went through
+   * `stepAI`'s chase branch, where `pickWeapon` knew nothing about the clog, returned a
+   * perfectly valid index, and the branch is `attack` **XOR** `move`:
+   *
+   *   > `if (chosenIndex !== null) { attemptAttack(...) } else if (!rooted) { …move… }`
+   *
+   * So the bot spent every tick of the clog attempting an attack that `attemptAttack`
+   * discarded, and **never reached the movement arm at all**. Five seconds of standing
+   * perfectly still, doing nothing, while the human it is fighting walks around it — the
+   * literal re-run of the recorded stun-silence defect (*stunned player fires 100% of its
+   * shots, stunned AI 0%*), one item later.
+   *
+   * ⚠️ **HERE AND NOT AT THE TWO CALL SITES**, because `healIndex` and the offensive index
+   * are both spent through `attemptAttack` and `weaponsLocked` gates both — a check written
+   * at one of the two would be the same bug one branch deeper. `pickWeapon` already owns
+   * *"is this press reachable at all"* (cooldown, range, cast budget); the clog is that
+   * question, not a new one.
+   *
+   * ⚠️ **INERT ON EVERY MATCH THAT PREDATES ITEMS.** `weaponsLocked` is
+   * `actionsLocked || elapsed < item.clogUntil`, and `createFighter` seeds both deadlines
+   * to `-Infinity` for a fighter with an empty loadout — which is every fighter every one of
+   * the 148 existing call sites builds. §43(c) drives the populated case in both directions.
+   */
+  if (weaponsLocked(self, now)) return null;
+
   let bestIndex: number | null = null;
   let bestScore = -Infinity;
   for (let i = 0; i < weapons.length; i++) {
@@ -924,6 +967,399 @@ function pickWeapon(
     }
   }
   return bestIndex;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LOADOUT ITEMS — THE BOT PRESSES THE SAME BUTTONS THE PLAYER DOES
+   ═══════════════════════════════════════════════════════════════════════════
+
+   🚨 WHY THIS BLOCK EXISTS, IN ONE NUMBER: 7.2 PERCENTAGE POINTS.
+
+   This file's header lists seven instances of one defect — *a rule stated once in
+   `rules.ts` and implemented for one seat only*. The most recent was `TRAIL.speedBoost`
+   reaching the human and not the bot (measured **player 1.350000 / enemy 1.000000**), and
+   `f1e6c03` priced the fix at **7.2 pp on one character**. Uri's ten items are the largest
+   opportunity this codebase has ever had to make that mistake at scale: **an item the human
+   presses and the bots cannot is not a handicap the bot suffers, it is a resource the player
+   gets for free, and no aggregate would call it a bug.** So the bot presses items, through
+   `combat.ts:attemptItem` — the same function `sim.ts`'s human branch calls, on the same
+   tick offset — and never through a private item-firing path.
+
+   ── THE RULE IS A QUESTION, NOT A CONSTANT ──────────────────────────────────
+
+   `seekKit`'s rule below is the worked example and the house style: *"can I reach it before
+   it expires, and am I missing at least a full kit"* — REACH plus WORTH, both derived, no
+   new radius. Every rule here has the same two halves:
+
+     REACH  can this press land at all? (in the item's own range, target visible, target
+            not already carrying the state this item applies)
+     WORTH  does landing it change anything? (the term that differs per item)
+
+   ⚠️ **AND FOUR OF THE SEVEN ACTIVES HAVE NO BINDING WORTH TERM, WHICH IS REPORTED RATHER
+   THAN DRESSED UP.** Warm Milk, Pompa, Squid Ink and Liquorice Rope are *"throw a five-second
+   status at the nearest opponent"*, and inside the throw's own reach there is no separation
+   at which landing one is worthless. A *"will the clog deny them a shot they were going to
+   get?"* term was derived — `separation - theirReach <= speedFor(them, AI_CHASE_SPEED) *
+   clogMs` — and **it cannot bind**: 5,000 ms of chase is 262 wu of closing against a throw
+   range of 199.22, so every target inside reach arrives inside its own weapon range before
+   the clog expires. Shipping it would have been a rule that reads like a judgement and is
+   `true` by arithmetic. §43(g) asserts that it cannot bind, so the day the numbers move the
+   claim goes red instead of quietly becoming a real term nobody re-derived.
+
+   ── WHAT IS DELIBERATELY *NOT* HERE ─────────────────────────────────────────
+
+   * **Tenderiser** is a passive streak on the attacker (`combat.ts:applyDamage`). The bot
+     could exploit it by refusing to switch targets — and that would mean a second target
+     rule in this file. `stepAI`'s target comes from `nearestLivingOpponent` **because
+     `combat.ts:deliverWeapon` resolves the shot with the same call on the same tick**; a
+     streak-aware override would rank a kit against one fighter and swing at another, which
+     this file's own header calls *"not a bug any balance instrument in this repo could
+     localise"*. Routed, not taken.
+   * **Blue Cheese** is a permanent aura at `REACH.meleeHeavy`. Wearing it argues for
+     standing closer; that is a change to the chase/flee distance policy for every character
+     in the roster, not an item decision, and it is a separate measured pass.
+   * **Leftovers** fires off somebody else's death. There is no press.
+
+   ── THE PRESS COSTS THE BOT NOTHING, EXACTLY AS IT COSTS THE HUMAN NOTHING ───
+
+   `sim.ts`'s human branch runs `applyAim` → `attemptAttack` → `moveFighter` → `attemptItem`,
+   and the item press is on its own line, gated by nothing the other three did. So the press
+   here sits at the END of `stepAI`, after both branches have spent the tick: a bot that
+   fires does not lose its item, and a bot that walks does not either. Putting the item
+   inside the chase branch's attack-XOR-move trade would have been a rule the human is not
+   subject to — this file's whole subject.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * HOW FAR A THROWN ITEM REACHES.
+ *
+ * 🚨 **THIS IS A SECOND STATEMENT OF A CONSTANT AND IT IS DECLARED AS ONE.**
+ * `combat.ts` holds `const ITEM_THROW_RANGE = GUARANTEED_VISIBLE_RADIUS` as a **private**
+ * module constant, and its own header already says where that belongs: *"the honest home is
+ * `ITEM_TUNING.<item>.range`, four one-line hunks in `rules.ts`, which this pass does not
+ * own"*. Two passes have now independently needed it, which is the strongest evidence
+ * available that the routed hunk is real work and not tidiness.
+ *
+ * Until it lands, this file derives from **the same source `combat.ts` derives from** —
+ * `rules.ts:GUARANTEED_VISIBLE_RADIUS` — rather than importing a private symbol it cannot
+ * see or typing 199.22. That makes the two agree by construction today and go wrong
+ * together rather than separately if the derivation moves, which is the least-bad shape a
+ * duplicated constant can have. §43(f) asserts the equality against `combat.ts`'s source
+ * text, so the day one of them changes the other is a red row.
+ */
+const ITEM_THROW_RANGE = GUARANTEED_VISIBLE_RADIUS;
+
+/**
+ * THE FURTHEST ANY OF A CHARACTER'S OFFENSIVE WEAPONS REACHES.
+ *
+ * Two rules ask *"can that fighter hurt me from where it is standing?"* — Pompa's and the
+ * Shiitake Shield's — and both need it about the **target**, not about `self`, so
+ * `pickWeapon`'s per-press range gate cannot answer it.
+ *
+ * Precomputed once at module load beside `PRESS_VALUE` and `FAN_OFFSETS`, for the reason
+ * those two give: `stepAI` runs every tick of every match and this file allocates nothing in
+ * the steady state.
+ *
+ * ⚠️ `self`-type weapons are excluded — a heal is not a threat — and `w.range ?? Infinity`
+ * matches `pickWeapon`'s own reading of a missing range exactly, so a rangeless weapon
+ * would make the character's reach infinite in **both** places rather than in one.
+ * §43(g) asserts every entry is finite and strictly inside `ITEM_THROW_RANGE`, because both
+ * rules that read this go vacuous the moment one is not.
+ */
+const OFFENSIVE_REACH: ReadonlyMap<CharacterId, number> = (() => {
+  const m = new Map<CharacterId, number>();
+  for (const id of CHARACTER_IDS) {
+    let best = 0;
+    for (const w of CHARACTERS[id].weapons) {
+      if (w.type === 'self') continue;
+      best = Math.max(best, w.range ?? Infinity);
+    }
+    m.set(id, best);
+  }
+  return m;
+})();
+
+/**
+ * `OFFENSIVE_REACH` with the map lookup's `undefined` collapsed. Every id is present.
+ *
+ * ⚠️ **EXPORTED FOR `sim.test.mjs` §43(g), ON `pressValue`'S AND `castThreat`'S PRECEDENT
+ * AND FOR THEIR REASON**, which that file states three times: *"a copy of the driver's
+ * ranking arithmetic would only test the copy"*. §43(g) asserts that every entry is finite
+ * and strictly inside `ITEM_THROW_RANGE` — the two properties both readers go **vacuous**
+ * without — and a `Math.max` over `CHARACTERS[id].weapons` written in the test would keep
+ * passing against a file that had stopped computing one.
+ */
+export function offensiveReach(id: CharacterId): number {
+  return OFFENSIVE_REACH.get(id) ?? 0;
+}
+
+/**
+ * ── IS PRESSING THIS ITEM, RIGHT NOW, WORTH THE PRESS? ──────────────────────
+ *
+ * Called only for a slot `combat.ts:itemUsable` has already accepted, so phase, kind,
+ * sleep, `minAlive` and the cooldown are all settled before this is reached and are
+ * deliberately NOT re-asked here — `itemUsable` is exported precisely so the HUD, the bot
+ * and the sim share one answer, and a copy of any of its six gates here would be a button
+ * that lies.
+ *
+ * `separation` and `visible` are the BELIEF, not the truth: they come from `stepAI`'s
+ * perception block, which is the only place in this file that reads a target's position.
+ * The sim resolves a throw against TRUE positions (`combat.ts:itemTargetInRange`), so a
+ * press decided on a stale belief can miss — which is exactly what the `visible` term is
+ * for, and it is the same rule the shot already obeys (*"you do not shoot into a bush you
+ * cannot see into"*).
+ *
+ * ⚠️ **EXHAUSTIVE BY TYPE, NO `default`.** `ItemId` is a closed union, so an eleventh item
+ * is a compile error in this file rather than a bot that silently never presses it — the
+ * same device `combat.ts:resolveItem` and `WeaponAllow` both use, and for the same reason:
+ * the compiler is the guard, because a code review is not.
+ */
+function itemWorthIt(
+  state: MatchState,
+  self: Fighter,
+  id: ItemId,
+  target: Fighter,
+  separation: number,
+  visible: boolean,
+  fleeing: boolean,
+  castBudgetMs: number,
+): boolean {
+  const now = state.elapsed;
+  switch (id) {
+    /**
+     * SPRINGFORM — Uri: *"Trampoline — use to jump further towards or away from the enemy"*.
+     *
+     * 🔴 **A BOT CAN ONLY EVER JUMP *TOWARDS*, AND THAT IS A SPEC GAP, NOT A CHOICE MADE
+     * HERE.** `combat.ts:resolveItem` launches along `user.facing`, and in this game
+     * **`facing` is AIM, never travel** — `2026-08-05`'s recorded fix removed the one line
+     * that pointed a fleeing bot's aim away from its target, because `combat.ts` resolves
+     * both the melee cone and the projectile heading off `facing` and **8 of 11 characters
+     * delivered ZERO damage from the flee branch** while it was open. Turning `facing`
+     * around for one tick to jump away would re-introduce that defect exactly.
+     *
+     * ⚠️ **AND THE HUMAN HAS THE SAME PROBLEM**, which is why this is routed rather than
+     * worked around: a player retreating while aiming at the enemy — the normal way anyone
+     * plays this — presses Springform and **leaps into them**. Uri's *"towards or away"*
+     * needs the launch to take an explicit bearing (`displaceFighter` already accepts one)
+     * rather than reading `facing`. Reported to the sim owner; until then the honest bot
+     * rule is "close, never escape", and the escape half of this item is unreachable for
+     * anybody who is aiming.
+     *
+     * WORTH: `separation > distance`. A jump shorter than the gap is a strict gain; a jump
+     * longer than it lands the bot **past** its target at roughly the separation it started
+     * from, having spent a 2,500 ms cooldown to stand somewhere else. Derived from the
+     * item's own authored distance, so it cannot go stale.
+     *
+     * REACH: `!movementLocked` and nothing already in flight. `movement.ts:stepPush` refuses
+     * to displace a locked fighter **and burns the budget anyway** — so pressing while
+     * rooted, slept, stunned or mid-wind-up is not a weak press, it is a wasted one. Note
+     * this is re-derived at press time rather than reusing `stepAI`'s `rooted`: a weapon
+     * cast opened earlier in THIS tick locks movement, and `rooted` was read before it.
+     */
+    case 'springform':
+      return !fleeing
+        && visible
+        && !movementLocked(self, now)
+        && self.push.remaining <= 0
+        && separation > ITEM_TUNING.springform.distance;
+
+    /**
+     * WARM MILK — Uri: *"put someone to sleep up to half a screen away, the farther he is,
+     * the longer it puts him to sleep"*.
+     *
+     * REACH: inside `ITEM_TUNING.warm_milk.range` (`GUARANTEED_VISIBLE_RADIUS`, the disc
+     * every supported aspect ratio guarantees) and visible.
+     * WORTH: the target is AWAKE. `combat.ts:applyItemStatus` refuses a status that is
+     * already running and the press is spent regardless, so re-sleeping a sleeper is the
+     * one strictly-wasted press this item has. `actionsLocked` is the single statement of
+     * "asleep" and is imported rather than compared against `item.sleepUntil` here.
+     *
+     * ⚠️ **THE DURATION CURVE IS NOT RE-DERIVED, DELIBERATELY.** The linear
+     * `minMs → maxMs` lerp lives in `combat.ts:resolveItem` and a copy here — to prefer a
+     * long sleep over a short one — would be this file's oldest defect in its purest form.
+     * The consequence is stated rather than hidden: **a bot will spend Warm Milk at
+     * point-blank for a 1,000 ms sleep** when waiting would have bought 5,000. The fix is
+     * for the sim to export the duration as a pure function, exactly as `pressValue` is
+     * exported for weapons; routed, not copied.
+     */
+    case 'warm_milk':
+      return visible
+        && separation <= ITEM_TUNING.warm_milk.range
+        && !actionsLocked(target, now);
+
+    /**
+     * POMPA — Uri: *"pompa — clogs their weapons for 5 secons"*.
+     *
+     * REACH: inside the throw, visible, not already clogged.
+     * WORTH: the target is awake — a sleeper is not firing anyway, and a clog laid over a
+     * sleep is five seconds of denial the sleep was already providing.
+     *
+     * ⚠️ The *"will this deny them a shot?"* term is absent **and cannot bind** — see the
+     * block header and §43(g). It is named here so the next reader does not add it back as
+     * an improvement.
+     */
+    case 'pompa':
+      return visible
+        && separation <= ITEM_THROW_RANGE
+        && !actionsLocked(target, now)
+        && now >= target.item.clogUntil;
+
+    /**
+     * SQUID INK — Uri: *"Ink spray that blots their screen"*.
+     *
+     * 🔴 **THIS ITEM HAS NO EFFECT ON A BOT, BY CONSTRUCTION, AND THE BOT PRESSES IT
+     * ANYWAY.** `state.ts:ItemState.blotUntil` is a flag the sim never branches on — it is
+     * read by the VFX layer and by nothing else — so blotting a bot changes nothing at all
+     * and blotting a human changes everything. Two consequences, both stated rather than
+     * discovered:
+     *
+     *   * **Every balance number for Squid Ink is structurally 0** in a bot-vs-bot corpus,
+     *     and that is the truth about the item rather than a limit of the rig. Its real cost
+     *     is that it occupies one of two equip slots.
+     *   * **No `controller` test here.** Refusing the press against a bot would be cheaper
+     *     by exactly nothing (the cooldown is the slot's own) and would put "am I fighting a
+     *     human?" into a file whose entire subject is the two sides playing by one rule.
+     *
+     * REACH/WORTH are Pompa's, against `blotUntil`.
+     */
+    case 'squid_ink':
+      return visible
+        && separation <= ITEM_THROW_RANGE
+        && !actionsLocked(target, now)
+        && now >= target.item.blotUntil;
+
+    /**
+     * LIQUORICE ROPE — Uri: *"you can use it to tie an opponent for 5 seconds"*.
+     *
+     * REACH: inside the throw, visible, not already rooted.
+     * WORTH: awake, as Pompa. A separation term was considered and rejected on its merits
+     * rather than on vacuity: a root is good when *closing* (they cannot kite) and good when
+     * *fleeing* (they cannot follow), so there is no separation at which it is worthless and
+     * a term would have encoded a preference, not a fact.
+     */
+    case 'liquorice':
+      return visible
+        && separation <= ITEM_THROW_RANGE
+        && !actionsLocked(target, now)
+        && now >= target.item.rootUntil;
+
+    /**
+     * DISPOSAL — Uri: *"Black hole — throws him nearby a different enemy. If there are only
+     * two players left, it's not available."*
+     *
+     * ⚠️ `minAlive: 3` is **not** re-checked here. It is declared on `ITEMS.disposal` and
+     * enforced by `itemUsable`, which is the whole argument that field's header makes.
+     *
+     * WORTH: **the victim must end up FURTHER FROM ME than they are now.** `combat.ts` spits
+     * them out on the far side of the destination, `dropDistance` away along the bearing back
+     * toward where they came from — so subtracting `dropDistance` from the distance to the
+     * destination is a **lower bound** on where they land, and the test is exact rather than
+     * approximate whichever way the bearing falls.
+     *
+     * That single term is what makes this a defensive item in the bot's hands: throwing away
+     * a target you are beating is a press spent to lose a fight, and the test refuses it
+     * automatically without a `fleeing` special case.
+     *
+     * ⚠️ **THE DESTINATION IS `nearestLivingOpponent(state, target, self)` — the SAME CALL
+     * `combat.ts:resolveItem` makes**, not a re-implementation of "nearest to the victim,
+     * excluding the thrower". If those two ever disagreed the bot would decide against one
+     * destination and the sim would use another.
+     * ⚠️ It reads third-party positions as TRUTH. `stepAI`'s perception model covers the
+     * fighter it is fighting; `seekKit` and `dangerSteer` already read kits and hazards
+     * unbelieved, and gating this alone would make the bot decide against one set and the
+     * sim resolve against another — which is worse than the asymmetry it would remove.
+     */
+    case 'disposal': {
+      if (!visible || separation > ITEM_THROW_RANGE) return false;
+      const dest = nearestLivingOpponent(state, target, self);
+      if (dest === null) return false;
+      return Math.hypot(dest.x - self.x, dest.y - self.y)
+        - ITEM_TUNING.disposal.dropDistance > separation;
+    }
+
+    /**
+     * SHIITAKE SHIELD — Uri: *"long cooldown/windup … attackers … get damage on every damage
+     * they do. Lasts for 5 seconds."*
+     *
+     * WORTH: somebody can actually hit me. A 1.0 reflect on nobody is a 10,000 ms cooldown
+     * spent on scenery, so the test is `separation <= offensiveReach(target)` — the furthest
+     * any of the target's own weapons reaches, which is the quantity the question is
+     * literally about.
+     *
+     * REACH: **`castBudgetMs`, reused rather than reinvented.** That is `stepAI`'s existing
+     * sentence for *"how long may this fighter commit to standing still"* — 0 while it is
+     * burning in the pot or inside a telegraph, `hp * 1000 / FOG_DPS` under sudden death,
+     * `Infinity` otherwise — and `pickWeapon` refuses a weapon cast on `castMs >= budget`.
+     * An item wind-up roots the fighter identically (`state.ts:movementLocked` carries
+     * `itemCast`), so it is the same question and it gets the same comparison; a second
+     * "can I stand still" rule for items would be one constant with two implementations,
+     * which is what this file is famous for.
+     *
+     * ⚠️ **REFUSED WHILE FLEEING, AND THAT IS AN ASSUMPTION WITH A NUMBER ON IT.**
+     * `fleeing` is `hp < maxHp * AI_FLEE_HP_FRACTION` (28%), and the wind-up is
+     * `SUPER_MIN_COOLDOWN_MS` = 2,500 ms of being **rooted inside an enemy's reach**. The
+     * opposite reading — that a reflect is exactly what a nearly-dead fighter wants — is
+     * defensible and is one term away; it is refused here because 2,500 ms of standing still
+     * at 28% HP is a coin flip on whether the shield ever opens, and a shield that never
+     * opens is strictly worse than retreating. Flip this term and re-measure if the price
+     * says otherwise.
+     */
+    case 'shiitake':
+      return !fleeing
+        && visible
+        && now >= self.item.shieldUntil
+        && ITEM_TUNING.shiitake.windupMs < castBudgetMs
+        && separation <= offensiveReach(target.characterId);
+
+    // ── THE THREE WITH NO BUTTON ─────────────────────────────────────────────
+    //
+    // Unreachable: `itemUsable` refuses anything whose `kind` is not `'active'`, so these
+    // are here for the compiler and for the next reader, exactly as `combat.ts:resolveItem`
+    // lists them rather than sweeping them into a `default`.
+    case 'tenderiser':   // passive — a streak on the attacker, in `applyDamage`
+    case 'blue_cheese':  // passive — a permanent aura, in `sim.ts`'s world tick
+    case 'leftovers':    // triggered — off a killer's death, never off a press
+      return false;
+  }
+}
+
+/**
+ * WHICH EQUIP SLOT TO PRESS THIS TICK, OR `null`.
+ *
+ * **FIRST USABLE SLOT WHOSE QUESTION SAYS YES, IN LOBBY SLOT ORDER**, and there is
+ * deliberately no ranking across items. `pickWeapon` can rank because `pressValue` puts
+ * every weapon on one axis — HP delivered by a press, validated at 183 of 183 cells. A
+ * sleep, a jump and a reflect have **no common unit**, so any cross-item score would be a
+ * preference invented here and then measured as if it were the item. Slot order is the
+ * player's own stated preference (Uri: *"which ones he wants to use"*), it is deterministic,
+ * and it breaks ties on the lower index exactly as every other tie in the sim does.
+ *
+ * ⚠️ **ONE PRESS PER TICK**, matching the human, who has one button. Returning after the
+ * first acceptance is what enforces it.
+ *
+ * ⚠️ **NON-EMPTY FIRST.** The early return is not an optimisation, it is `CLAUDE.md` rule 6:
+ * a loop over an empty `equipped` yields `null`, which is indistinguishable from "nothing was
+ * worth pressing" — the vacuity trap that fired three times in three files in one session.
+ * §43(a) drives the populated case, and the empty case is every match that predates items.
+ */
+function pickItem(
+  state: MatchState,
+  self: Fighter,
+  target: Fighter,
+  separation: number,
+  visible: boolean,
+  fleeing: boolean,
+  castBudgetMs: number,
+): number | null {
+  const equipped = self.item.equipped;
+  if (equipped.length === 0) return null;
+  for (let slot = 0; slot < equipped.length; slot++) {
+    if (!itemUsable(state, self, slot)) continue;
+    if (itemWorthIt(state, self, equipped[slot], target, separation, visible, fleeing, castBudgetMs)) {
+      return slot;
+    }
+  }
+  return null;
 }
 
 /**
@@ -1491,6 +1927,26 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
       attemptedMove = true;
     }
   }
+
+  // ── THE ITEM PRESS — see the LOADOUT ITEMS block above ─────────────────────
+  //
+  // ⚠️ **LAST, AND OUTSIDE BOTH BRANCHES.** `sim.ts`'s human branch is
+  // `applyAim` → `attemptAttack` → `moveFighter` → `attemptItem`, with the item on its own
+  // line gated by nothing the other three did. This is that line, on this side of the
+  // `controller` branch. Putting it inside the chase branch's attack-XOR-move trade would
+  // have made the bot pay for an item the human gets free, which is the seven-times-recorded
+  // defect this whole file is about.
+  //
+  // ⚠️ It does NOT touch `attemptedMove`. That return value drives the Sticky Trail drop and
+  // means *"this fighter's movement input was non-zero"*; Springform's displacement is spent
+  // by `movement.ts:stepPush`, not by `moveToward`, and the human's item press does not feed
+  // `moveFighter`'s return either.
+  //
+  // ⚠️ **`separation`, NOT `adist`.** `adist` is `separation || 1` — a guard that keeps a
+  // zero-separation range check passing and must never be used as a distance. Every range
+  // test in `itemWorthIt` is a real reach in world units.
+  const itemSlot = pickItem(state, self, target, separation, visible, fleeing, castBudgetMs);
+  if (itemSlot !== null) attemptItem(state, self, itemSlot, events);
 
   return attemptedMove;
 }
