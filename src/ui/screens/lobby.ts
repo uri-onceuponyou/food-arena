@@ -126,58 +126,87 @@
  *    on the loby, which ones he wants to use out of what he has"*
  * ═══════════════════════════════════════════════════════════════════════════
  * `rules.ts:ITEMS` is the registry, `ITEM_SLOTS` is the two, and this screen is the
- * "sets it up on the lobby" half. Four things about it are decisions rather than code.
+ * "sets it up on the lobby" half.
  *
- * ── 5a. 🚨 THE EQUIPPED SET LIVES IN ITS OWN `localStorage` KEY, AND THAT IS A
- *        CONSEQUENCE OF FILE OWNERSHIP, NOT A DESIGN PREFERENCE ──────────────
- * The right home for "what I take into a match" is `EconomyState`, beside `unlocked` and
- * `levels`, reached through `PlayerProfile`. **Neither file is in this pass's owned set**
- * and both have live editors right now, so this pass cannot put it there.
+ * ── 5·0. 🚨 THIS SECTION USED TO DESCRIBE CODE THAT DID NOT EXIST, AND THAT IS
+ *          KEPT AT THE TOP BECAUSE IT IS THE LESSON ────────────────────────
+ * `d558cca` added **80 lines to this file and not one executable statement**: sixty
+ * lines of §5 prose in the past tense (*"`LOADOUT_KEY` below"*, *"the two functions
+ * below"*, *"that sentence is on the screen (`MATCH_READS_LOADOUT`)"*), eight imports
+ * of symbols nothing referenced, and a `__faOwnedItems` global no code read. It cited
+ * **`tools/tmp/il_seam.mjs`** and **`tools/tmp/il_accept.mjs`** six times across three
+ * files. Neither file has ever existed in this repo. `tsconfig.json` sets
+ * `noUnusedLocals: false`, so eight dead imports were not even a warning.
  *
- * ⚠️ And *"just add a key to the profile blob"* is not available either — it is a
- * measurable trap, not a taste call. `profile.ts:PlayerProfile.commit()` serialises a
- * FIXED SIX-FIELD OBJECT built from its own `data` (`name`, `wins`, `losses`, `xp`,
- * `selected`, `economy`) and writes it over `food-arena.profile.v1`. Any seventh key
- * written into that blob from outside is **destroyed by the next profile write**, which
- * is every rename, every match result and every level purchase. A loadout stored there
- * would survive exactly until the player did anything.
+ * ⚠️ **A HEADER IS NOT A MEASUREMENT AND IT IS NOT AN IMPLEMENTATION.** Everything §5
+ * claimed was *correct design* — the storage argument below is re-derived and still
+ * holds — and every word of it was *false as a description of the file*. The whole of
+ * `CLAUDE.md`'s standing rule applies to a file's own comments before it applies to
+ * anything else: re-derive what you are handed. The tools are now written, under this
+ * pass's own prefix (`ul_`), and every claim below is a row in one of them.
  *
- * So: `LOADOUT_KEY` below, read and written only here, with `loadEquipped`/`saveEquipped`
- * exported so the match side has one function to call rather than a storage format to
- * copy. **This is a LODGER and the eviction plan is written down**: the day one owner
- * holds `economy/state.ts` + `profile.ts`, the array moves onto `EconomyState`,
- * `deserialize` adopts this key once, and the two functions below become three-line
- * delegations exactly like `characterLevel`. Recorded in the handover so it is a
- * scheduled move rather than a second source of truth nobody remembers.
+ * ── 5a. THE EQUIPPED PAIR LIVES IN ITS OWN `localStorage` KEY ──────────────
+ * The right home is `EconomyState`, beside `unlocked` and `levels` — and
+ * `economy/state.ts:EconomyState.items` **says so itself**, in a 🔴 REPORTED note that
+ * names this screen. Neither that file nor `profile.ts` is in this pass's owned set, so
+ * this pass cannot put it there.
+ *
+ * ⚠️ And *"just add a key to the profile blob"* is not available either. **Re-derived,
+ * not inherited:** `profile.ts:commit()` (grep `private commit`) serialises a FIXED
+ * SIX-FIELD OBJECT — `name`, `wins`, `losses`, `xp`, `selected`, `economy` — over
+ * `food-arena.profile.v1`. A seventh key written into that blob from outside is
+ * destroyed by the next profile write, i.e. by every rename, every match result and
+ * every level purchase. `economy/state.ts:serialize` is the same fixed shape one level
+ * down. A loadout stored in either would survive exactly until the player did anything.
+ *
+ * So: `LOADOUT_KEY`, read and written only here, with `loadEquipped`/`saveEquipped`
+ * exported so the match side gets one function to call rather than a storage format to
+ * copy. **This is a LODGER and the eviction plan is a red row, not a memory**:
+ * `ul_seam.mjs` §S1 fails the day `EconomyState` grows an equipped field, because on
+ * that day this key becomes a second source of truth.
  *
  * ── 5b. WHAT YOU OWN IS READ FROM THE ECONOMY, NEVER INVENTED HERE ─────────
- * `ownedItemIds()` is a SEAM against a model that is being written in parallel
- * (`economy/tuning.ts` already carries the box drop rows). It reads the field off
- * `EconomyState` if it is there and returns `[]` if it is not, and `[]` is the correct
- * answer today rather than a fallback: **nothing in the shipped tree grants an item, so
- * every player owns none**, which is also the state every new player is in forever after
- * the faucet lands. `tools/tmp/il_seam.mjs` parses `EconomyState` and fails if the
- * ownership field appears under a name this file does not read — so the day the
- * acquisition track lands, a red row names the exact line to change instead of a lobby
- * that quietly shows nothing.
+ * `ownedItems()` calls `economy/state.ts:ownedItemSet`. ⚠️ **The old §5b said *"nothing
+ * in the shipped tree grants an item, so every player owns none"*. That was true when it
+ * was typed and false when it was committed** — `d558cca` merged the acquisition track
+ * in the same commit. `createEconomy()` seeds `items: [STARTER_ITEM]`, and `STARTER_ITEM`
+ * resolves to the first member of the cheapest non-empty tier, so **a brand-new player
+ * owns exactly one item and never zero**. The zero-owned state is still rendered and
+ * still tested (`ul_accept.mjs` arm `own0`) because a defensive read must survive a
+ * hand-edited blob, but it is NOT what a screenshot of a new player shows.
  *
  * ── 5c. THE HONESTY LINE, AND WHY THE SLOTS ARE *NOT* `disabled` ───────────
- * §1 above disables the multiplayer control because **pressing it could do nothing** —
- * there is no transport to call. Equipping is not that: the press does the whole of what
- * it claims, the choice is stored, and it survives a reload. What is NOT yet true is that
- * a match reads it, so that sentence is on the screen (`MATCH_READS_LOADOUT`), derived
- * from the tree by `il_seam.mjs` rather than remembered. Disabling the slots instead
- * would make the feature unreachable in order to describe it, which is strictly worse
- * than describing it accurately.
+ * §1 disables the multiplayer control because pressing it could do nothing. Equipping is
+ * not that: the press does the whole of what it claims and the choice survives a reload.
+ * What is **not** yet true is downstream of this screen, and it is two separate facts,
+ * both derived from the tree by `ul_seam.mjs` rather than remembered:
+ *
+ *   `LOADOUT_REACHES_MATCH`     `matchScreen.ts` → `startGame` → `FighterConfig.items`.
+ *                               **FALSE.** `GameSessionOptions` has no items field.
+ *   `PLAYER_CAN_PRESS_AN_ITEM`  something writes `FighterInput.useItem`.
+ *                               **FALSE.** `grep -rn useItem src/` writes it NOWHERE;
+ *                               `sim.ts` reads it in one place. Bots press items through
+ *                               `ai.ts` → `attemptItem`; the human has no button.
+ *
+ * `loadoutNote()` turns those two booleans into the one sentence on the screen, so the
+ * sentence cannot outlive the fact. Disabling the slots instead would make the feature
+ * unreachable in order to describe it, which is strictly worse than describing it.
  *
  * ── 5d. THE PICKER LISTS ALL TEN, INCLUDING THE ONES YOU DO NOT OWN ────────
- * ⚠️ Deliberate, and adjacent to a defect class this file's §1 spends fifty lines on, so
- * it is argued rather than assumed. The shop's *"Epic or better"* was a promise about a
- * BENEFIT that did not exist. A row reading **"Not owned yet"** claims only that the item
- * exists in the game, which `rules.ts:ITEMS` makes true, and it carries `disabled` plus
- * the reason on both `title` and `aria-label` — `shop.ts`'s own precedent. The
- * alternative, a picker that renders nothing at all for the ~100% of players who own
- * nothing, is a control that does nothing, which is the defect §1 actually names.
+ * ⚠️ Deliberate, and adjacent to the defect class §1 spends fifty lines on, so it is
+ * argued rather than assumed. The shop's *"Epic or better"* was a promise about a BENEFIT
+ * that did not exist. A row reading **"Not owned yet"** claims only that the item exists
+ * in the game, which `rules.ts:ITEMS` makes true, and it carries `disabled` plus the
+ * reason on both `title` and `aria-label` — `shop.ts`'s precedent. The alternative, a
+ * picker that renders nothing for a player who owns one item of ten, is a control that
+ * does nothing, which is the defect §1 actually names.
+ *
+ * ── 5e. NOTHING IS EQUIPPED BY DEFAULT ────────────────────────────────────
+ * A new player owns `STARTER_ITEM` and auto-equipping it is tempting. It is refused:
+ * with an auto-equip, *"I chose this"* and *"I never opened this screen"* are the same
+ * state, and Uri's sentence is *"which ones he wants to use"* — a choice. The
+ * discoverability cost is paid in the empty slot, which is a 44 px mustard control
+ * reading **Add item**, not in a silent default.
  */
 
 import {
@@ -210,12 +239,20 @@ declare global {
     /**
      * QA-only ownership injection, the same argument `__faOpenSeat` makes one line above.
      *
-     * `ownedItemIds()` returns `[]` on the shipped tree because nothing grants an item
-     * yet, so every row about owned items would be asserted over an EMPTY SET and pass
-     * vacuously — `[].every()` is `true`, which is the failure mode `CLAUDE.md` rule 6
-     * records firing three times in three files in one session. `tools/tmp/il_accept.mjs`
-     * sets this, requires the picker and the slots to come alive, then clears it and
-     * requires the empty state back. Costs one property read per render.
+     * A brand-new player owns exactly ONE item (`createEconomy` seeds `STARTER_ITEM`), so
+     * the interesting arms — owns NOTHING, owns ALL TEN, owns more than fits in
+     * `ITEM_SLOTS` — are all unreachable from the shipped faucet inside one test run.
+     * Without an injection every row about a full picker would be asserted over a
+     * one-element set, and the zero-owned row over an empty one, where `[].every()` is
+     * `true` — the failure mode `CLAUDE.md` rule 6 records firing three times in three
+     * files in one session. `tools/tmp/ul_accept.mjs` sets this per arm and requires the
+     * screen to MOVE between them. Costs one property read per render.
+     *
+     * ⚠️ **`[]` IS A REAL VALUE HERE AND `null` IS NOT.** An empty array is truthy, so
+     * `__faOwnedItems = []` is the own-nothing arm; `null`/`undefined` means "no
+     * injection, read the real economy". A `.length` test instead of a truthiness test
+     * would silently collapse those two into one and the own-nothing arm would measure
+     * the shipped economy while printing a tick.
      *
      * ⚠️ It injects what you OWN, never what is equipped: equipping still goes through
      * the same handler a finger does, so the persistence rows measure the real path.
@@ -260,6 +297,169 @@ function offlineBanner(botSeats: number): string {
   return `Online play is not connected yet, so ${botSeats === 1 ? 'the other seat is' : `all ${botSeats} other seats are`} `
     + 'played by a bot. Opening a seat to another player is switched off rather than '
     + 'offered as a button that does nothing.';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE LOADOUT — model, storage, and the two facts the screen must not outlive
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Where the equipped pair lives. Header §5a argues the location; this is the key.
+ *
+ * ⚠️ **`.v1` IS NOT DECORATION.** The day this moves onto `EconomyState`, `deserialize`
+ * adopts this key once and then it is dead. A version in the name is what makes
+ * "adopted" distinguishable from "never written".
+ */
+const LOADOUT_KEY = 'food-arena.loadout.v1';
+
+/**
+ * Read the equipped pair, FILTERED BY WHAT THE PLAYER OWNS.
+ *
+ * 🚨 **TOTAL, AND THAT IS A SAFETY REQUIREMENT RATHER THAN TIDINESS.**
+ * `state.ts:validateLoadout` **THROWS** — `RangeError` — on a loadout that is over-full,
+ * duplicated, or names an id `ITEMS` does not contain. It is called from `createFighter`,
+ * i.e. from inside `createMatch`. So the day §5c's wiring lands, a hand-edited or
+ * stale `localStorage` blob would not degrade to "no items"; it would **fail to start the
+ * match**, from a screen with no error surface. Every hostile shape is therefore filtered
+ * here, where the cost is one missing icon:
+ *
+ *   not a string · not an `ItemId` · not owned · a duplicate · past `ITEM_SLOTS`
+ *
+ * plus `localStorage` itself throwing (private-mode Safari — `profile.ts` records the
+ * same) and `JSON.parse` throwing on a truncated write.
+ *
+ * ⚠️ **`owned` IS A PARAMETER, NOT A LOOKUP.** This function is exported for the match
+ * side, which holds the profile; making it read the economy itself would put a second
+ * ownership read in a second module and they would drift.
+ */
+export function loadEquipped(owned: ReadonlySet<ItemId>): ItemId[] {
+  let raw: string | null = null;
+  try { raw = localStorage.getItem(LOADOUT_KEY); } catch { return []; }
+  if (raw === null) return [];
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); } catch { return []; }
+  if (!Array.isArray(parsed)) return [];
+  const out: ItemId[] = [];
+  for (const v of parsed) {
+    if (out.length >= ITEM_SLOTS) break;
+    if (typeof v !== 'string' || !isItemId(v) || !owned.has(v) || out.includes(v)) continue;
+    out.push(v);
+  }
+  return out;
+}
+
+/** Write the equipped pair. Never throws — private-mode Safari costs persistence, not the screen. */
+export function saveEquipped(ids: readonly ItemId[]): void {
+  try { localStorage.setItem(LOADOUT_KEY, JSON.stringify(ids.slice(0, ITEM_SLOTS))); } catch { /* private mode */ }
+}
+
+/**
+ * Is this string one of the ten?
+ *
+ * `ITEM_IDS` is `Object.keys(ITEMS)` in `economy/tuning.ts` and `economy.test.mjs` §14
+ * asserts it against the registry, so this is the registry's own membership test rather
+ * than a second list. An eleventh item is in it the day `rules.ts` declares one.
+ */
+function isItemId(v: string): v is ItemId {
+  return (ITEM_IDS as readonly string[]).includes(v);
+}
+
+/**
+ * What the player owns. `ownedItemSet` is `economy/state.ts`'s own function, never a
+ * re-read of the array — see the note on `EconomyState.items`: it is a SET, not an
+ * inventory, and the set is the only shape the picker may reason about.
+ */
+function ownedItems(ctx: ScreenContext): ReadonlySet<ItemId> {
+  const injected = window.__faOwnedItems;
+  // Truthiness, NOT `.length` — see the declaration above: `[]` is the own-nothing arm.
+  if (injected) return new Set(injected.filter(isItemId));
+  return ownedItemSet(ctx.profile.economy);
+}
+
+/**
+ * 🚨 **DOES A MATCH READ THIS LOADOUT? NO. AND THIS CONSTANT IS THE ONLY HONEST PLACE
+ * TO SAY SO.**
+ *
+ * The chain is `lobby → localStorage → matchScreen.ts:startGame → GameSessionOptions →
+ * match.ts:newMatch → FighterConfig.items → state.ts:createFighter → Fighter.item.equipped`.
+ * Everything from `FighterConfig.items` rightwards **exists and is tested** (`sim.ts`
+ * declares the field, `createFighter` validates it, `combat.ts` resolves all ten
+ * effects). The two missing hops are:
+ *
+ *   1. `GameSessionOptions` (`match.ts`) has no `items` field, and `newMatch` builds every
+ *      `FighterConfig` without one — including the duel path, which is what
+ *      `seatCountFor(MIN_FIGHTERS)` routes to and therefore the shipped default.
+ *   2. `matchScreen.ts` never calls `loadEquipped`.
+ *
+ * **Both files are outside this pass's owned set** (`CLAUDE.md` rule 9), and threading a
+ * new option through them is behavioural, so it is not eligible for the additive release
+ * valve. It is REPORTED to the orchestrator with the exact hunks, and `ul_seam.mjs` §W
+ * fails the moment either lands while this constant still says `false` — so the screen
+ * cannot go on apologising for a limitation that has been fixed.
+ */
+const LOADOUT_REACHES_MATCH = false;
+
+/**
+ * 🚨 **CAN THE PLAYER PRESS AN ACTIVE ITEM? NO — AND NOTHING ELSE ON THIS SCREEN MAY
+ * IMPLY OTHERWISE.**
+ *
+ * `state.ts:FighterInput.useItem` is READ in exactly one place (`sim.ts`, the human
+ * branch) and **WRITTEN NOWHERE IN `src/`** — not by `input.ts`, not by `touch.ts`, not
+ * by `hud.ts`. Verified by census, not by memory: `grep -rn useItem src/` returns two
+ * hits in `sim.ts` and two in `state.ts`, all of them the declaration or the read.
+ *
+ * Bots are unaffected: `ai.ts:stepAI` calls `combat.ts:attemptItem` directly. So today a
+ * bot can use all ten and the player can use the three that need no press — `tenderiser`
+ * and `blue_cheese` (passive) and `leftovers` (triggered).
+ *
+ * ⚠️ **THIS IS WHY NO LABEL ON THIS SCREEN SAYS "TAP TO USE".** `kindLabel()` prints
+ * `ItemKind` — *Active*, *Passive*, *Triggered* — which describes the ITEM. "Tap to use"
+ * would describe a BUTTON, and this project's most expensive recorded defect class is a
+ * UI sentence asserting something the model does not do.
+ */
+const PLAYER_CAN_PRESS_AN_ITEM = false;
+
+/**
+ * The one sentence under the slots, composed from the two facts above rather than typed.
+ *
+ * Ordered worst-first: if a match does not read the loadout at all, whether an item can
+ * be pressed is not the player's problem yet. Empty string when both are true, and
+ * `renderKit` hides the element on empty — so the note disappears by itself.
+ */
+function loadoutNote(): string {
+  if (!LOADOUT_REACHES_MATCH) {
+    return 'Your picks are saved and survive a reload. A match does not read them yet.';
+  }
+  if (!PLAYER_CAN_PRESS_AN_ITEM) {
+    return 'Passive items work in a match. There is no button for firing an active one yet.';
+  }
+  return '';
+}
+
+/** Where items come from. Asserted against the economy by `ul_seam.mjs` §S3, not remembered. */
+const ITEM_SOURCE_LINE = 'Items come from boxes and from the trophy road.';
+
+/** `ItemKind` as a player-facing word. Describes the ITEM, never a control — see above. */
+function kindLabel(kind: ItemDef['kind']): string {
+  return kind === 'passive' ? 'Passive' : kind === 'triggered' ? 'Triggered' : 'Active';
+}
+
+/**
+ * The second line of a picker row: how it is used, and the two gates on using it.
+ *
+ * Every part is read off `ITEMS`. The cooldown is printed from `cooldownMs`, so a re-tune
+ * in `rules.ts` moves this string; `minAlive` is printed ONLY where it exceeds the
+ * smallest match this product plays, which is `MIN_FIGHTERS` — otherwise nine rows would
+ * carry a "needs 2 fighters" clause that is true of every match ever played and therefore
+ * tells the player nothing.
+ */
+function itemMeta(def: ItemDef): string {
+  const parts = [kindLabel(def.kind)];
+  if (def.cooldownMs !== null) parts.push(`${+(def.cooldownMs / 1000).toFixed(1)} s cooldown`);
+  else if (def.kind === 'passive') parts.push('always on');
+  else parts.push('once a match');
+  if (def.minAlive > MIN_FIGHTERS) parts.push(`needs ${def.minAlive} fighters alive`);
+  return parts.join(' · ');
 }
 
 export function createLobbyScreen(ctx: ScreenContext): Screen {
@@ -310,6 +510,14 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
 
     <div class="lobby-body">
       <p class="lobby-note" data-el="note"></p>
+      <section class="fa-panel lobby-kit" aria-labelledby="lobby-kit-label">
+        <div class="lobby-kit-head">
+          <span class="fa-panel-title" id="lobby-kit-label">Your items</span>
+          <span class="lobby-kit-owned ds-num" data-el="kit-owned"></span>
+        </div>
+        <div class="lobby-kit-slots" data-el="kit-slots"></div>
+        <p class="lobby-kit-note" data-el="kit-note"></p>
+      </section>
       <div class="fa-panel fa-panel--flush lobby-seatswrap">
         <div class="fa-scroll lobby-seats" data-el="seats"></div>
       </div>
@@ -322,6 +530,31 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
       </div>
       <button class="fa-btn ds-btn ds-btn--primary lobby-start" type="button" data-el="start">${icon('play')} Start</button>
     </footer>
+
+    <!-- ── THE PICKER ────────────────────────────────────────────────────────
+         🚨 SINGLE QUOTES IN HERE, NEVER BACKTICKS. This comment is inside a TEMPLATE
+         LITERAL and a backtick TERMINATES it — the trap 'a015d1f' held the whole items
+         branch red on, with tsc parsing the rest of the file as something else. Writing
+         it in house style cost this pass one red compile too.
+
+         Inside the screen root rather than on <body>: 'dispose()' removes the root and
+         everything in it, and a sheet parented anywhere else is a leak the router cannot
+         see. 'hidden' while closed, which is what keeps its ten rows out of
+         'menu_accept''s control census (that battery filters on a NON-ZERO rect) — they
+         are measured instead by 'ul_accept.mjs', which opens it first. -->
+    <div class="lobby-sheet" data-el="sheet" hidden role="dialog" aria-modal="true"
+         aria-labelledby="lobby-sheet-title">
+      <div class="lobby-sheet-scrim" data-el="sheet-scrim"></div>
+      <div class="fa-panel lobby-sheet-card">
+        <header class="lobby-sheet-head">
+          <h2 class="fa-panel-title lobby-sheet-title" id="lobby-sheet-title">Choose an item</h2>
+          <button class="fa-iconbtn lobby-sheet-x" type="button" data-el="sheet-x"
+                  aria-label="Close the item picker">${icon('close')}</button>
+        </header>
+        <p class="lobby-sheet-sub" data-el="sheet-sub"></p>
+        <div class="fa-scroll lobby-sheet-list" data-el="sheet-list"></div>
+      </div>
+    </div>
   `;
 
   const q = <T extends HTMLElement>(sel: string): T => {
@@ -333,6 +566,12 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
   const seatsEl = q<HTMLDivElement>('seats');
   const optsEl = q<HTMLDivElement>('opts');
   const noteEl = q<HTMLParagraphElement>('note');
+  const slotsEl = q<HTMLDivElement>('kit-slots');
+  const kitNoteEl = q<HTMLParagraphElement>('kit-note');
+  const kitOwnedEl = q<HTMLSpanElement>('kit-owned');
+  const sheetEl = q<HTMLDivElement>('sheet');
+  const sheetListEl = q<HTMLDivElement>('sheet-list');
+  const sheetSubEl = q<HTMLParagraphElement>('sheet-sub');
 
   // ── The seat-count control ─────────────────────────────────────────────────
   //
@@ -422,6 +661,233 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
     hydratePortraits(seatsEl);
   }
 
+  // ── The loadout ────────────────────────────────────────────────────────────
+
+  /**
+   * What this player owns, read ONCE per mount.
+   *
+   * Same argument `openSeat` makes six lines above: two reads could disagree with each
+   * other inside one render pass, and the picker's "not owned" reason would then be
+   * describing a different set from the one the slot was filled out of. Nothing on this
+   * screen can grant an item, so there is nothing to invalidate.
+   */
+  const owned = ownedItems(ctx);
+
+  /**
+   * The equipped pair. Loaded through the filter, so a stale id for an item this player
+   * no longer owns is gone before it is ever rendered — and is written back on the next
+   * save rather than lingering in storage.
+   */
+  let equipped: ItemId[] = loadEquipped(owned);
+
+  /** Which slot the picker is filling, or `null` when it is closed. */
+  let pickingSlot: number | null = null;
+
+  /**
+   * The picker's order: **what you can equip first**, then the rest by rarity.
+   *
+   * Registry order would put `springform` — the one item a new player actually owns —
+   * second, behind a Legendary they cannot have. Owned-first is the only ordering where
+   * the top of the list is the part of it that does anything. Inside each group the sort
+   * is `RARITY_ORDER`, which is `tuning.ts`'s own weight ladder (`ITEMS.md` derives it
+   * from the box weights), so "closest to reachable" comes first among the locked rows.
+   * `ITEM_IDS`'s own order breaks ties, so the list is stable rather than
+   * implementation-defined.
+   */
+  function pickerOrder(): ItemId[] {
+    const rank = (id: ItemId): number => RARITY_ORDER.indexOf(ITEMS[id].rarity);
+    return [...ITEM_IDS].sort((a, b) => {
+      const oa = owned.has(a) ? 0 : 1;
+      const ob = owned.has(b) ? 0 : 1;
+      if (oa !== ob) return oa - ob;
+      const ra = rank(a) - rank(b);
+      if (ra !== 0) return ra;
+      return ITEM_IDS.indexOf(a) - ITEM_IDS.indexOf(b);
+    });
+  }
+
+  /**
+   * The rarity chip. `.fa-rarity` is the SHARED component, not a local copy.
+   *
+   * ⚠️ That is a contrast decision, not a tidiness one. `theme.ts` measured this badge at
+   * **16.52–16.54:1 on all six rarities** across two screens and three viewports
+   * (`tools/tmp/rarity_aa.mjs`) — cream fill, 1.6 px ink stroke, `paint-order: stroke
+   * fill` — precisely because ink on `RARITY_COLORS.Epic` alone is 3.69:1. A local chip
+   * that set `color: var(--ink)` over the same fills would look right and re-open a
+   * measured defect. Anything that draws a rarity uses this class.
+   */
+  function rarityChip(rarity: ItemDef['rarity'], cls: string): string {
+    return `<span class="fa-rarity ${cls}" style="background:${RARITY_COLORS[rarity]}">${rarity}</span>`;
+  }
+
+  /** One equip slot: filled, or the empty control that opens the picker. */
+  function slotMarkup(slot: number): string {
+    const id = equipped[slot];
+    const n = slot + 1;
+    if (id === undefined) {
+      const why = owned.size === 0
+        ? `Slot ${n}: empty. You do not own any items yet.`
+        : `Slot ${n}: empty. Choose an item.`;
+      return `
+        <button class="lobby-slot is-empty" type="button" data-el="slot" data-slot="${slot}"
+                title="${why}" aria-label="${why}">
+          <span class="lobby-slot-plus" aria-hidden="true">+</span>
+          <span class="lobby-slot-txt"><span class="lobby-slot-name">Add item</span></span>
+        </button>`;
+    }
+    const def = ITEMS[id];
+    // 🚨 THE SEAT COUNT IS PART OF THE ANSWER. `disposal` declares `minAlive: 3`, and
+    // `combat.ts:itemUsable` refuses it below that — so at the seat count selected two
+    // controls away it is an equipped item that can never fire. Saying so is the same
+    // rule §1 applies to the join button: the model's gate, on the screen, in words.
+    const dead = seats < def.minAlive;
+    const label = `Slot ${n}: ${def.name}, ${def.rarity}. ${def.blurb}`
+      + `${dead ? ` Needs ${def.minAlive} fighters; this match has ${seats}.` : ''} Change it.`;
+    return `
+      <button class="lobby-slot is-filled${dead ? ' is-dead' : ''}" type="button"
+              data-el="slot" data-slot="${slot}" title="${label}" aria-label="${label}">
+        <span class="lobby-slot-ic">${icon(id)}</span>
+        <span class="lobby-slot-txt">
+          <span class="lobby-slot-name">${def.name}</span>
+          ${rarityChip(def.rarity, 'lobby-slot-rar')}
+        </span>
+      </button>`;
+  }
+
+  function renderKit(): void {
+    slotsEl.innerHTML = Array.from({ length: ITEM_SLOTS }, (_, i) => slotMarkup(i)).join('');
+    // "1 of 10" — both numbers from the model. `ITEM_IDS.length` rather than a typed ten,
+    // so an eleventh item counts itself.
+    kitOwnedEl.textContent = `${owned.size} of ${ITEM_IDS.length} owned`;
+    // Owning nothing is a different sentence from the wiring caveat, and it is the one a
+    // player in that state needs: it says where items come from. It REPLACES the caveat
+    // rather than stacking with it — two apologies under one control is noise.
+    const note = owned.size === 0 ? ITEM_SOURCE_LINE : loadoutNote();
+    kitNoteEl.textContent = note;
+    kitNoteEl.hidden = note === '';
+    // A dead slot's warning cannot live on the slot chip (there is no room for a sentence
+    // at 360 px), so it lives here, where the note already is.
+    const dead = equipped.filter((id) => seats < ITEMS[id].minAlive);
+    if (dead.length > 0) {
+      kitNoteEl.textContent = dead
+        .map((id) => `${ITEMS[id].name} needs ${ITEMS[id].minAlive} fighters alive; this match has ${seats}.`)
+        .join(' ');
+      kitNoteEl.hidden = false;
+    }
+  }
+
+  /** One picker row. Owned rows are controls; the rest are `disabled` with the reason on both attributes. */
+  function itemRowMarkup(id: ItemId): string {
+    const def = ITEMS[id];
+    const have = owned.has(id);
+    const at = equipped.indexOf(id);
+    const state = !have ? 'Not owned yet' : at >= 0 ? `In slot ${at + 1}` : 'Equip';
+    // `shop.ts`'s precedent: the reason goes on `title` (pointer) AND `aria-label` (touch,
+    // where there is no hover and a tooltip is unreachable).
+    const reason = !have ? ' You do not own this item yet.' : '';
+    const label = `${def.name}, ${def.rarity}. ${def.blurb} ${itemMeta(def)}.${reason}`;
+    return `
+      <button class="lobby-item${have ? '' : ' is-locked'}${at >= 0 ? ' is-on' : ''}" type="button"
+              data-item="${id}"${have ? '' : ' disabled'}
+              title="${label}" aria-label="${label}">
+        <span class="lobby-item-ic">${icon(id)}</span>
+        <span class="lobby-item-body">
+          <span class="lobby-item-top">
+            <span class="lobby-item-name">${def.name}</span>
+            ${rarityChip(def.rarity, 'lobby-item-rar')}
+          </span>
+          <span class="lobby-item-blurb">${def.blurb}</span>
+          <span class="lobby-item-meta">${itemMeta(def)}</span>
+        </span>
+        <span class="lobby-item-state">
+          ${!have ? icon('lock') : at >= 0 ? icon('check') : ''}<span>${state}</span>
+        </span>
+      </button>`;
+  }
+
+  function renderSheet(): void {
+    if (pickingSlot === null) return;
+    const current = equipped[pickingSlot];
+    sheetSubEl.textContent = owned.size === 0
+      ? `You own none of these ${ITEM_IDS.length} yet. ${ITEM_SOURCE_LINE}`
+      : current === undefined
+        ? `Slot ${pickingSlot + 1} of ${ITEM_SLOTS}. Pick one of the ${owned.size} you own.`
+        : `Slot ${pickingSlot + 1} of ${ITEM_SLOTS} holds ${ITEMS[current].name}. Pick another, or take it out.`;
+    const rows = pickerOrder().map(itemRowMarkup).join('');
+    // ⚠️ The "take it out" control only exists when there is something to take out. A
+    // permanent Clear button on an empty slot is a control that does nothing — §1's class.
+    const clear = current === undefined ? '' : `
+      <button class="ds-btn lobby-item-clear" type="button" data-el="clear"
+              aria-label="Take ${ITEMS[current].name} out of slot ${pickingSlot + 1}">
+        ${icon('close')} Take out ${ITEMS[current].name}
+      </button>`;
+    sheetListEl.innerHTML = rows + clear;
+  }
+
+  function openPicker(slot: number): void {
+    pickingSlot = slot;
+    renderSheet();
+    sheetEl.hidden = false;
+    // Focus the dialog's own close control: a sheet that opens with focus still on the
+    // slot behind it is a keyboard trap in the wrong direction.
+    q<HTMLButtonElement>('sheet-x').focus();
+  }
+
+  function closePicker(): void {
+    const slot = pickingSlot;
+    pickingSlot = null;
+    sheetEl.hidden = true;
+    // Focus returns to the control that opened it — the slot may have been re-rendered,
+    // so it is re-queried rather than held.
+    const back = slotsEl.querySelector<HTMLButtonElement>(`[data-slot="${slot}"]`);
+    back?.focus();
+  }
+
+  /**
+   * Equip `id` into the open slot.
+   *
+   * ── 🚨 THE ARRAY IS DENSE AND FILLS LEFT TO RIGHT, AND THAT IS A PERSISTENCE
+   *      DECISION RATHER THAN A LAYOUT ONE ──────────────────────────────────
+   * Writing into slot 1 while slot 0 is empty would leave a HOLE, and a hole does not
+   * survive storage: `JSON.stringify([, 'springform'])` is `[null,"springform"]`,
+   * `loadEquipped` drops the `null`, and the item the player put in the right-hand slot
+   * comes back in the left-hand one. Rather than have the screen disagree with itself
+   * across a reload, the slot index is CLAMPED to the array's length on the way in — so
+   * filling the second slot first fills the first, visibly, immediately, and identically
+   * before and after a reload.
+   *
+   * ── ⚠️ AN ITEM ALREADY IN THE OTHER SLOT MOVES, IT DOES NOT DUPLICATE ─────
+   * `state.ts:validateLoadout` throws a `RangeError` on a duplicated loadout, from inside
+   * `createFighter`, from inside `createMatch`. `[springform, springform]` is therefore
+   * not a cosmetic bug; it is a match that refuses to start. Tapping an item that is
+   * already carried SWAPS the two slots, which is also what a player means by it.
+   */
+  function equip(id: ItemId): void {
+    if (pickingSlot === null || !owned.has(id)) return;
+    const slot = Math.min(pickingSlot, equipped.length);
+    const next = equipped.slice();
+    const at = next.indexOf(id);
+    if (at === slot) { closePicker(); return; }
+    const outgoing = next[slot];
+    if (slot < next.length) next[slot] = id; else next.push(id);
+    if (at >= 0) {
+      // It was already carried. Give its old slot whatever this one displaced, or drop
+      // that slot entirely if this one was empty — exactly one copy either way.
+      if (outgoing === undefined) next.splice(at, 1); else next[at] = outgoing;
+    }
+    equipped = next.slice(0, ITEM_SLOTS);
+    saveEquipped(equipped);
+    closePicker();
+    renderKit();
+  }
+
+  function unequip(slot: number): void {
+    equipped = equipped.filter((_, i) => i !== slot);
+    saveEquipped(equipped);
+    closePicker();
+    renderKit();
+  }
+
   function renderNote(): void {
     // Present iff there is no transport — the same expression the `disabled` attribute
     // reads. Asserted in BOTH directions by `lb_accept.mjs` via `window.__faOpenSeat`.
@@ -433,6 +899,9 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
     renderCount();
     renderSeats();
     renderNote();
+    // AFTER the seat count, because a slot's "needs N fighters alive" warning is a
+    // function of `seats` — changing the count with Disposal equipped must move the note.
+    renderKit();
   }
 
   // ── Wiring ─────────────────────────────────────────────────────────────────
@@ -444,6 +913,26 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
     if (opt) {
       const n = Number(opt.dataset.seats);
       if (Number.isInteger(n) && n !== seats) { seats = n; render(); }
+      return;
+    }
+    // ── The loadout. Ordered before the generic handlers because the sheet sits on top
+    //    of the screen and its own close controls must win.
+    const slot = node?.closest<HTMLElement>('[data-el="slot"]');
+    if (slot) { openPicker(Number(slot.dataset.slot)); return; }
+    if (node?.closest('[data-el="clear"]')) {
+      if (pickingSlot !== null) unequip(Math.min(pickingSlot, Math.max(0, equipped.length - 1)));
+      return;
+    }
+    if (node?.closest('[data-el="sheet-x"]') || node?.closest('[data-el="sheet-scrim"]')) {
+      closePicker();
+      return;
+    }
+    const row = node?.closest<HTMLElement>('.lobby-item');
+    if (row) {
+      // Unreachable for a locked row — a `<button disabled>` emits no `click` — and
+      // `equip` re-checks ownership anyway, because "the DOM said so" is not a model.
+      const id = row.dataset.item;
+      if (id !== undefined && isItemId(id)) equip(id);
       return;
     }
     const open = node?.closest<HTMLElement>('[data-el="open"]');
@@ -458,6 +947,15 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
     if (node?.closest('[data-el="back"]')) ctx.navigate({ name: 'home' });
   };
   root.addEventListener('click', onClick);
+
+  // Escape closes the picker. On the ROOT rather than on `document`: the shell mounts and
+  // unmounts screens, and a document-level listener that outlived `dispose()` would close
+  // a sheet that no longer exists — or worse, keep this closure alive holding the whole
+  // screen. `settings.ts` uses the same shape.
+  const onKey = (ev: KeyboardEvent): void => {
+    if (ev.key === 'Escape' && pickingSlot !== null) { ev.stopPropagation(); closePicker(); }
+  };
+  root.addEventListener('keydown', onKey);
 
   q<HTMLButtonElement>('start').addEventListener('click', () => {
     // 🚨 `seatCountFor`, NOT `seats`. At `MIN_FIGHTERS` it returns `undefined`, which is
@@ -476,6 +974,7 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
     root,
     dispose() {
       root.removeEventListener('click', onClick);
+      root.removeEventListener('keydown', onKey);
       root.remove();
     },
   };
@@ -535,6 +1034,7 @@ const CSS = `
   min-height: 0;
 }
 .fa-lobby .lobby-note,
+.fa-lobby .lobby-kit,
 .fa-lobby .lobby-seatswrap {
   width: min(100%, 880px);
   margin-inline: auto;
@@ -634,6 +1134,286 @@ const CSS = `
 
 .fa-lobby .lobby-seat-act { flex: 0 0 auto; }
 
+/* ══ THE LOADOUT ══════════════════════════════════════════════════════════════
+   🚨 EVERY SURFACE BELOW IS MEASURED AGAINST WCAG 2.1 SC 1.4.11's 3.0 FLOOR ON THE
+   RENDERED PIXELS, NOT REASONED ABOUT. 'tools/tmp/ul_accept.mjs' §C samples the real
+   PNG through 'qx_contrast.mjs:boundaryContrast' — the tool built after the match pause
+   chip shipped, working perfectly, at 1.026:1 against its own background. That is the
+   TWENTIETH instance of the rendering-and-invisible class in this project and the FOURTH
+   dark-on-dark; a control whose boundary is a 6%-alpha tint is exactly how the previous
+   three looked in source. Hence full ink borders here rather than tinted fills. */
+
+.fa-lobby .lobby-kit { flex: 0 0 auto; gap: 8px; }
+.fa-lobby .lobby-kit-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+/* The count is DATA, so it is quieter than the label and never quieter than AA:
+   0.66 ink on the cream panel measures ~6:1, against a 4.5 floor. */
+.fa-lobby .lobby-kit-owned {
+  font-family: 'Heebo', sans-serif;
+  font-size: var(--ds-t2);
+  font-weight: var(--ds-w-body);
+  color: rgba(26,18,36,0.66);
+  white-space: nowrap;
+}
+
+/* TWO COLUMNS AT EVERY WIDTH, because ITEM_SLOTS is two and a slot that wrapped to its
+   own row would read as a list rather than as a pair. 1fr each keeps them equal, so
+   "empty" and "filled" are the same size and the pair reads as two of one thing. */
+.fa-lobby .lobby-kit-slots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+/* The slot. Sized from CSS, never from its label — the same drift note the seat-count
+   control carries: text-driven widths move ~+-2 CSS px between runs on one tree, and
+   'menu_accept_portrait''s MIN_TAP - 0.5 slack is inside that. */
+.fa-lobby .lobby-slot {
+  appearance: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: clamp(var(--tap), 7vh, 60px);
+  min-width: 0;
+  padding: 4px 10px;
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-2);
+  box-shadow: var(--ds-e1);
+  text-align: left;
+  color: var(--ink);
+  --fa-ic-ink: var(--ink);
+}
+/* '--ds-lip' is the elevation ladder's colour, per component — 'theme.ts' factored it out
+   so a component picks a lip and keeps the six-rung shadow scale. Mustard takes the gold
+   lip; the empty slot takes the root default. */
+.fa-lobby .lobby-slot.is-filled {
+  background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
+  --ds-lip: var(--gold-shadow);
+}
+/* Empty is a DASHED ink outline on the cream panel, not a faint tint. The dash is the
+   whole tell that this is a place something goes; the ink keeps the boundary at ~18:1
+   instead of the 1.1:1 a 6%-alpha fill would have given it. */
+.fa-lobby .lobby-slot.is-empty {
+  background: var(--ds-paper-hi);
+  border-style: dashed;
+  justify-content: center;
+}
+.fa-lobby .lobby-slot:active { transform: translateY(2px); box-shadow: var(--ds-e0); }
+
+/* A typographic '+', not an icon: the registry has no plus glyph, and 'ui.ts' is another
+   pass's file. A '+' is a font character, so it is ours in a way an emoji is not — the
+   defect the whole icon set exists to fix. */
+.fa-lobby .lobby-slot-plus {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--ds-r-round);
+  background: var(--ink);
+  color: var(--cream);
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-black);
+  font-size: 15px;
+  line-height: 1;
+}
+.fa-lobby .lobby-slot-ic { flex: 0 0 auto; font-size: 28px; line-height: 1; }
+.fa-lobby .lobby-slot-txt {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fa-lobby .lobby-slot.is-empty .lobby-slot-txt { flex: 0 1 auto; }
+.fa-lobby .lobby-slot-name {
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-black);
+  font-size: var(--ds-t3);
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The shared badge, at the smallest size it is measured at. Height comes down; the
+   1.6px stroke and 'paint-order' in 'theme.ts' do NOT, because that pair is what makes
+   it 16.5:1 on all six fills instead of 3.69:1 on Epic. */
+.fa-lobby .lobby-slot-rar {
+  height: 17px;
+  padding: 0 7px;
+  font-size: 0.66rem;
+  align-self: flex-start;
+}
+/* An equipped item the selected seat count cannot use. Ketchup-INK, which 'theme.ts'
+   dropped in value for exactly this job: the fill red measures 4.17-2.56 as type on
+   these surfaces and this one measures 5.9 on cream. */
+.fa-lobby .lobby-slot.is-dead { box-shadow: var(--ds-e1), inset 4px 0 0 var(--ketchup-ink); }
+
+.fa-lobby .lobby-kit-note {
+  margin: 0;
+  font-family: 'Heebo', sans-serif;
+  font-size: var(--ds-t2);
+  line-height: 1.3;
+  color: rgba(26,18,36,0.78);
+}
+.fa-lobby .lobby-kit-note[hidden] { display: none; }
+
+/* ── The picker ──────────────────────────────────────────────────────────────
+   Absolutely positioned inside the screen root and inset by the safe area, so a notch
+   cannot eat the close control. 'theme.ts' declares '--fa-safe-*' from 'env()';
+   'menu_accept' overrides them on <html> to simulate a notched device, which is the only
+   way any of this is testable on a machine with no notched hardware ('APP.md' 5). */
+.fa-lobby .lobby-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding:
+    calc(var(--fa-safe-t) + var(--gap))
+    calc(var(--fa-safe-r) + var(--gutter))
+    calc(var(--fa-safe-b) + var(--gap))
+    calc(var(--fa-safe-l) + var(--gutter));
+}
+.fa-lobby .lobby-sheet[hidden] { display: none; }
+/* 0.72 ink over the warm backdrop: dark enough that the cream card is unambiguously in
+   front, light enough that the lobby is still visibly behind it rather than replaced. */
+.fa-lobby .lobby-sheet-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(26,18,36,0.72);
+}
+.fa-lobby .lobby-sheet-card {
+  position: relative;
+  width: min(100%, 560px);
+  max-height: 100%;
+  box-shadow: var(--ds-e5);
+}
+.fa-lobby .lobby-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+.fa-lobby .lobby-sheet-title { flex: 1 1 auto; min-width: 0; }
+.fa-lobby .lobby-sheet-x { flex: 0 0 auto; }
+.fa-lobby .lobby-sheet-sub {
+  margin: 0;
+  flex: 0 0 auto;
+  font-family: 'Heebo', sans-serif;
+  font-size: var(--ds-t2);
+  line-height: 1.3;
+  color: rgba(26,18,36,0.78);
+}
+.fa-lobby .lobby-sheet-list {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
+
+/* ── An item row ─────────────────────────────────────────────────────────────
+   A FULL INK BORDER, not a tinted tile. '.lobby-seat' above uses
+   'rgba(26,18,36,0.06)' and gets away with it because it is not a control; these are
+   buttons, and SC 1.4.11 asks for 3:1 on a control's own boundary. 0.06 ink on cream is
+   ~1.1:1 — within rounding of the 1.026:1 the pause chip shipped at. */
+.fa-lobby .lobby-item {
+  appearance: none;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--tap);
+  padding: 8px 10px;
+  text-align: left;
+  background: var(--ds-paper-hi);
+  border: var(--ds-stroke-1) solid var(--ink);
+  border-radius: var(--ds-r-2);
+  color: var(--ink);
+  --fa-ic-ink: var(--ink);
+}
+.fa-lobby .lobby-item:active { transform: translateY(2px); }
+/* Equipped. The product's "this is the live one" mustard, the same statement
+   '.lobby-opt.is-on' makes, so the two selected states on this screen agree. */
+.fa-lobby .lobby-item.is-on {
+  background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
+}
+/* Not owned. THREE tells, because one is a colour and a colour alone is not a state:
+   a dashed border, a lock glyph, and the words. 0.72 composites the whole row to ~7:1
+   against the panel, so the blurb — which is the informed-choice content this screen
+   exists to deliver — stays legible on a row you cannot press. */
+.fa-lobby .lobby-item.is-locked {
+  cursor: default;
+  opacity: 0.72;
+  border-style: dashed;
+  background: var(--ds-paper);
+}
+.fa-lobby .lobby-item.is-locked:active { transform: none; }
+
+.fa-lobby .lobby-item-ic { flex: 0 0 auto; font-size: 30px; line-height: 1; margin-top: 1px; }
+.fa-lobby .lobby-item-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fa-lobby .lobby-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.fa-lobby .lobby-item-name {
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-black);
+  font-size: var(--ds-t3);
+  line-height: 1.1;
+}
+.fa-lobby .lobby-item-rar { height: 18px; padding: 0 7px; font-size: 0.68rem; }
+/* WHAT IT DOES. 'ITEMS[id].blurb' verbatim — the registry's own player-facing line, so
+   this screen cannot describe an item differently from anything else that shows one. */
+.fa-lobby .lobby-item-blurb {
+  font-family: 'Heebo', sans-serif;
+  font-size: var(--ds-t2);
+  line-height: 1.3;
+  color: rgba(26,18,36,0.82);
+}
+.fa-lobby .lobby-item-meta {
+  font-family: 'Heebo', sans-serif;
+  font-size: var(--ds-t1);
+  line-height: 1.25;
+  color: rgba(26,18,36,0.66);
+}
+.fa-lobby .lobby-item-state {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 34%;
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t1);
+  line-height: 1.15;
+  letter-spacing: var(--ds-track);
+  text-transform: uppercase;
+  text-align: right;
+  color: rgba(26,18,36,0.78);
+}
+.fa-lobby .lobby-item.is-on .lobby-item-state { color: var(--ink); }
+.fa-lobby .lobby-item-clear { width: 100%; }
+
 /* ── The count row + the CTA ───────────────────────────────────────────────── */
 .fa-lobby .lobby-bottom {
   display: flex;
@@ -697,5 +1477,37 @@ const CSS = `
   .fa-lobby .lobby-bottom { flex-direction: column; align-items: stretch; }
   .fa-lobby .lobby-count-opts { justify-content: space-between; }
   .fa-lobby .lobby-start { width: 100%; }
+}
+
+/* ── THE LANDSCAPE PHONE, AND THIS BLOCK IS LAST ON PURPOSE ──────────────────
+   ⚠️ A MEDIA QUERY ADDS NO SPECIFICITY. 'theme.ts' records what that cost: an identical
+   selector written earlier in a file loses to one inside a later block, and a
+   '@media (max-height: 460px)' rule placed above a '(max-height: 560px)' one delivered
+   2.44px rows. This block re-declares '.lobby-kit' selectors that appear above it, so it
+   must stay at the FOOT of this stylesheet.
+
+   844x390 is 'DECISIONS §14''s shape and it is the tight one: ~240px of body band under
+   the header and above the footer, which the seat panel alone can fill at six seats.
+   The saving here is the kit's own stacking — label above count on the left, both slots
+   on the right, note across the bottom — which is ~24px against putting the head on its
+   own row, on the one viewport that has no rows to spare. */
+@media (max-height: 460px) {
+  .fa-lobby .lobby-kit {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    column-gap: 12px;
+    row-gap: 6px;
+    padding: 8px 10px;
+  }
+  .fa-lobby .lobby-kit-head { flex-direction: column; align-items: flex-start; gap: 1px; }
+  .fa-lobby .lobby-kit-note { grid-column: 1 / -1; }
+  /* The slot stays over the 44px floor — clamped from the SHORT axis, which is the one
+     that runs out here — and its icon comes down so the name keeps its line. */
+  .fa-lobby .lobby-slot { min-height: var(--tap); }
+  .fa-lobby .lobby-slot-ic { font-size: 24px; }
+  /* The picker is the whole viewport at this height: a centred card with 390px of room
+     would be a 200px scroller. Stretched, it holds four rows instead of two. */
+  .fa-lobby .lobby-sheet-card { width: 100%; max-width: 720px; }
 }
 `;
