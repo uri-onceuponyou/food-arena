@@ -19,8 +19,8 @@
  * `sim.test.mjs` import these modules directly with zero build step.
  */
 
-import type { CharacterId, StatusEffect, Weapon } from './rules.ts';
-import { CHARACTERS, LEVEL_MIN, clampLevel, levelDamageMultiplier } from './rules.ts';
+import type { CharacterId, ItemId, StatusEffect, Weapon } from './rules.ts';
+import { CHARACTERS, ITEM_SLOTS, ITEM_TUNING, ITEMS, LEVEL_MIN, clampLevel, levelDamageMultiplier } from './rules.ts';
 import type { ArenaDefinition } from '../arena/types.ts';
 // TYPE ONLY, and the direction matters: `movement.ts` imports nothing from this file, so
 // there is no cycle to reason about at runtime or at build time. `ConcealBox` is declared
@@ -214,6 +214,156 @@ export interface ActiveCast {
   /** Absolute `state.elapsed` at or after which the fighter loop resolves it. */
   resolvesAt: number;
 }
+
+/**
+ * ── AN ITEM WIND-UP. THE SAME SHAPE AS `ActiveCast`, AND A SEPARATE FIELD. ───
+ *
+ * `ITEMS.shiitake` is *"long cooldown/windup"* (Uri) and `docs/ITEMS.md` says to build it
+ * on the cast/telegraph system rather than a bespoke timer. It is a SECOND record rather
+ * than a widened `ActiveCast`, and that is a measurement rather than tidiness:
+ *
+ * 🚨 **`ai.ts:castThreat`'s caller does `CHARACTERS[other.characterId].weapons[cast.weaponIndex]`.**
+ * Putting an EQUIP-SLOT index into `ActiveCast.weaponIndex` would silently index the
+ * caster's weapon list with 0 or 1 and hand the AI a real, wrong weapon to model a threat
+ * from — a confident wrong answer in a file this pass does not own, produced by a field
+ * whose name would have become a lie. Renaming `weaponIndex` instead is worse again: a
+ * field that DISAPPEARS is a hard failure in the bit-identity differ, by design (see
+ * `FighterRole`), and `ai.ts` is out of set.
+ *
+ * What the separate record still shares, by calling the same predicates rather than by
+ * copying them: the movement root and the frozen aim (`movementLocked`, `isCasting`), and
+ * cancellation on the two terminators that kill a weapon cast (an applied stun, and death).
+ *
+ * ⚠️ **A REAL, OWN, ENUMERABLE DATA PROPERTY INITIALISED TO `null`** — never `undefined`,
+ * never a getter — for the reason `cast` carries above it: the bit-identity differs walk
+ * `MatchState` with `Object.keys`/spread and an absent-until-first-use key is SILENTLY
+ * DROPPED from the comparison.
+ */
+export interface ItemCast {
+  /** Index into `ItemState.equipped` — the SAME key `ItemState.lastUsed[]` uses. */
+  slot: number;
+  /**
+   * Which item is winding up. Stored beside the slot rather than derived from it because a
+   * cancel has to NAME the item in its event, and re-reading `equipped[slot]` at the cancel
+   * would be a second answer to "what is this" that could disagree with the first.
+   */
+  itemId: ItemId;
+  /** Absolute `state.elapsed` at the press. The telegraph's clock starts here. */
+  startedAt: number;
+  /** Absolute `state.elapsed` at or after which the fighter loop resolves it. */
+  resolvesAt: number;
+}
+
+/**
+ * ── EVERYTHING A LOADOUT DOES TO ONE FIGHTER, IN ONE OBJECT ──────────────────
+ *
+ * `rules.ts:ITEMS` is the registry; this is the per-match state that registry needs. Uri:
+ * *"up to 2 items per player, he sets it up on the loby, which ones he wants to use out of
+ * what he has"*.
+ *
+ * 🚨 **EVERY FIELD HERE IS A REAL, OWN, ENUMERABLE DATA PROPERTY SEEDED IN
+ * `createFighter`** — not optional, not a getter, not undefined-until-first-use. That rule
+ * is stated four times already on this file's other per-fighter records (`cast`, `push`,
+ * the DR counters) and it is the same rule for the same reason: `conceal_lab --bitid` and
+ * `nw_delta` walk the state with `Object.keys`/spread, so a field that only appears once it
+ * has been written is a field a divergence can hide in while the differ prints PASS.
+ *
+ * ⚠️ **AND THE WHOLE OBJECT IS SEEDED FOR A FIGHTER WITH NO ITEMS.** `equipped` is `[]`,
+ * every deadline is `-Infinity`, every counter is its identity. That is what makes a match
+ * with an empty loadout BIT-IDENTICAL in behaviour to the sim before items existed —
+ * proven by `tools/tmp/is_bitid.mjs` against a detached worktree of the parent commit
+ * rather than asserted here.
+ *
+ * ── ABSOLUTE DEADLINES, NEVER PER-TICK BOOLEANS ─────────────────────────────
+ *
+ * Exactly the idiom `StatusTimers` uses, and for the reason `Fighter.revealedUntil` records
+ * at length: a recomputed flag is written at ONE point in the tick and its readers sit
+ * either side of that point, so it is fresh for some of them and stale for others in an
+ * order nobody can see from the call sites. A timestamp compared against `state.elapsed`
+ * has no such window.
+ */
+export interface ItemState {
+  /**
+   * The ids this fighter took into the match, in LOBBY SLOT ORDER. At most `ITEM_SLOTS`,
+   * no duplicates — `createFighter` refuses both rather than silently truncating, because a
+   * loadout screen that over-filled would otherwise ship a third item that simply never
+   * fired.
+   *
+   * ⚠️ AN ARRAY AND NOT A `Set`, for the reason `MatchState.fighters` is an array: iteration
+   * order must be a pure function of the caller's arguments. A `Set` traverses in insertion
+   * order, which is the same thing today and stops being the same thing the first time
+   * anything rebuilds one.
+   */
+  equipped: ItemId[];
+  /** Per-SLOT last-activation timestamp, index-aligned with `equipped`. `-Infinity` = never. */
+  lastUsed: number[];
+  /** Warm Milk. Movement AND actions locked until this. See `movementLocked` / `actionsLocked`. */
+  sleepUntil: number;
+  /** Pompa. Weapons refused until this; movement and items unaffected — Uri: *"clogs their weapons"*. */
+  clogUntil: number;
+  /** Liquorice Rope. Movement locked until this; the victim can still act. */
+  rootUntil: number;
+  /**
+   * Squid Ink. **A SIM-SIDE FLAG AND NOTHING ELSE.** The blots are screen-space and belong
+   * to the VFX layer, which reads this deadline off the state exactly as `vfx.ts` already
+   * reads `status.stunnedUntil` to decide whether to draw a stun ring. Nothing in the sim
+   * branches on it: impairing a HUMAN'S VIEW cannot be a sim input or the sim would stop
+   * being a pure function of the inputs, and a bot's sight is `movement.ts:isVisibleFrom`.
+   */
+  blotUntil: number;
+  /** Shiitake Shield. Attackers take back what they deal until this. */
+  shieldUntil: number;
+  /**
+   * TENDERISER, AND IT IS THE **ATTACKER'S** STREAK, NOT THE VICTIM'S.
+   *
+   * Uri: *"each consecutive attack on the same character increases the damage by 1.3"* —
+   * "consecutive" is a statement about the sequence of attacks THIS fighter makes, so the
+   * cell belongs to the attacker and names the target. Slot of the fighter this streak is
+   * running against, or `NO_FIGHTER` when there is none.
+   */
+  streakTarget: FighterId;
+  /** How many consecutive hits have already landed on `streakTarget`. Clamped at `maxStacks`. */
+  streakCount: number;
+  /** `state.elapsed` of the last hit that fed the streak. `-Infinity` = never. */
+  streakAt: number;
+  /**
+   * BLUE CHEESE, AND IT IS THE **VICTIM'S** ACCUMULATOR, INDEXED BY THE OWNER'S SLOT.
+   *
+   * One cloud can be standing on several fighters at once and several clouds can be
+   * standing on one, so "how long have I been in it" is a property of the PAIR. Indexed by
+   * owner slot for the same reason `hazardTimers` is indexed by hazard: `state.fighters` is
+   * fixed for the life of a match, so the index is stable and iteration order is not
+   * involved.
+   *
+   * ⚠️ Sparse and grown lazily, exactly like `hazardTimers` — a fighter only ever gets a
+   * cell for an owner whose cloud has actually touched it — and read through `?? 0`.
+   */
+  auraTimers: number[];
+  /**
+   * LEFTOVERS: the slot of whoever last knocked this fighter out, or `NO_FIGHTER`.
+   *
+   * 🚨 **THE DEATH ORDER LIVES IN THE EVENT STREAM, NOT IN THE FINAL STATE** — every loser
+   * ends bit-identical, and an orchestrator claim to the contrary was falsified once
+   * already. So the killer is recorded at the instant of the kill, by the one function that
+   * knows it (`combat.ts:applyDamage`, which holds the `DamageSource`), and never
+   * reconstructed afterwards from a state that no longer contains the answer.
+   */
+  killerId: FighterId;
+  /** Uri: *"Works once per match."* Seeded to `ITEM_TUNING.leftovers.usesPerMatch` iff equipped. */
+  revivesLeft: number;
+}
+
+/**
+ * "NO FIGHTER" for the two `FighterId`-valued cells in `ItemState`.
+ *
+ * ⚠️ A NUMBER AND NOT `null`, because both cells are compared against a live `FighterId` on
+ * a hot path and `-1` can never collide with one: `state.fighters[i].id === i` is an
+ * invariant and array indices are non-negative. `null` would have made every read a
+ * two-branch test for a value that is never reachable, and `-1` indexes `state.fighters` as
+ * `undefined` rather than as somebody else — which is the failure mode a plausible sentinel
+ * like `0` would have had, and `0` is the human seat.
+ */
+export const NO_FIGHTER = -1;
 
 export interface Fighter {
   /**
@@ -449,6 +599,20 @@ export interface Fighter {
    * decision input.
    */
   push: PushState;
+  /**
+   * THIS FIGHTER'S LOADOUT AND EVERYTHING IT HAS DONE OR HAD DONE TO IT. See `ItemState`.
+   *
+   * ⚠️ Always present, always fully seeded, `equipped: []` for a fighter that brought
+   * nothing — which is every fighter every existing caller builds, and is what makes the
+   * feature inert rather than merely small.
+   */
+  item: ItemState;
+  /**
+   * The ITEM this fighter has pressed and not yet resolved, or `null`. See `ItemCast`, and
+   * note it is deliberately NOT the same field as `cast`: `ai.ts` indexes a weapon list
+   * with `cast.weaponIndex`.
+   */
+  itemCast: ItemCast | null;
 }
 
 /**
@@ -462,6 +626,24 @@ export interface PushState {
   x: number;
   y: number;
   remaining: number;
+  /**
+   * WORLD UNITS PER MILLISECOND THIS DISPLACEMENT IS SPENT AT, or **`0` for "no rate of its
+   * own"** — which `movement.ts:stepPush` reads as `PLAYER_SPEED`, the rate it hard-coded
+   * before this field existed.
+   *
+   * ⚠️ **THE SENTINEL IS `0`, NOT `PLAYER_SPEED`, AND THAT IS WHAT KEEPS THE STATE
+   * BIT-IDENTICAL.** Every weapon-driven displacement writes `0` here, so the whole shipped
+   * roster produces a state digest indistinguishable from the one before the field existed
+   * except for the field itself — which the differs report as an ADDED key, the one kind of
+   * schema change they treat as declared rather than as a regression (see `FighterRole`).
+   * Seeding it with `PLAYER_SPEED` would have written a live number into every fighter of
+   * every match and made "nothing is in flight" two different states.
+   *
+   * Written only by `movement.ts:displaceFighter` and `placeFighterAt`, zeroed with `x`,
+   * `y` and `remaining` the moment the impulse is spent, for the reason those three are:
+   * two behaviourally identical states must also be BIT-identical.
+   */
+  speed: number;
 }
 
 /**
@@ -487,12 +669,52 @@ export interface FighterSpec {
   hitRadius: number;
   facing: Vec2;
   level?: number;
+  /**
+   * The loadout this fighter takes into the match — up to `ITEM_SLOTS` ids, in lobby slot
+   * order. Optional and defaulting to NOTHING, on the same precedent `level` sets: a caller
+   * that says nothing gets the sim that existed before this field, bit for bit.
+   */
+  items?: readonly ItemId[];
+}
+
+/**
+ * VALIDATE A LOADOUT, ONCE, WHERE A FIGHTER IS BUILT.
+ *
+ * 🚨 **IT THROWS RATHER THAN TRUNCATING, AND THAT IS THE WHOLE POINT.** Silently dropping a
+ * third item would ship a loadout screen whose third pick simply never fires — a promise on
+ * screen the game does not keep, which is this project's named failure mode ("it looked
+ * like it worked"). Silently de-duplicating is the same defect wearing a different hat: two
+ * copies of Blue Cheese would occupy both slots and behave as one, so the player has paid a
+ * slot for nothing and nothing says so.
+ *
+ * ⚠️ The unknown-id check is not decoration either. `ItemId` is a union `tsc` enforces for
+ * the 2 typed `createMatch` call sites in this repo and CANNOT enforce for the ~72 `.mjs`
+ * instruments — the same measurement that decided `createMatch`'s compat overload — so a
+ * typo in a tool would otherwise equip a ghost that never fires and quietly change nothing.
+ */
+function validateLoadout(items: readonly ItemId[], id: FighterId): ItemId[] {
+  if (items.length > ITEM_SLOTS) {
+    throw new RangeError(
+      `createFighter: slot ${id} was handed ${items.length} items and the game has ${ITEM_SLOTS} equip slots`
+      + ' (rules.ts:ITEM_SLOTS — Uri: "up to 2 items per player")',
+    );
+  }
+  for (const it of items) {
+    if (!(it in ITEMS)) {
+      throw new RangeError(`createFighter: slot ${id} was handed an unknown item id "${it}" (see rules.ts:ITEMS)`);
+    }
+  }
+  if (new Set(items).size !== items.length) {
+    throw new RangeError(`createFighter: slot ${id} equipped a duplicate item [${items.join(', ')}]`);
+  }
+  return items.slice();
 }
 
 export function createFighter(spec: FighterSpec): Fighter {
   const { id, controller, characterId, spawn, maxHp, size, hitRadius, facing: initialFacing } = spec;
   const weaponCount = CHARACTERS[characterId].weapons.length;
   const lvl = clampLevel(spec.level ?? LEVEL_MIN);
+  const equipped = validateLoadout(spec.items ?? [], id);
   return {
     id,
     controller,
@@ -533,8 +755,46 @@ export function createFighter(spec: FighterSpec): Fighter {
     // Seeded here and only here — see `Fighter.push`. A fighter that has never been shoved
     // holds `{0,0,0}`, which is the identity for `stepPush` and is what makes a roster with
     // no authored displacement bit-identical to the sim before this field existed.
-    push: { x: 0, y: 0, remaining: 0 },
+    push: { x: 0, y: 0, remaining: 0, speed: 0 },
+    // ── THE LOADOUT, SEEDED WHOLE, EVEN WHEN IT IS EMPTY — see `ItemState` ───
+    //
+    // Every field is written here and nowhere else, exactly as `push` and `cast` are, so
+    // there is no state a fighter can reach in which one of these keys does not exist. A
+    // fighter with `equipped: []` holds the identity for every rule below: no deadline is
+    // ever in the future, no streak has a target, no cloud has a timer and no resurrection
+    // is owed.
+    item: {
+      equipped,
+      lastUsed: new Array(equipped.length).fill(-Infinity),
+      sleepUntil: -Infinity,
+      clogUntil: -Infinity,
+      rootUntil: -Infinity,
+      blotUntil: -Infinity,
+      shieldUntil: -Infinity,
+      streakTarget: NO_FIGHTER,
+      streakCount: 0,
+      streakAt: -Infinity,
+      auraTimers: [],
+      killerId: NO_FIGHTER,
+      // Uri: *"Works once per match."* Zero for everyone who did not bring it, which is what
+      // makes `revivesLeft > 0` the whole of the "may this fire" test — the equip check and
+      // the once-per-match check are ONE comparison rather than two that can disagree.
+      revivesLeft: equipped.includes('leftovers') ? ITEM_TUNING.leftovers.usesPerMatch : 0,
+    },
+    itemCast: null,
   };
+}
+
+/**
+ * Is `id` in this fighter's two slots? The ONE statement of "did they bring it".
+ *
+ * Trivial by design, exactly as `isCasting` is: the value is having one place that asks.
+ * Every rule below — the streak multiplier, the aura, the shield, the resurrection — is
+ * gated on this, and a `.includes` written at each site is how a rule stated once ends up
+ * implemented five times, which is this codebase's most expensive recorded defect class.
+ */
+export function hasItem(f: Fighter, id: ItemId): boolean {
+  return f.item.equipped.includes(id);
 }
 
 /**
@@ -572,7 +832,72 @@ export function isCasting(f: Fighter): boolean {
  * attack — is stated separately, by `isCasting`, at the sites that own those rules.
  */
 export function movementLocked(f: Fighter, elapsed: number): boolean {
-  return elapsed < f.status.stunnedUntil || f.cast !== null;
+  return elapsed < f.status.stunnedUntil
+    || f.cast !== null
+    // An ITEM wind-up roots exactly as a weapon wind-up does — see `ItemCast`. It is a
+    // second term rather than a second predicate for the reason this whole function
+    // exists: `sim.ts:moveFighter`, `ai.ts:stepAI` and `movement.ts:stepPush` all ask
+    // "may this fighter move", and a lock added to one of the three is the sixth
+    // instance of the defect class named above.
+    || f.itemCast !== null
+    // Uri: *"put someone to sleep"* / *"tie an opponent"*. Both deny MOVEMENT and they
+    // are not the same state — `actionsLocked` below is what separates them, and it is
+    // stated there rather than here so this predicate keeps meaning exactly one thing.
+    || elapsed < f.item.sleepUntil
+    || elapsed < f.item.rootUntil;
+}
+
+/**
+ * ── CAN THIS FIGHTER ACT AT ALL? SLEEP, AND ONLY SLEEP. ──────────────────────
+ *
+ * 🚨 **A SEPARATE PREDICATE FROM `movementLocked` BECAUSE THE TWO ARE NOT THE SAME
+ * QUESTION, AND THIS FILE ALREADY PAID FOR ANSWERING THEM WITH ONE.** `movementLocked`'s
+ * own header records the rule: *"this predicate must never grow into 'the fighter's turn
+ * does not happen': that reading is the recorded bug"* — the stun that silenced the AI's
+ * shooting while the stunned player fired 100% of its shots. So the wider lock gets its
+ * own name and its own call sites (`combat.ts:attemptAttack` and `combat.ts:attemptItem`),
+ * which are shared by the human and the AI alike, and neither side can play by a different
+ * rule.
+ *
+ * ⚠️ **ROOT IS NOT HERE, DELIBERATELY, AND `ITEMS.liquorice.look` IS WHERE THAT PROMISE IS
+ * MADE:** *"It must read as ROOTED rather than STUNNED — the victim can still act, they
+ * just cannot move, and those are different states."* A tied fighter keeps shooting.
+ */
+export function actionsLocked(f: Fighter, elapsed: number): boolean {
+  return elapsed < f.item.sleepUntil;
+}
+
+/**
+ * ── CAN THIS FIGHTER FIRE A WEAPON? ─────────────────────────────────────────
+ *
+ * Uri: *"pompa — clogs their weapons for 5 secons"*. **WEAPONS, and nothing else** — a
+ * clogged fighter still walks, still presses its other item, still finishes a wind-up it
+ * had already opened. That is the narrowest reading of his sentence and it is the one that
+ * makes Pompa a distinct item rather than a second stun.
+ *
+ * Sleep is included because a sleeping fighter does nothing at all; stating it as
+ * `actionsLocked(...) ||` rather than as a second deadline comparison is what stops the two
+ * from drifting apart the day sleep grows a second effect.
+ */
+export function weaponsLocked(f: Fighter, elapsed: number): boolean {
+  return actionsLocked(f, elapsed) || elapsed < f.item.clogUntil;
+}
+
+/**
+ * HOW MANY FIGHTERS ARE STILL UP. The quantity `ItemDef.minAlive` is compared against, and
+ * the one `lastFighterStanding` answers a yes/no question about.
+ *
+ * ⚠️ **A COUNT AND NOT `lastFighterStanding(state) === null`.** Uri gated one item on
+ * *"only two players left"* and `ITEM_TUNING.leftovers` on *"the killer's death must leave
+ * at least 2 alive"* — those are three different thresholds (3, 2, and "more than one"),
+ * and expressing them through a boolean that only knows about one of them is how a declared
+ * rule becomes an inferred one. `alive && hp > 0` for the reason `isLivingOpponentOf` gives:
+ * instruments pin `hp` directly and the conjunction is the one that cannot be surprised.
+ */
+export function livingFighterCount(state: MatchState): number {
+  let n = 0;
+  for (const f of state.fighters) if (f.alive && f.hp > 0) n++;
+  return n;
 }
 
 /**
@@ -1023,11 +1348,30 @@ export function isLivingOpponentOf(candidate: Fighter, fighter: Fighter): boolea
   return candidate !== fighter && candidate.alive && candidate.hp > 0;
 }
 
-export function nearestLivingOpponent(state: MatchState, fighter: Fighter): Fighter | null {
+/**
+ * ⚠️ **`except` IS AN OPTIONAL THIRD EXCLUSION AND IT IS NOT A SECOND TARGET RULE.**
+ *
+ * `ITEMS.disposal` — Uri: *"Black hole — throws him nearby a DIFFERENT enemy"* — has to
+ * name a third fighter that is neither the caster nor the victim. That is this same rule
+ * asked from the victim's position with one more body taken off the board, so it is one
+ * more clause in the ONE implementation rather than a `disposalDestination()` next door
+ * with its own tie-break, its own `alive` test and its own chance of forgetting one. The
+ * alternative is exactly the shape `isLivingOpponentOf` was extracted to prevent.
+ *
+ * Omitted (`undefined`) it is bit-for-bit the two-argument function every existing caller
+ * has: `other !== undefined` is true for every fighter, so the added test can never reject
+ * one. §28(a) still checks the whole thing against `opponentOf` on a live two-fighter match.
+ */
+export function nearestLivingOpponent(
+  state: MatchState,
+  fighter: Fighter,
+  except?: Fighter,
+): Fighter | null {
   let best: Fighter | null = null;
   let bestDist = Infinity;
   for (const other of state.fighters) {
     if (!isLivingOpponentOf(other, fighter)) continue;
+    if (other === except) continue;
     const d = Math.hypot(other.x - fighter.x, other.y - fighter.y);
     if (d < bestDist) {
       bestDist = d;
@@ -1105,6 +1449,27 @@ export interface MatchInput {
    * interpretation of an original that only ever fired on a discrete click event).
    */
   attack: boolean;
+  /**
+   * ONE ITEM ACTIVATION THIS TICK: the EQUIP SLOT to press, or `null`/absent for none.
+   *
+   * ⚠️ **AN OPTIONAL FIELD RATHER THAN A `useItem: boolean` BESIDE `selectedItem: number`,
+   * AND NEITHER HALF OF THAT IS AN ACCIDENT.** `attack` + `selectedWeapon` is two fields
+   * because a weapon slot is a persistent SELECTION the player scrolls through and the HUD
+   * draws; an item is two buttons on a phone, so the press names its own slot and there is
+   * no selection to hold. One field also means there is no state in which a press and a
+   * selection can disagree.
+   *
+   * ⚠️ **OPTIONAL, SO EVERY ONE OF THE 148 `stepMatch` CALL SITES IS UNCHANGED** — `tsc`
+   * sees 4 of them (`state.ts:MatchInputs` records the measurement). `NEUTRAL_INPUT` does
+   * not carry the key at all, which is the same statement as `null`, and both are read
+   * through `?? null` at the single site that consumes it.
+   *
+   * ⚠️ It is INDEXED INTO `Fighter.item.equipped`, not an `ItemId`. A press names a button,
+   * and which item is on that button is the loadout's business — passing an id would let a
+   * caller fire an item the fighter never equipped, which is a rule the sim would then have
+   * to state a second time.
+   */
+  useItem?: number | null;
 }
 
 /**
@@ -1162,8 +1527,44 @@ export type MatchInputs = MatchInput | readonly (MatchInput | null | undefined)[
  * and `applyDamage` no longer derives it either.
  */
 export type DamageSource =
-  /** `attackerId` is the slot that fired it. A weapon hit ALWAYS has an attacker. */
-  | { kind: 'weapon'; weaponKey: string; weaponName: string; attackerId: FighterId }
+  /**
+   * `attackerId` is the slot that fired it. A weapon hit ALWAYS has an attacker.
+   *
+   * ── 🚨 `itemId` — AND WHY A LOADOUT ITEM IS NOT A FIFTH `kind` ─────────────
+   *
+   * Blue Cheese's cloud and Shiitake's reflection are damage one fighter deliberately does
+   * to another with something they brought, so they arrive on THIS member with `itemId`
+   * set. **The first implementation added a fifth `kind: 'item'` and it broke `tsc` in
+   * `src/audio/director.ts` — measured, not predicted.** That file narrows the union by
+   * ELIMINATION (`hazard`, then `fog`, then `trail`, then "the rest is a weapon") and hands
+   * the residual to `roster.ts:weaponAttackerOf`, whose parameter is
+   * `Extract<DamageSource, { kind: 'weapon' }>`. A new member therefore does not extend
+   * that file's switch — it invalidates the assumption underneath it, in a file this pass
+   * does not own and may not edit. `match.ts:colorForDamageSource` survives only because it
+   * happens to carry a `default:`.
+   *
+   * **An OPTIONAL PROPERTY on an existing member breaks no narrowing anywhere**, which is
+   * what makes this shape landable while four out-of-set consumers stay untouched — and it
+   * is the same measurement (`tsc` cannot see the consumers that matter) that decided
+   * `createMatch`'s compat overload and `stepMatch`'s widened input.
+   *
+   * It is also an honest reading rather than a workaround: this member already means "a
+   * fighter deliberately hurt you with something they brought", and `itemId` says which of
+   * the two kinds of thing it was. `weaponKey` carries the ITEM ID for such a hit and
+   * `weaponName` its display name, so the four consumers that look a `Weapon` up by key
+   * MISS and fall back — a path every one of them already has, because `sim.test.mjs`
+   * fixtures have always spammed bare `{ kind: 'weapon', weaponKey: 'T' }`. §42 asserts no
+   * item id can ever collide with a real weapon key rather than trusting the casing.
+   *
+   * ⚠️ **AND THE SIM READS `itemId`, NOT THE KEY, AT THE THREE PLACES IT MATTERS:** item
+   * damage is NOT multiplied by the owner's `damageMul` (`ITEM_TUNING.shiitake.reflect` is
+   * exactly 1.0 — *"damage on EVERY damage they do"* — and a level-15 mirror returning
+   * 1.70x is not that number; `blue_cheese.dps` is the roster's floor unit, not a rung on
+   * the character ladder), it does NOT feed a Tenderiser streak, and it does NOT reflect —
+   * which is what makes the mirror TERMINATE at one bounce instead of ringing forever
+   * between two shielded fighters.
+   */
+  | { kind: 'weapon'; weaponKey: string; weaponName: string; attackerId: FighterId; itemId?: ItemId }
   /** A Sticky Trail mark outlives the tick that dropped it, so it carries its own owner. */
   | { kind: 'trail'; ownerId: FighterId; ownerRole: FighterRole }
   | { kind: 'hazard' }
@@ -1210,7 +1611,17 @@ export type GameEvent =
    * for why clearing it in `applyDamage`'s victor block AND in `resolveTimeout` would be
    * two statements of one rule.
    */
-  | { type: 'cast-cancelled'; fighterRole: FighterRole; fighterId: FighterId; weaponKey: string; reason: 'stun' | 'death' }
+  /**
+   * ⚠️ `reason` GAINED `'sleep'` WITH THE LOADOUT ITEMS. `ITEMS.warm_milk` denies a fighter
+   * its whole turn, so a wind-up it had already opened must die exactly as a stun kills one
+   * — and calling that `'stun'` would have been a lie in the one field whose job is to say
+   * which terminator fired. Additive: `combat.ts` is the only emitter and nothing in `src/`
+   * consumes this event yet, so the widening reaches no consumer today (`vfx.ts`'s
+   * `cancelCastTelegraph` takes its own separate `'stun' | 'death' | 'resolved'` and is
+   * called from `match.ts`, which does not route this event at all — reported, not fixed
+   * here: a cast telegraph that is never cancelled outlives the cast it draws).
+   */
+  | { type: 'cast-cancelled'; fighterRole: FighterRole; fighterId: FighterId; weaponKey: string; reason: 'stun' | 'death' | 'sleep' }
   | {
       type: 'projectile-spawned';
       id: number;
@@ -1298,4 +1709,76 @@ export type GameEvent =
    * member of this union: the sim states what happened, the presentation layers decide what
    * that looks like and what it sounds like.
    */
-  | { type: 'concealment-broken'; ownerRole: FighterRole; ownerId: FighterId; x: number; y: number; w: number; h: number; kind?: string };
+  | { type: 'concealment-broken'; ownerRole: FighterRole; ownerId: FighterId; x: number; y: number; w: number; h: number; kind?: string }
+  /* ── LOADOUT ITEMS ─────────────────────────────────────────────────────────
+   *
+   * Four members, and the split is by WHO NEEDS TO KNOW rather than by which item fired.
+   * The VFX track builds ten world effects plus the screen-space ink off this stream and
+   * off `Fighter.item`'s deadlines; the sim states what happened and never what it looks
+   * like, which is the contract every other member of this union already has.
+   *
+   * 🚨 **DAMAGE IS NOT HERE.** Blue Cheese's tick and Shiitake's reflection are ordinary
+   * `hit-landed` events carrying `DamageSource { kind: 'item' }`, so every consumer that
+   * already draws a hit — the damage number, the flash, the shake, the audio — works on
+   * them with no change. A second damage channel would be a second answer to "how much did
+   * that cost", and `DECISIONS §13` is the record of what that costs.
+   */
+  /**
+   * AN ITEM WAS ACTIVATED. Emitted at the PRESS, for actives only, once the press has
+   * cleared every gate (`combat.ts:itemUsable`) and consumed its cooldown.
+   *
+   * `windupMs` is 0 for the nine items that resolve on the press and
+   * `ITEM_TUNING.shiitake.windupMs` for the one that does not — so a telegraph can size
+   * itself from this event alone, exactly as `cast-started` lets one size itself without
+   * re-reading the weapon table. **A non-zero `windupMs` means the effect has NOT happened
+   * yet**; `item-resolved` is the beat where it does.
+   */
+  | { type: 'item-used'; fighterRole: FighterRole; fighterId: FighterId; itemId: ItemId; slot: number; x: number; y: number; windupMs: number }
+  /**
+   * AN ITEM WITH A WIND-UP WENT OFF. Emitted for that item and no other, at the resolve, in
+   * the same position in the tick a castless press would have landed. Nine of the ten items
+   * therefore emit `item-used` alone and one emits both — which is the identical shape
+   * `weapon-fired` and `cast-started` already have, deliberately.
+   */
+  | { type: 'item-resolved'; fighterRole: FighterRole; fighterId: FighterId; itemId: ItemId; slot: number; x: number; y: number }
+  /**
+   * AN ITEM WIND-UP DIED BEFORE IT LANDED. The cooldown is NOT refunded — the press is
+   * spent exactly as `cancelCast`'s is, and for the same reason: interrupting a commitment
+   * has to cost its owner the commitment.
+   */
+  | { type: 'item-cancelled'; fighterRole: FighterRole; fighterId: FighterId; itemId: ItemId; slot: number; reason: 'stun' | 'death' | 'sleep' }
+  /**
+   * AN ITEM LANDED ON SOMEBODY. One member for all six items that do something TO another
+   * fighter (Warm Milk, Pompa, Squid Ink, Liquorice, Disposal, and Tenderiser's stack), so
+   * a consumer subscribes once and switches on `itemId`.
+   *
+   * `durationMs` is how long the state it applied lasts, 0 for an instantaneous one.
+   * `stacks` is Tenderiser's count and 0 for everything else.
+   *
+   * ⚠️ **`fromX`/`fromY` AND `x`/`y` ARE BOTH THE VICTIM'S, BEFORE AND AFTER.** They differ
+   * for exactly one item — Disposal, which MOVES the victim — and the pair is what lets the
+   * drain open where they were and the spit-out land where they went. Identical for the
+   * other five, which is the honest way to say "nobody moved". Same contract, and the same
+   * two-ended shape, as `medikit-dropped`.
+   */
+  | {
+      type: 'item-hit';
+      itemId: ItemId;
+      ownerRole: FighterRole;
+      ownerId: FighterId;
+      targetRole: FighterRole;
+      targetId: FighterId;
+      durationMs: number;
+      stacks: number;
+      fromX: number;
+      fromY: number;
+      x: number;
+      y: number;
+    }
+  /**
+   * LEFTOVERS FIRED: a fighter is back on its feet because whoever killed it has died while
+   * the match goes on. Carries the killer, because *"your killer died"* is the whole story
+   * and reconstructing it downstream would mean reading a death order out of a final state
+   * that does not contain one.
+   */
+  | { type: 'item-revived'; fighterRole: FighterRole; fighterId: FighterId; killerRole: FighterRole; killerId: FighterId; hp: number; x: number; y: number };

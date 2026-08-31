@@ -29,6 +29,11 @@
  */
 
 import { CHARACTER_IDS, CHARACTERS, type CharacterId, type Rarity } from '../rules.ts';
+// ⚠️ `ITEMS` is the loadout registry, `rules.ts`'s own. It is imported rather than
+// re-listed for the same reason `CHARACTERS_BY_RARITY` is derived: an item added there
+// must reach the drop pools automatically, or the pools are a second roster that silently
+// disagrees with the first.
+import { ITEMS, type ItemId } from '../rules.ts';
 // §76: the payout scalars below are read through the override layer so the admin panel's
 // Economy tab has something real in it. Same rule as `rules.ts` — the literal stays on its
 // line and the registry LEARNS the default; there is no table of economy numbers anywhere.
@@ -533,6 +538,18 @@ export interface ContainerEntry {
   gems?: number;
   /** Grants a uniformly-random character of this rarity (duplicate → coins). */
   characterRarity?: Rarity;
+  /**
+   * Grants a uniformly-random LOADOUT ITEM of this rarity (duplicate → coins).
+   *
+   * The same shape as `characterRarity` and deliberately so: one roller, one odds
+   * derivation, one duplicate ladder. See "ITEMS — the acquisition side" at the foot of
+   * this file for the design, and `ITEMS_BY_RARITY` for the pool each tier draws from.
+   *
+   * ⚠️ **THIS IS THE SAME LEGAL INTERFACE the paragraph above describes.** An item is
+   * randomised content inside a container that gems can buy, so its rate is disclosed on
+   * exactly the same sheet by exactly the same function. There is no second table.
+   */
+  itemRarity?: Rarity;
 }
 
 /**
@@ -604,6 +621,16 @@ export const CONTAINERS: Record<ContainerKind, ContainerDef> = {
    * fastest route to the roster (that is the trophy road's job). Expected value is
    * ~186 coins + ~1.5 gems, which is about three matches' coin income — enough that
    * the chest counter is worth watching.
+   *
+   * ── 2026-08-31: THE CHEST IS THE FREE ITEM FAUCET, AND IT STOPS AT LEGENDARY ──
+   * 5% of the table is now an item, taken out of the two plain-coin rows (50 → 46 and
+   * 22 → 21) so nothing else moved. The chest is the highest-VOLUME container in the
+   * game — one every `winsPerChest` wins, forever, for free — so it is the right place
+   * for the common half of the item set and the wrong place for the rare half.
+   * **There is no Neon or Cyber item row here**, which is what keeps Uri's *"zombie
+   * power is the rarest"* true against a faucet that never turns off: Leftovers and the
+   * Shiitake Shield come from the boxes and from the road's late surprise nodes, both
+   * of which are bounded.
    */
   chest: {
     name: 'Chest',
@@ -611,13 +638,17 @@ export const CONTAINERS: Record<ContainerKind, ContainerDef> = {
     blurb: 'Earned by winning matches and along the Trophy Road.',
     price: null,
     entries: [
-      { weight: 50, coins: 120 },
-      { weight: 22, coins: 220 },
+      { weight: 46, coins: 120 },
+      { weight: 21, coins: 220 },
       { weight: 13, coins: 90, gems: 5 },
       { weight: 8, coins: 400 },
       { weight: 4, coins: 150, gems: 20 },
       { weight: 2.1, characterRarity: 'Normal' },
       { weight: 0.9, characterRarity: 'Rare' },
+      { weight: 3, itemRarity: 'Normal' },
+      { weight: 1.4, itemRarity: 'Rare' },
+      { weight: 0.5, itemRarity: 'Epic' },
+      { weight: 0.1, itemRarity: 'Legendary' },
     ],
   },
 
@@ -640,52 +671,94 @@ export const CONTAINERS: Record<ContainerKind, ContainerDef> = {
     // spread 20.7 pp -> 4.0 pp). A box that promises a stronger fighter and delivers a
     // rarer one is the `DECISIONS §13` defect wearing a different hat, so every blurb
     // below now says RARER, and the drop-rate sheet states what rarity buys instead.
-    blurb: 'Mostly Normal fighters, with a chance of something rarer.',
+    blurb: 'Mostly Normal fighters and gear, with a chance of something rarer.',
     price: { coins: 900, gems: 60 },
     entries: [
-      { weight: 89, characterRarity: 'Normal' },
-      { weight: 10, characterRarity: 'Rare' },
-      { weight: 1, characterRarity: 'Epic' },
+      { weight: 71.2, characterRarity: 'Normal' },
+      { weight: 8, characterRarity: 'Rare' },
+      { weight: 0.8, characterRarity: 'Epic' },
+      { weight: 16, itemRarity: 'Normal' },
+      { weight: 3.6, itemRarity: 'Rare' },
+      { weight: 0.4, itemRarity: 'Epic' },
     ],
   },
 
   pineappleBox: {
     name: 'Purple Pineapple Box',
     emoji: '🍍',
-    blurb: 'Rare fighters guaranteed, Epic and Legendary possible.',
+    blurb: 'Rare fighters and gear, Epic and Legendary possible.',
     price: { coins: 3200, gems: 120 },
     entries: [
-      { weight: 94.5, characterRarity: 'Rare' },
-      { weight: 5, characterRarity: 'Epic' },
-      { weight: 0.5, characterRarity: 'Legendary' },
+      { weight: 75.6, characterRarity: 'Rare' },
+      { weight: 4, characterRarity: 'Epic' },
+      { weight: 0.4, characterRarity: 'Legendary' },
+      { weight: 16, itemRarity: 'Rare' },
+      { weight: 3.6, itemRarity: 'Epic' },
+      { weight: 0.4, itemRarity: 'Legendary' },
     ],
   },
 
   redBox: {
     name: 'Big Smile Box',
     emoji: '🎁',
-    blurb: 'Epic fighters, with the only Cyber chance outside the Fire Box.',
+    blurb: 'Epic fighters and gear, with the only Cyber chance outside the Fire Box.',
     price: { coins: 5600, gems: 240 },
     entries: [
-      { weight: 89.49, characterRarity: 'Epic' },
-      { weight: 10, characterRarity: 'Legendary' },
-      { weight: 0.5, characterRarity: 'Neon' },
+      { weight: 71.59, characterRarity: 'Epic' },
+      { weight: 8, characterRarity: 'Legendary' },
+      { weight: 0.4, characterRarity: 'Neon' },
+      // ⚠️ 0.01 IS LOAD-BEARING AND IS THE ONE CHARACTER WEIGHT THAT DID NOT MOVE when
+      // the item rows landed. `economy.test.mjs` §5 pins it as the proof that
+      // `formatPercent` never rounds a real chance away to "0.0%" on a disclosure
+      // surface. The 20% the item rows cost was taken from the three rows above it.
       { weight: 0.01, characterRarity: 'Cyber' },
+      { weight: 16, itemRarity: 'Epic' },
+      { weight: 3.5, itemRarity: 'Legendary' },
+      { weight: 0.4, itemRarity: 'Neon' },
+      { weight: 0.1, itemRarity: 'Cyber' },
     ],
   },
 
   fireBox: {
     name: 'Purple Fire Box',
     emoji: '🔥',
-    blurb: 'Legendary fighters, with the best Neon and Cyber odds in the game.',
+    blurb: 'Legendary fighters and gear, with the best Neon and Cyber odds in the game.',
     price: { coins: 12000, gems: 480 },
     entries: [
-      { weight: 94.5, characterRarity: 'Legendary' },
-      { weight: 5, characterRarity: 'Neon' },
-      { weight: 0.5, characterRarity: 'Cyber' },
+      { weight: 75.6, characterRarity: 'Legendary' },
+      { weight: 4, characterRarity: 'Neon' },
+      { weight: 0.4, characterRarity: 'Cyber' },
+      { weight: 16, itemRarity: 'Legendary' },
+      { weight: 3.5, itemRarity: 'Neon' },
+      // The best Cyber ITEM odds in the game, which is what keeps the blurb above true
+      // for both halves of what this box now contains. 0.5% here against 0.1% in the
+      // Big Smile Box, and nothing at all in the free chest.
+      { weight: 0.5, itemRarity: 'Cyber' },
     ],
   },
 };
+
+/*
+ * ── ⚠️ WHAT THE ITEM ROWS COST THE FIGHTER ODDS, STATED ONCE ────────────────
+ *
+ * Every box gave up exactly **20%** of its table to items, and the character rows were
+ * scaled by 0.8 rather than re-authored — so each box's INTERNAL rarity split is
+ * untouched (89:10:1 became 71.2:8:0.8, and so on) and only the fighter/item split is
+ * new. The one exception is the Big Smile Box's Cyber fighter row, held at 0.01 for the
+ * reason stated on it; its 20% came from the three rows above instead.
+ *
+ * The free chest gave up **5%**, taken from its two plain-coin rows, because it is the
+ * only container that arrives forever and for free.
+ *
+ * ⚠️ AND THE CONSEQUENCE THE SHOP SCREEN WILL FEEL: `shop.ts:sellable()` offers a box
+ * when it *"can hand over something the player does not own"*. Until today that could
+ * only ever be a fighter, and `ROSTER_GATED` is false, so it was never true and every
+ * Buy button was dead. Items are NOT roster-gated — a new player owns one of ten — so
+ * the boxes now have a genuine first-copy to sell and the shop comes alive on its own.
+ * That is the derived predicate working exactly as its author documented, not a new
+ * decision, and the purchase path it enables (`state.ts:buyContainer`) has been built
+ * and tested since the economy landed.
+ */
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The trophy road
@@ -696,6 +769,19 @@ export type MilestoneReward =
   | { type: 'gems'; amount: number }
   | { type: 'container'; kind: ContainerKind; count: number }
   | { type: 'character'; id: CharacterId }
+  /**
+   * A LOADOUT ITEM the player cannot see in advance. Uri: *"and in trophy road (as a
+   * surprise, not a fixed item)"*.
+   *
+   * `minRarity` is a FLOOR on the pool, not the item — the node still cannot be read off
+   * the table, which is the whole instruction, but the road can get rarer as it goes and
+   * the last surprise can guarantee something worth walking 9,145 trophies for. A tier
+   * banded at `Neon` draws from {Shiitake Shield, Leftovers} and nothing else.
+   *
+   * ⚠️ It carries NO item id on purpose. Which item it resolves to is a function of the
+   * player's persisted seed and this threshold — see `trophyRoad.ts:roadSurpriseItem`.
+   */
+  | { type: 'itemSurprise'; minRarity: Rarity }
   | { type: 'bundle'; parts: MilestoneReward[] };
 
 export interface Milestone {
@@ -932,6 +1018,41 @@ export const ROSTER_COMPLETE_TROPHIES = 10_000;
  * 1,208,810 / 27,048 / ~191.6 h. Flattening cut the roster's bill **59.3%** and cost the
  * Normal player nothing — Normal was the 1.0x tier already.)
  *
+ * ── 2026-08-31: SEVEN SURPRISE ITEMS, AND NOT ONE NUMBER ON THIS ROAD MOVED ──
+ *
+ * Uri: *"Items can be obtained through boxes/chests and in trophy road (as a surprise,
+ * not a fixed item)"*. Seven nodes now pay a `itemSurprise` **in addition to** what they
+ * already paid, wrapped in the `bundle` type that already existed.
+ *
+ * 🚨 **ADDITIVE WAS A DELIBERATE CHOICE AND IT IS THE REASON THE 10,000 ROAD SURVIVES
+ * INTACT.** The two alternatives were both destructive and both were rejected on
+ * measurement, not taste:
+ *   * **New nodes.** Inserting seven thresholds SHRINKS gaps, and `economy.test.mjs`
+ *     §4b asserts *"step gaps never shrink along the road"* — the assertion `2228c2b`
+ *     added to protect Uri's own *"stretch the distance between steps"*. Seven inserted
+ *     nodes falsify it by construction.
+ *   * **Replacing seven payouts.** The seven cheapest coin/gem nodes are 5+10+120+150
+ *     gems and 700+1,800+3,000 coins. Taking them out cuts road gems **39%** and road
+ *     coins **20%**, on a road whose grind Uri is already being asked to rule on.
+ *
+ * So: same 45 steps, same thresholds, same gaps, same character positions, same road
+ * end, same **26,900** direct coins, same **800** gems. **Time to the full roster is
+ * unchanged and it is unchanged BY CONSTRUCTION, not by luck** — not one trophy
+ * threshold and not one trophy payout was touched, and `MATCH_PAYOUT` was not opened.
+ * §9's pacing figures (8 matches / 296 / 1,891) are therefore the same figures.
+ *
+ * The bands rise along the road — Normal · Normal · Rare · Rare · Epic · Legendary ·
+ * **Neon** — so the last one draws from a two-item pool and finishing the road
+ * guarantees a Neon-or-better item. `minRarity` is a floor on the POOL, never an item
+ * id: the node is genuinely unreadable in advance, which is the instruction.
+ *
+ * ⚠️ **AND THE ROAD IS NOW WORTH MORE THAN THE COMMENTARY ABOVE STATES.** Every
+ * *"the road hands over 26,900 coins directly, or 43,571 counting every chest, box and
+ * duplicate"* figure above is a CURRENCY figure and all of them still hold exactly.
+ * What they no longer describe is the road's total value, because seven of its nodes now
+ * hand over something that is not currency at all. Do not add an item to those sums; it
+ * is not denominated in coins unless the pool is exhausted, and then it is a duplicate.
+ *
  * ── Which characters, in which order ────────────────────────────────────────
  * Rarity-ascending, which also preserves the prototype's own ordering for the six it
  * placed (Donut → Sushi → Water Bottle → Pizza → Lollipop → Hot Dog). The five it
@@ -950,7 +1071,10 @@ export const TROPHY_ROAD: Milestone[] = [
   { trophies: 65, reward: { type: 'coins', amount: 150 } },
   { trophies: 100, reward: { type: 'character', id: 'donut' } },           // Normal
   // ── 45·50·55 ────────────────────────────────────────────────────────────────
-  { trophies: 145, reward: { type: 'gems', amount: 5 } },
+  { trophies: 145, reward: { type: 'bundle', parts: [
+    { type: 'gems', amount: 5 },
+    { type: 'itemSurprise', minRarity: 'Normal' },
+  ] } },
   { trophies: 195, reward: { type: 'container', kind: 'hamburgerBox', count: 1 } },
   { trophies: 250, reward: { type: 'character', id: 'taco' } },            // Rare
   // ── 65·75·90 ────────────────────────────────────────────────────────────────
@@ -958,7 +1082,10 @@ export const TROPHY_ROAD: Milestone[] = [
   { trophies: 390, reward: { type: 'container', kind: 'chest', count: 1 } },
   { trophies: 480, reward: { type: 'character', id: 'burrito' } },         // Rare
   // ── 95·110·115 ──────────────────────────────────────────────────────────────
-  { trophies: 575, reward: { type: 'gems', amount: 10 } },
+  { trophies: 575, reward: { type: 'bundle', parts: [
+    { type: 'gems', amount: 10 },
+    { type: 'itemSurprise', minRarity: 'Normal' },
+  ] } },
   { trophies: 685, reward: { type: 'container', kind: 'hamburgerBox', count: 1 } },
   { trophies: 800, reward: { type: 'character', id: 'soup' } },            // Epic
   // ── 140·150·160 ─────────────────────────────────────────────────────────────
@@ -968,7 +1095,10 @@ export const TROPHY_ROAD: Milestone[] = [
   // ── 170·175·175·180 ─────────────────────────────────────────────────────────
   { trophies: 1420, reward: { type: 'gems', amount: 20 } },
   { trophies: 1595, reward: { type: 'container', kind: 'chest', count: 1 } },
-  { trophies: 1770, reward: { type: 'coins', amount: 700 } },
+  { trophies: 1770, reward: { type: 'bundle', parts: [
+    { type: 'coins', amount: 700 },
+    { type: 'itemSurprise', minRarity: 'Rare' },
+  ] } },
   { trophies: 1950, reward: { type: 'character', id: 'waterbottle' } },    // Legendary
   // ── 190·200·210·220·230 ─────────────────────────────────────────────────────
   { trophies: 2140, reward: { type: 'container', kind: 'pineappleBox', count: 1 } },
@@ -978,7 +1108,10 @@ export const TROPHY_ROAD: Milestone[] = [
   { trophies: 3000, reward: { type: 'character', id: 'pizza' } },          // Neon
   // ── 235·240·250·255·260·260 ─────────────────────────────────────────────────
   { trophies: 3235, reward: { type: 'container', kind: 'redBox', count: 1 } },
-  { trophies: 3475, reward: { type: 'coins', amount: 1800 } },
+  { trophies: 3475, reward: { type: 'bundle', parts: [
+    { type: 'coins', amount: 1800 },
+    { type: 'itemSurprise', minRarity: 'Rare' },
+  ] } },
   { trophies: 3725, reward: { type: 'gems', amount: 50 } },
   { trophies: 3980, reward: { type: 'container', kind: 'pineappleBox', count: 1 } },
   { trophies: 4240, reward: { type: 'coins', amount: 2400 } },
@@ -986,7 +1119,10 @@ export const TROPHY_ROAD: Milestone[] = [
   // ── 280·300·310·320·330·340·370 ─────────────────────────────────────────────
   { trophies: 4780, reward: { type: 'gems', amount: 70 } },
   { trophies: 5080, reward: { type: 'container', kind: 'redBox', count: 1 } },
-  { trophies: 5390, reward: { type: 'coins', amount: 3000 } },
+  { trophies: 5390, reward: { type: 'bundle', parts: [
+    { type: 'coins', amount: 3000 },
+    { type: 'itemSurprise', minRarity: 'Epic' },
+  ] } },
   { trophies: 5710, reward: { type: 'container', kind: 'chest', count: 3 } },
   { trophies: 6040, reward: { type: 'gems', amount: 90 } },
   { trophies: 6380, reward: { type: 'container', kind: 'pineappleBox', count: 2 } },
@@ -994,10 +1130,19 @@ export const TROPHY_ROAD: Milestone[] = [
   // ── the last stretch — 375·385·395·405·415·420·420·435 ──────────────────────
   { trophies: 7125, reward: { type: 'coins', amount: 4000 } },
   { trophies: 7510, reward: { type: 'container', kind: 'redBox', count: 1 } },
-  { trophies: 7905, reward: { type: 'gems', amount: 120 } },
+  { trophies: 7905, reward: { type: 'bundle', parts: [
+    { type: 'gems', amount: 120 },
+    { type: 'itemSurprise', minRarity: 'Legendary' },
+  ] } },
   { trophies: 8310, reward: { type: 'coins', amount: 5000 } },
   { trophies: 8725, reward: { type: 'container', kind: 'fireBox', count: 1 } },
-  { trophies: 9145, reward: { type: 'gems', amount: 150 } },
+  { trophies: 9145, reward: { type: 'bundle', parts: [
+    { type: 'gems', amount: 150 },
+    // The last surprise before the capstone, banded so the pool is exactly the two
+    // rarest items in the game. Finishing the road GUARANTEES you own a Neon-or-better
+    // item, which is asserted rather than intended.
+    { type: 'itemSurprise', minRarity: 'Neon' },
+  ] } },
   {
     // The capstone haul. It is now the SECOND-TO-LAST node rather than the last —
     // see "WHERE THE BUNDLE WENT" above.
@@ -1105,4 +1250,124 @@ export const CHARACTERS_BY_RARITY: Record<Rarity, CharacterId[]> = (() => {
     (out[rarity] ??= []).push(id);
   }
   return out;
+})();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ITEMS — the acquisition side
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `rules.ts:ITEMS` is the contract: ten loadout items, two equip slots, a rarity each.
+// It says nothing about how a player COMES to own one, and this block is that half.
+//
+// ── ⚠️ `rules.ts` HAS NO `ITEM_IDS`, AND `CHARACTER_IDS` IS THE PRECEDENT IT BROKE ──
+// `CHARACTER_IDS` is an exported array and `CharacterId` is derived FROM it, so every
+// consumer in the codebase enumerates the roster the same way. `ItemId` is a hand-written
+// union with no runtime counterpart, so the first thing every downstream track (loadout
+// screen, AI, VFX, icons, this file) has to do is invent `Object.keys(ITEMS)` — five
+// private enumerations of one set, in five files, none of them asserted to agree. This is
+// the one below and it is REPORTED rather than fixed here: `rules.ts` is not this file
+// set's to edit. `economy.test.mjs` §14 asserts it against `ITEMS` so at least this copy
+// cannot drift.
+//
+// ── RARITY GATES THE POOL, WHICH IS THE OPPOSITE OF WHAT IT DOES FOR FIGHTERS ──
+// `RARITY_MEANING` above tells the player, truthfully, that a fighter's rarity buys no
+// power. An ITEM's rarity is a power statement — you carry two of them into a match —
+// and `rules.ts` states the reconciliation: a character's tier gates nothing, an item's
+// tier gates how hard it is to get. So item rarity appears here as a DROP WEIGHT and
+// nowhere else; it never touches a cost, a level or a stat.
+
+/** Every item id, derived from the registry. See the note above about `ITEM_IDS`. */
+export const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
+
+/**
+ * Item ids grouped by rarity — the pool a container row or a road surprise draws from.
+ * Derived exactly as `CHARACTERS_BY_RARITY` is, and for the identical reason.
+ *
+ * ⚠️ A tier with NO items is a real possibility (there is exactly one Normal item and
+ * one Cyber item today, so deleting either empties a tier). Every consumer must treat an
+ * empty pool as "this row cannot pay out" rather than indexing into it — `[]` is the
+ * vacuity trap `CLAUDE.md` non-negotiable 6 is about, and `economy.test.mjs` §14 asserts
+ * every tier a shipped container REFERENCES is non-empty, after first asserting that the
+ * set of referencing rows is itself non-empty.
+ */
+export const ITEMS_BY_RARITY: Record<Rarity, ItemId[]> = (() => {
+  const out = {} as Record<Rarity, ItemId[]>;
+  for (const id of ITEM_IDS) (out[ITEMS[id].rarity] ??= []).push(id);
+  return out;
+})();
+
+/**
+ * What a SECOND copy of an item is worth, by rarity.
+ *
+ * ── THE DUPLICATE DECISION, STATED ONCE ─────────────────────────────────────
+ * An item is binary: you own it or you do not. There are no item levels, no power
+ * points, no shards. Two reasons, and the second is the one that decides it:
+ *   * You carry `ITEM_SLOTS` of them (two). A second copy of a thing you can already
+ *     equip is worth exactly nothing in a match, so it must be worth something outside
+ *     one or the container that produced it paid nothing.
+ *   * An upgrade ladder is a whole second economy — a currency, a cost curve, a cap, a
+ *     balance pass at every rung — and Uri asked for none of it. `LEVEL_UP` is already
+ *     this game's long tail and it took a 1,108-line file to price. Adding a parallel
+ *     one on an unshipped feature would be inventing work the owner did not ask for.
+ *
+ * So a duplicate converts to coins, exactly as a duplicate fighter does, **on the same
+ * ladder** — `DUPLICATE_COINS`, not a second table. One ladder used by two things beats
+ * two ladders that drift. And the roller refuses to hand you a duplicate at all while an
+ * unowned item shares the pool, which is `rollContainer`'s existing rule for fighters
+ * applied unchanged.
+ */
+export const ITEM_DUPLICATE_COINS: Record<Rarity, number> = DUPLICATE_COINS;
+
+/**
+ * Relative chance of drawing each item WITHIN a pool, by rarity.
+ *
+ * Used only where a draw spans more than one tier — the trophy road's surprise, whose
+ * `minRarity` band is a floor rather than a tier. A container row names ONE tier, so its
+ * pool is uniform and this table never enters into it.
+ *
+ * ── DERIVED, AND FROM THE LADDER THAT ALREADY EXISTS ────────────────────────
+ * The weight is the RECIPROCAL of `DUPLICATE_COINS`. That is one ladder read in its two
+ * directions: what a duplicate pays you is what the item is worth, and what an item is
+ * worth is the inverse of how often you should see it. Authoring a second six-number
+ * table here would be a table that can disagree with the first one, on the same axis,
+ * for no gain — which is `DECISIONS §13`'s defect shape exactly.
+ *
+ * The resulting share of an all-tiers draw, computed rather than typed (§14 prints it):
+ * Springform 30.7% · each Rare 14.2% · each Epic 7.1% · each Legendary 4.1% ·
+ * Shiitake Shield 2.6% · **Leftovers 1.7%** — 18.3× rarer than the Normal item, which is
+ * Uri's *"zombie power is the rarest"* as an arithmetic fact rather than an intention.
+ */
+export const ITEM_DROP_WEIGHT: Record<Rarity, number> = (() => {
+  const out = {} as Record<Rarity, number>;
+  for (const [rarity, coins] of Object.entries(DUPLICATE_COINS) as [Rarity, number][]) {
+    out[rarity] = coins > 0 ? 1 / coins : 0;
+  }
+  return out;
+})();
+
+/**
+ * The one item a brand-new player already has, so the loadout screen is never empty.
+ *
+ * ⚠️ **THIS IS AN ASSUMPTION, NOT AN INSTRUCTION.** Uri named boxes, chests and the
+ * trophy road as the ways to obtain an item and did not mention a starting one. A player
+ * who owns nothing meets an empty loadout screen and cannot discover the feature exists
+ * until their first chest — which is `winsPerChest` wins away — so the feature would be
+ * invisible for the whole of a first session. `STARTER_CHARACTER` is the precedent and
+ * the same argument produced it. Reversing it is one line and costs a player one Normal
+ * item.
+ *
+ * DERIVED, not typed: the lowest-rarity item on the ladder, ties broken by registry
+ * order. Adding a second Normal item changes which one this is, and §14 asserts that the
+ * result is a real member of the lowest non-empty tier rather than trusting the index.
+ */
+export const STARTER_ITEM: ItemId = (() => {
+  const ladder = (Object.keys(DUPLICATE_COINS) as Rarity[])
+    .sort((a, b) => DUPLICATE_COINS[a] - DUPLICATE_COINS[b]);
+  for (const tier of ladder) {
+    const pool = ITEMS_BY_RARITY[tier];
+    if (pool && pool.length > 0) return pool[0];
+  }
+  // Unreachable while `rules.ts` ships ten items; throwing beats exporting `undefined`
+  // as an `ItemId` and letting it surface as a missing icon three files away.
+  throw new Error('STARTER_ITEM: rules.ts:ITEMS is empty');
 })();

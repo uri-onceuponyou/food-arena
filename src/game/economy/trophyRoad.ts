@@ -322,5 +322,30 @@ export function milestoneFace(reward: MilestoneReward, owned: ReadonlySet<Charac
     }
     case 'bundle':
       return { emoji: '🎉', title: 'Grand Prize', isCharacter: false };
+    /**
+     * ⚠️ THIS CASE IS THE ORCHESTRATOR COMPLETING SOMEBODY ELSE'S HALF-LANDED WORK, and
+     * it is declared rather than quietly filled in.
+     *
+     * The acquisition agent added `{ type: 'itemSurprise'; minRarity: Rarity }` to
+     * `MilestoneReward` and placed SEVEN of them along the road, then died on a
+     * connection error before teaching this function to draw one — so `tsc` failed with
+     * TS2366 on a file nobody had edited. Exactly `CLAUDE.md`'s note that agents die
+     * mid-FILE and not mid-THOUGHT: the union, the road entries and the rarity floors
+     * were all coherent, and the one missing thing was the render.
+     *
+     * 🚨 THE TITLE MUST NOT NAME THE ITEM. Uri: *"Items can be obtained through
+     * boxes/chests and in trophy road (AS A SURPRISE, not a fixed item)"* — a road node
+     * that read "Liquorice Rope at 1,950" would be the fixed item he explicitly did not
+     * ask for. The floor is shown because a player choosing whether to push for the next
+     * node needs to know what tier they are pushing toward; WHICH item it is stays
+     * unknown until it is claimed, which is the whole of "surprise".
+     */
+    case 'itemSurprise':
+      return {
+        emoji: '🎁',
+        title: 'Mystery Item',
+        isCharacter: false,
+        payoutNote: `${reward.minRarity} or better`,
+      };
   }
 }

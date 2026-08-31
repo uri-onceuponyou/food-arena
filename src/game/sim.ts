@@ -95,8 +95,10 @@ import {
   SUDDEN_DEATH_RADIUS,
   SUDDEN_DEATH_REMAINING_MS,
   suddenDeathActive,
+  ITEM_TUNING,
   TRAIL,
   type CharacterId,
+  type ItemId,
 } from './rules.ts';
 import type { ArenaDefinition } from '../arena/types.ts';
 import type {
@@ -104,10 +106,13 @@ import type {
   Projectile, Sighting, Splat, TrailMark, Vec2,
 } from './state.ts';
 import {
-  createFighter, fighterBit, isCasting, isLivingOpponentOf, MAX_FIGHTERS, MIN_FIGHTERS,
+  createFighter, fighterBit, hasItem, isCasting, isLivingOpponentOf, MAX_FIGHTERS, MIN_FIGHTERS,
   movementLocked, sightingIndex,
 } from './state.ts';
-import { applyDamage, attemptAttack, isOnOwnTrail, resolveDueCast } from './combat.ts';
+import {
+  applyDamage, attemptAttack, attemptItem, isOnOwnTrail, ITEM_AURA_TICK_MS, itemDamageSource,
+  resolveDueCast, resolveDueItemCast,
+} from './combat.ts';
 import { boxesOverlap, isHidden, isVisibleFrom, stepPush, terrainSlowAt, tryMove } from './movement.ts';
 import { stepAI } from './ai.ts';
 
@@ -217,6 +222,20 @@ export interface FighterConfig {
   size?: number;
   /** Incoming-projectile hit radius. Default `HIT_RADIUS_VS_ENEMY` for the DUEL's slot 1, `..._VS_PLAYER` everywhere else. */
   hitRadius?: number;
+  /**
+   * THE LOADOUT THIS SEAT BRINGS — up to `rules.ts:ITEM_SLOTS` ids, in lobby slot order.
+   * Uri: *"up to 2 items per player, he sets it up on the loby, which ones he wants to use
+   * out of what he has"*.
+   *
+   * ⚠️ **OPTIONAL, DEFAULTING TO NOTHING**, on exactly the precedent `level` sets and for the
+   * reason every addition to this file has had to respect: 74 `createMatch` call sites and
+   * `tsc` can see 2 of them. A caller that says nothing gets the sim that existed before
+   * items, bit for bit — which is what `tools/tmp/is_bitid.mjs` measures rather than assumes.
+   *
+   * `state.ts:createFighter` REFUSES an over-full, duplicated or unknown loadout rather than
+   * truncating one; see `validateLoadout` for why a silent truncation is the worse failure.
+   */
+  items?: readonly ItemId[];
 }
 
 /**
@@ -347,6 +366,8 @@ function createMatchFromList(arena: ArenaDefinition, configs: readonly FighterCo
       hitRadius: cfg.hitRadius ?? (seatIsBotOpponent ? HIT_RADIUS_VS_ENEMY : HIT_RADIUS_VS_PLAYER),
       facing: cfg.facing ?? defaultFacing(arena, id, spawn),
       level: lvl,
+      // Nothing by default — see `FighterConfig.items`. `createFighter` validates.
+      items: cfg.items,
     });
   });
 
@@ -622,6 +643,25 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
       // for the identical reason. The declaration has no side effect, so below it is
       // free; above it costs a peer's instrument.
       resolveDueCast(state, fighter, events);
+      // ── TERMINATOR 1's TWIN: A DUE *ITEM* WIND-UP GOES OFF IN THE SAME PLACE ──
+      //
+      // `ITEMS.shiitake` is the one item with a wind-up, and it resolves here for every
+      // reason `resolveDueCast` resolves here: the effect lands at the point in the tick the
+      // press that bought it would have landed, in the same slot order, before either
+      // controller branch, so nothing downstream has to know item wind-ups exist.
+      //
+      // ⚠️ **BOTH CONTROLLERS, ABOVE THE BRANCH.** A bot that opened a shield and never got
+      // a resolve would stand rooted forever — the exact shape of the recorded stun-silence
+      // defect, and the reason `resolveDueCast` sits here rather than inside the human path.
+      // `ai.ts` does not press items yet (phase 3); this line is what makes it work when it
+      // does, with no second resolution rule written on that side.
+      //
+      // ⚠️ **BELOW `resolveDueCast`, NOT ABOVE IT**, so that a fighter holding both kinds of
+      // wind-up resolves them in a fixed order rather than one that depends on which was
+      // pressed first. Neither can open while the other is running for the same fighter only
+      // in the item's case (`itemUsable`); a weapon cast and an item cast CAN overlap, which
+      // is `DECISIONS §78` — a wind-up costs position, not silence.
+      resolveDueItemCast(state, fighter, events);
       // ── 🚨 A CORPSE DOES NOT TAKE ITS TURN. ONE STATEMENT, BOTH CONTROLLERS. ──
       //
       // Uri, playing the deployed six-player build on 2026-08-18:
@@ -701,6 +741,30 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
         applyAim(fighter, fi);
         if (fi.attack) attemptAttack(state, fighter, fi.selectedWeapon, events);
         moved = moveFighter(state, fighter, dt, fi);
+        // ── THE ITEM PRESS ────────────────────────────────────────────────────
+        //
+        // 🚨 **IT IS *BELOW* THE THREE LINES ABOVE AND NOT BETWEEN THEM, AND THAT IS NOT
+        // STYLE.** `tools/tmp/nc_measure.mjs`'s `HUMAN_ANCHOR` is those three literal lines
+        // at their exact indentation, and its `--selftest` §F asserts the patch landed —
+        // so an insertion anywhere inside them silently breaks a peer's instrument, exactly
+        // as `conceal_lab`'s `FIGHTER_LOOP_ANCHOR` two paragraphs up would be broken by a
+        // line between the `for` and the `let`. Found by grepping for the anchors rather
+        // than by being told, which is what the warnings on both of them ask for.
+        //
+        // ⚠️ **AFTER `applyAim`, WHICH IS WHY IT COULD NOT GO FIRST.** Springform launches
+        // along `facing`, so a press resolved before this tick's aim was applied would send
+        // the fighter down LAST tick's bearing — visible to the player as the jump going
+        // somewhere they were not pointing. Every other active resolves against a position
+        // too, and after `moveFighter` that position is this tick's.
+        //
+        // ⚠️ **AFTER THE ATTACK, DELIBERATELY.** A tick that presses both fires the weapon
+        // first. The order has to be *some* order and this one keeps `attemptAttack` in the
+        // position 148 call sites and every recorded balance number were measured in.
+        //
+        // ⚠️ `?? null`, so a caller that never heard of items (all 148 of them) and
+        // `NEUTRAL_INPUT`, which does not carry the key at all, both mean "no press".
+        const useItem = fi.useItem ?? null;
+        if (useItem !== null) attemptItem(state, fighter, useItem, events);
       } else {
         moved = stepAI(state, fighter, dt, events);
       }

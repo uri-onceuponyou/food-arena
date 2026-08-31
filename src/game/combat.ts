@@ -22,6 +22,9 @@
 import {
   CHARACTERS,
   CONCEAL_ATTACK_REVEAL_MS,
+  GUARANTEED_VISIBLE_RADIUS,
+  ITEM_TUNING,
+  ITEMS,
   MEDIKIT,
   SLOW_DURATION_MS,
   SLOW_GRACE_MS,
@@ -31,12 +34,16 @@ import {
   STUN_GRACE_MS,
   TRAIL,
   levelHealthMultiplier,
+  type ItemId,
   type StatusEffect,
   type Weapon,
 } from './rules.ts';
 import type { DamageSource, Fighter, GameEvent, MatchState, Medikit, Vec2 } from './state.ts';
-import { isLivingOpponentOf, lastFighterStanding, nearestLivingOpponent } from './state.ts';
-import { boxesOverlap, breakConcealment, displaceFighter } from './movement.ts';
+import {
+  actionsLocked, hasItem, isLivingOpponentOf, lastFighterStanding, livingFighterCount,
+  nearestLivingOpponent, NO_FIGHTER, weaponsLocked,
+} from './state.ts';
+import { boxesOverlap, breakConcealment, displaceFighter, placeFighterAt } from './movement.ts';
 
 const RAD2DEG = 180 / Math.PI;
 const DEG2RAD = Math.PI / 180;
@@ -141,7 +148,7 @@ export function drDurationFor(
  */
 function cancelCast(
   fighter: Fighter,
-  reason: 'stun' | 'death',
+  reason: 'stun' | 'death' | 'sleep',
   events: GameEvent[],
 ): void {
   const c = fighter.cast;
@@ -152,6 +159,36 @@ function cancelCast(
     fighterRole: fighter.role,
     fighterId: fighter.id,
     weaponKey: CHARACTERS[fighter.characterId].weapons[c.weaponIndex].key,
+    reason,
+  });
+}
+
+/**
+ * END `fighter`'s ITEM wind-up without firing it — `cancelCast`'s twin, and deliberately a
+ * twin rather than a shared body: the two clear different fields and emit different events,
+ * so "share the implementation" would mean a `kind` parameter and two branches inside one
+ * function, which is the same two functions with a worse name. What they DO share is the
+ * rule, and it is stated once here: the cooldown is not refunded.
+ *
+ * ⚠️ **THE COOLDOWN STAYS SPENT**, exactly as `cancelCast`'s does and for the identical
+ * reason — `item.lastUsed[slot]` was stamped at the press, and interrupting a commitment has
+ * to cost its owner the commitment or the wind-up is not a real cost. `ITEMS.shiitake` is the
+ * only item this can reach, and it is the one whose whole price is the wait.
+ */
+function cancelItemCast(
+  fighter: Fighter,
+  reason: 'stun' | 'death' | 'sleep',
+  events: GameEvent[],
+): void {
+  const c = fighter.itemCast;
+  if (c === null) return;
+  fighter.itemCast = null;
+  events.push({
+    type: 'item-cancelled',
+    fighterRole: fighter.role,
+    fighterId: fighter.id,
+    itemId: c.itemId,
+    slot: c.slot,
     reason,
   });
 }
@@ -237,6 +274,92 @@ function applyHitDisplacement(state: MatchState, attacker: Fighter, target: Figh
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   LOADOUT ITEMS — the pieces `applyDamage` needs. See the ITEM ACTIVATION block
+   further down for the press half.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * THE DAMAGE SOURCE FOR AN ITEM'S OWN DAMAGE, BUILT IN ONE PLACE.
+ *
+ * Two callers — Blue Cheese's cloud in `sim.ts:applyWorldTick`, and Shiitake's reflection a
+ * few hundred lines below — and one shape, because `state.ts:DamageSource`'s header records
+ * three separate rules that key on `itemId` being present (no level scaling, no Tenderiser
+ * streak, no re-reflection). A source assembled at each site is two chances to omit the
+ * field that turns all three off, and the failure would be silent in every direction: a
+ * reflect that scales with level, a cloud that builds a streak, a mirror that rings.
+ *
+ * `weaponKey` carries the ITEM ID and `weaponName` its display name, so the four out-of-set
+ * consumers that look a `Weapon` up by key MISS and fall back to their generic path — see
+ * `DamageSource`. §42 asserts no item id can collide with a weapon key.
+ */
+export function itemDamageSource(owner: Fighter, itemId: ItemId): DamageSource {
+  return {
+    kind: 'weapon',
+    weaponKey: itemId,
+    weaponName: ITEMS[itemId].name,
+    attackerId: owner.id,
+    itemId,
+  };
+}
+
+/**
+ * ── TENDERISER: HOW MUCH HARDER THIS HIT LANDS, AND WHY THE STREAK IS THE ATTACKER'S ──
+ *
+ * Uri: *"Stacking up damage — each consecutive attack on the same character increases the
+ * damage by 1.3 up to x6 time (6x1.3)"*.
+ *
+ * 🔴 **TWO THINGS IN THAT SENTENCE ARE READINGS, NOT FACTS, AND BOTH ARE PARKED FOR URI IN
+ * `docs/ITEMS.md`. THEY ARE STATED HERE BECAUSE THIS IS WHERE THEY ARE IMPLEMENTED:**
+ *
+ *   1. **"up to x6 time (6x1.3)"** is read as SIX COMPOUNDING APPLICATIONS —
+ *      `1.3^6 = 4.827x` — and not as `6 x 1.3 = 7.8x` flat. It is the smaller of the two and
+ *      the one that makes "x6 time" a stack COUNT. `rules.ts:ITEM_TUNING.tenderiser` holds
+ *      both numbers; §41(f) pins the ceiling.
+ *   2. **WHAT BREAKS A STREAK IS NOT IN HIS SENTENCE AT ALL, AND ONE IS STRUCTURALLY
+ *      REQUIRED** — without it a stack laid at second ten is still live at the death of the
+ *      match. Two breakers, and both are the plain reading of "consecutive":
+ *        * **HITTING SOMEBODY ELSE.** The streak names one target; landing on another is not
+ *          a consecutive hit on the first one, so the count restarts on the new victim.
+ *        * **A LAPSE OF `ITEM_TUNING.tenderiser.decayMs`** (one Super floor, 2,500 ms) since
+ *          the last hit that fed it. Silence ends a streak.
+ *      ⚠️ **BEING HIT DOES NOT BREAK IT**, deliberately: "consecutive attack" is a statement
+ *      about the sequence of attacks the HOLDER makes, and a defensive breaker would make an
+ *      offensive item depend on what everyone else is doing.
+ *
+ * The first hit is unmultiplied — `stackMul ** 0` — and the Nth consecutive hit carries
+ * `stackMul ** min(N-1, maxStacks)`, so the ceiling is reached on hit 7 and held. That is
+ * what makes `1.3^6` the CAP rather than the value of the sixth hit.
+ *
+ * ⚠️ **READ BEFORE WRITE, AND THE TWO HALVES ARE SEPARATE FUNCTIONS FOR THAT REASON.** The
+ * multiplier this hit gets is a function of the streak BEFORE it; folding the update into
+ * the same expression is how the first hit ends up already multiplied.
+ */
+function tenderiserMultiplier(attacker: Fighter, target: Fighter, elapsed: number): number {
+  const st = attacker.item;
+  if (st.streakTarget !== target.id) return 1;
+  if (elapsed - st.streakAt >= ITEM_TUNING.tenderiser.decayMs) return 1;
+  const stacks = st.streakCount < ITEM_TUNING.tenderiser.maxStacks
+    ? st.streakCount
+    : ITEM_TUNING.tenderiser.maxStacks;
+  return ITEM_TUNING.tenderiser.stackMul ** stacks;
+}
+
+/** Record that a hit landed on `target`, extending or restarting the streak. See above. */
+function feedTenderiserStreak(attacker: Fighter, target: Fighter, elapsed: number): number {
+  const st = attacker.item;
+  const continues = st.streakTarget === target.id
+    && elapsed - st.streakAt < ITEM_TUNING.tenderiser.decayMs;
+  // Clamped at the cap on the way IN, so the stored count cannot run away over a long fight
+  // and the number an event publishes is the number the multiplier actually used.
+  st.streakCount = continues
+    ? Math.min(st.streakCount + 1, ITEM_TUNING.tenderiser.maxStacks)
+    : 1;
+  st.streakTarget = target.id;
+  st.streakAt = elapsed;
+  return st.streakCount;
+}
+
 /**
  * Apply `amount` damage to `target`, optionally inflicting a status effect,
  * clamping HP, recording the hit for regen/VFX purposes, and ending the match if
@@ -285,10 +408,44 @@ export function applyDamage(
   //   'fog' / 'hazard'  no attacker, no scaling.
   //
   // `damageMul` is exactly 1.0 at LEVEL_MIN, so every pre-levels match is bit-identical.
+  //
+  // ── ⚠️ AND AN ITEM'S OWN DAMAGE IS NOT ON THE CHARACTER LADDER AT ALL ─────
+  //
+  // `source.itemId` is set for exactly two things: Blue Cheese's cloud and Shiitake's
+  // reflection (`itemDamageSource`). Neither is a rung of the character's kit — the cloud's
+  // `dps` is the roster's floor unit and the mirror's `reflect` is **1.0**, Uri's *"damage
+  // on EVERY damage they do"*, which a level-15 wearer returning 1.70x would not be. The
+  // whole argument is on `state.ts:DamageSource`.
+  const isItemDamage = source.kind === 'weapon' && source.itemId !== undefined;
   const attacker = source.kind === 'weapon' ? state.fighters[source.attackerId]
     : source.kind === 'trail' ? state.fighters[source.ownerId]
     : null;
-  const dealt = attacker ? amount * attacker.damageMul : amount;
+  // ── TENDERISER, AT THE SAME SINGLE CHOKE POINT THE LEVEL TERM USES ────────
+  //
+  // Uri's item, and it multiplies the number the victim actually loses — so it is here,
+  // beside `damageMul`, for the reason that block gives at length: five damage call sites,
+  // and a multiplier applied at four of them is a silent balance bug in the fifth.
+  //
+  // 🚨 **THE GUARD IS WHAT MAKES IT INERT, AND THE SHAPE OF THE ARITHMETIC IS WHAT MAKES IT
+  // BIT-IDENTICAL.** `stackMul` is exactly `1` for every fighter that did not equip the item
+  // — which is every fighter every existing caller of `createMatch` builds — and the `!== 1`
+  // guard means the `dealt` line those matches execute is the line that was here before,
+  // character for character. Writing `amount * damageMul * stackMul` instead would have been
+  // arithmetically identical in exact reals and NOT in IEEE-754 doubles, which is the
+  // difference between a bit-identity proof and a nearly-identical one.
+  //
+  // ⚠️ **WEAPON HITS ONLY, AND NOT AN ITEM'S OWN DAMAGE.** The trail is a mark you tread on
+  // rather than an attack, the hazard and the fog have no attacker, and a cloud that fed the
+  // streak would build six stacks by standing still. *"Each consecutive ATTACK"*.
+  const streaks = attacker != null && !isItemDamage && source.kind === 'weapon'
+    && attacker !== target && hasItem(attacker, 'tenderiser');
+  const stackMul = streaks ? tenderiserMultiplier(attacker as Fighter, target, state.elapsed) : 1;
+  let dealt = attacker && !isItemDamage ? amount * attacker.damageMul : amount;
+  if (stackMul !== 1) dealt *= stackMul;
+  // Read, THEN write — see `tenderiserMultiplier`. The count this returns is the one the
+  // NEXT hit will use and the one the VFX layer draws, which is why it is published rather
+  // than left to be re-derived from a field the renderer would have to poll.
+  const stacks = streaks ? feedTenderiserStreak(attacker as Fighter, target, state.elapsed) : 0;
 
   target.hp = Math.max(0, target.hp - dealt);
   target.lastDamagedAt = state.elapsed;
@@ -358,7 +515,11 @@ export function applyDamage(
   // on all but four, absence is `?? 0`, and `displaceFighter` refuses a non-positive
   // distance — so `Fighter.push` is never written and the sim is bit-identical to the one
   // before this existed. §39(g) proves that on a real match instead of asserting it here.
-  if (attacker != null && source.kind === 'weapon') {
+  // ⚠️ `!isItemDamage` is stated rather than left to the lookup. An item source carries the
+  // ITEM ID in `weaponKey`, so `find` would miss and displace nobody anyway — but relying on
+  // a miss is relying on two id namespaces never colliding, and "they never collide" is a
+  // claim about people. §42 asserts the namespaces are disjoint AND this line refuses.
+  if (attacker != null && source.kind === 'weapon' && !isItemDamage) {
     const w = CHARACTERS[attacker.characterId].weapons.find((x) => x.key === source.weaponKey);
     if (w !== undefined) applyHitDisplacement(state, attacker, target, w);
   }
@@ -369,6 +530,27 @@ export function applyDamage(
   // screen shows a number the model does not compute. `hud.ts` already rounds it for
   // display and `setBar` already ceils HP, so a continuous term needs nothing downstream.
   events.push({ type: 'hit-landed', targetRole: target.role, targetId: target.id, amount: dealt, effect, source, x: target.x, y: target.y });
+
+  // ── THE STACK, PUBLISHED, BECAUSE THE COUNT *IS* THE MECHANIC ─────────────
+  //
+  // `ITEMS.tenderiser.look`: *"a short compression ring on the VICTIM … brightening per
+  // stack so the sixth is unmistakable — the stack count is the whole mechanic and it must
+  // be readable at the match camera."* A renderer cannot get that off `hit-landed`, whose
+  // `amount` conflates the stack with the weapon, the level and the trail boost; and polling
+  // `attacker.item.streakCount` would read a value that has already moved on by the time the
+  // frame draws. So the count that priced THIS hit rides with it.
+  //
+  // ⚠️ AFTER `hit-landed` and never before it: the hit is the fact, the stack is a
+  // qualifier on it, and a consumer that reads them in order sees the damage first.
+  if (stacks > 0 && attacker != null) {
+    events.push({
+      type: 'item-hit', itemId: 'tenderiser',
+      ownerRole: attacker.role, ownerId: attacker.id,
+      targetRole: target.role, targetId: target.id,
+      durationMs: ITEM_TUNING.tenderiser.decayMs, stacks,
+      fromX: target.x, fromY: target.y, x: target.x, y: target.y,
+    });
+  }
 
   if (target.hp === 0) {
     target.alive = false;
@@ -390,6 +572,25 @@ export function applyDamage(
     // predicted: this line was written beside `alive = false` first and `--selftest` crashed.
     // **Do not move it back up, and do not put a comment between those three lines.**
     target.deaths++;
+    // ── WHO KILLED YOU — RECORDED AT THE INSTANT, BECAUSE IT IS NOT RECOVERABLE LATER ──
+    //
+    // `ITEMS.leftovers` — Uri: *"If someone kills you and than he dies (not the last in the
+    // game) that causes you to resurrect."*
+    //
+    // 🚨 **THE DEATH ORDER LIVES IN THE EVENT STREAM, NOT IN THE FINAL STATE.** Every loser
+    // ends `alive: false, hp: 0` and is bit-identical to every other loser, so "who killed
+    // me" cannot be reconstructed from a `MatchState` at all — an orchestrator claim to the
+    // contrary was falsified once already. This function is the only place in the sim that
+    // holds both the `DamageSource` and the death, so it is the only place the answer
+    // exists. Written for EVERY death, whether or not the victim brought the item: a field
+    // populated only for equipped fighters is a field whose correctness nobody exercises,
+    // and it costs one assignment.
+    //
+    // ⚠️ Only a fighter can be a killer. The fog, the pot and a trail mark whose owner is
+    // gone are not *"someone"*, so they leave `NO_FIGHTER` and no resurrection is owed —
+    // which also means a fighter the ring killed can never come back, and that is the
+    // reading of Uri's sentence rather than an omission.
+    target.item.killerId = attacker != null && attacker !== target ? attacker.id : NO_FIGHTER;
     // ── TERMINATOR 3: A CORPSE DOES NOT FINISH ITS WIND-UP ────────────────────
     //
     // 🚨 **BELOW `target.deaths++`, AND THE POSITION IS LOAD-BEARING FOR THE SAME REASON
@@ -408,6 +609,11 @@ export function applyDamage(
     if (target.cast !== null) {
       cancelCast(target, 'death', events);
     }
+    // TERMINATOR 3's twin: an item wind-up dies with its owner, on the same argument and in
+    // the same place, so a corpse can never hold either kind of open commitment.
+    if (target.itemCast !== null) {
+      cancelItemCast(target, 'death', events);
+    }
     // ── THE BODY DROPS ITS KITS ───────────────────────────────────────────────
     //
     // BELOW every terminator and ABOVE the victor block, and both edges are deliberate.
@@ -423,6 +629,27 @@ export function applyDamage(
     // `playing`), and expires. Gating it here would make the last body in a match the one
     // body that leaves nothing behind, which reads on screen as a bug.
     dropMedikits(state, target, events);
+    // ── LEFTOVERS: WHOEVER THIS FIGHTER KILLED MAY NOW GET UP ─────────────────
+    //
+    // BELOW the kits and ABOVE the victor block, and both edges decide behaviour rather
+    // than reading order. Below the kits because a resurrection is a statement about
+    // somebody ELSE and the corpse's own bookkeeping comes first. Above the victor block
+    // because a fighter who stands back up is not a corpse the match can be won over —
+    // `lastFighterStanding` must count them.
+    //
+    // ⚠️ **THAT ORDERING IS SAFE RATHER THAN LUCKY, AND IT IS AN ARITHMETIC FACT.** The gate
+    // below is `livingFighterCount >= ITEM_TUNING.leftovers.minAliveAfterKillerDies` (2), and
+    // two or more standing is exactly the condition under which `lastFighterStanding` returns
+    // `null`. So on every tick a resurrection fires, the victor block was going to decide
+    // nothing anyway; and on every tick the victor block decides something, the gate has
+    // already refused. The two can never disagree — which is Uri's *"(not the last in the
+    // game)"* falling out of the count rather than being enforced twice.
+    //
+    // ⚠️ 🚨 **AND IT IS STRUCTURALLY INVISIBLE AT TWO SEATS.** It needs a killer who then
+    // dies WHILE THE MATCH CONTINUES, and at N=2 the killer's death is the end of the match
+    // by construction. The 110-cell two-seat corpus every balance number in this repo rests
+    // on cannot see one line of this — `docs/ITEMS.md` says so, and §42 drives it at N=6.
+    reviveThoseKilledBy(state, target, events);
     if (state.phase === 'playing') {
       // ── ⚠️ A KNOCKOUT IS NO LONGER THE END OF THE MATCH. IT USED TO SAY: ─────
       //
@@ -449,6 +676,125 @@ export function applyDamage(
         events.push({ type: 'match-ended', winner: victor.role, winnerId: victor.id });
       }
     }
+  }
+
+  // ── SHIITAKE SHIELD: WHAT THE ATTACKER TAKES BACK ─────────────────────────
+  //
+  // Uri: *"it created a fungas shield arround the character causing the enemies attacking
+  // him get damage on every damage they do."* Every point, not a fraction —
+  // `ITEM_TUNING.shiitake.reflect` is 1.0 and is applied to `dealt`, the number the victim
+  // ACTUALLY lost, so the mirror cannot disagree with the health bar it is mirroring.
+  //
+  // 🚨 **LAST IN THE FUNCTION, AFTER THE VICTIM'S ENTIRE DEATH BLOCK, AND THAT IS AN EVENT
+  // ORDER DECISION.** A reflection can kill the attacker, and `applyDamage` is re-entered to
+  // do it — so the stream reads: the victim's `hit-landed`, the victim's death and kits, and
+  // only then the attacker's `hit-landed` and its own death. Reflecting earlier would
+  // interleave two fighters' death sequences inside one call and no consumer could tell
+  // which corpse a `medikit-dropped` belonged to without tracking the recursion depth.
+  //
+  // 🚨 **AND IT TERMINATES AT EXACTLY ONE BOUNCE, BY CONSTRUCTION RATHER THAN BY A DEPTH
+  // COUNTER.** The reflected damage carries `itemDamageSource`, whose `itemId` is set;
+  // `isItemDamage` is therefore true on re-entry and this block is not reached again. Two
+  // shielded fighters hitting each other resolve in one level. §42 plants exactly that —
+  // both shields up, both hitting — and asserts the call does not recur.
+  //
+  // ⚠️ **A HIT FROM A LOADOUT ITEM DOES NOT REFLECT**, which is the same clause doing the
+  // same job for a different reason: a cloud you are standing in is not an attacker
+  // "attacking him", and a mirror that bounced a mirror would be the recursion above.
+  //
+  // ⚠️ **THE SHIELD DOES NOT REDUCE THE INCOMING HIT.** Uri described a retaliation, not
+  // armour, and reading it as damage reduction would be inventing a second effect he did
+  // not ask for. The wearer takes the blow and the attacker takes it too.
+  if (!isItemDamage && source.kind === 'weapon' && attacker != null && attacker !== target
+      && dealt > 0 && state.elapsed < target.item.shieldUntil) {
+    applyDamage(
+      state, attacker, dealt * ITEM_TUNING.shiitake.reflect, null,
+      itemDamageSource(target, 'shiitake'), events,
+    );
+  }
+}
+
+/**
+ * ── LEFTOVERS, RESOLVED: EVERYONE `killer` PUT DOWN GETS UP ──────────────────
+ *
+ * Called from the death block above, with the fighter that has just died. Uri: *"If someone
+ * kills you and than he dies (not the last in the game) that causes you to resurrect. Works
+ * once per match."*
+ *
+ * ── THE FOUR CONDITIONS, AND WHERE EACH ONE COMES FROM ──────────────────────
+ *
+ *   1. **`revivesLeft > 0`** — one comparison that answers BOTH "did they equip it" and "have
+ *      they used it", because `createFighter` seeds the counter to zero for anyone who did
+ *      not bring the item. Two separate tests could disagree; one cannot.
+ *   2. **`item.killerId === killer.id`** — recorded at the kill by `applyDamage`, because it
+ *      is not recoverable from a final state (see the note there).
+ *   3. **Still down.** A fighter already back on its feet is not resurrected again, and this
+ *      also covers the ordinary case where the corpse is somebody the killer never killed.
+ *   4. **`livingFighterCount(state) >= minAliveAfterKillerDies`** — Uri's *"(not the last in
+ *      the game)"*, counted AFTER the killer fell and BEFORE anyone stands up, so a
+ *      resurrection can never happen into a match that is already decided.
+ *
+ * ⚠️ **SLOT ORDER, AND DETERMINISM DEPENDS ON IT.** Two fighters can share a killer, so two
+ * can rise on one tick; `state.fighters` is the sim's one iteration order (see
+ * `MatchState.fighters`), which makes "who stood up first" a pure function of
+ * `createMatch`'s arguments. The living count is read ONCE, before the loop, so the second
+ * resurrection cannot be authorised by the first one — otherwise the rule would silently
+ * become "the first revive is gated, the rest are free".
+ *
+ * ── WHAT COMING BACK MEANS, STATED RATHER THAN INHERITED ────────────────────
+ *
+ * `ITEM_TUNING.leftovers.hp` — *"one corpse's worth of medikits"* — and **where the body
+ * fell**, which is a standable point by proof rather than by argument: a fighter was
+ * standing on it one tick ago (the same reasoning `dropMedikits` uses for its fallback).
+ *
+ * Every lock and every accumulator is cleared, and that list is a decision, not tidiness: a
+ * fighter that came back stunned, slept, rooted, mid-fog-tick or owing a knockback from
+ * where its body used to lie would be answering for a life it is no longer living. What is
+ * NOT cleared is `deaths` — the count is the record that this happened, and
+ * `sim.ts:resolveTimeout`'s rung 3 is *"fewest deaths"*.
+ *
+ * 🚨 **AND THAT RUNG STOPS BEING INERT TODAY.** Its own doc says it *"is a rung that becomes
+ * LOAD-BEARING the day respawns exist, and a counter is the only shape that survives that
+ * day; a `f.alive ? 0 : 1` derivation would have been a restatement of rung 1 forever."*
+ * This is that day: a resurrected fighter is alive with `deaths === 1`, so a timeout can now
+ * separate two survivors on it. The prediction was written before the quantity had a second
+ * reader, and it held.
+ */
+function reviveThoseKilledBy(state: MatchState, killer: Fighter, events: GameEvent[]): void {
+  const living = livingFighterCount(state);
+  if (living < ITEM_TUNING.leftovers.minAliveAfterKillerDies) return;
+  for (const f of state.fighters) {
+    if (f.item.revivesLeft <= 0) continue;
+    if (f.item.killerId !== killer.id) continue;
+    if (f.alive || f.hp > 0) continue;
+    f.item.revivesLeft--;
+    f.item.killerId = NO_FIGHTER;
+    f.alive = true;
+    f.hp = Math.min(f.maxHp, ITEM_TUNING.leftovers.hp);
+    // Every deadline back to "never", every accumulator back to its identity. See above.
+    f.status.slowedUntil = -Infinity;
+    f.status.stunnedUntil = -Infinity;
+    f.item.sleepUntil = -Infinity;
+    f.item.clogUntil = -Infinity;
+    f.item.rootUntil = -Infinity;
+    f.item.blotUntil = -Infinity;
+    f.item.shieldUntil = -Infinity;
+    f.push.x = 0;
+    f.push.y = 0;
+    f.push.remaining = 0;
+    f.push.speed = 0;
+    f.fogTimer = 0;
+    f.regenTimer = 0;
+    f.hazardTimers.length = 0;
+    // The regen delay starts now rather than from whenever the body last took a hit, so
+    // coming back does not immediately tick health up out of a corpse's stale timestamp.
+    f.lastDamagedAt = state.elapsed;
+    events.push({
+      type: 'item-revived',
+      fighterRole: f.role, fighterId: f.id,
+      killerRole: killer.role, killerId: killer.id,
+      hp: f.hp, x: f.x, y: f.y,
+    });
   }
 }
 
@@ -795,6 +1141,28 @@ export function attemptAttack(
   const now = state.elapsed;
   const castMs = w.castMs ?? 0;
 
+  // ── 🚨 POMPA CLOGS THE WEAPON, AND WARM MILK STOPS THE TURN ────────────────
+  //
+  // Uri: *"pompa — clogs their weapons for 5 secons"* and *"You can put someone to sleep"*.
+  // `state.ts:weaponsLocked` is the one statement of both, and it is asked HERE — in the
+  // function the human and the AI share — for the reason this file's header gives: the
+  // recorded stun-silence defect was one rule stated on one side of a `controller` branch,
+  // where the stunned player fired 100% of its shots and the stunned bot fired 0%. A clog
+  // enforced in `sim.ts` alone would be that defect rebuilt, exactly.
+  //
+  // ⚠️ **ABOVE THE COOLDOWN STAMP, SO A REFUSED PRESS COSTS NOTHING.** The line this
+  // function has always drawn is that a press which was ATTEMPTED is spent — "too far",
+  // "wrong direction", "target already dead". A clogged weapon was never attempted; the
+  // plunger is in the way. Refusing after the stamp would have made Pompa silently steal
+  // five seconds of cooldown as well as five seconds of fire, i.e. two effects from one
+  // sentence.
+  //
+  // ⚠️ **IT DOES NOT TOUCH A WIND-UP ALREADY OPEN.** A clog stops you STARTING something;
+  // `resolveDueCast` is a commitment already paid for. Sleep is different and says so
+  // separately — it cancels, through `cancelCast`, because a sleeping fighter is not
+  // finishing anything.
+  if (weaponsLocked(attacker, now)) return false;
+
   // ── 🚨 THE SECOND-CAST GATE. IT USED TO BE THE ATTACK LOCKOUT. ──────────────
   //
   // It still sits ABOVE the cooldown gate deliberately: "am I already committed to a
@@ -1065,4 +1433,481 @@ function deliverWeapon(
     spawnProjectile(state, attacker, target, w, 0, dmg, undefined, undefined, origin, facing, events);
   }
   return true;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ITEM ACTIVATION — the press half, and the ten effects
+   ═══════════════════════════════════════════════════════════════════════════
+
+   `rules.ts:ITEMS` is the registry, `rules.ts:ITEM_TUNING` every number,
+   `docs/ITEMS.md` the contract. This block is what happens when a button is
+   pressed, and it is deliberately shaped exactly like `attemptAttack` above it:
+
+     * ONE ENTRY POINT FOR BOTH DRIVERS. `attemptItem` is what `sim.ts`'s human
+       branch calls and what `ai.ts` will call in phase 3. Sharing it is what
+       guarantees a bot and a player pay the same cooldown, respect the same
+       `minAlive` and are refused by the same lock — the alternative is this
+       file's most expensive recorded defect class, five AI driver bugs whose
+       common shape was one rule implemented twice.
+     * THE USABILITY RULE IS EXPORTED, NOT BURIED. `itemUsable` answers "may this
+       button be pressed right now" for the HUD, for the loadout screen and for
+       the AI, and `attemptItem` is defined as "if `itemUsable`, spend it". A
+       button that greys itself out on a copy of the rule is a button that will
+       one day disagree with the sim.
+
+   ── 🚨 THERE IS NO ROLL IN ANY OF THIS ──────────────────────────────────────
+
+   `grep -rn 'Math.random' src/game/{sim,state,combat,ai,movement}.ts` returns
+   NOTHING and the sim carries no seeded generator either — the seeds every
+   balance number in this project rests on belong to the DRIVER. Every effect
+   below is a pure function of the match state at the instant it fires. The one
+   item that looks like it wants a roll is Disposal's destination, and the rule
+   there is an ORDERING over a set the sim already holds (`nearestLivingOpponent`,
+   the same rule every weapon aims with) rather than a choice.
+
+   ── ⚠️ WHAT THIS BLOCK ASSUMES BECAUSE THE REGISTRY DOES NOT SAY ────────────
+
+   `ITEM_TUNING` declares a `range` for exactly one thrown item (`warm_milk`,
+   where the range IS the mechanic). Pompa, Squid Ink, Liquorice and Disposal are
+   thrown too and declare none. Rather than type four numbers into the sim —
+   which would put four tuning values outside the file that owns tuning — every
+   throw that does not declare its own reach uses `ITEM_THROW_RANGE` below, and
+   the gap is REPORTED to whoever owns `rules.ts` rather than papered over.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * HOW FAR A THROWN ITEM REACHES WHEN `ITEM_TUNING` DOES NOT SAY.
+ *
+ * `GUARANTEED_VISIBLE_RADIUS` — the disc EVERY supported aspect ratio shows around you, so
+ * its edge is the furthest point a player can be certain is on their screen. It is the same
+ * constant `ITEM_TUNING.warm_milk.range` is derived from, which is the argument for it: Uri
+ * described one of these five items as reaching *"up to half a screen away"* and did not
+ * describe the other four as reaching further, so "as far as you can see" is the honest
+ * default and it is DERIVED rather than typed.
+ *
+ * 🔴 **THIS IS A GAP IN THE PHASE-1 CONTRACT AND IT IS REPORTED, NOT PATCHED.** The right
+ * end state is `ITEM_TUNING.pompa.range` / `.squid_ink.range` / `.liquorice.range` /
+ * `.disposal.range`, four one-line hunks in `rules.ts`, which this pass does not own. A
+ * constant living here instead of there is a second, quieter source of truth for tuning —
+ * `CLAUDE.md`'s named defect shape — and it is written down so nobody mistakes it for a
+ * decision that was made on purpose in the right place.
+ */
+const ITEM_THROW_RANGE = GUARANTEED_VISIBLE_RADIUS;
+
+/**
+ * ONE SECOND, FOR THE ONE ITEM WHOSE NUMBER IS DENOMINATED IN SECONDS.
+ *
+ * `ITEM_TUNING.blue_cheese.dps` is damage per SECOND. The second is the unit that number is
+ * quoted in, not a cadence somebody chose — so it is written once, here, rather than as a
+ * bare `1000` in `sim.ts`'s aura loop where it would read as a tuning knob. §42 asserts the
+ * relationship (one tick per second, `dps` damage per tick) rather than the number.
+ */
+export const ITEM_AURA_TICK_MS = 1000;
+
+/**
+ * ── MAY THIS BUTTON BE PRESSED RIGHT NOW? ───────────────────────────────────
+ *
+ * Exported for the same reason `statusReadyAt` and `drDurationFor` are: the HUD must be able
+ * to grey a button out, the AI must be able to decide whether pressing is worth a tick, and
+ * both have to ask the question the sim will actually answer. A copy of this rule anywhere
+ * else is a button that lies.
+ *
+ * The gates, in order, and the order is not arbitrary:
+ *
+ *   1. **PHASE.** Nothing is usable outside `'playing'`.
+ *   2. **THE SLOT HOLDS AN ACTIVE ITEM.** `passive` and `triggered` items have no button at
+ *      all — `ITEMS[id].cooldownMs` is `null` for exactly those, and §41(g) already pins
+ *      that correspondence, so this test and that one cannot drift.
+ *   3. **THE FIGHTER IS AWAKE.** `actionsLocked`, not `movementLocked`: a ROOTED fighter may
+ *      still press (`ITEMS.liquorice.look` — *"the victim can still act, they just cannot
+ *      move"*), a SLEEPING one may not. A CLOGGED one may — Uri's plunger clogs weapons.
+ *   4. **`minAlive`.** Uri, of Disposal: *"If there are only two players left, it's not
+ *      available."* 🚨 **READ FROM THE REGISTRY FOR EVERY ITEM, NEVER SPECIAL-CASED HERE.**
+ *      `ItemDef.minAlive`'s own header says why the field exists: hard-coding the check
+ *      inside Disposal's handler would make it invisible to the loadout screen, to the AI
+ *      and to any test that wants to enumerate what is usable right now.
+ *   5. **NO SECOND WIND-UP.** One `ItemCast` per fighter, exactly as `attemptAttack` allows
+ *      only one `ActiveCast` — a second press would overwrite the record and spend the
+ *      first item's cooldown on a wind-up that never resolved.
+ *   6. **COOLDOWN.**
+ *
+ * ⚠️ **A WEAPON WIND-UP DOES NOT REFUSE AN ITEM, AND THAT IS `DECISIONS §78` APPLIED RATHER
+ * THAN OVERLOOKED:** a cast costs POSITION, not SILENCE. The consequence is stated where it
+ * bites — `resolveItem`'s Springform branch — because a fighter that may not MOVE is one
+ * `movement.ts:stepPush` will not displace.
+ */
+export function itemUsable(state: MatchState, fighter: Fighter, slot: number): boolean {
+  if (state.phase !== 'playing') return false;
+  const id = fighter.item.equipped[slot];
+  if (id === undefined) return false;
+  const def = ITEMS[id];
+  if (def.kind !== 'active') return false;
+  if (actionsLocked(fighter, state.elapsed)) return false;
+  if (livingFighterCount(state) < def.minAlive) return false;
+  if (fighter.itemCast !== null) return false;
+  const cooldown = def.cooldownMs ?? 0;
+  return state.elapsed - fighter.item.lastUsed[slot] >= cooldown;
+}
+
+/**
+ * PRESS THE ITEM IN EQUIP SLOT `slot`. Returns false only when the press could not be
+ * attempted at all — which is exactly `!itemUsable`.
+ *
+ * Everything a press COSTS happens here and at the press, whether or not the effect finds
+ * anybody: the cooldown is stamped, and `item-used` is emitted. That is the same line
+ * `attemptAttack` has always drawn — *"too far", "wrong direction" and "target already dead"
+ * all consume the press* — and it is what stops an item being a free scan of the arena.
+ *
+ * ⚠️ **THE ONE ITEM WITH A WIND-UP RETURNS HERE AND RESOLVES LATER**, through
+ * `resolveDueItemCast` at the top of its owner's next qualifying turn, exactly as a `castMs`
+ * weapon does. `ITEMS.shiitake.look`: *"The WIND-UP MUST BE VISIBLE TO OPPONENTS — that is
+ * what makes it counterable rather than a coin flip."* The telegraph a renderer draws off
+ * `item-used`'s `windupMs` is therefore describing an effect that has not happened yet, and
+ * the fighter is rooted and its aim frozen for the whole of it (`state.ts:movementLocked`,
+ * `sim.ts:applyAim`) — the same three properties that make a weapon cast dodgeable.
+ */
+export function attemptItem(
+  state: MatchState,
+  fighter: Fighter,
+  slot: number,
+  events: GameEvent[],
+): boolean {
+  if (!itemUsable(state, fighter, slot)) return false;
+  const id = fighter.item.equipped[slot];
+  const def = ITEMS[id];
+  const now = state.elapsed;
+  fighter.item.lastUsed[slot] = now;
+
+  const windupMs = id === 'shiitake' ? ITEM_TUNING.shiitake.windupMs : 0;
+  events.push({
+    type: 'item-used',
+    fighterRole: fighter.role, fighterId: fighter.id,
+    itemId: id, slot, x: fighter.x, y: fighter.y, windupMs,
+  });
+
+  if (windupMs > 0) {
+    fighter.itemCast = { slot, itemId: id, startedAt: now, resolvesAt: now + windupMs };
+    return true;
+  }
+
+  resolveItem(state, fighter, slot, id, events);
+  return true;
+}
+
+/**
+ * RESOLVE `fighter`'s item wind-up if it is due — the item twin of `resolveDueCast`, called
+ * from the same place in `sim.ts`'s fighter loop and for the same reason: the effect must
+ * land at the point in the tick a press would have landed it, so nothing downstream has to
+ * know wind-ups exist.
+ *
+ * ⚠️ **THE PHASE IS RE-READ AND THAT IS NOT REDUNDANT** — the loop's gate was evaluated
+ * before the loop began and `applyDamage` can end the match mid-loop. ⚠️ **THE RECORD IS
+ * CLEARED BEFORE THE RESOLUTION RUNS**, so a resolution that reaches `applyDamage` cannot
+ * find its own owner mid-cast. Both are `resolveDueCast`'s rules, stated once there and
+ * followed here rather than re-argued.
+ *
+ * ⚠️ A match that ends mid-wind-up leaves the record ALONE: the gate simply never resolves
+ * it. `resolveDueCast`'s header records why clearing it in two places would be two
+ * statements of one rule.
+ */
+export function resolveDueItemCast(state: MatchState, fighter: Fighter, events: GameEvent[]): boolean {
+  if (state.phase !== 'playing') return false;
+  const c = fighter.itemCast;
+  if (c === null || state.elapsed < c.resolvesAt) return false;
+  fighter.itemCast = null;
+  events.push({
+    type: 'item-resolved',
+    fighterRole: fighter.role, fighterId: fighter.id,
+    itemId: c.itemId, slot: c.slot, x: fighter.x, y: fighter.y,
+  });
+  resolveItem(state, fighter, c.slot, c.itemId, events);
+  return true;
+}
+
+/**
+ * WHO A THROWN ITEM LANDS ON: the nearest living opponent, if it is inside `range`.
+ *
+ * 🚨 **`nearestLivingOpponent` AND NOT A SECOND TARGET RULE.** `state.ts` records that this
+ * question split into three when the seat cap came off and that every asker now shares one
+ * answer — `combat.ts:deliverWeapon` and `ai.ts:stepAI` both take this one, on the same tick,
+ * with nothing moving in between, precisely so an aim and a shot cannot name different
+ * fighters. An item that picked "the one I am pointing at" would be a fourth rule, and the
+ * first fighter it disagreed with a weapon about would be a bug nobody could see from either
+ * call site.
+ *
+ * ⚠️ **THE RANGE TEST IS SEPARATE FROM THE PICK, AND THE ORDER MATTERS.** The nearest
+ * opponent is chosen first and THEN tested, so a throw whose nearest target is out of reach
+ * MISSES rather than skipping past them to somebody further away. Uri's *"up to half a
+ * screen away"* is a maximum reach, not a search radius — and the alternative would let a
+ * player hit a distant fighter through a nearer one, which no other weapon in this game does.
+ */
+function itemTargetInRange(state: MatchState, user: Fighter, range: number): Fighter | null {
+  const t = nearestLivingOpponent(state, user);
+  if (t === null) return null;
+  return Math.hypot(t.x - user.x, t.y - user.y) <= range ? t : null;
+}
+
+/** The four deadline fields an item status can write. Named so the writer below is total. */
+type ItemStatusField = 'sleepUntil' | 'clogUntil' | 'rootUntil' | 'blotUntil';
+
+/**
+ * ── APPLY A TIMED ITEM STATUS, AND REFUSE ONE THAT IS ALREADY RUNNING ────────
+ *
+ * One writer for all four of Uri's timed states, so "what happens when it is applied twice"
+ * is answered once instead of four times.
+ *
+ * **THE RULE: A STATUS THAT IS ALREADY RUNNING IS NOT RE-APPLIED.** It is the same shape as
+ * `applyDamage`'s refusal for slow and stun (`statusReadyAt`), minus the grace window, and
+ * it is the minimum that stops two holders of one item chaining a lock nobody can answer —
+ * `DECISIONS §75` is the record of what that costs when it is missed: *"you essentially lock
+ * him to place"*.
+ *
+ * 🔴 **AND IT IS NOT SUFFICIENT ON TODAY'S NUMBERS — REPORTED, NOT SILENTLY FIXED.**
+ * `ITEMS.warm_milk.cooldownMs` is `SUPER_MIN_COOLDOWN_MS * 2` = 5,000 and
+ * `ITEM_TUNING.warm_milk.maxMs` is `ITEM_STATUS_MS` = 5,000, so a single holder throwing at
+ * maximum range can re-apply the instant the previous sleep expires and hold one fighter
+ * asleep for the whole match. The same arithmetic is exactly level for Pompa and Liquorice
+ * (5,000 cooldown against a 5,000 state). The fix is a cooldown or a grace window in
+ * `rules.ts`, which this pass does not own; the refusal here is the half that belongs in the
+ * sim. §42 measures the gap rather than describing it.
+ *
+ * ⚠️ **SLEEP KILLS BOTH KINDS OF WIND-UP.** Uri's sleep denies a fighter its whole turn, so
+ * a commitment it had already opened dies exactly as a stun kills one — `cast-cancelled` and
+ * `item-cancelled` both gain the reason `'sleep'` rather than borrowing `'stun'`, because
+ * the one job of that field is to say which terminator fired.
+ */
+function applyItemStatus(
+  state: MatchState,
+  owner: Fighter,
+  target: Fighter,
+  itemId: ItemId,
+  field: ItemStatusField,
+  ms: number,
+  events: GameEvent[],
+): boolean {
+  if (ms <= 0) return false;
+  if (state.elapsed < target.item[field]) return false;   // already running: refused
+  target.item[field] = state.elapsed + ms;
+  if (field === 'sleepUntil') {
+    if (target.cast !== null) cancelCast(target, 'sleep', events);
+    if (target.itemCast !== null) cancelItemCast(target, 'sleep', events);
+  }
+  events.push({
+    type: 'item-hit', itemId,
+    ownerRole: owner.role, ownerId: owner.id,
+    targetRole: target.role, targetId: target.id,
+    durationMs: ms, stacks: 0,
+    fromX: target.x, fromY: target.y, x: target.x, y: target.y,
+  });
+  return true;
+}
+
+/**
+ * ── WHAT EACH ACTIVE ITEM DOES. ONE SWITCH, REACHED BY BOTH PATHS. ───────────
+ *
+ * `attemptItem` for the nine that resolve on the press, `resolveDueItemCast` for the one
+ * that does not — the same two-callers-one-implementation shape `resolveWeapon` has, and for
+ * the same reason: a rule stated on the press path and again on the resolve path is two
+ * implementations of one resolution.
+ *
+ * The three non-active items are unreachable here by construction (`itemUsable` refuses
+ * anything whose `kind` is not `'active'`), and they are listed in the switch anyway rather
+ * than left to `default`, so that adding an eleventh item is a compile error in this file
+ * instead of a silent no-op in the game.
+ */
+function resolveItem(
+  state: MatchState,
+  user: Fighter,
+  slot: number,
+  id: ItemId,
+  events: GameEvent[],
+): void {
+  switch (id) {
+    // ── SPRINGFORM — Uri: *"Trampoline — use to jump further towards or away from the
+    // enemy"* ────────────────────────────────────────────────────────────────
+    //
+    // ALONG THE FIGHTER'S OWN `facing`, which is the whole of "towards or away": you point
+    // where you want to go and press. No target, no aim assist, nothing to resolve — which
+    // also makes it the one active item that works in an empty arena.
+    //
+    // ⚠️ It uses the displacement primitive with an explicit cap and rate, and
+    // `movement.ts:displaceFighter`'s `opts` block is the measurement of why it had to grow
+    // them: the shipped cap is 42 wu against this item's authored 99.61, and the shipped
+    // rate would have taken 1,107 ms against an authored 350.
+    //
+    // ⚠️ **IT IS A JUMP THAT COLLIDES.** The impulse is spent through `tryMove`, so a
+    // trampoline into a wall stops at the wall rather than passing through it. That is the
+    // conservative reading and it is deliberate: the alternative — a positional write, as
+    // Disposal takes — would let a fighter cross cover the nav grid and every weapon still
+    // treats as solid.
+    //
+    // ⚠️ **A FIGHTER THAT MAY NOT MOVE IS NOT LAUNCHED, AND ITS PRESS IS STILL SPENT.**
+    // `stepPush` refuses to displace a `movementLocked` fighter and burns the budget anyway,
+    // so pressing this while rooted, slept, stunned or mid-wind-up wastes it. That is not a
+    // new rule and it is not this item's: it is `stepPush`'s stated *"the sim never moves a
+    // fighter it has denied the ability to move"*, and a root you can trampoline out of is
+    // not a root. `attemptItem` does NOT gate on it, because `attemptAttack` does not gate a
+    // stunned fighter's press either and one of the two would then be lying.
+    case 'springform': {
+      displaceFighter(user, user.facing.x, user.facing.y, ITEM_TUNING.springform.distance, {
+        cap: ITEM_TUNING.springform.distance,
+        // Distance over time, so the authored `travelMs` is what the jump actually takes.
+        speed: ITEM_TUNING.springform.distance / ITEM_TUNING.springform.travelMs,
+      });
+      return;
+    }
+
+    // ── WARM MILK — Uri: *"You can put someone to sleep up to half a screen away, the
+    // farther he is, the longer it puts him to sleep"* ────────────────────────
+    //
+    // The one item whose duration is a function of the geometry, so the arithmetic is the
+    // mechanic: LINEAR from `minMs` at zero separation to `maxMs` at the edge of `range`.
+    // Linear rather than any curve because his sentence states a monotone relation and
+    // nothing more, and a curve would be a tuning decision invented in the sim.
+    //
+    // ⚠️ `range` is `GUARANTEED_VISIBLE_RADIUS` — *"half a screen"* derived from the disc
+    // every supported aspect ratio guarantees, never typed. `rules.ts` owns that derivation
+    // and §41(d) asserts it.
+    case 'warm_milk': {
+      const t = itemTargetInRange(state, user, ITEM_TUNING.warm_milk.range);
+      if (t === null) return;
+      const sep = Math.hypot(t.x - user.x, t.y - user.y);
+      const frac = ITEM_TUNING.warm_milk.range > 0
+        ? Math.min(1, Math.max(0, sep / ITEM_TUNING.warm_milk.range))
+        : 0;
+      const ms = ITEM_TUNING.warm_milk.minMs
+        + (ITEM_TUNING.warm_milk.maxMs - ITEM_TUNING.warm_milk.minMs) * frac;
+      applyItemStatus(state, user, t, id, 'sleepUntil', ms, events);
+      return;
+    }
+
+    // ── POMPA — Uri: *"pompa — clogs their weapons for 5 secons"* ─────────────
+    //
+    // WEAPONS, and nothing else: the victim still walks, still presses its other item, still
+    // finishes a wind-up it had already bought. `state.ts:weaponsLocked` is where that
+    // narrowness is stated and `attemptAttack` is the single site that reads it.
+    case 'pompa': {
+      const t = itemTargetInRange(state, user, ITEM_THROW_RANGE);
+      if (t === null) return;
+      applyItemStatus(state, user, t, id, 'clogUntil', ITEM_TUNING.pompa.clogMs, events);
+      return;
+    }
+
+    // ── SQUID INK — Uri: *"Ink spray that blots their screen"* ────────────────
+    //
+    // 🚨 **THE SIM HALF IS A FLAG WITH A DURATION AND NOTHING ELSE, AND THAT IS THE WHOLE
+    // OF THIS ITEM HERE.** The blots are screen-space and belong to the VFX track; the sim
+    // renders nothing and — importantly — DECIDES nothing on it. Impairing a human's view
+    // cannot be a sim input without the sim ceasing to be a pure function of its inputs, and
+    // a bot's sight is `movement.ts:isVisibleFrom`, which is geometry. So a slate-blind
+    // fighter behaves identically to a sighted one INSIDE the simulation, and the entire
+    // effect is what the player can see. §42 asserts that inertness rather than assuming it.
+    case 'squid_ink': {
+      const t = itemTargetInRange(state, user, ITEM_THROW_RANGE);
+      if (t === null) return;
+      applyItemStatus(state, user, t, id, 'blotUntil', ITEM_TUNING.squid_ink.blotMs, events);
+      return;
+    }
+
+    // ── LIQUORICE ROPE — Uri: *"Rope — you can use it to tie an opponent for 5 seconds"* ──
+    //
+    // ROOTED, NOT STUNNED. `ITEMS.liquorice.look` makes the promise explicitly — *"the victim
+    // can still act, they just cannot move, and those are different states"* — so the root
+    // is a term in `movementLocked` and is deliberately absent from `actionsLocked`.
+    case 'liquorice': {
+      const t = itemTargetInRange(state, user, ITEM_THROW_RANGE);
+      if (t === null) return;
+      applyItemStatus(state, user, t, id, 'rootUntil', ITEM_TUNING.liquorice.rootMs, events);
+      return;
+    }
+
+    // ── SHIITAKE SHIELD — Uri: *"attackers … get damage on every damage they do. Lasts for
+    // 5 seconds"* ─────────────────────────────────────────────────────────────
+    //
+    // Reached ONLY from `resolveDueItemCast`, one full `windupMs` after the press. The
+    // reflection itself is at the bottom of `applyDamage`, because that is the single choke
+    // point every point of damage in the game passes through; all this does is open the
+    // window.
+    //
+    // ⚠️ **THE WINDOW IS SET FROM *NOW*, WHICH IS THE RESOLVE AND NOT THE PRESS.** Uri's
+    // five seconds are five seconds of shield, not five seconds minus a wind-up.
+    case 'shiitake': {
+      user.item.shieldUntil = state.elapsed + ITEM_TUNING.shiitake.durationMs;
+      // The wearer is both owner and target: this is the one item that lands on nobody else,
+      // and publishing it as a hit on yourself is what lets one subscription draw all ten.
+      events.push({
+        type: 'item-hit', itemId: id,
+        ownerRole: user.role, ownerId: user.id,
+        targetRole: user.role, targetId: user.id,
+        durationMs: ITEM_TUNING.shiitake.durationMs, stacks: 0,
+        fromX: user.x, fromY: user.y, x: user.x, y: user.y,
+      });
+      return;
+    }
+
+    // ── DISPOSAL — Uri: *"Black hole — throws him nearby a different enemy. If there are
+    // only two players left, it's not available"* ─────────────────────────────
+    //
+    // Three fighters, resolved by the sim's ONE target rule asked twice:
+    //
+    //   VICTIM       `nearestLivingOpponent(state, user)`          — inside the throw's reach
+    //   DESTINATION  `nearestLivingOpponent(state, victim, user)`  — nearest to the VICTIM,
+    //                                                                excluding the thrower
+    //
+    // Nearest-to-the-victim rather than nearest-to-the-thrower because the sentence is about
+    // where the victim ENDS UP, and because it is the reading a player can predict from what
+    // is on screen: they go to whoever they were already closest to. Ties break on the lower
+    // slot, inside `nearestLivingOpponent`, which is where every other tie in the sim breaks.
+    //
+    // ⚠️ **THE `minAlive: 3` GATE IS NOT HERE.** It is declared on `ITEMS.disposal` and
+    // enforced by `itemUsable`, so the loadout screen and the AI can see it — that field's
+    // header is the argument. This branch may still find no destination (all other fighters
+    // out of the world, an instrument's fixture), and then nothing happens and the press is
+    // spent, exactly as a missed swing is.
+    //
+    // ⚠️ **THE DESTINATION IS A POSITIONAL WRITE, NOT A SHOVE.** `movement.ts:placeFighterAt`
+    // carries the measurement: an impulse across a 2800x2000 arena is nearly eight seconds of
+    // sliding at the primitive's spend rate. The drain and the spit-out are the VFX track's,
+    // drawn between the two ends this event publishes.
+    case 'disposal': {
+      const victim = itemTargetInRange(state, user, ITEM_THROW_RANGE);
+      if (victim === null) return;
+      const dest = nearestLivingOpponent(state, victim, user);
+      if (dest === null) return;
+      const fromX = victim.x;
+      const fromY = victim.y;
+      // The bearing from the destination BACK TOWARD where the victim was, so they are spat
+      // out on the side they came from rather than through the fighter they are thrown at.
+      // Coincident fighters have no bearing between them — the same degeneracy the melee cone
+      // and `displaceFighter` both answer — so it falls back to the destination's own facing,
+      // which `createFighter` seeds non-zero and nothing in the sim ever zeroes.
+      let dx = fromX - dest.x;
+      let dy = fromY - dest.y;
+      const mag = Math.hypot(dx, dy);
+      if (mag < 1e-6) { dx = dest.facing.x; dy = dest.facing.y; }
+      else { dx /= mag; dy /= mag; }
+      const d = ITEM_TUNING.disposal.dropDistance;
+      placeFighterAt(victim, dest.x + dx * d, dest.y + dy * d, state.arena);
+      events.push({
+        type: 'item-hit', itemId: id,
+        ownerRole: user.role, ownerId: user.id,
+        targetRole: victim.role, targetId: victim.id,
+        durationMs: 0, stacks: 0,
+        fromX, fromY, x: victim.x, y: victim.y,
+      });
+      return;
+    }
+
+    // ── THE THREE THAT HAVE NO BUTTON ────────────────────────────────────────
+    //
+    // `itemUsable` refuses anything whose `kind` is not `'active'`, so these are unreachable
+    // from both call sites. They are named rather than swept into a `default` so that the
+    // eleventh item added to `ItemId` fails to compile HERE — a `default: return;` would have
+    // made a new item a silent no-op in the game and green in every test that did not know to
+    // look for it.
+    case 'tenderiser':   // passive: `applyDamage`'s streak block
+    case 'blue_cheese':  // passive: `sim.ts:applyWorldTick`'s aura block
+    case 'leftovers':    // triggered: `reviveThoseKilledBy`, off a death rather than a press
+      return;
+  }
 }

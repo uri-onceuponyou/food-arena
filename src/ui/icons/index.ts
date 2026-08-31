@@ -33,11 +33,26 @@
  */
 
 import { FOOD_ICONS } from './food';
+import { ITEM_ICONS } from './items';
 import { UI_ICONS } from './ui';
 
 export { portraitMarkup, hydratePortraits } from './portraits';
+export { ITEM_ICONS } from './items';
 
-const REGISTRY: Record<string, string> = { ...UI_ICONS, ...FOOD_ICONS };
+/**
+ * ⚠️ **THE SPREAD IS A SILENT LAST-ONE-WINS, AND THAT IS THE ONLY HAZARD OF ADDING A
+ * THIRD SOURCE.** Three flat records merged with `...` means a key present in two of them
+ * resolves to whichever spread is later, with no error and no warning — the glyph simply
+ * becomes a different drawing on a screen nobody was looking at. `ui.ts` and `food.ts` are
+ * owned by other passes and both grow, so "I checked for collisions once" is a property of
+ * the day it was checked. `node tools/tmp/il_seam.mjs` re-derives the three key sets from
+ * source and fails on any intersection, and its own known-bad arm plants a collision and
+ * requires the row to go red.
+ *
+ * The wording of this note is inherited verbatim from branch `items-groundwork`
+ * (`3c30a3b`), which reached it independently. It was right.
+ */
+const REGISTRY: Record<string, string> = { ...UI_ICONS, ...FOOD_ICONS, ...ITEM_ICONS };
 
 export type IconName = string;
 
