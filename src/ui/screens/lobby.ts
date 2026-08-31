@@ -184,7 +184,9 @@ import {
   CHARACTER_IDS, CHARACTERS, ITEMS, ITEM_SLOTS, RARITY_COLORS, RARITY_ORDER,
   type CharacterId, type ItemDef, type ItemId,
 } from '../../game/rules';
-import { enemyLevelFor } from '../../game/economy';
+import {
+  ITEM_IDS, enemyLevelFor, ownedItemSet, type EconomyState,
+} from '../../game/economy';
 import { MIN_FIGHTERS } from '../../game/state';
 import { SEAT_CHOICES, brawlRoster, seatCountFor } from './brawl';
 import type { Route, Screen, ScreenContext } from './types';

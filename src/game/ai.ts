@@ -1079,8 +1079,17 @@ const OFFENSIVE_REACH: ReadonlyMap<CharacterId, number> = (() => {
   return m;
 })();
 
-/** `OFFENSIVE_REACH` with the map lookup's `undefined` collapsed. Every id is present. */
-function offensiveReach(id: CharacterId): number {
+/**
+ * `OFFENSIVE_REACH` with the map lookup's `undefined` collapsed. Every id is present.
+ *
+ * ⚠️ **EXPORTED FOR `sim.test.mjs` §43(g), ON `pressValue`'S AND `castThreat`'S PRECEDENT
+ * AND FOR THEIR REASON**, which that file states three times: *"a copy of the driver's
+ * ranking arithmetic would only test the copy"*. §43(g) asserts that every entry is finite
+ * and strictly inside `ITEM_THROW_RANGE` — the two properties both readers go **vacuous**
+ * without — and a `Math.max` over `CHARACTERS[id].weapons` written in the test would keep
+ * passing against a file that had stopped computing one.
+ */
+export function offensiveReach(id: CharacterId): number {
   return OFFENSIVE_REACH.get(id) ?? 0;
 }
 

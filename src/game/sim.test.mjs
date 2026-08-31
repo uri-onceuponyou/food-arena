@@ -26,7 +26,12 @@ import { createMatch, stepMatch } from './sim.ts';
 // §33(m) imports `castThreat` for the third time this rule appears: the AI's model of what
 // an open cast can hit is checked against the damage the REAL combat path delivers over a
 // swept grid, and a copy of the wedge arithmetic here would only have tested the copy.
-import { castThreat, pressValue, stepAI } from './ai.ts';
+// §43(g) imports `offensiveReach` for the fourth time this rule appears in this list: the
+// two item rules that ask "can that fighter hurt me from where it stands" both go VACUOUS
+// if a character's reach is infinite or wider than the throw, and a `Math.max` over
+// `CHARACTERS[id].weapons` written here would keep passing against an `ai.ts` that had
+// stopped computing one.
+import { castThreat, offensiveReach, pressValue, stepAI } from './ai.ts';
 // Section 17 needs the real damage path to prove that taking a hit restarts the
 // out-of-combat delay — modelling `lastDamagedAt` by hand would test the model.
 // Section 19 fires Lollipop's slam directly, because the thing under test is that it
@@ -7502,10 +7507,55 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
     // and they are correctly outside this claim, which is about MOVEMENT.
     console.log(`     stunnedUntil comparers: [${comparers.join(', ')}]  ·  movers: [${movers.join(', ')}]`);
 
-    check('the predicate itself is live: it locks on a cast with no stun anywhere in sight',
-      movementLocked({ status: { stunnedUntil: -Infinity }, cast: { weaponIndex: 0, startedAt: 0, resolvesAt: 1 } }, 0)
-      && !movementLocked({ status: { stunnedUntil: -Infinity }, cast: null }, 0)
-      && movementLocked({ status: { stunnedUntil: 100 }, cast: null }, 0));
+    // ── 🚨 THIS ROW WENT RED WHEN `Fighter` GREW A FIELD, AND THE FIXTURE WAS THE BUG ──
+    //
+    // It used to be three HAND-BUILT PARTIALS:
+    //
+    //   > `check('the predicate itself is live: it locks on a cast with no stun anywhere in sight',`
+    //   >   `movementLocked({ status: { stunnedUntil: -Infinity }, cast: { weaponIndex: 0, startedAt: 0, resolvesAt: 1 } }, 0)`
+    //   >   `&& !movementLocked({ status: { stunnedUntil: -Infinity }, cast: null }, 0)`
+    //   >   `&& movementLocked({ status: { stunnedUntil: 100 }, cast: null }, 0));`
+    //
+    // `movementLocked` grew three terms for Uri's items — `f.itemCast !== null`, sleep and
+    // root — and the middle arm is the CONTROL, the one that must come back FALSE. On an
+    // object with no `itemCast` key, `undefined !== null` is `true`, so the control locked
+    // and the row failed. **It failed for the right reason and pointed at the wrong thing**:
+    // nothing was wrong with the predicate, the fixture had simply stopped describing a
+    // fighter. Typing `itemCast: null, item: { sleepUntil: -Infinity, rootUntil: -Infinity }`
+    // in would fix today and re-arm the same trap for the fourth term, which is this
+    // project's named defect shape (a second, quieter statement of a `Fighter`).
+    //
+    // → **THE FIXTURE IS `createFighter` NOW.** A real fighter, from the factory the sim
+    // builds every seat with, mutated one field at a time. A seventh lock term cannot make
+    // this stale — it can only make it RED, which is what a row like this is for.
+    //
+    // ⚠️ AND IT NOW DRIVES ALL FIVE TERMS, because the claim "the predicate is live" is
+    // worth exactly as much as the number of ways it is shown to fire. Each arm is a
+    // single field away from the control, so a term that stopped being read is one red row
+    // naming itself rather than a silent pass.
+    {
+      const locked = (mutate) => {
+        const f = createFighter({
+          id: 0, controller: 'human', characterId: 'hamburger', spawn: { x: 0, y: 0 },
+          maxHp: 100, size: PLAYER_SIZE, hitRadius: HIT_RADIUS_VS_PLAYER, facing: { x: 1, y: 0 },
+        });
+        mutate(f);
+        return movementLocked(f, 0);
+      };
+      // NON-VACUITY / THE CONTROL: an untouched fighter at `elapsed = 0` is free. Every arm
+      // below is this fixture plus one field, so an arm that passes is that field's doing.
+      check('the predicate\'s CONTROL is live: a freshly built fighter is NOT movement-locked',
+        !locked(() => {}));
+      check('the predicate itself is live: it locks on a cast with no stun anywhere in sight',
+        locked((f) => { f.cast = { weaponIndex: 0, startedAt: 0, resolvesAt: 1 }; }));
+      check('…and on a stun with no cast anywhere in sight',
+        locked((f) => { f.status.stunnedUntil = 100; }));
+      check('…and on an ITEM wind-up, which roots exactly as a weapon wind-up does',
+        locked((f) => { f.itemCast = { slot: 0, itemId: 'shiitake', startedAt: 0, resolvesAt: 1 }; }));
+      check('…and on Uri\'s sleep, and on Uri\'s rope, which are two terms and not one',
+        locked((f) => { f.item.sleepUntil = 100; })
+        && locked((f) => { f.item.rootUntil = 100; }));
+    }
   }
 
   // ── (f) A CASTING HUMAN CANNOT MOVE AND CANNOT RE-AIM ─────────────────────
