@@ -2693,6 +2693,105 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
   // its own rails and pots across its own legs, which is exactly the cue measured as
   // absent — no top-vs-side value break on any pole, no shadow from the rack onto its
   // own legs, no key-light falloff along a rail.
+  // ───────────────────────────────────────────────────────────────────────────
+  // THE HANGING STRANDS — the half that answers "players are visible through them"
+  // ───────────────────────────────────────────────────────────────────────────
+  //
+  // Uri, FOURTH report, then again after the rack shipped: *"yep, looked at it, still
+  // see through"*. `DECISIONS §29a` authorises this; the header above has the numbers.
+  //
+  // Braided onions, dried herbs and cloth ties hung off the rack, down INTO the body
+  // band. Everything above this point in the function is on the floor (<= 0.620 m) or
+  // above a 2.100 m head (>= 2.470 m); this is the only geometry between them, and the
+  // band is 70.5% of the character.
+  //
+  // ── 🚨 THE DESIGN IS RADIAL DENSITY, AND IT IS WHAT MAKES THE TRADE SURVIVABLE ──
+  //
+  // The original header's objection to body-band mass was that it "would also hide the
+  // floor the fighter stands on", and that objection is TRUE of a wall. It is not true
+  // of this, because the strands are not uniform: `RINGS` puts them THICK AROUND THE
+  // PERIMETER AND LEAVES THE MIDDLE OPEN. Three different lines of sight, three
+  // different answers, from one piece of geometry:
+  //
+  //   * LOOKING IN from outside, at the match camera's oblique angle, a sightline to a
+  //     fighter standing in the middle crosses the FAR perimeter, and at 58 degrees it
+  //     crosses several strands' worth of lateral extent. That is the occlusion Uri is
+  //     asking for.
+  //   * LOOKING OUT from inside, you are standing in the OPEN middle, so you see through
+  //     one perimeter rather than two, and you are close enough to it that the gaps
+  //     subtend more angle than the strands. You can still fight from in here.
+  //   * LOOKING DOWN, the middle is empty, so the floor, the rim and the ground crockery
+  //     all still read — which is the original objection, answered by ARRANGEMENT rather
+  //     than by absence.
+  //
+  // Thin verticals are also the shape that FORGIVES INTERPENETRATION, and that matters
+  // because a concealment region is walk-through by definition (`addConceal`'s header)
+  // and `DUCK_CLEAR_M` above exists precisely so nothing can pass through a head. It
+  // cannot hold here — mass in the body band is mass a body walks through, and that is
+  // the trade §29a authorises. A character overlapping a 0.09 m strand reads as pushing
+  // THROUGH hanging cordage; the same character overlapping a slab reads as the
+  // interpenetration defect `CLAUDE.md` rule 3 is about. Narrow and many, never wide.
+  //
+  // ── HEIGHTS DERIVED, NEVER TYPED, for the same reason as everything above ──
+  // The bottom sits above the tallest ground clutter so a strand never ends inside a
+  // stack of plates, and the top is the rack itself, so if `CHARACTER_HEIGHT` moves the
+  // whole curtain moves with it instead of becoming a fringe.
+  const STRAND_BOT = CHARACTER_HEIGHT * 0.36;   // 0.756 m — above CLUTTER's tallest 0.620
+  const STRAND_TOP = RACK_Y;                    // hangs from the rack, not from nothing
+  const STRAND_H = STRAND_TOP - STRAND_BOT;
+  const STRAND_W = 0.09;                        // narrower than POST (0.21), deliberately
+  //
+  // ⚠️ A FIXED TABLE, NOT AN RNG, and the header says why: every patch ships with a
+  // point-symmetric partner that `kitchen.ts` generates by transform, so the two must be
+  // identical under 180 degrees or the map is not fair. Fractions of the patch's own
+  // half-extent, so one table serves 110, 120 and 130 wu alike.
+  //
+  // `u`/`v` in -1..1, `drop` scales the strand's length so the curtain has a broken
+  // hemline rather than a fence line.
+  //
+  // 🚨 THE FIRST TABLE HERE WAS WRONG AND THE RENDER SHOWED IT. Kept as the lesson,
+  // because it is the exact failure this file's rule 3 is about — the numbers looked
+  // reasonable and the picture did not. It ran 16 outer strands at `drop` 0.68..1.00 and
+  // four inner at 0.46..0.52, and:
+  //   * `STRAND_H` is 2.234 m, so **a drop of 0.46 ends at 1.96 m — head height.** The
+  //     four inner strands did not reach the body band AT ALL. They were decoration in
+  //     the one place the whole change exists to put mass.
+  //   * 16 strands of 0.09 m around a ~6.5 m perimeter is **~5% lateral coverage**. At a
+  //     glancing angle that is a few pixels of cord, which is what the frame showed:
+  //     a fighter standing at a rack's edge, fully readable, through it.
+  // So: every drop now reaches the band, and the perimeter is dense enough to read as a
+  // MASS rather than as a handful of wires.
+  //
+  // ⚠️ AND THE TARGET IS "READS AS A HIDING PLACE", NOT "PHYSICALLY OCCLUDES FROM EVERY
+  // ANGLE". The mechanic already hides a fighter 92.7% of the time at six seats
+  // (`cn_reveal`); the model, the pill and the blip all go. What Uri is describing is
+  // that the GEOMETRY does not look like somewhere that would do that. Chasing true
+  // occlusion at 58 degrees means a wall, and a wall is what the original header
+  // correctly refused. Visual density is the target.
+  const RINGS: ReadonlyArray<readonly [number, number, number]> = [
+    [-0.88, -0.88, 1.0], [-0.88, 0.88, 0.93], [-0.59, -0.88, 0.93], [-0.59, 0.88, 1.0],
+    [-0.29, -0.88, 1.0], [-0.29, 0.88, 0.93], [0.0, -0.88, 0.93], [0.0, 0.88, 1.0],
+    [0.29, -0.88, 1.0], [0.29, 0.88, 0.93], [0.59, -0.88, 0.93], [0.59, 0.88, 1.0],
+    [0.88, -0.88, 1.0], [0.88, 0.88, 0.93], [-0.88, -0.59, 1.0], [0.88, -0.59, 0.96],
+    [-0.88, -0.29, 0.96], [0.88, -0.29, 1.0], [-0.88, 0.0, 1.0], [0.88, 0.0, 0.96],
+    [-0.88, 0.29, 0.96], [0.88, 0.29, 1.0], [-0.88, 0.59, 1.0], [0.88, 0.59, 0.96],
+    [-0.55, -0.55, 0.82], [0.55, -0.55, 0.82], [-0.55, 0.55, 0.82], [0.55, 0.55, 0.82],
+    [0.0, -0.6, 0.82], [0.0, 0.6, 0.82], [-0.6, 0.0, 0.82], [0.6, 0.0, 0.82],
+    [-0.22, -0.2, 0.76], [0.24, -0.16, 0.76], [-0.18, 0.24, 0.76], [0.2, 0.22, 0.76],
+  ];
+  for (const [u, v, drop] of RINGS) {
+    const x = u * (rW / 2), z = v * (rD / 2);
+    const h = STRAND_H * drop;
+    // The cord, top-anchored so the broken hemline is at the BOTTOM where it is read.
+    rackParts.push(roundedBox(STRAND_W, h, STRAND_W, STRAND_W * 0.4)
+      .translate(x, STRAND_TOP - h / 2, z));
+    // One bulb near the bottom. It is what makes a strand read as produce rather than as
+    // a hanging wire, and it is the widest thing down here — so it is capped at twice the
+    // cord and no more, for the interpenetration reason above.
+    plateParts.push(puck(STRAND_W * 2.0, STRAND_W * 1.5, 8)
+      .translate(x, STRAND_TOP - h + STRAND_W * 1.6, z));
+  }
+
   const rack = mesh(mergeGeometries(rackParts, false)!, M.concealRack, 'conceal_rack');
   rack.castShadow = true;
   rack.receiveShadow = true;
