@@ -116,10 +116,10 @@ const fired = (s) => s.cls.includes('is-cooling') || s.cls.includes('is-winding'
  * it before "nothing happened" means anything.
  */
 const WATCH_MS = 9000;
-async function watch(page, pred) {
+async function watch(page, pred, ms = WATCH_MS) {
   const t0 = Date.now();
   let last = await slots(page);
-  while (Date.now() - t0 < WATCH_MS) {
+  while (Date.now() - t0 < ms) {
     if (pred(last)) return { hit: true, last, ms: Date.now() - t0 };
     await page.waitForTimeout(150);
     last = await slots(page);
@@ -202,7 +202,13 @@ console.log(`\n${EXPECT_DEAD ? 'EXPECTING A DEAD CHAIN' : 'EXPECTING A LIVE CHAI
   // `ITEM_TUNING.shiitake.windupMs` is SUPER_MIN_COOLDOWN_MS = 2500, but WALL-CLOCK is not
   // the unit that matters — the wind-up resolves on a SIM tick, and this machine's tick
   // rate is whatever SwiftShader can manage. Poll for the next state instead.
-  const cool = await watch(s.page, (r) => r[0].cls.includes('is-cooling'));
+  // ⚠️ A LONGER WINDOW, AND THE NUMBER IS MEASURED RATHER THAN PICKED. The wind-up is
+  // 2,500 ms of SIM time and this sim advances at a fraction of wall-clock under
+  // SwiftShader: on the run that produced this line the badge moved 2.5 -> 1.0 in 9.0 s of
+  // wall time, i.e. **1.5 s of sim per 9.0 s real, 0.167x**. 2,500 ms of sim is therefore
+  // ~15 s of wall on a loaded machine, and a 9 s window reported a green behaviour as red.
+  // 30 s is that with margin; a live press still exits the moment the state flips.
+  const cool = await watch(s.page, (r) => r[0].cls.includes('is-cooling'), 30000);
   ok(`5. ...and after the wind-up it is ${EXPECT_DEAD ? 'still inert' : 'cooling'}`,
     EXPECT_DEAD ? !cool.hit : cool.hit,
     `after ${cool.ms}ms: ${cool.last[0].cls} "${cool.last[0].badge}"`);
