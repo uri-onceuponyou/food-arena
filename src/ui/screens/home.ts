@@ -162,7 +162,8 @@ import { loadEquipped, ownedItems } from './lobby';
  *  keep.
  *
  *  ⚠️ **WAS `'1v1 · Kitchen Rumble'`, and the `1v1` became FALSE on 2026-08-12.**
- *  `DECISIONS §74` gives the player a seat count of 2–6 (`screens/lobby.ts`), so a mode
+ *  `DECISIONS §66` (⚠️ was `§74` — see the `.home-mode` markup for why that number is
+ *  wrong in five files) gives the player a seat count of 2–6 (`screens/lobby.ts`), so a mode
  *  line that hardcodes the field size is a claim the model stops computing the moment
  *  anyone taps 3 — against this screen's own standing rule, quoted from the header:
  *  *"Nothing on this screen advertises something that does not work."* The count is not
@@ -367,7 +368,20 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
       <!-- 🚨 THE LOBBY ENTRY, AND IT IS THIS ELEMENT RATHER THAN THE CTA.
            NOTE: no backticks anywhere in this literal. A backtick inside a template
            string terminates it, and menu_accept parses all 88 modules for exactly this.
-           DECISIONS 74 asks for "the lobby where the gameplay is set".
+           DECISIONS 66 asks for "the lobby where the gameplay is set".
+           ⚠️ WAS "DECISIONS 74", and it is wrong here and in four other places, kept
+           per the reversed-assertion rule because the fix is a re-derivation and not a
+           typo. Checked 2026-09-02 against the document itself: there is NO section
+           heading numbered 74 in docs/DECISIONS-FOR-URI.md at all — the number appears
+           only in prose, about a phone capture and about choosing BUILD over reword.
+           The sentence quoted above sits under "### 66 — the six-player lobby. The
+           default is withdrawn; build the affordance.", and the summary table at the
+           top of that file attributes the same verbatim quote to 66. A citation is the
+           one part of a comment that looks verified BECAUSE it is a citation, which is
+           exactly how this one survived being pasted into five source files.
+           ⚠️ ROUTED, not fixed: lobby.ts (x2), types.ts, brawl.ts and
+           tools/tmp/lb_accept.mjs carry the same wrong number and are outside this
+           pass's owned set.
 
            ── WAS: "the obvious wiring is the start button, and it is REFUSED by a
            measurement: journey.mjs — the only end-to-end gate in this project — and
@@ -855,7 +869,8 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     ctx.navigate({ name: 'characters' });
   });
 
-  // `DECISIONS §74` — where the match is configured. Not routed through the delegated
+  // `DECISIONS §66` (⚠️ was `§74`; see the `.home-mode` markup) — where the match is
+  // configured. Not routed through the delegated
   // `[data-go]` handler above because that one maps a string to a route by name and this
   // is the screen's second committed action, which deserves to be readable beside the
   // first rather than as one more entry in a dispatch table.
@@ -2539,7 +2554,8 @@ const CSS = `
   /* ⚠️ WAS '.fa-home .home-mode { display: none; }', on the reasoning that the footer's
      copy is not durable at this width and the mode block is only a caption. That reason
      expired on 2026-08-12: the block is now the ONLY route to the match lobby
-     (DECISIONS 74), and hiding it would make the seat count unreachable in portrait
+     (DECISIONS 66 -- was 74, see the '.home-mode' markup), and hiding it would make the
+     seat count unreachable in portrait
      except by typing '?screen=lobby' — "hidden is unmeasurable", and worse, unusable.
      Kept here per the project's rule on reversed assertions.
 
