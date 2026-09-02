@@ -31,7 +31,15 @@ import { createMatch, stepMatch } from './sim.ts';
 // if a character's reach is infinite or wider than the throw, and a `Math.max` over
 // `CHARACTERS[id].weapons` written here would keep passing against an `ai.ts` that had
 // stopped computing one.
-import { castThreat, offensiveReach, pressValue, stepAI } from './ai.ts';
+// §43(a) and §43(d) import `pickItem` and `itemWorthIt` for the FIFTH and SIXTH time this
+// rule appears in this list, and here it is not a preference — it is the only way the rows
+// can discriminate at all. A press that never happens EMITS NOTHING, so "declined because
+// the target was already asleep" and "declined because it was out of range" are the same
+// silence from outside `ai.ts`; and `pickItem`'s two `null`s (empty loadout / nothing worth
+// pressing) leave the state bit-identical, which is exactly the vacuity its own header
+// names. A copy of either rule written here would pass forever against a file that had
+// stopped calling it.
+import { castThreat, itemWorthIt, offensiveReach, pickItem, pressValue, stepAI } from './ai.ts';
 // Section 17 needs the real damage path to prove that taking a hit restarts the
 // out-of-combat delay — modelling `lastDamagedAt` by hand would test the model.
 // Section 19 fires Lollipop's slam directly, because the thing under test is that it
@@ -41,7 +49,11 @@ import { castThreat, offensiveReach, pressValue, stepAI } from './ai.ts';
 // `TRAIL.radius` test — the section's whole claim is that ONE predicate is now consulted
 // by two files, and a re-derived version here would pass forever against a sim that had
 // stopped calling it.
-import { applyDamage, attemptAttack, isOnOwnTrail, resolveDueCast, statusReadyAt } from './combat.ts';
+// Section 43 imports `itemUsable` for the same reason again, and here the argument is the
+// sim's own: `combat.ts:itemUsable`'s header says it is exported *precisely* so the HUD, the
+// loadout screen and the AI share ONE answer, and that "a copy of this rule anywhere else is
+// a button that lies". §43 is the third reader, so it asks the same function.
+import { applyDamage, attemptAttack, isOnOwnTrail, itemUsable, resolveDueCast, statusReadyAt } from './combat.ts';
 // Section 26 tests CONCEALMENT. The predicates are imported rather than re-derived for
 // the same reason `pressValue` and `statusReadyAt` are: the section's entire claim is that
 // ONE rule is read by four call sites, and a copy of the AABB test here would pass forever
@@ -179,6 +191,11 @@ import {
   // Section 33(e): the movement lock. Imported so the row asserts the predicate the sim
   // actually calls rather than a copy of `stunned OR casting` written here.
   movementLocked,
+  // Section 43(c): Pompa's clog. `weaponsLocked` is imported for the reason `movementLocked`
+  // is — the whole claim of that row is that ONE predicate now gates the human's press and
+  // the bot's weapon CHOICE, and a copy of `asleep OR clogged` written here would keep
+  // passing against an `ai.ts` that had stopped consulting it.
+  weaponsLocked,
 } from './state.ts';
 
 // Weapon reach and projectile speed come off the `REACH`/`SPEED` ladders in
@@ -11189,6 +11206,408 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
           { characterId: 'hamburger', items: [PAIR[0]] }, { characterId: 'donut' },
         ])));
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 43. THE BOT PRESSES THE SAME BUTTONS THE PLAYER DOES — `ai.ts`'s LOADOUT ITEMS block
+//
+// 🚨 THIS SECTION WAS CITED EIGHT TIMES BEFORE IT EXISTED, AND THAT IS THE FINDING.
+// `ai.ts` names `§43(a)`, `§43(c)`, `§43(f)` and `§43(g)` in the present tense — *"§43(g)
+// asserts that it cannot bind, so the day the numbers move the claim goes red"* — and this
+// file's own import block has said *"§43(g) imports `offensiveReach`"* since `a015d1f`.
+// Measured 2026-09-02: the last section in this file was §41. **Four assertions were
+// described, relied on in prose, and never written.** `combat.ts` cites a §42 that does not
+// exist either (7 sites), which is reported rather than fixed here — §42 is the sim track's.
+//
+// The cost of the gap is exactly the defect `ai.ts`'s own header opens with: *a rule stated
+// once in `rules.ts` and implemented for one seat only*, seven recorded instances, the last
+// priced at **7.2 percentage points on one character** (`f1e6c03`). Ten items is the largest
+// opportunity this codebase has ever had to repeat it at scale.
+//
+// ── WHY THESE ROWS DRIVE `ai.ts` DIRECTLY AND NOT ONLY THROUGH `stepMatch` ───
+//
+// Because **a press that never happens emits nothing.** Six of the seven worth terms are
+// unobservable from the event stream — "the target was already asleep", "already clogged",
+// "already rooted", "out of throw range", "the destination is behind me" and "I am fleeing"
+// all produce the identical silence. And `pickItem`'s two `null`s (empty loadout / nothing
+// worth pressing) leave the state BIT-IDENTICAL, which is the vacuity its own header names.
+// So (a) and (d) call the functions; (b) and (c) then prove the bot REACHES them in a real
+// match, because this file's whole recorded defect class is a rule that is correct in
+// isolation and unreachable in play.
+//
+// ── WHAT A COUNT ADDS THAT NO ASSERTION HERE CAN ────────────────────────────
+//
+// Nothing below proves the bot presses an item OFTEN ENOUGH to matter. That is a corpus
+// question and it is answered by `tools/tmp/ub2_itemuse.mjs`, which counts the shipped
+// event stream over 11 six-seat matches per item. Measured at `e5631cd`, one item on every
+// seat, 66 fighter-slots per arm:
+//
+//   springform 447 presses / 66 of 66 fighters   ·  liquorice 588 / 64  ·  pompa 442 / 65
+//   squid_ink  239 / 66  ·  disposal 157 / 66  ·  shiitake 145 / 66 (143 resolved, 4144
+//   reflected damage)  ·  warm_milk 98 / 52  —  **7 of 7 actives pressed, 0 silent.**
+//   tenderiser 662 stack hits · leftovers 22 resurrections · **blue_cheese 0 of everything.**
+//
+// 🔴 Blue Cheese's zero is NOT an AI finding and this section must not be read as one: the
+// aura it is supposed to tick is missing from `sim.ts` entirely (`32438b4` reported it and
+// it is still open). `itemWorthIt` returns `false` for it CORRECTLY — it is a passive with
+// no button. (e) pins that, and pins that the pin is about the button and not the effect.
+// ─────────────────────────────────────────────────────────────────────────────
+{
+  const ITEM_ARENA = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+
+  /**
+   * A PLAYING match at any seat count, every seat driven by the bot, positioned by hand.
+   *
+   * `controller: 'ai'` on EVERY seat including slot 0, explicitly: `createMatch` defaults
+   * slot 0 to `'human'`, and a row that meant to observe the AI and silently observed a
+   * frozen human seat would pass by measuring nothing. `nf_ffa.mjs` states the same rule and
+   * then ASSERTS it; so does (b).
+   */
+  const itemMatch = (specs) => {
+    const st = createMatch(ITEM_ARENA, specs.map((s, i) => ({
+      characterId: s.char ?? 'hamburger',
+      controller: 'ai',
+      spawn: { x: s.x ?? (400 + i * 300), y: s.y ?? 400 },
+      ...(s.items ? { items: s.items } : {}),
+    })));
+    st.phase = 'playing';
+    return st;
+  };
+  const sep = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+  const THROW = GUARANTEED_VISIBLE_RADIUS;   // `ai.ts:ITEM_THROW_RANGE`, derived not typed — (f)
+
+  // ── (a) `pickItem` — AND THE TWO `null`s IT MUST TELL APART ───────────────
+  //
+  // `ai.ts:pickItem`'s header: *"a loop over an empty `equipped` yields `null`, which is
+  // indistinguishable from 'nothing was worth pressing' — the vacuity trap that fired three
+  // times in three files in one session."* From outside `ai.ts` those two are the same
+  // observation. This is the only place the distinction can be made.
+  {
+    const st = itemMatch([{ items: ['pompa'], x: 1000, y: 1000 }, { x: 1080, y: 1000 }]);
+    const [self, target] = st.fighters;
+    const d = sep(self, target);
+    check('(a) NON-VACUITY: the fixture equipped slot 0 and put a live target inside the throw',
+      self.item.equipped.length === 1 && target.alive && d < THROW,
+      `[${self.item.equipped.join(',')}] separation ${d.toFixed(1)} < ${THROW.toFixed(2)}`);
+    check('(a) NON-VACUITY: …and `itemUsable` — the gate `pickItem` runs first — actually accepts the slot',
+      itemUsable(st, self, 0), `phase ${st.phase}, alive ${lastFighterStanding(st) === null}`);
+
+    check('(a) 🔴 a bot with a WORTHWHILE item returns its SLOT — not `null`',
+      pickItem(st, self, target, d, true, false, Infinity) === 0,
+      `${pickItem(st, self, target, d, true, false, Infinity)}`);
+
+    // The same fighter, same tick, same everything — with the target already clogged, which
+    // is Pompa's one strictly-wasted press. `null` here and a slot above is the whole rule.
+    target.item.clogUntil = st.elapsed + ITEM_TUNING.pompa.clogMs;
+    check('(a) 🔴 …and `null` when the SAME press is worthless — the rule is a QUESTION, not a constant',
+      pickItem(st, self, target, d, true, false, Infinity) === null);
+    target.item.clogUntil = -Infinity;
+
+    // The other `null`. Bit-identical from outside; opposite meanings.
+    const bare = itemMatch([{ x: 1000, y: 1000 }, { x: 1080, y: 1000 }]);
+    check('(a) 🔴 THE OTHER `null`: an EMPTY loadout returns `null` too — every match that predates items',
+      bare.fighters[0].item.equipped.length === 0
+      && pickItem(bare, bare.fighters[0], bare.fighters[1], d, true, false, Infinity) === null);
+
+    // Slot order, and that it SCANS rather than only ever reading slot 0.
+    const two = itemMatch([{ items: ['pompa', 'liquorice'], x: 1000, y: 1000 }, { x: 1080, y: 1000 }]);
+    const s2 = two.fighters[0], t2 = two.fighters[1];
+    check('(a) NON-VACUITY: both slots are filled and BOTH are individually usable',
+      s2.item.equipped.length === ITEM_SLOTS && itemUsable(two, s2, 0) && itemUsable(two, s2, 1),
+      `[${s2.item.equipped.join(', ')}]`);
+    check('(a) with two worthwhile items the LOWER slot wins — the player\'s own stated preference',
+      pickItem(two, s2, t2, d, true, false, Infinity) === 0);
+    s2.item.lastUsed[0] = two.elapsed;   // slot 0 on cooldown, slot 1 still ready
+    check('(a) 🔴 …and it SCANS: with slot 0 spent it returns slot 1, not `null`',
+      !itemUsable(two, s2, 0) && pickItem(two, s2, t2, d, true, false, Infinity) === 1);
+  }
+
+  // ── (b) THE BOT REACHES IT IN A REAL MATCH, AT SIX SEATS ──────────────────
+  //
+  // (a) proves the RULE answers. This proves `stepAI` actually calls it, through
+  // `combat.ts:attemptItem` — the same function `sim.ts`'s human branch calls — and that the
+  // presses are caused by the LOADOUT rather than by anything else in the harness. The
+  // empty-loadout arm is the control and it is not decoration: without it "0 presses" and
+  // "presses from something else" are the same green.
+  {
+    const ring = (items) => Array.from({ length: MAX_FIGHTERS }, (_, i) => {
+      const a = (i * 2 * Math.PI) / MAX_FIGHTERS;
+      return { char: CHARACTER_IDS[i], x: 1400 + Math.cos(a) * 150, y: 1000 + Math.sin(a) * 150, ...(items ? { items } : {}) };
+    });
+    const runFor = (items, ticks = 400) => {
+      const st = itemMatch(ring(items));
+      const used = [];
+      for (let i = 0; i < ticks && st.phase === 'playing'; i++) {
+        for (const ev of stepMatch(st, 16.667, new Array(st.fighters.length).fill(null))) {
+          if (ev.type === 'item-used') used.push(ev);
+        }
+      }
+      return { st, used };
+    };
+
+    const live = runFor(['liquorice']);
+    check(`(b) NON-VACUITY: ${MAX_FIGHTERS} seats, EVERY ONE driven by the bot — a frozen human seat would pass by measuring nothing`,
+      live.st.fighters.length === MAX_FIGHTERS && live.st.fighters.every((f) => f.controller === 'ai'),
+      live.st.fighters.map((f) => f.controller).join(','));
+    check('(b) NON-VACUITY: every seat is carrying the item',
+      live.st.fighters.every((f) => f.item.equipped.length === 1),
+      `${live.st.fighters.filter((f) => f.item.equipped.length === 1).length}/${MAX_FIGHTERS}`);
+    check('(b) 🔴 THE BOTS PRESS IT — a code path is not a behaviour',
+      live.used.length > 0, `${live.used.length} presses`);
+    check('(b) 🔴 …more than one of them does, so this is the POLICY and not one lucky seat',
+      new Set(live.used.map((e) => e.fighterId)).size > 1,
+      `${new Set(live.used.map((e) => e.fighterId)).size} distinct pressers`);
+    check('(b) …and every press names an item that seat actually equipped',
+      live.used.every((e) => live.st.fighters[e.fighterId].item.equipped.includes(e.itemId)),
+      `${live.used.length} presses`);
+
+    const control = runFor(null);
+    check('(b) 🔴 CONTROL: the identical match with NO loadout emits ZERO presses — the events are caused by the item',
+      control.used.length === 0, `${control.used.length} presses`);
+  }
+
+  // ── (c) 🔴 A CLOGGED BOT MOVES. BOTH DIRECTIONS — `ai.ts:pickWeapon`'s clog gate ──
+  //
+  // `ai.ts` cites this row by name: *"`weaponsLocked` … `createFighter` seeds both deadlines
+  // to `-Infinity` for a fighter with an empty loadout — which is every fighter every one of
+  // the 148 existing call sites builds. §43(c) drives the populated case in both directions."*
+  //
+  // The defect it guards is the recorded stun-silence bug arriving through a new item: the
+  // chase branch is `attack` XOR `move`, so a clogged bot whose `pickWeapon` did not know
+  // about the clog returns a valid index, spends every tick on an attack `attemptAttack`
+  // discards, and NEVER REACHES THE MOVEMENT ARM. Five seconds of standing perfectly still.
+  {
+    const step = (st, ticks) => {
+      const self = st.fighters[0];
+      const x0 = self.x, y0 = self.y;
+      let attacks = 0;
+      for (let i = 0; i < ticks; i++) {
+        const evs = [];
+        stepAI(st, self, 16.667, evs);
+        // `weapon-fired`, not "attack": `combat.ts:attemptAttack` emits that member and there
+        // is no `attack` event in `state.ts:GameEvent` at all. A filter on a name that does
+        // not exist counts 0 forever and reads exactly like a bot that never fires.
+        for (const ev of evs) if (ev.type === 'weapon-fired') attacks++;
+        st.elapsed += 16.667;
+      }
+      return { moved: Math.hypot(self.x - x0, self.y - y0), attacks };
+    };
+
+    // DIRECTION 1 — the CONTROL. Unclogged, target inside reach: the bot fires.
+    const free = itemMatch([{ x: 1000, y: 1000 }, { x: 1090, y: 1000 }]);
+    const freeR = step(free, 120);
+    check('(c) NON-VACUITY / CONTROL: an UNCLOGGED bot with a target in reach ATTACKS — so the clogged arm has something to lose',
+      freeR.attacks > 0, `${freeR.attacks} attacks, moved ${freeR.moved.toFixed(1)} wu`);
+
+    // DIRECTION 2 — the populated case. Same fixture, clog stamped.
+    const clog = itemMatch([{ x: 1000, y: 1000 }, { x: 1090, y: 1000 }]);
+    clog.fighters[0].item.clogUntil = clog.elapsed + ITEM_TUNING.pompa.clogMs;
+    check('(c) NON-VACUITY: the clog is really on — `weaponsLocked` is the sim\'s own predicate, not a copy',
+      weaponsLocked(clog.fighters[0], clog.elapsed) && !weaponsLocked(free.fighters[0], free.elapsed));
+    const clogR = step(clog, 120);
+    check('(c) 🔴 a CLOGGED bot fires NOTHING — Uri: "clogs their weapons for 5 secons"',
+      clogR.attacks === 0, `${clogR.attacks} attacks`);
+    check('(c) 🔴 …and MOVES ANYWAY, rather than standing still for five seconds. This is the whole row',
+      clogR.moved > 0, `moved ${clogR.moved.toFixed(2)} wu (unclogged arm moved ${freeR.moved.toFixed(2)})`);
+    check('(c) …and the clog is WEAPONS ONLY — it never touched the movement lock',
+      !movementLocked(clog.fighters[0], clog.elapsed));
+  }
+
+  // ── (d) 🔴 EVERY ACTIVE'S WORTH TERM ANSWERS BOTH WAYS ────────────────────
+  //
+  // 🚨 A RULE THAT CAN ONLY SAY ONE THING IS A CONSTANT WEARING A QUESTION'S CLOTHES, and
+  // this repo has shipped that exact shape — `ai.ts`'s own block header records a clog term
+  // that was derived, was `true` by arithmetic for every reachable input, and was DROPPED
+  // rather than shipped. So each of the seven gets a TRUE state and a FALSE state that
+  // differ in ONE named quantity, and the `false` half is what would go red if a term were
+  // deleted. The table is asserted complete against the registry, not typed from memory.
+  {
+    // A FRESH state per arm. The `false` arms mutate the fixture (that IS the one difference),
+    // so sharing one would leak the sleep/clog/root deadline into the next item's `true` arm
+    // and turn a green table into an accident.
+    const near = () => itemMatch([{ items: [], x: 1000, y: 1000 }, { x: 1080, y: 1000 }, { x: 1600, y: 1000 }]);
+
+    /**
+     * `[id, arm -> {separation, visible, fleeing, budget}, what the ONE difference IS]`.
+     * Each builder receives a fresh state and returns the argument bundle after making its
+     * single mutation, so the two arms differ in exactly the named quantity and nothing else.
+     */
+    const CASES = [
+      ['springform',
+        (st, yes) => ({ separation: yes ? THROW : ITEM_TUNING.springform.distance }),
+        'separation past the bounce distance vs exactly inside it'],
+      ['warm_milk',
+        (st, yes) => { if (!yes) st.fighters[1].item.sleepUntil = st.elapsed + 1000; return {}; },
+        'the target is awake vs already asleep'],
+      ['pompa',
+        (st, yes) => { if (!yes) st.fighters[1].item.clogUntil = st.elapsed + 1000; return {}; },
+        'the target is unclogged vs already clogged'],
+      ['squid_ink',
+        (st, yes) => { if (!yes) st.fighters[1].item.blotUntil = st.elapsed + 1000; return {}; },
+        'the target is unblotted vs already blotted'],
+      ['liquorice',
+        (st, yes) => { if (!yes) st.fighters[1].item.rootUntil = st.elapsed + 1000; return {}; },
+        'the target is loose vs already rooted'],
+      ['disposal',
+        // The destination is `nearestLivingOpponent(state, target, self)` — seat 2, parked at
+        // 1600. Throwing the victim there leaves them at least 600 - 84 = 516 wu away, from
+        // 80. The `false` arm drags seat 2 next to the victim so the throw would move them
+        // nowhere, which is the one term that makes this a DEFENSIVE item in the bot's hands.
+        (st, yes) => { if (!yes) st.fighters[2].x = 1090; return {}; },
+        'the victim lands further away vs no further at all'],
+      ['shiitake',
+        (st, yes) => ({ fleeing: !yes }),
+        'standing my ground vs fleeing below 28% HP'],
+    ];
+
+    const actives = Object.values(ITEMS).filter((d) => d.kind === 'active');
+    check('(d) NON-VACUITY: there are active items to quantify over at all',
+      actives.length > 0, `${actives.length} actives`);
+    check('(d) 🔴 THE TABLE IS COMPLETE against the registry — an eleventh active cannot slip through untested',
+      CASES.length === actives.length && actives.every((a) => CASES.some((c) => c[0] === a.id)),
+      `${CASES.length} cases / ${actives.length} actives; missing [${actives.map((a) => a.id).filter((id) => !CASES.some((c) => c[0] === id)).join(', ') || 'none'}]`);
+
+    const arm = (id, build, yes) => {
+      const st = near();
+      const o = build(st, yes) ?? {};
+      const self = st.fighters[0], target = st.fighters[1];
+      return itemWorthIt(st, self, id, target,
+        o.separation ?? sep(self, target),
+        o.visible ?? true,
+        o.fleeing ?? false,
+        o.budget ?? Infinity);
+    };
+    for (const [id, build, what] of CASES) {
+      const t = arm(id, build, true);
+      const f = arm(id, build, false);
+      check(`(d) 🔴 ${id}: the rule DISCRIMINATES — ${what}`,
+        t === true && f === false, `true-arm ${t}, false-arm ${f}`);
+    }
+  }
+
+  // ── (e) THE THREE WITH NO BUTTON, AND WHAT THAT DOES *NOT* CLAIM ──────────
+  {
+    const st = itemMatch([{ items: [], x: 1000, y: 1000 }, { x: 1080, y: 1000 }, { x: 1600, y: 1000 }]);
+    const noButton = Object.values(ITEMS).filter((d) => d.kind !== 'active');
+    check('(e) NON-VACUITY: the registry holds items that are not actives',
+      noButton.length === 3, `${noButton.map((d) => `${d.id}:${d.kind}`).join(' ')}`);
+    check('(e) 🔴 a passive or triggered item is NEVER worth a press — there is no button to press',
+      noButton.every((d) => itemWorthIt(st, st.fighters[0], d.id, st.fighters[1], 50, true, false, Infinity) === false),
+      noButton.map((d) => `${d.id}:${itemWorthIt(st, st.fighters[0], d.id, st.fighters[1], 50, true, false, Infinity)}`).join(' '));
+    // The same claim from the sim's side, so the two cannot drift: `itemUsable` refuses the
+    // slot outright, which is why `itemWorthIt` is unreachable for these three in play.
+    const passiveEquipped = itemMatch([{ items: ['blue_cheese'], x: 1000, y: 1000 }, { x: 1080, y: 1000 }, { x: 1600, y: 1000 }]);
+    check('(e) …and the SIM refuses the slot too, so the AI branch is unreachable rather than merely false',
+      passiveEquipped.fighters[0].item.equipped[0] === 'blue_cheese'
+      && !itemUsable(passiveEquipped, passiveEquipped.fighters[0], 0));
+    // 🔴 THIS ROW IS ABOUT THE BUTTON AND NOT ABOUT THE EFFECT, STATED SO NOBODY READS IT AS
+    // A CLEAN BILL OF HEALTH. `32438b4` reported Blue Cheese as a NO-OP — `combat.ts` routes
+    // it to "`sim.ts:applyWorldTick`'s aura block" and there is no aura block; `sim.ts`
+    // imports `ITEM_AURA_TICK_MS`, `itemDamageSource` and `hasItem` and calls none of them.
+    // `ub2_itemuse` re-measured it at `e5631cd`: 66 seats wearing it, 0 damage, 0 hits.
+    // `noUnusedLocals: false` means three dead imports are not even a warning, so the
+    // ABSENCE is asserted here — this row goes red the day somebody implements the aura,
+    // which is the correct time for a test that says "this is missing" to demand attention.
+    const simSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "sim.ts"), "utf8");
+    const auraCalls = (stripComments(simSrc).match(/ITEM_AURA_TICK_MS/g) ?? []).length;
+    check('(e) 🔴 OPEN DEFECT, PINNED: Blue Cheese\'s aura is imported by `sim.ts` and called NOWHERE — 1 mention is the import alone',
+      auraCalls === 1,
+      `${auraCalls} live mentions of ITEM_AURA_TICK_MS in sim.ts — >1 means the aura landed and this row should be REWRITTEN, not deleted`);
+  }
+
+  // ── (f) 🔴 ONE CONSTANT, TWO FILES, ASSERTED AGAINST THE SOURCE TEXT ──────
+  //
+  // `ai.ts` declares `ITEM_THROW_RANGE` because `combat.ts`'s copy is module-private, and
+  // says so: *"Two passes have now independently needed it, which is the strongest evidence
+  // available that the routed hunk is real work"*. The right home is
+  // `ITEM_TUNING.<item>.range` in `rules.ts` — four one-line hunks neither file owns. Until
+  // then the two must agree BY DERIVATION, and this row is what makes them go wrong together
+  // rather than separately. "Both authors remembered" is a claim about people; five of this
+  // file's recorded defects are that claim being false.
+  {
+    const decls = ['ai.ts', 'combat.ts'].map((f) => {
+      const src = stripComments(readFileSync(join(dirname(fileURLToPath(import.meta.url)), f), 'utf8'));
+      const m = src.match(/const\s+ITEM_THROW_RANGE\s*=\s*([^;]+);/);
+      return { f, expr: m ? m[1].trim() : null };
+    });
+    check('(f) NON-VACUITY: BOTH files really declare `ITEM_THROW_RANGE` — a rename would otherwise pass this row vacuously',
+      decls.every((d) => d.expr !== null), decls.map((d) => `${d.f}:${d.expr}`).join(' | '));
+    check('(f) 🔴 …and they derive it from the SAME expression, so the duplicate cannot drift',
+      decls[0].expr !== null && decls[0].expr === decls[1].expr,
+      decls.map((d) => `${d.f} = ${d.expr}`).join('  vs  '));
+    check('(f) …which is `GUARANTEED_VISIBLE_RADIUS` — derived from the camera, never typed as 199.22',
+      decls[0].expr === 'GUARANTEED_VISIBLE_RADIUS' && THROW === GUARANTEED_VISIBLE_RADIUS,
+      `${THROW}`);
+  }
+
+  // ── (g) 🔴 THE TWO PROPERTIES BOTH READERS GO VACUOUS WITHOUT ─────────────
+  {
+    const reaches = CHARACTER_IDS.map((id) => [id, offensiveReach(id)]);
+    check('(g) NON-VACUITY: there is a roster to take reaches over, and every id resolves',
+      reaches.length === CHARACTER_IDS.length && reaches.length > 0, `${reaches.length} characters`);
+    check('(g) 🔴 every character\'s offensive reach is FINITE — a rangeless weapon makes both item rules vacuously true',
+      reaches.every(([, r]) => Number.isFinite(r) && r > 0),
+      reaches.filter(([, r]) => !Number.isFinite(r) || r <= 0).map(([id, r]) => `${id}:${r}`).join(' ') || 'all finite');
+    check('(g) 🔴 …and STRICTLY INSIDE the throw — otherwise "can that fighter hurt me from there" is always yes inside range',
+      reaches.every(([, r]) => r < THROW),
+      `max ${Math.max(...reaches.map(([, r]) => r))} vs throw ${THROW.toFixed(2)}`);
+
+    // ── THE CLOG TERM THAT WAS DERIVED AND DELIBERATELY NOT SHIPPED ─────────
+    //
+    // `ai.ts`: *"a 'will the clog deny them a shot they were going to get?' term was derived
+    // — `separation - theirReach <= speedFor(them, AI_CHASE_SPEED) * clogMs` — and it CANNOT
+    // BIND. §43(g) asserts that it cannot bind, so the day the numbers move the claim goes
+    // red instead of quietly becoming a real term nobody re-derived."*
+    //
+    // ⚠️ THE PROSE THERE QUOTES THE WRONG END OF THE ROSTER AND IT IS CORRECTED HERE RATHER
+    // THAN COPIED: *"5,000 ms of chase is 262 wu of closing"* is the FASTEST character
+    // (sushi/hotdog, 262.50). The claim needs the SLOWEST — egg/soup at 231.00 — because a
+    // term binds if ANY character can be outrun. The margin is 3.24x either way, so the
+    // conclusion survives; the number quoted to support it did not. Both are asserted below
+    // so the day the ladder moves, the row names which end went wrong.
+    const worstGap = THROW - Math.min(...reaches.map(([, r]) => r));
+    const slowestClose = Math.min(...CHARACTER_IDS.map((id) => speedFor(id, AI_CHASE_SPEED))) * ITEM_TUNING.pompa.clogMs;
+    check('(g) NON-VACUITY: both sides of the comparison are real positive distances',
+      worstGap > 0 && slowestClose > 0, `gap ${worstGap.toFixed(2)} wu, close ${slowestClose.toFixed(2)} wu`);
+    check('(g) 🔴 the omitted clog term CANNOT BIND: even the slowest chaser closes the widest gap inside the clog',
+      slowestClose > worstGap,
+      `slowest close ${slowestClose.toFixed(2)} wu in ${ITEM_TUNING.pompa.clogMs} ms vs widest reachable gap ${worstGap.toFixed(2)} wu (margin ${(slowestClose / worstGap).toFixed(2)}x)`);
+    check('(g) …and the FASTEST closes it too, which is the number `ai.ts`\'s prose actually quotes',
+      Math.max(...CHARACTER_IDS.map((id) => speedFor(id, AI_CHASE_SPEED))) * ITEM_TUNING.pompa.clogMs > worstGap,
+      `${(Math.max(...CHARACTER_IDS.map((id) => speedFor(id, AI_CHASE_SPEED))) * ITEM_TUNING.pompa.clogMs).toFixed(2)} wu`);
+  }
+
+  // ── (h) 🔴 THE SIX-SEAT LANDMINE, MACHINE-CHECKED ────────────────────────
+  //
+  // `docs/ITEMS.md`: *"Disposal is unavailable at N=2 by Uri's own rule. Leftovers needs a
+  // killer who then dies while the match continues. Every balance number in this repo rests
+  // on a 110-cell two-seat matchup corpus. IT CANNOT SEE EITHER OF THESE."* §41(c) asserts
+  // the gating is DECLARED. This asserts it BITES, on the AI's own gate, at both seat counts
+  // — so "the bots never press Disposal" can never again be read as an AI finding when it is
+  // the rig. `ub2_itemuse --n 2` measures the same thing on a corpus: 0 presses at two seats
+  // against 157 at six, with the AI byte-identical between them.
+  {
+    const duel = itemMatch([{ items: ['disposal'], x: 1000, y: 1000 }, { x: 1080, y: 1000 }]);
+    const six = itemMatch(Array.from({ length: MAX_FIGHTERS }, (_, i) => ({
+      char: CHARACTER_IDS[i], x: 1000 + i * 60, y: 1000, ...(i === 0 ? { items: ['disposal'] } : {}),
+    })));
+    check('(h) NON-VACUITY: both fixtures equipped Disposal on slot 0 and seated the counts they claim',
+      duel.fighters.length === MIN_FIGHTERS && six.fighters.length === MAX_FIGHTERS
+      && duel.fighters[0].item.equipped[0] === 'disposal' && six.fighters[0].item.equipped[0] === 'disposal',
+      `${duel.fighters.length} vs ${six.fighters.length} seats`);
+    check(`(h) 🔴 at N=${MIN_FIGHTERS} the SIM refuses the press — Uri: "If there are only two players left, it's not available"`,
+      !itemUsable(duel, duel.fighters[0], 0), `minAlive ${ITEMS.disposal.minAlive}`);
+    check(`(h) 🔴 …and at N=${MAX_FIGHTERS} it accepts it. The two-seat corpus is BLIND, not clean`,
+      itemUsable(six, six.fighters[0], 0));
+    // 🚨 THE CONTROL, AND IT IS LOAD-BEARING. Without it, "not usable at two seats" is also
+    // what a broken fixture returns — wrong phase, dead target, a spawn `createMatch` moved.
+    // An item with `minAlive: 2` in the SAME two-seat fixture must be usable, or the row
+    // above is measuring the harness.
+    const duelPompa = itemMatch([{ items: ['pompa'], x: 1000, y: 1000 }, { x: 1080, y: 1000 }]);
+    check('(h) 🔴 CONTROL: an item with no crowd requirement IS usable in the same two-seat fixture — so (h) is Disposal\'s gate, not the harness',
+      ITEMS.pompa.minAlive === MIN_FIGHTERS && itemUsable(duelPompa, duelPompa.fighters[0], 0),
+      `pompa minAlive ${ITEMS.pompa.minAlive}, usable ${itemUsable(duelPompa, duelPompa.fighters[0], 0)}`);
   }
 }
 

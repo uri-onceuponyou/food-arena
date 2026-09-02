@@ -1113,8 +1113,23 @@ export function offensiveReach(id: CharacterId): number {
  * is a compile error in this file rather than a bot that silently never presses it — the
  * same device `combat.ts:resolveItem` and `WeaponAllow` both use, and for the same reason:
  * the compiler is the guard, because a code review is not.
+ *
+ * 🚨 **EXPORTED FOR `sim.test.mjs` §43(d), ON `pressValue`'S, `castThreat`'S AND
+ * `offensiveReach`'S PRECEDENT AND FOR THEIR REASON** — stated three times in that file:
+ * *"a copy of the driver's ranking arithmetic would only test the copy"*. Seven items each
+ * have a two-term rule and **six of the seven terms are unobservable from the event stream**
+ * — a press that never happens emits nothing, so "the bot declined because the target was
+ * already asleep" and "the bot declined because it was out of range" are the SAME silence.
+ * §43(d) drives this function directly and requires every one of the seven to answer BOTH
+ * `true` and `false` on constructed states, because a rule that can only say one of them is
+ * a constant wearing a question's clothes.
+ *
+ * ⚠️ **THE TEST IS NOT A SUBSTITUTE FOR THE COUNT AND NEITHER IS A SUBSTITUTE FOR THE
+ * OTHER.** §43(d) proves the RULE discriminates; `tools/tmp/ub2_itemuse.mjs` proves the bot
+ * reaches it in a real six-seat match and counts how often. This file's whole recorded
+ * defect class is a rule that is correct in isolation and unreachable in play.
  */
-function itemWorthIt(
+export function itemWorthIt(
   state: MatchState,
   self: Fighter,
   id: ItemId,
@@ -1341,8 +1356,15 @@ function itemWorthIt(
  * a loop over an empty `equipped` yields `null`, which is indistinguishable from "nothing was
  * worth pressing" — the vacuity trap that fired three times in three files in one session.
  * §43(a) drives the populated case, and the empty case is every match that predates items.
+ *
+ * 🚨 **EXPORTED FOR §43(a), AND THE VACUITY IS THE REASON.** From outside this file the two
+ * `null`s are the SAME OBSERVATION: an empty loadout and a full loadout nothing is worth
+ * both emit no `item-used` event and leave the state bit-identical. Only a direct call can
+ * tell them apart, so a test that drove `stepAI` instead would be asserting the number 0 and
+ * calling it a rule. §43(a) requires this to return a SLOT on a state where one is worth it
+ * and `null` on the empty loadout, which is the discrimination the early return exists for.
  */
-function pickItem(
+export function pickItem(
   state: MatchState,
   self: Fighter,
   target: Fighter,
