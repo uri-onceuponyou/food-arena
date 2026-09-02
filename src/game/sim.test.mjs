@@ -11434,9 +11434,26 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
      * single mutation, so the two arms differ in exactly the named quantity and nothing else.
      */
     const CASES = [
+      // 🔴 THE FALSE ARM'S SEPARATION IS PINNED BETWEEN THE TWO TERMS, AND IT HAD TO BE.
+      // The first version used `THROW` (199.22) against `ITEM_TUNING.springform.distance`
+      // (99.61) — and a planted known-bad reverting the rule to the RETIRED
+      // `separation > distance` term left this suite **895/0, completely green**. Both terms
+      // answer identically at those two separations, so the row was discriminating between
+      // "very far" and "very close" and NOT between the two rules. That is a vacuous control
+      // of exactly the shape `CLAUDE.md` rule 6 names: it passed, it looked like coverage,
+      // and it could not have failed for the reason it exists.
+      //
+      // The midpoint of bounce and reach is strictly greater than one and strictly less than
+      // the other, so the old rule says TRUE there and the new one says FALSE. It is derived
+      // from BOTH constants, so it tracks either of them moving. §43(g)'s ordering row is
+      // what guarantees the midpoint lies between them at all.
       ['springform',
-        (st, yes) => ({ separation: yes ? THROW : ITEM_TUNING.springform.distance }),
-        'separation past the bounce distance vs exactly inside it'],
+        (st, yes) => ({
+          separation: yes
+            ? THROW
+            : (ITEM_TUNING.springform.distance + offensiveReach(st.fighters[0].characterId)) / 2,
+        }),
+        'past my own weapons\' reach vs inside it — a range I could already SHOOT from'],
       ['warm_milk',
         (st, yes) => { if (!yes) st.fighters[1].item.sleepUntil = st.elapsed + 1000; return {}; },
         'the target is awake vs already asleep'],
@@ -11464,6 +11481,15 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
     const actives = Object.values(ITEMS).filter((d) => d.kind === 'active');
     check('(d) NON-VACUITY: there are active items to quantify over at all',
       actives.length > 0, `${actives.length} actives`);
+    // 🔴 THE SPRINGFORM ARMS ARE ONLY A CONTROL IF THEY STRADDLE THE TERM. Asserted, because
+    // the version that did not straddle it was green against a planted revert of the rule.
+    {
+      const reach = offensiveReach(near().fighters[0].characterId);
+      const mid = (ITEM_TUNING.springform.distance + reach) / 2;
+      check('(d) NON-VACUITY: Springform\'s false arm sits STRICTLY BETWEEN the retired constant and the live question — otherwise the row cannot tell them apart',
+        mid > ITEM_TUNING.springform.distance && mid < reach,
+        `bounce ${ITEM_TUNING.springform.distance.toFixed(2)} < mid ${mid.toFixed(2)} < reach ${reach}`);
+    }
     check('(d) 🔴 THE TABLE IS COMPLETE against the registry — an eleventh active cannot slip through untested',
       CASES.length === actives.length && actives.every((a) => CASES.some((c) => c[0] === a.id)),
       `${CASES.length} cases / ${actives.length} actives; missing [${actives.map((a) => a.id).filter((id) => !CASES.some((c) => c[0] === id)).join(', ') || 'none'}]`);
