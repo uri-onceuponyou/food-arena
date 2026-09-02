@@ -52,6 +52,7 @@
  */
 
 import { audio } from '../audio';
+import { ITEM_SLOTS } from './rules';
 import { createTouchControls, type TouchControls } from './touch';
 
 /** The four axes `moveAxes()` reads. Order inside each list is preference order:
@@ -93,6 +94,52 @@ export const MUTE_KEY = 'KeyM';
  */
 export const MAX_WEAPON_SLOT_KEY = 9;
 
+/**
+ * ── ONE KEY PER EQUIP SLOT, AND THE PRESS NAMES ITS OWN SLOT ────────────────
+ *
+ * `state.ts:FighterInput.useItem` is a SLOT INDEX into `Fighter.item.equipped`, not an
+ * `ItemId`, and its header gives the reason: *"an item is two buttons on a phone, so the
+ * press names its own slot and there is no separate selection"*. This table is the
+ * keyboard half of those two buttons, and it is the ONLY thing in the app that decides
+ * which key means which slot — `ui/hud.ts` prints these caps on the buttons themselves
+ * rather than carrying its own copy, exactly as `settings.ts` was made to render off
+ * `MOVE_KEYS` instead of a hand-transcribed duplicate.
+ *
+ * ⚠️ **DELIBERATELY NOT A DIGIT ROW.** Digits already select weapon slots (`onKeyDown`
+ * reads `Number(e.key)` for `1`-`9`), so an item on `5` would be a control whose meaning
+ * depends on how many weapons your character happens to carry — and `MAX_WEAPON_SLOT_KEY`
+ * is 9, so there is no digit that is safe forever. `Q`/`E` are the pair either index
+ * finger already rests beside on WASD and are free of every other binding in this repo
+ * (`MUTE_KEY` is `KeyM`, `matchScreen.ts:PAUSE_KEY` is `Escape`).
+ *
+ * 🔴 **AND `settings.ts` DOES NOT KNOW ABOUT THEM YET, WHICH IS A REPORTED GAP, NOT A
+ * DECISION.** That screen builds `RESERVED_KEYS` from `MUTE_KEY`, `PAUSE_KEY` and the
+ * weapon digits, all imported from here, and refuses to bind a movement direction onto
+ * any of them. These two are not on that list, so a player who rebinds "up" to `Q` gets a
+ * key that moves AND fires an item, and the Controls reference does not mention items at
+ * all. The fix is two lines in a file this pass does not own; the export exists so it is
+ * one import when somebody takes it.
+ */
+export const ITEM_KEYS = ['KeyQ', 'KeyE'] as const;
+
+/**
+ * A COMPILE-TIME tie between the table above and `rules.ts:ITEM_SLOTS`.
+ *
+ * `ITEM_SLOTS` is the number of equip slots; `ITEM_KEYS` is one cap per slot. A third
+ * slot added in `rules.ts` with no third key here would not be a type error anywhere —
+ * it would be a slot with a button on a phone and no key on a desktop, which is exactly
+ * the class of silent half-wiring this feature is being built to remove. `never` is what
+ * makes the mismatch a `tsc` failure at the line below rather than a missing control
+ * somebody notices in a screenshot.
+ *
+ * Verified by planting the bug rather than by reasoning about it: with `ITEM_SLOTS`
+ * temporarily set to 3 in a detached worktree, `npx tsc --noEmit` reports exactly
+ * `src/game/input.ts(138,7): error TS2322: Type 'true' is not assignable to type 'never'`
+ * — one error, on this line, naming this file. Restored, the tree is clean again.
+ */
+const ITEM_KEYS_COVER_EVERY_SLOT: typeof ITEM_KEYS['length'] extends typeof ITEM_SLOTS ? true : never = true;
+void ITEM_KEYS_COVER_EVERY_SLOT;
+
 /** Aim-ring radius as a fraction of the viewport's short axis, with px bounds. */
 const AIM_RADIUS_FRACTION = 0.155;
 const AIM_RADIUS_MIN = 84;
@@ -113,6 +160,11 @@ export class InputController {
   private hasMouse = false;
   private weaponIndex = 0;
   private weaponCount = 1;
+  /**
+   * ONE PENDING ITEM PRESS, OR NULL — the equip slot named by the last press nobody has
+   * collected yet. See `pressItem` / `takeItemPress`.
+   */
+  private itemPress: number | null = null;
 
   // ── Virtual cursor (pointer lock only) ──────────────────────────────────────
   private locked = false;
@@ -173,6 +225,51 @@ export class InputController {
   /** True once the player has actually used touch. QA/diagnostics only. */
   get touchEngaged(): boolean {
     return this.touch.engaged;
+  }
+
+  /**
+   * ── PRESS THE ITEM IN EQUIP SLOT `index` ────────────────────────────────────
+   *
+   * The one entry point for BOTH item controls, exactly as `selectWeapon` is the one
+   * entry point for the weapon bar and the digit keys: `onKeyDown` calls it for
+   * `ITEM_KEYS`, and `ui/hud.ts`'s item buttons call it through the `onUseItem` callback
+   * the way the weapon slots already call `selectWeapon` through `onSelectWeapon`. A
+   * second path would be a second place for a press to be dropped.
+   *
+   * ⚠️ **THIS DOES NOT ASK WHETHER THE ITEM IS USABLE, AND MUST NOT.** `combat.ts`
+   * `itemUsable` is the gate, and `attemptItem` is defined as *"if `itemUsable`, spend
+   * it"*; that file's own header says a control that greys itself out on a COPY of the
+   * rule is a control that will one day disagree with the sim. The HUD reads the real
+   * predicate to decide what to DRAW; this layer only reports that a finger went down.
+   * Bounds are the exception — an out-of-range slot is not a refused press, it is a
+   * caller bug, and `sim.ts` would index `equipped[7]` with it.
+   */
+  pressItem(index: number): void {
+    if (!Number.isInteger(index) || index < 0 || index >= ITEM_SLOTS) return;
+    this.itemPress = index;
+  }
+
+  /**
+   * CONSUME the pending press. Returns the slot, or null when nothing is queued.
+   *
+   * ⚠️ **CONSUME-ONCE, WHERE `attackHeld` IS A LEVEL, AND THE ASYMMETRY IS THE FIELD'S
+   * OWN.** `MatchInput.attack` is documented as *"one attack attempt this tick"* that a
+   * held button may legitimately repeat every tick; `MatchInput.useItem` is *"ONE ITEM
+   * ACTIVATION THIS TICK"* named by a press. Reading it as a level would mean a finger
+   * resting on a button re-arms the item the instant its cooldown expires, which is a
+   * different control from the one the button draws.
+   *
+   * ⚠️ **A PRESS SURVIVES UNTIL A FRAME COLLECTS IT.** `match.ts`'s loop calls
+   * `buildInput()` once per stepping frame and skips it entirely while paused, so a press
+   * made behind the pause sheet is delivered on the first frame after the resume rather
+   * than being silently eaten. `reset()` and `onBlur` drop it, which covers restart,
+   * backgrounding and the app switcher — the three ways a queued press stops meaning
+   * what the player meant.
+   */
+  takeItemPress(): number | null {
+    const slot = this.itemPress;
+    this.itemPress = null;
+    return slot;
   }
 
   /** Either fire control. Held mouse OR a finger on the aim stick — never one or the
@@ -260,6 +357,8 @@ export class InputController {
   reset(): void {
     this.keys.clear();
     this.mouseDown = false;
+    // A press queued in the last match must not fire the first item of the next one.
+    this.itemPress = null;
     this.touch.reset();
     if (this.locked) {
       this.offX = 0;
@@ -320,6 +419,14 @@ export class InputController {
       const idx = n - 1;
       if (idx < this.weaponCount) this.weaponIndex = idx;
     }
+    // Items, on the KEYDOWN EDGE and gated on `repeat` for the same reason mute is:
+    // the OS repeats a held key at ~30 Hz, and an item press is an EDGE (see
+    // `takeItemPress`). Without `!e.repeat` a leaned-on Q would re-arm the item on the
+    // frame after every cooldown expiry for as long as the finger was down.
+    // ⚠️ Modifier-gated like mute, so browser and OS shortcuts (Cmd-Q quits the app on
+    // macOS, Ctrl-Q on some Linux desktops) do not also spend an item on the way out.
+    const itemSlot = e.repeat || e.ctrlKey || e.metaKey || e.altKey ? -1 : ITEM_KEYS.indexOf(e.code as typeof ITEM_KEYS[number]);
+    if (itemSlot >= 0) this.pressItem(itemSlot);
     // Mute. Deliberately on the KEYDOWN edge and gated on `repeat`, so holding M does
     // not strobe the mix. Under pointer lock this is the only way out of the audio —
     // the OS volume mixer is no longer one cursor-move away.
@@ -367,6 +474,9 @@ export class InputController {
   private readonly onBlur = (): void => {
     this.keys.clear();
     this.mouseDown = false;
+    // Same reason the held stick is dropped below: a press made on the way out of the
+    // app must not fire an item when the player comes back to a fight that has moved on.
+    this.itemPress = null;
     // A finger held while the app is backgrounded never sends its `touchend`, so
     // without this the fighter walks into a wall for as long as the player is away.
     this.touch.reset();

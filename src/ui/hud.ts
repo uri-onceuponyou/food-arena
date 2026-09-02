@@ -43,16 +43,36 @@ import {
   // function that knows both rules; see `zoneInfo`.
   ringFloorFor,
   suddenDeathActive,
+  // ── The loadout half. `ITEMS` is the registry (name, kind, blurb, cooldown,
+  // `minAlive`), `ITEM_SLOTS` is how many buttons there are. Every number the item
+  // buttons print is read from here — a cooldown typed into this file would be the
+  // second source of truth `rules.ts` exists to prevent, and `docs/ITEMS.md` records
+  // that a literal in this project is stale from the moment it is typed.
+  ITEMS,
+  ITEM_SLOTS,
   type CharacterId,
+  type ItemId,
   type Weapon,
 } from '../game/rules';
 // ⚠️ `FighterRole` is GONE from this file's imports and that is the headline: nothing in
 // the HUD reads a seat NAME any more. Slots come from `roster.ts`, and the only two-valued
 // strings left are the CSS modifiers `--player` / `--enemy`, which are a look, not an
 // identity (see `buildFighterSlots`).
-import type { Fighter, MatchState } from '../game/state';
+import { livingFighterCount, type Fighter, type MatchState } from '../game/state';
 import { fightersOf, LOCAL_SLOT, localFighter, slotKey, slotOf } from '../game/roster';
+// 🚨 THE ITEM BUTTONS ASK THE SIM'S OWN PREDICATE WHETHER THEY MAY BE PRESSED.
+// `combat.ts:itemUsable`'s header says why it is exported at all: *"the HUD must be able
+// to grey a button out ... A copy of this rule anywhere else is a button that lies."*
+// `is-ready` below is toggled from this call and from nothing else; the reason chips are
+// a SECOND, purely explanatory derivation and are never allowed to arm a button.
+// (Precedent for a presentation module importing this one: `game/vfx.ts:statusReadyAt`.)
+import { itemUsable } from '../game/combat';
 import { isVisibleFrom } from '../game/movement';
+// The keyboard half of the item buttons, imported rather than transcribed — the same
+// argument `input.ts:MOVE_KEYS` makes for `settings.ts`: two copies of one mapping is a
+// defect waiting for the day they disagree, and a control that lies about its own key is
+// worse than one with no cap on it.
+import { ITEM_KEYS } from '../game/input';
 // The guaranteed-visible radius. It lives with the camera because the camera is what
 // guarantees it, but it is a GAMEPLAY number — "how far can this player possibly see"
 // — and the zone warning is calibrated against it so the pill and the 3D fog curtain
@@ -74,6 +94,24 @@ export interface HudCallbacks {
    * on a machine with no touchscreen at all.
    */
   onSelectWeapon?: (index: number) => void;
+  /**
+   * AN ITEM BUTTON WAS PRESSED. The argument is the EQUIP SLOT, never an `ItemId` —
+   * `state.ts:FighterInput.useItem` is a slot index and says why: *"a press names a
+   * button, and which item is on that button is the loadout's business — passing an id
+   * would let a caller fire an item the fighter never equipped"*.
+   *
+   * ⚠️ **OPTIONAL, AND ABSENT IT DRAWS EXACTLY THE SAME BUTTONS.** The cluster is a
+   * READOUT as well as a control — cooldown, wind-up, `minAlive`, which item is in which
+   * slot — and every one of those is derived from `MatchState`, not from this callback.
+   * A caller that never supplies it gets buttons that show the truth and do nothing,
+   * which is the honest failure and is also what `menu_accept`'s harness sees.
+   *
+   * 🔴 **AND NOTHING SUPPLIES IT ON HEAD.** `game/match.ts` builds this HUD and owns
+   * `buildInput()`; both hops are one line each and are ROUTED rather than taken, because
+   * that file belongs to another owner this run. Until they land, the buttons are the
+   * third dead link in the chain `docs/ITEMS.md` describes — see `renderItems`.
+   */
+  onUseItem?: (slot: number) => void;
 }
 
 export interface ScreenPoint {
@@ -526,6 +564,15 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
       <div class="hud-weapons" data-el="weapons"></div>
 
+      <!-- ── The two equip slots, as buttons ────────────────────────────────
+           Declared AFTER the weapon tray and positioned relative to it (see the
+           .hud-items rules), because it is the tray's neighbour in every layout:
+           directly above it on desktop and in portrait, and a column beside it in
+           the landscape corner cluster. Empty until renderItems() sees a local
+           fighter carrying something — a player with no loadout gets no element
+           with a box, which is what keeps every existing probe's pixels identical. -->
+      <div class="hud-items" data-el="items"></div>
+
       <!-- ── "You are dead, and this is why the screen changed" ──────────────
            🚨 THE MISSING AFFORDANCE. Uri's six-seat loss left a HUD that was
            internally consistent and unexplained: the health plate read 0/70, the
@@ -667,6 +714,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
   const timerEl = q<HTMLDivElement>('timer');
   const weaponsEl = q<HTMLDivElement>('weapons');
+  const itemsEl = q<HTMLDivElement>('items');
   const spectateEl = q<HTMLDivElement>('spectate');
   const countdownEl = q<HTMLDivElement>('countdown');
   const gameoverEl = q<HTMLDivElement>('gameover');
@@ -1018,6 +1066,252 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         timer: slot.querySelector<HTMLDivElement>('[data-role="timer"]')!,
         wasReady: true,
       };
+    });
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+     THE TWO EQUIP SLOTS, AS BUTTONS — the press half of `docs/ITEMS.md`
+     ═══════════════════════════════════════════════════════════════════════════
+
+     🚨 URI: *"how do i use an item in a game?"* — and until this cluster existed the
+     answer was **you cannot**, because `state.ts:FighterInput.useItem` was READ by
+     `sim.ts` and WRITTEN BY NOTHING. Ten items resolve in `combat.ts`, the economy
+     awards them, the lobby equips two and `match.ts` now carries them into the match;
+     `grep -rn useItem src/` still returned only a reader and a declaration. This is the
+     control that writes it.
+
+     ── WHAT EACH BUTTON HAS TO SAY, AND WHY A DEAD ONE IS THE BUG ─────────────
+     A button that looks pressable while it is not is the same defect as a weapon that
+     fires nothing, so every state below is DRAWN, not implied:
+
+       EMPTY      no item in this slot. Most players have one or zero, so this is the
+                  common case and it must not look like a control that is merely
+                  cooling. Dark socket, dashed rim, no icon, the word EMPTY.
+       AUTO       `kind: 'passive'` or `'triggered'` (Tenderiser, Blue Cheese,
+                  Leftovers). There IS no press: `itemUsable` refuses anything whose
+                  kind is not `'active'`, and `ITEMS[id].cooldownMs` is `null` for
+                  exactly those three. The slot shows the item at full strength and says
+                  AUTO — a dead button offered here would be a control that can never
+                  work, which is worse than no control.
+       cooling    the remaining seconds, over the same dark conic wipe the weapon tray
+                  uses. That language is already load-bearing in this file (see
+                  `.hud-weapon-cooldown`: a dark wipe on a LIGHT plate, after three
+                  critic rounds reported the old dark-on-dark one as absent).
+       winding    Shiitake's `ITEM_TUNING.shiitake.windupMs` cast. AMBER wipe, not dark:
+                  a wind-up is time you are SPENDING, a cooldown is time you are WAITING,
+                  and drawing both in the same ink would make the one counterable state
+                  in the item set unreadable. `ITEMS.shiitake.look` requires the wind-up
+                  be legible; this is the local seat's half of that.
+       NEED n     `livingFighterCount(state) < ITEMS[id].minAlive` — Disposal, and only
+                  Disposal today, at Uri's own rule *"If there are only two players left,
+                  it's not available."* The number is READ FROM THE REGISTRY, never
+                  typed: `ItemDef.minAlive`'s header exists precisely so the loadout
+                  screen, the AI and a readout like this one can all see the gate.
+       WAIT       every other refusal `itemUsable` can issue — the match is not in
+                  `'playing'`, the fighter is asleep (`actionsLocked`), or the OTHER slot
+                  is mid-wind-up. Deliberately one catch-all rather than four chips: the
+                  player's question in all four cases is "can I press this", the answer
+                  is no, and inventing four words would be inventing four rules.
+
+     ── 🚨 `is-ready` COMES FROM `itemUsable` AND FROM NOTHING ELSE ────────────
+     The chips above are a SECOND, explanatory derivation walked in the same order the
+     sim's gate is written in, and they are allowed to be silent — they are never allowed
+     to ARM a button. `combat.ts`'s own header: *"A button that greys itself out on a copy
+     of the rule is a button that will one day disagree with the sim."* So the pressable
+     class is `itemUsable(state, me, slot)`, one call, and if a chip ever disagrees with
+     it the chip is wrong and the button is still right.
+
+     ── THE LOCAL SEAT, NEVER THE OBSERVER ────────────────────────────────────
+     `localFighter`, for the reason the weapon tray states at length: after `30e3360` a
+     dead player's camera follows somebody still fighting, and printing THEIR loadout
+     under YOUR buttons would look like information. Dead ⇒ the whole cluster goes inert
+     with the tray.
+     ═══════════════════════════════════════════════════════════════════════════ */
+
+  interface ItemSlotEls {
+    root: HTMLDivElement;
+    /** The conic wipe. One element for both cooldown and wind-up; `is-winding` recolours it. */
+    wipe: HTMLDivElement;
+    badge: HTMLDivElement;
+    /** Last values written, so a slot in a steady state writes nothing to the DOM. */
+    lastBadge: string;
+    lastState: string;
+    lastP: string;
+    /** Ready/not edge, for the one-shot "usable now" flash. Same latch the tray uses. */
+    wasReady: boolean;
+  }
+
+  let itemSlots: ItemSlotEls[] = [];
+  /**
+   * WHAT THE CLUSTER WAS LAST BUILT FOR — the equipped ids joined, or `''` for a fighter
+   * carrying nothing. Rebuilding is keyed on this rather than on a frame counter because
+   * the loadout is not known when `setCharacters` runs (it arrives on the `MatchState`,
+   * seeded by `state.ts:createFighter`), and it can legitimately change between matches
+   * without this HUD being torn down.
+   */
+  let itemSig = ' ';
+
+  /** `'KeyQ'` → `'Q'`. The cap PRINTED on a key, from the physical code `input.ts`
+   *  matches on — the same split `input.ts:MOVE_KEYS` documents, kept in the UI layer
+   *  because that file "has no business knowing that `ArrowLeft` draws as an arrow". */
+  const keyCap = (code: string): string => (code.startsWith('Key') ? code.slice(3) : code);
+
+  function buildItemSlots(equipped: readonly ItemId[]): void {
+    itemsEl.innerHTML = '';
+    if (equipped.length === 0) {
+      // 🚨 NO ELEMENT AT ALL, NOT TWO DEAD SOCKETS. Most players carry nothing, and two
+      // permanently empty buttons would be pure cost: thumb space, occluded arena (the
+      // currency `lu_occlude.mjs` measures) and one more thing on screen that never does
+      // anything. It is also what keeps this pass byte-identical for every existing probe
+      // and gate — nothing under `tools/` sets a loadout, so `lu_land`, `menu_accept` and
+      // `hud_accept` measure the HUD they always measured.
+      itemSlots = [];
+      return;
+    }
+    itemSlots = Array.from({ length: ITEM_SLOTS }, (_, i) => {
+      const id = equipped[i];
+      const slot = document.createElement('div');
+      slot.className = 'hud-item-slot';
+      // The glyph is `ui/icons/items.ts`'s authored 24x24 SVG, addressed by `ItemId` —
+      // the join `rules.ts:ItemId` documents ("a display name is a thing that gets
+      // rewritten and an id is not"). Its outline inherits `--fa-ic-ink`, so it flips
+      // with the plate instead of shipping this project's fourth dark-on-dark control.
+      slot.innerHTML = `
+        <div class="hud-item-wipe"></div>
+        <div class="hud-item-glyph">${id ? icon(id, { size: '26px', label: ITEMS[id].name }) : ''}</div>
+        <div class="hud-item-badge" data-role="badge"></div>
+        <div class="hud-item-key">${keyCap(ITEM_KEYS[i] ?? '')}</div>
+      `;
+      // `pointerdown`, and the two `preventDefault`/`stopPropagation` calls are the
+      // weapon tray's, for the weapon tray's reasons: a press must register on the way
+      // DOWN in a fight, one listener covers finger/pen/mouse without a `touchstart` +
+      // `click` double-fire, and the event must not reach the canvas underneath as a
+      // shot. `game/touch.ts:ownsTarget` independently refuses a touch whose target is a
+      // control, which is what lets a button live inside the aim thumb's half at all.
+      slot.addEventListener('pointerdown', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        callbacks.onUseItem?.(i);
+      });
+      itemsEl.appendChild(slot);
+      return {
+        root: slot,
+        wipe: slot.querySelector<HTMLDivElement>('.hud-item-wipe')!,
+        badge: slot.querySelector<HTMLDivElement>('[data-role="badge"]')!,
+        lastBadge: ' ',
+        lastState: ' ',
+        lastP: ' ',
+        wasReady: false,
+      };
+    });
+  }
+
+  /** One frame of the item cluster. See the block above for what each state means. */
+  function renderItems(state: MatchState): void {
+    const me = localFighter(state);
+    const equipped = me.item.equipped;
+    const sig = equipped.join(',');
+    if (sig !== itemSig) {
+      itemSig = sig;
+      buildItemSlots(equipped);
+      itemsEl.classList.toggle('is-on', equipped.length > 0);
+      // ⚠️ A CLASS ON <html>, WRITTEN HERE AND READ IN `game/touch.ts`. That module's aim
+      // hint sits in the corner this cluster now extends into, and the two elements live
+      // in different layers (`.tch-root` z 25, `.hud-root` z 20) with no shared ancestor
+      // below the document element. `fa-touch` / `fa-touch-capable` already established
+      // that this is where a cross-layer layout fact goes. Removed in `dispose`.
+      document.documentElement.classList.toggle('fa-items', equipped.length > 0);
+    }
+    if (itemSlots.length === 0) return;
+
+    // Same predicate, same reason, same frame as the weapon tray: a corpse's controls
+    // must not read as pressable. See the tray's block above.
+    const inert = localIsSpectating(state);
+    itemsEl.classList.toggle('is-inert', inert);
+
+    const living = livingFighterCount(state);
+    const cast = me.itemCast;
+
+    itemSlots.forEach((s, i) => {
+      const id = equipped[i];
+      // ── The one gate. Everything below only DESCRIBES this answer. ─────────
+      const usable = id !== undefined && !inert && itemUsable(state, me, i);
+
+      let stateClass: string;
+      let badge: string;
+      let p = 0;
+      if (id === undefined) {
+        stateClass = 'is-empty';
+        badge = 'EMPTY';
+      } else if (ITEMS[id].cooldownMs === null) {
+        // `cooldownMs === null` for exactly `passive` and `triggered` — `combat.ts`'s
+        // gate 2 and `sim.test.mjs` §41(g) pin that correspondence, so this test and the
+        // sim's cannot drift. Reading the null rather than re-testing `kind` keeps the
+        // "has a button" question answered by the field that means it.
+        stateClass = 'is-auto';
+        badge = 'AUTO';
+      } else if (cast !== null && cast.slot === i) {
+        // The wind-up. `resolvesAt` is the sim's own deadline (`combat.ts:attemptItem`),
+        // so this counts down the real cast rather than a copy of `windupMs`.
+        const total = Math.max(1, cast.resolvesAt - cast.startedAt);
+        const left = Math.max(0, cast.resolvesAt - state.elapsed);
+        stateClass = 'is-winding';
+        badge = (left / 1000).toFixed(1);
+        p = Math.min(1, left / total);
+      } else {
+        const cd = ITEMS[id].cooldownMs ?? 0;
+        const left = Math.max(0, cd - (state.elapsed - me.item.lastUsed[i]));
+        p = cd > 0 ? Math.min(1, left / cd) : 0;
+        if (left > 0) {
+          stateClass = 'is-cooling';
+          badge = (left / 1000).toFixed(1);
+        } else if (living < ITEMS[id].minAlive) {
+          // Read from the registry, never special-cased: `ItemDef.minAlive` exists so
+          // this readout, the AI and the loadout screen all ask one field.
+          stateClass = 'is-blocked';
+          badge = `NEED ${ITEMS[id].minAlive}`;
+        } else if (usable) {
+          // ⚠️ EMPTY, NOT `'is-ready'`. The walk is not allowed to NAME the ready state —
+          // that class is added below, from `usable`, on one line. If this branch wrote
+          // it, a future edit that reached here for some other reason would arm a button
+          // the sim would refuse, which is the whole defect the cluster exists to remove.
+          // Structural, so it cannot be undone by someone who has not read the comment.
+          stateClass = '';
+          badge = '';
+        } else {
+          // Phase, sleep, or the other slot mid-wind-up. One honest "not now".
+          stateClass = 'is-blocked';
+          badge = 'WAIT';
+        }
+      }
+      // ⚠️ `is-ready` is set from `usable` and NOT from `stateClass`, even though the
+      // branch above computes them together. If the walk ever disagrees with the sim's
+      // gate, the button must follow the sim: a slot that reads READY and refuses the
+      // press is the exact defect this cluster exists to remove.
+      const ready = usable;
+
+      const cls = ['hud-item-slot', stateClass, ready ? 'is-ready' : ''].filter(Boolean).join(' ');
+      if (s.lastState !== cls) {
+        s.lastState = cls;
+        // `className`, not two `classList.toggle` calls: the flash below adds and removes
+        // `is-flash` on the same element, and a wholesale rewrite here would delete it
+        // mid-animation — so the flash is applied AFTER this line, never before.
+        s.root.className = cls;
+      }
+      const ps = p.toFixed(3);
+      if (s.lastP !== ps) { s.lastP = ps; s.wipe.style.setProperty('--p', ps); }
+      if (s.lastBadge !== badge) { s.lastBadge = badge; s.badge.textContent = badge; }
+
+      // One-shot "usable now" pop on the rising edge only — the tray's mechanism and its
+      // reflow-forcing restart. ⚠️ Latched on `ready`, which already carries `inert`, so
+      // a player dying and being spectated cannot manufacture an edge, and a passive
+      // (never ready) cannot flash at all.
+      if (ready && !s.wasReady) {
+        s.root.classList.remove('is-flash');
+        void s.root.offsetWidth;
+        s.root.classList.add('is-flash');
+      }
+      s.wasReady = ready;
     });
   }
 
@@ -1917,6 +2211,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         });
       }
 
+      renderItems(state);
       renderSpectate(state, frame);
       renderZone(state, frame);
       renderAim(frame);
@@ -2188,6 +2483,10 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // The audio engine outlives the match, so a HUD that does not unsubscribe leaks
       // a closure onto a dead DOM tree for every match the player plays.
       offAudio();
+      // The `<html>` flag outlives this element (see `renderItems`), so it has to be
+      // dropped explicitly or the next screen's aim hint stays parked clear of a cluster
+      // that no longer exists.
+      document.documentElement.classList.remove('fa-items');
       root.innerHTML = '';
     },
   };
@@ -3287,6 +3586,264 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
    none and this is the ONE opt-in in the HUD), so this is the exact counterpart. */
 .hud-weapons.is-inert .hud-weapon-slot { pointer-events: none; }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   THE ITEM BUTTONS
+   ═══════════════════════════════════════════════════════════════════════════
+
+   See renderItems() for what each state means. This sheet's job is that they can be
+   TOLD APART at arm's length on a phone, and that none of them is invisible.
+
+   ── ROUND, WHERE A WEAPON SLOT IS A ROUNDED SQUARE ────────────────────────
+   The one shape difference, and it is doing real work rather than decoration: these
+   two buttons sit directly beside four that mean something else, they are pressed by
+   the same thumb, and at 58px a player is reading silhouette long before they read a
+   glyph. Round-vs-square is the cheapest discriminator available and it is the one
+   this genre already uses for "ability" against "weapon". Everything ELSE is copied
+   from the weapon slot on purpose: the light plate, the ink border, the dark conic
+   wipe and the numeric countdown are all language this HUD has already paid for —
+   .hud-weapon-cooldown's own header records three critic rounds calling a dark wipe
+   on a dark card absent, which is why the plate under it is light.
+
+   ── POSITION: ALWAYS THE TRAY'S NEIGHBOUR ─────────────────────────────────
+   Directly ABOVE the tray on desktop and in portrait; a COLUMN beside it in the
+   landscape-touch corner cluster (that rule is with the tray's, at the bottom of this
+   sheet, so the two are read together). Both offsets are written as the SUM of the
+   terms they clear, the way .hud-spectate's is, so a change to the tray is a visible
+   change to a term here rather than a number that silently stops being right. */
+.hud-items {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  /*   18px  .hud-weapons' own bottom offset
+       58px  a weapon slot at this viewport (the DESKTOP one, deliberately: the
+             max-width:720px block takes the tray to 46px, so keeping 58 in this sum
+             OVER-clears by 12px on a phone and keeps the whole cluster describable by
+             one constant instead of two that must be kept in step)
+       20px  clearance — and it is 20 rather than 10 because the state badge HANGS 9px
+             BELOW its button (bottom: -7px on a 16px pill). At 10 the badge's ink and
+             the tray's top border were 1px apart, which reads as one crowded block
+             rather than two control groups. */
+  bottom: calc(var(--fa-safe-b, 0px) + 18px + 58px + 20px);
+  display: none;
+  /* 14, not the tray's 10: these plates are round and each carries a badge wider than
+     itself (NEED 3 overhangs a 46px button by ~4px a side), plus a 5px ready ring. */
+  gap: 14px;
+}
+/* Set by renderItems when the local seat actually brought something. display rather
+   than opacity, so a player with an empty loadout has no box in the frame at all and
+   cannot enter any collision or occlusion measurement. */
+.hud-items.is-on { display: flex; }
+
+.hud-item-slot {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  background: #EFEAF7;
+  border: 3px solid #1a1224;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 0 rgba(0,0,0,0.35);
+  transition: border-color 0.1s, transform 0.1s;
+}
+
+/* ── EMPTY: a socket, not a control ────────────────────────────────────────
+   Most players carry one item or none, so this is the state most of them will see and
+   it has to read as "nothing here", never as "cooling". Opaque #241a30 — this HUD's
+   darkest card, the same plate .hud-spectate and the mute chip use, so it inherits
+   their measured contrast instead of inventing a new one, and it is opaque for the
+   reason the zone pill was made opaque: a translucent plate over live 3D let the pot's
+   hazard ring read straight through a readout. The dashed cream rim is the whole
+   signal and is measured against that plate, not against the arena. */
+.hud-item-slot.is-empty {
+  background: #241a30;
+  border-style: dashed;
+  border-color: #FFF3DE;
+  box-shadow: none;
+}
+
+/* ── AUTO: an item that is working, with no press to offer ─────────────────
+   Passive and triggered items (cooldownMs null) get the full-strength plate and glyph
+   — they ARE on — and lose every affordance that would imply a press: no pointer
+   events even on touch, no :active depress, no ready flash. */
+.hud-item-slot.is-auto { pointer-events: none !important; }
+
+.hud-item-glyph {
+  line-height: 0;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));
+  z-index: 1;
+  transition: filter 0.15s, opacity 0.15s;
+}
+/* Not usable right now: the same desaturate+dim the weapon tray uses, so "dim glyph"
+   means one thing across both clusters. is-auto is excluded deliberately — it is not
+   waiting for anything. */
+.hud-item-slot.is-cooling .hud-item-glyph,
+.hud-item-slot.is-blocked .hud-item-glyph {
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5)) grayscale(0.75) brightness(0.6);
+  opacity: 0.85;
+}
+
+/* ── The wipe: dark for a COOLDOWN, amber for a WIND-UP ────────────────────
+   Two different facts, so two different inks. A cooldown is time you are waiting
+   through; a wind-up is time you are spending, in public, and ITEMS.shiitake.look
+   makes that visibility the reason the item is counterable rather than a coin flip.
+   Drawing both as the same dark sweep would make the only telegraphed item in the set
+   indistinguishable from the eight that are not.
+   The dark value is .hud-weapon-cooldown's, unchanged, for the same reason. */
+.hud-item-wipe {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: conic-gradient(rgba(20,14,28,0.88) calc(var(--p, 0) * 360deg), transparent 0);
+  pointer-events: none;
+}
+.hud-item-slot.is-winding .hud-item-wipe {
+  background: conic-gradient(rgba(244,163,0,0.92) calc(var(--p, 0) * 360deg), transparent 0);
+}
+.hud-item-slot.is-ready .hud-item-wipe,
+.hud-item-slot.is-empty .hud-item-wipe,
+.hud-item-slot.is-auto .hud-item-wipe { background: transparent; }
+
+/* ── READY: an amber ring ADDED OUTSIDE the ink, never REPLACING it ─────────
+   🚨 THE FIRST CUT DID WHAT .hud-weapon-slot.is-selected DOES — swapped border-color to
+   #F4A300 — AND THE RENDERED FRAME FAILED ITS OWN CONTRAST ROW AT 2.31:1. The ink
+   border is the only thing that separates this plate from the arena; amber on the
+   kitchen's yellow counter is not, and a ready button sitting on that counter lost its
+   outline in exactly the state it most needs to be seen (up_item_hud D, 844x390,
+   shots at tools/tmp/up_shots/crop-ready.png).
+
+   So the border stays ink at every state and the readiness cue becomes a spread
+   box-shadow OUTSIDE it: amber ring, then ink again, then the soft glow. The plate is
+   legible against any arena via the inner ink; the amber is legible against any arena
+   via the outer ink; and nothing about the layout moves, because a box-shadow has no
+   box. The tray's is-selected is deliberately NOT changed here — that is a different
+   control, a different owner's measurement, and a routed note rather than a drive-by.
+
+   There is no SELECTION here to confuse readiness with: the press names its own slot
+   (state.ts:FighterInput.useItem), so amber can mean one thing. */
+.hud-item-slot.is-ready {
+  box-shadow: 0 0 0 3px #F4A300, 0 0 0 5px #1a1224,
+              0 3px 0 rgba(0,0,0,0.35), 0 0 12px rgba(244,163,0,0.75);
+}
+/* ── 🚨 THE ONE-SHOT POP, AND IT MAY NOT BE THE TRAY'S ─────────────────────
+   ⚠️ THIS RULE USED TO SAY, AND THE REASONING WAS WRONG IN A WAY ONLY THE RENDER SHOWS:
+
+     "The tray's one-shot pop, reused rather than duplicated: it is the same event
+      ('usable now') on the same kind of control, and a second keyframe set would be a
+      second place to change the beat."
+     .hud-item-slot.is-flash { animation: hud-weapon-ready-flash 0.35s ease-out; }
+
+   hud-weapon-ready-flash animates the whole box-shadow PROPERTY, and its 100% frame is
+   the weapon slot's shadow — 0 3px 0 rgba(0,0,0,0.35) and nothing else. An animation
+   wins over a normal declaration while it is running, so for 350ms after an item became
+   usable it was drawn with NO AMBER RING AT ALL: the flash deleted the exact state it
+   existed to announce, and then handed it back.
+
+   Found by looking at the PNG, not by any assertion — every geometry and contrast row
+   was green, because the ink border it fell back to is the one that carries the 3.0
+   floor. tools/tmp/up_shots/crop-btn.png is the frame: a ready button with a plain dark
+   rim, 250ms into a 350ms animation.
+
+   ⚠️ SO THE LESSON IS NOT "duplicate less". It is that a shared keyframe set is a shared
+   statement about WHICH PROPERTIES ARE IN PLAY, and these two controls no longer agree
+   about that — the weapon slot puts its state in border-color, the item button puts its
+   in box-shadow. The white ring below is the same beat at the same duration; the two
+   static rungs under it are this control's own resting shadow, restated in both frames
+   so the animation adds a flash instead of replacing the button. */
+.hud-item-slot.is-flash { animation: hud-item-ready-flash 0.35s ease-out; }
+@keyframes hud-item-ready-flash {
+  0% { box-shadow: 0 0 0 3px #F4A300, 0 0 0 5px #1a1224, 0 3px 0 rgba(0,0,0,0.35),
+                   0 0 0 10px rgba(255,255,255,0.55); }
+  100% { box-shadow: 0 0 0 3px #F4A300, 0 0 0 5px #1a1224, 0 3px 0 rgba(0,0,0,0.35),
+                     0 0 0 0 rgba(255,255,255,0); }
+}
+
+/* ── ONE badge, bottom-centre, carrying whichever fact this slot has ───────
+   The weapon tray puts its countdown bottom-RIGHT because that corner is free on a
+   square plate. This one is centred because the plate is round — a corner badge on a
+   circle floats off the edge — and because it has to hold words (EMPTY, AUTO, NEED 3,
+   WAIT) as well as a number, and a word centred under a round button is the shape the
+   eye already reads as a label.
+   #1a1224 on a #FFF3DE rim and cream text is .hud-weapon-timer's pair, unchanged. */
+.hud-item-badge {
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  transform: translateX(-50%);
+  min-width: 22px;
+  padding: 1px 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a1224;
+  border: 2px solid #FFF3DE;
+  border-radius: 8px;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: #FFF3DE;
+  white-space: nowrap;
+  z-index: 3;
+  pointer-events: none;
+}
+/* Ready: no badge at all, never an empty pill floating under a live button. */
+.hud-item-badge:empty { display: none; }
+
+/* The key cap. Top-LEFT like the weapon tray's digit badge, same colours, and hidden
+   on a device with no keyboard by the same capability rule — a legend for a key that
+   does not exist is a small lie about how the game is played. A touchscreen LAPTOP
+   keeps it, because its keys work. */
+.hud-item-key {
+  position: absolute;
+  top: -6px;
+  left: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #F4A300;
+  color: #1a1224;
+  border: 2px solid #1a1224;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 800;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+html.fa-touch-capable .hud-item-key { display: none; }
+/* An empty or automatic slot has nothing to press, so it carries no key legend either. */
+.hud-item-slot.is-empty .hud-item-key,
+.hud-item-slot.is-auto .hud-item-key { display: none; }
+
+/* The ONE opt-in to pointer events, exactly as the weapon slot's: per-slot, 58x58
+   (well over the 44px floor), and gated on html.fa-touch, which game/touch.ts sets only
+   after a REAL finger. .hud-root is pointer-events:none and a full-viewport layer that
+   claims events starves the canvas of firing AND aim at once — that has shipped once. */
+html.fa-touch .hud-item-slot {
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+/* A press has to acknowledge itself even when the slot it hit is still cooling — with
+   no press state, a mis-hit and a dead control look identical. */
+html.fa-touch .hud-item-slot:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0,0,0,0.35);
+}
+/* Nothing to press: no depress, and no pointer events to produce one. */
+html.fa-touch .hud-item-slot.is-empty { pointer-events: none; }
+
+/* Dead player: the cluster greys with the tray and stops accepting presses, for the
+   tray's reasons and by the tray's mechanism. */
+.hud-items.is-inert {
+  filter: grayscale(1);
+  opacity: 0.42;
+}
+.hud-items.is-inert .hud-item-slot { pointer-events: none; }
+
 /* ── "SPECTATING <NAME>" ───────────────────────────────────────────────────────
    The one element this pass ADDS a signal with rather than removing one. See
    renderSpectate for what it says, what it rejected, and why it is not a banner.
@@ -3344,6 +3901,19 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
    opacity, so the element has no box at all in the 99% of match time it is off and
    cannot enter any collision measurement hud_accept takes on a living HUD. */
 .hud-spectate.is-on { display: block; }
+/* ── ...and it steps over the item row when there is one ───────────────────────
+   The offset above is a SUM of the terms it clears, and the item cluster adds two of
+   them: another 58px control and another 10px of clearance. Without this the caption
+   lands exactly on the item buttons — measured, not predicted: both are bottom-centre
+   and the caption's own bottom offset IS the item row's.
+
+   ⚠️ It is gated on html.fa-items rather than applied unconditionally, so a player with
+   an empty loadout keeps the caption where it has always been. And it is CANCELLED in
+   the landscape-touch block at the bottom of this sheet, where the cluster is in the
+   corner and nothing is under the caption at all. */
+html.fa-items .hud-spectate {
+  bottom: calc(var(--fa-safe-b, 0px) + 18px + 58px + 20px + 58px + 10px);
+}
 
 /* ── Countdown overlay ────────────────────────────────────────────────────── */
 .hud-countdown {
@@ -3979,6 +4549,15 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
      so this also closes most of a gap where the platform with the SMALLER screen was
      being handed the proportionally smaller icon. */
   .hud-weapon-emoji { font-size: 24px; }
+  /* The item buttons follow the tray down, and for the tray's reason: this is the
+     phone treatment, and a control that stayed 58px while its neighbour became 46
+     would read as a different, more important kind of button rather than as the pair
+     they are. The 24px glyph is the same measured legibility fix the line above
+     records — 20px was where every identify-at-real-size failure was scored. */
+  .hud-item-slot { width: 46px; height: 46px; }
+  .hud-item-glyph .fa-ic { width: 24px; height: 24px; }
+  .hud-items { gap: 12px; }
+  .hud-item-badge { font-size: 10px; padding: 1px 4px; bottom: -6px; }
   .hud-countdown { font-size: 90px; }
   .hud-gameover-card { padding: 26px 32px; }
   .hud-gameover-title { font-size: 34px; }
@@ -4283,6 +4862,66 @@ html.fa-touch-capable .hud-topbar--chips ~ .hud-radar {
     border-radius: 16px;
   }
   html.fa-touch-capable .hud-weapons .hud-weapon-emoji { font-size: 26px; }
+
+  /* ── ...AND THE ITEM BUTTONS BECOME A COLUMN BESIDE IT, NOT A ROW ABOVE IT ──
+     🚨 THIS WAS GOING TO GO ABOVE THE TRAY UNTIL THE CORNER WAS MEASURED, AND THE
+     MEASUREMENT IS THE ONLY REASON IT DID NOT. tools/tmp/up_item_probe.mjs on the
+     tree before this pass, fa-touch-capable on, six seats:
+
+         viewport   .hud-radar bottom   .hud-weapons top   free band
+         ────────   ─────────────────   ────────────────   ─────────
+         844x390    y 232               y 251              19px
+         667x375    y 214               y 236              22px
+         932x430    y 232               y 291              59px
+
+     A 58px row above the tray needs 66px and there are NINETEEN at the phone this HUD
+     is tuned for. The right edge of a landscape phone is already full: radar at the
+     top, tray at the bottom. So the cluster grows SIDEWAYS along the bottom edge, which
+     is also the cheaper direction — lu_occlude's finding is that the guaranteed view
+     is a DISC, ground hidden by a corner control tends to zero, and the bottom edge of a
+     58 degree frame is the cheapest ground on screen.
+
+     ── EVERY OFFSET IS FROM THE RIGHT EDGE, WHICH IS THE LESSON NEXT DOOR ────
+     game/touch.ts spent a whole pass learning that a percentage is the wrong unit
+     here because the cluster's left edge is a CONSTANT distance from the right of the
+     screen. Same units, one more term:
+
+       144 = 12 (safe gutter) + 124 (weapon cluster) + 8 (gap)
+       58  wide, so this column's left edge is 202px in from the right at EVERY width
+
+     ⚠️ AND THE AIM HINT'S 194 BECOMES 260 IN game/touch.ts — gated on the SAME
+     html.fa-items flag, so a player with no loadout pays nothing. That file's rule
+     carries the arithmetic and the warning that the two must move together;
+     tools/tmp/lu_land.mjs row C is what catches it if they ever do not.
+
+     ⚠️ 58px HERE EVEN BELOW 720px, for the tray's reason and by the tray's argument: two
+     of them stacked is 124px of a 390px-tall frame, the two-column constraint that forced
+     46px on the tray does not apply, and a constant width is what lets one number in a
+     different file clear this cluster at every viewport. */
+  html.fa-touch-capable .hud-items {
+    left: auto;
+    transform: none;
+    right: calc(var(--fa-safe-r, 0px) + 144px);
+    bottom: calc(var(--fa-safe-b, 0px) + 12px);
+    flex-direction: column;
+    align-items: center;
+    /* 16, not the tray's 8: stacked vertically, the upper button's badge hangs 9px into
+       whatever is below it. At 8 the NEED 3 pill sat 1px off the next button's rim —
+       photographed at tools/tmp/up_shots/crop-blocked.png before this line existed. */
+    gap: 16px;
+  }
+  html.fa-touch-capable .hud-items .hud-item-slot { width: 58px; height: 58px; }
+  html.fa-touch-capable .hud-items .hud-item-glyph .fa-ic { width: 26px; height: 26px; }
+  html.fa-touch-capable .hud-items .hud-item-badge { font-size: 11px; padding: 1px 5px; bottom: -7px; }
+  /* The caption's step-over is a bottom-CENTRE rule and there is nothing bottom-centre
+     here to step over — the cluster is in the corner. Cancelled explicitly rather than
+     by scoping the rule above, so the two states are readable side by side. */
+  html.fa-touch-capable.fa-items .hud-spectate {
+    bottom: calc(var(--fa-safe-b, 0px) + 18px + 58px + 10px);
+  }
+  /* 12 + 58 + 16 + 58 = 144px of frame height, from the bottom edge up. The block's
+     header carries the measurement that made a row above the tray impossible; this is
+     what the column costs instead, and up_item_hud B is what keeps it honest. */
 
   /* ═════════════════════════════════════════════════════════════════════════
      ...AND THE CLOCK LIES DOWN, BECAUSE IT BECAME THE BIGGEST OCCLUDER IN THE FRAME

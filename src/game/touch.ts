@@ -840,5 +840,40 @@ const CSS = `
     right: calc(var(--fa-safe-r, 0px) + 194px);
     bottom: calc(var(--fa-safe-b, 0px) + 14%);
   }
+
+  /* ── ...AND 194 BECOMES 260 THE MOMENT THE PLAYER BRINGS AN ITEM ──────────────
+     ui/hud.ts now draws item buttons — the control that makes rules.ts:ITEMS pressable
+     at all — as a COLUMN immediately left of the weapon cluster, in this same corner.
+     The arithmetic above just gains one term, and every term is still measured from the
+     RIGHT EDGE, which is the unit the paragraph above spent a whole pass learning:
+
+       194 = 12 (safe gutter) + 124 (weapon cluster)                    + 12 + 46
+       260 = 12 (safe gutter) + 124 (weapon cluster) + 8 + 58 (items)   + 12 + 46
+                                                       ^^^^^^^^^^^^^^
+     58 is the item button's width and 8 the gap BETWEEN THE TWO CLUSTERS (it is spelled
+     in ui/hud.ts as right: safe-r + 144px, i.e. 12 + 124 + 8 — not the 16px gap between
+     the two stacked buttons, which is a HEIGHT and does not enter this sum). Both are
+     fixed in that file's landscape rule for exactly the reason the weapon slot is fixed
+     at 58 there: a cluster whose width changes at a breakpoint cannot be cleared by one
+     constant in a different file.
+
+     ⚠️ **GATED ON html.fa-items, WHICH ui/hud.ts SETS ONLY WHEN THE LOCAL SEAT ACTUALLY
+     BROUGHT SOMETHING, AND THAT GATE IS THE WHOLE POINT.** Moving the hint costs
+     guaranteed view — the paragraph above measured a percentage-based move at
+     1.51% -> 5.46% of the disc at 844x390 and called it a third of the tray's saving
+     handed back — so a player with an empty loadout must not pay it. With no items the
+     cluster is display:none, this rule does not match, and the hint is where it was to
+     the pixel. That is also what keeps every existing probe byte-identical: nothing in
+     tools/ sets a loadout, so lu_land, menu_accept and hud_accept see the tree they
+     always saw.
+
+     ⚠️ A CLASS ON <html> RATHER THAN A DESCENDANT SELECTOR, BECAUSE THE TWO ELEMENTS ARE
+     IN DIFFERENT TREES: .tch-hint--aim is inside .tch-root (this module's own layer, z 25)
+     and .hud-items is inside .hud-root (z 20). There is no ancestor they share below
+     <html>, and fa-touch / fa-touch-capable already establish that this is where a
+     cross-layer layout fact lives. ui/hud.ts owns writing it and removes it on dispose. */
+  html.fa-touch-capable.fa-items .tch-hint--aim {
+    right: calc(var(--fa-safe-r, 0px) + 260px);
+  }
 }
 `;
