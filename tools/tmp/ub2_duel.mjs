@@ -58,6 +58,40 @@
  * loadout rather than trusting `match.ts`'s claim that they are.
  *
  * ═══════════════════════════════════════════════════════════════════════════
+ * 4. WHAT THIS TOOL HAS MEASURED — OBSERVATIONS stamped with a SHA. Re-run, do not re-quote.
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * `a0d9ed1`, 2026-09-02, `--seeds 4`, 880 matches per arm. Control 51.4% smart2 / 44.5%
+ * chase. The loadout is on the BOT seat, which is the only side this rig can drive:
+ *
+ *     warm_milk 0.0/0.0 (121/220 cells, 1202 presses)   pompa 0.0/0.0 (121/220, 950)
+ *     tenderiser 7.3/0.2 (119/220, passive)             shiitake 29.8/27.0 (79/220, 882)
+ *     liquorice 46.1/42.5 (78/220, 2019)                springform 52.0/45.9 (50/220, 6156)
+ *     squid_ink 51.4/44.5 (0/220, 1044 PRESSES)         blue_cheese 51.4/44.5 (0/220, 0)
+ *     disposal 51.4/44.5 (0/220, 0 presses)             leftovers 51.4/44.5 (0/220, 0)
+ *
+ * 🚨 **THE FOUR ZEROS HAVE FOUR DIFFERENT CAUSES AND THE PRESS COLUMN IS WHAT SEPARATES
+ * THEM.** Squid Ink presses 1,044 times and moves nothing — a TRUE zero, because the sim
+ * never branches on `blotUntil`. Blue Cheese has no implementation. Disposal and Leftovers
+ * never press at all: `minAlive: 3` and "a killer who then dies" are unreachable at two
+ * seats, so those two zeros are the RIG. Without the press count all four look identical.
+ *
+ * ── THE OBVIOUS TUNING FIX, MEASURED AND REFUTED ───────────────────────────
+ *
+ * Every five-second status has `cooldownMs` EXACTLY EQUAL to its duration, so uptime is 100%
+ * by construction. Lengthening it, Warm Milk on the bot seat, through
+ * `ub2_patchsim`'s `UB2_CD` dial:
+ *
+ *     x1  0.0/0.0 (1202 presses)   x2  1.1/2.0 (881)   x3  1.1/2.0 (880)
+ *     x4  1.1/2.0 (880)            x6  1.1/2.0 (880)   x10 1.1/2.0 (880)
+ *
+ * **A TENFOLD COOLDOWN RECOVERS 1-2 POINTS OF A 51-POINT HOLE, AND x2 THROUGH x10 ARE
+ * IDENTICAL** — the press count saturates because beyond x2 the bot is limited by
+ * OPPORTUNITY (line of sight and range), not by the cooldown. The lever is the EFFECT, not
+ * the frequency. Five seconds of total action-lock loses a duel outright however rarely it
+ * comes. Reported to Uri with the number; `DECISIONS §77` withholds permission to re-tune.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
  * USAGE
  * ═══════════════════════════════════════════════════════════════════════════
  *

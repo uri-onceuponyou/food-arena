@@ -74,6 +74,45 @@
  *     never prints one beside the other.
  *
  * ═══════════════════════════════════════════════════════════════════════════
+ * 5. WHAT THIS TOOL HAS MEASURED — an OBSERVATION stamped with its SHA, not a floor
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * `a0d9ed1`, 2026-09-02, `--phases 6`, mirror rosters, 66 matches per arm. Re-run it; do not
+ * re-quote it. **Carrier seat 0 against five identical opponents carrying nothing:**
+ *
+ *     control  seat-0 mean place 3.773 · 1st-place 12.1%
+ *     maxHp x4 (the rig's own positive control)   1.076 · 95.5% · 63/66 configs moved
+ *     warm_milk 1.000 · 100.0% · 63/66      pompa 1.015 · 98.5% · 64/66
+ *     tenderiser 1.076 · 97.0% · 64/66      shiitake 1.970 · 59.1% · 63/66
+ *     disposal 1.591 · 40.9% · 61/66        liquorice 3.167 · 24.2% · 59/66
+ *     leftovers 2.361 · 18.0% · 24/61       squid_ink & blue_cheese 3.773 · 12.1% · 0/66
+ *     springform 4.515 · 9.1% · 58/66       — the only one that makes its owner WORSE
+ *
+ * ⚠️ **THE TOP OF THAT TABLE IS SATURATED AND THAT IS THE RESULT, NOT A CAVEAT.** Placement
+ * bottoms out at 1.000, so Warm Milk, Pompa, Tenderiser and the 4x-HP control are
+ * INDISTINGUISHABLE here — all four win essentially every match and there is nothing above
+ * first place for the instrument to separate them with.
+ *
+ * ── AND THE SYMMETRIC ARM ANSWERS A QUESTION THAT WAS PARKED FOR URI ────────
+ *
+ * `UB2_ITEMS=warm_milk` with no `UB2_ITEM_SEAT` — EVERY seat carries it, 66/66 configs moved:
+ *
+ *     TOTAL WIPES (a declared winner who is dead)   control 12/66  ->  **0/66**
+ *     deaths with no attributable hit (fog/hazard)  control    16  ->  **0**
+ *     mean survivors at the whistle                 control  0.82  ->  1.00
+ *
+ * `docs/HANDOVER.md`'s ranked next work #2 is *"28 total wipes in 360 six-player matches,
+ * where there were 0. Everyone dying is a reachable ending now. A design question, not a
+ * bug."* **One item on every seat removes the ending entirely**, because the fights resolve
+ * before the fog closes. Counts, so EXACT.
+ *
+ * ⚠️ **DO NOT READ THE SEAT SPREAD OFF THIS CORPUS.** Control 1.076 places, symmetric 0.303 —
+ * which LOOKS like "items made the seats fairer", and 66 matches cannot support that claim:
+ * `nf_ffa`'s published 0.315 seat-spread floor was measured on 11,088. The control's own
+ * spread is already 3.4x that floor, which is the tell that the design is too small for a
+ * seat-fairness statement. The paired COUNT is what this corpus can carry.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
  * USAGE
  * ═══════════════════════════════════════════════════════════════════════════
  *
