@@ -143,7 +143,7 @@
  * relationship the player never sees.
  */
 
-import { CHARACTERS, MATCH_DURATION_MS, RARITY_COLORS } from '../../game/rules';
+import { CHARACTERS, ITEM_SLOTS, ITEMS, MATCH_DURATION_MS, RARITY_COLORS } from '../../game/rules';
 import { containerIcon, ensureIconStyles, emojiIcon, hydratePortraits, icon, portraitMarkup } from '../icons';
 import { MATCH_PAYOUT, milestoneFace, roadProgress } from '../../game/economy';
 import { XP_PER_LEVEL } from './profile';
@@ -151,6 +151,10 @@ import type { Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
 import { burstConfetti, el } from './fx';
 import { getCharacterStage, PORTRAIT_BG_CSS } from './charStage';
+// 🚨 THE LOADOUT IS READ FROM `lobby.ts`, NOT RE-IMPLEMENTED. See `renderModeKit()` for
+// why that direction is right and why there is no cycle. `matchScreen.ts` is the
+// precedent — it imports the same two symbols from the same file.
+import { loadEquipped, ownedItems } from './lobby';
 
 /** The one mode this build ships. Named here rather than in `rules.ts` because it is
  *  a piece of front-end copy, not a balance constant — but the DURATION beside it is
@@ -363,28 +367,83 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
       <!-- 🚨 THE LOBBY ENTRY, AND IT IS THIS ELEMENT RATHER THAN THE CTA.
            NOTE: no backticks anywhere in this literal. A backtick inside a template
            string terminates it, and menu_accept parses all 88 modules for exactly this.
-           DECISIONS 74 asks for "the lobby where the gameplay is set". The obvious
-           wiring is the start button, and it is REFUSED by a measurement: journey.mjs
-           — the only end-to-end gate in this project — and tools/match-play.mjs both
-           click [data-el=start], wait for __screen === "characters", then click
-           [data-el=fight]. Re-pointing the CTA breaks both, at a 120 s timeout each, and
-           neither file is in this pass's owned set. HEAD was unbootable for 24 commits
-           with every unit gate green; a red end-to-end gate is not worth one tap.
+           DECISIONS 74 asks for "the lobby where the gameplay is set".
+
+           ── WAS: "the obvious wiring is the start button, and it is REFUSED by a
+           measurement: journey.mjs — the only end-to-end gate in this project — and
+           tools/match-play.mjs both click [data-el=start], wait for __screen ===
+           characters, then click [data-el=fight]. Re-pointing the CTA breaks both, at a
+           120 s timeout each, and neither file is in this pass's owned set." ──
+           Kept per the reversed-assertion rule. The CONCLUSION survives and the
+           ARGUMENT was wrong in both directions, re-derived 2026-09-02 by grepping
+           [data-el=start] across tools/ instead of trusting this comment:
+
+             * "journey.mjs is the only end-to-end gate" is FALSE. menu_accept.mjs is a
+               REQUIRED PRE-COMMIT GATE and it clicks this exact button and waits on
+               characters twice (its flow arm), which this comment does not mention.
+             * "both" is FALSE and undercounts by eight. Ten files drive
+               [data-el=start] on home and then wait on characters: menu_accept.mjs,
+               journey.mjs, match-play.mjs, input_accept.mjs, kbdverdict.mjs,
+               lb_accept.mjs, lb_journey.mjs, reload_watch.mjs, us_loadout.mjs and the
+               archived _before_menu_accept.mjs. Uri was offered the trade as "the two
+               tools that depend on it are ours and can be updated" — the real number
+               is ten, one of them shipped, and that is the fact that decides it.
+             * "it is what keeps 2f907a7's four-arm np_identity bit-identity true BY
+               CONSTRUCTION" is FALSE, and it was the load-bearing half. np_identity
+               NEVER VISITS THIS SCREEN: it opens ?px=1070&py=610&player=...&enemy=...
+               and main.ts routes any MATCH_ONLY_PARAMS straight to the match. No click,
+               no home screen, no dependency on this line at all. That claim could have
+               been used to refuse a change on grounds that do not exist.
+
+           ⚠️ SO THE REAL ARGUMENT IS OWNERSHIP, NOT BIT-IDENTITY: seven of those ten
+           tools are outside this pass's owned set, and re-pointing the CTA is a
+           ten-file change that has to land atomically with them or the battery is red.
+           Routed to the orchestrator. What is fixed HERE instead is the thing Uri
+           actually reported — that this control does not look like a control and says
+           nothing about items.
 
            It is also where the reference plates put mode configuration — a wide tappable
            band immediately left of the primary CTA, mode on line 1, variant on line 2 —
            which is the composition this element already had as a dead div. So the change
            is that it becomes what it looks like.
 
-           ⚠️ It KEEPS .home-mode and both inner class names: home_metrics,
-           screen_metrics and menu_accept all key on them. -->
+           ⚠️ It KEEPS .home-mode and both inner class names. The old note said
+           "home_metrics, screen_metrics and menu_accept all key on them"; grepping
+           tools/ says only home_metrics does (its HEADLINE regex names home-mode-name),
+           plus ud_defects.mjs on both inner names and lb_accept.mjs on .home-mode.
+           screen_metrics and menu_accept do not mention any of the three. The names are
+           kept anyway — two live tools is reason enough — but the list is now the
+           measured one. -->
       <button class="home-mode" type="button" data-el="mode"
               aria-label="Match lobby — choose how many players are in the match">
+        <!-- The leading tile is the "you act on this" mark. This screen's own grammar,
+             stated in the record-row comment above: amber tiles for things you act on,
+             dark slate for things you read off. The party glyph is the same one the
+             lobby's count chip carries, so the two screens are visibly one subject. -->
+        <span class="home-mode-tile" aria-hidden="true">${icon('party')}</span>
         <span class="home-mode-lines">
           <span class="home-mode-name">${MODE_NAME}</span>
           <span class="home-mode-sub" data-el="modesub">${formatDuration(MATCH_DURATION_MS)} · last one standing</span>
         </span>
-        <span class="home-mode-go" aria-hidden="true">${icon('party')}</span>
+        <!-- 🚨 THE ANSWER TO "how do i use an item in a game?" IS ON THIS CONTROL.
+             Measured on the shipped screen with tools/tmp/lf_probe.mjs: ZERO of 41
+             visible text runs on home matched /items?|kits?|loadouts?|equip|gear/, and
+             zero aria-labels did either. The route to the loadout existed and nothing
+             on the screen named it. Two slots, ITEM_SLOTS from rules.ts rather than a
+             typed two, each showing the equipped icon or an empty + — and the empty
+             slot is the point: lobby.ts 5e refuses to auto-equip precisely so that
+             "I chose this" and "I never opened this screen" are different states, and
+             an empty slot is what makes the second one visible from here. -->
+        <span class="home-mode-kit">
+          <span class="home-mode-kit-cap">Items</span>
+          <span class="home-mode-slots" data-el="modekit"></span>
+        </span>
+        <!-- WAS the party glyph, which is now the leading tile. A trailing mark on a
+             control should say "this goes somewhere", and the icon set has no forward
+             chevron — back is the only chevron in it, mirrored here in CSS rather than
+             by adding a near-duplicate glyph to a shared registry that five screens
+             draw from. -->
+        <span class="home-mode-go" aria-hidden="true">${icon('back')}</span>
       </button>
       <button class="fa-btn fa-btn--primary" type="button" data-el="start">${icon('play')} Start Game</button>
     </footer>
@@ -689,6 +748,57 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     }
   }
 
+  /**
+   * The equipped pair, drawn on the control that leads to where you change it.
+   *
+   * ── WHY HOME READS THE LOADOUT AT ALL ──────────────────────────────────────
+   * Uri's question was *"how do i use an item in a game?"* and the honest answer at
+   * HEAD was that you cannot find where they live. `lf_probe.mjs` put a number on it:
+   * **0 of 41** visible text runs on this screen, and **0** aria-labels, named an item,
+   * a kit or a loadout. A route nothing points at is not a route.
+   *
+   * ⚠️ `loadEquipped`/`ownedItems` are imported FROM `lobby.ts`, which looks like the
+   * wrong direction until you check: `matchScreen.ts` already does exactly this, and
+   * `loadEquipped`'s own header argues for it — the `LOADOUT_KEY` is read and written
+   * in one file so a stale blob cannot mean two things in two places. Home is the third
+   * caller and adds no second source of truth. There is no import cycle: `lobby.ts`
+   * imports `rules`, `economy`, `state`, `brawl`, `types`, `theme`, `fx` and `icons`,
+   * and none of those reaches back here.
+   *
+   * ⚠️ AND IT IS NOT SUBSCRIBED TO ANYTHING, DELIBERATELY. Equipping happens in the
+   * lobby and lands in `localStorage`, not in `PlayerProfile`, so `profile.onChange`
+   * would never fire for it. What makes this correct is that `shell.ts` UNMOUNTS this
+   * screen to show the lobby and mounts a fresh one on the way back, so `render()`
+   * re-reads the store on every return. A cached copy held across that boundary is the
+   * bug this shape avoids.
+   */
+  function renderModeKit(): void {
+    // `ownedItems` filters to what the player actually has — `loadEquipped` takes the
+    // owned set as a PARAMETER for that reason, and passing the unfiltered registry
+    // would draw an item the lobby itself would refuse to equip.
+    const equipped = loadEquipped(ownedItems(ctx.profile.economy));
+    // `ITEM_SLOTS`, never a typed two: a third slot draws itself here.
+    q('modekit').innerHTML = Array.from({ length: ITEM_SLOTS }, (_, i) => {
+      const id = equipped[i];
+      if (id === undefined) {
+        return `<span class="home-mode-slot is-empty" aria-hidden="true">+</span>`;
+      }
+      return `<span class="home-mode-slot is-filled" aria-hidden="true"`
+        + ` title="${ITEMS[id].name}">${icon(id)}</span>`;
+    }).join('');
+    // The slots are `aria-hidden` and the state goes on the BUTTON's own name instead.
+    // A screen reader hearing "plus, plus" learns nothing; the count and the noun are
+    // what carry the meaning, and they have to be in one string because a control has
+    // one accessible name. ⚠️ The old static label named only the seat count — the same
+    // omission the pixels had.
+    const filled = equipped.length;
+    q('mode').setAttribute(
+      'aria-label',
+      `Match lobby — your items and how many players are in the match.`
+      + ` ${filled} of ${ITEM_SLOTS} item slots filled.`,
+    );
+  }
+
   function render(): void {
     const def = CHARACTERS[ctx.profile.selected];
     q('name').textContent = ctx.profile.name;
@@ -698,6 +808,7 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     renderChest();
     renderHeld();
     renderFighter();
+    renderModeKit();
     q('wins').textContent = ctx.profile.wins.toLocaleString();
     q('losses').textContent = ctx.profile.losses.toLocaleString();
     q('best').textContent = ctx.profile.bestTrophies.toLocaleString();
@@ -2019,24 +2130,51 @@ const CSS = `
    explicit font declarations are not tidiness — a <button> inherits neither family nor
    size, and 'screen_metrics.mjs' has caught real controls shipping in Arial for exactly
    that reason. */
+/* 🚨 THE PLATE IS CREAM NOW, AND THE PARAGRAPH ABOVE IS THE OLD REASON, KEPT.
+   ── What it got right, and still does ────────────────────────────────────────
+   The 3.50:1 finding was about INK ON A SATURATED RED BACKDROP and it is still fixed:
+   the copy sits on an opaque plate rather than on the screen, and lf_probe measures the
+   ink from the pixels behind each glyph, so the fix is verified rather than assumed.
+   ── What it got wrong ────────────────────────────────────────────────────────
+   A dark plate on this screen means "read this", not "press this", and the rule is
+   THIS FILE'S OWN, three hundred lines up in the record-row comment: "amber tiles for
+   things you act on, dark slate tiles for things you read off — and these are
+   read-only, so they are the dark ones." The screen keeps it everywhere else — the
+   status chips are dark and read-only, the record row is dark and read-only, the
+   ability tiles you press are cream, the one you have selected is mustard. The lobby
+   entry was the exception, and Uri could not find it. So this is not a taste reversal:
+   the element was carrying the wrong side of a rule the screen already states.
+   ── And the measurement agrees ───────────────────────────────────────────────
+   tools/tmp/lf_probe.mjs, on a detached worktree of 32438b4, warm: the dark plate
+   separated from the pixels behind it by 1.555:1 at 1600x900 and 1.102:1 at 390x844,
+   against 3.87:1 and 4.27:1 for START GAME on the same frames. The nearest other dark
+   pill on the screen is TAP TO TAUNT, which IS a label — that is the grammar it had
+   joined. Known-bad validated: camouflaging the plate in its own surround colour drops
+   the number to 1.007 and restoring brings it back to 1.554, so the metric moves for
+   the reason it claims to.
+   ⚠️ The HUD idiom sentence above is not wrong about the HUD. It is wrong about a
+   MENU FOOTER, where nothing else dark is pressable. */
 .fa-home .home-mode {
   appearance: none;
   cursor: pointer;
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: clamp(8px, 1vw, 14px);
+  gap: clamp(7px, 0.85vw, 12px);
   min-height: var(--tap);
   margin-inline-start: auto;
-  text-align: end;
+  /* WAS 'text-align: end'. The block used to be two right-aligned lines hugging the
+     CTA; it is now a row of four objects reading left to right, so the type starts at
+     its own left edge like every other card on the screen. */
+  text-align: start;
   min-width: 0;
   font-family: 'Rubik', sans-serif;
-  padding: 6px clamp(11px, 1.4vw, 18px);
-  background: linear-gradient(180deg, rgba(44,30,60,0.94) 0%, rgba(20,13,30,0.96) 100%);
+  padding: 6px clamp(10px, 1.2vw, 16px);
+  background: linear-gradient(180deg, #FFFFFF 0%, #EFE2CC 100%);
   border: var(--ds-stroke-2) solid var(--ink);
   border-radius: var(--ds-r-2);
-  --ds-lip: rgba(0,0,0,0.45);
-  box-shadow: var(--ds-e3), var(--ds-bevel-dark);
+  --ds-lip: rgba(0,0,0,0.35);
+  box-shadow: var(--ds-e3), var(--ds-bevel);
   transition: transform 0.08s, box-shadow 0.08s, filter 0.12s;
 }
 .fa-home .home-mode:hover { filter: brightness(1.12); }
@@ -2044,27 +2182,112 @@ const CSS = `
 .fa-home .home-mode-lines {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  /* WAS 'flex-end' — see 'text-align' above. */
+  align-items: flex-start;
   gap: 1px;
   min-width: 0;
 }
-/* The affordance. A dark plate that is suddenly tappable needs to say so, and the glyph
-   is the same 'who is in the match' mark the lobby's own count chip carries — so the two
-   screens are visibly the same subject rather than two unrelated controls. */
+/* The leading tile. Mustard is the screen's "act on this" accent and a round filled
+   tile is the shape the stat rows already use, so the control announces itself with a
+   mark this screen has taught the player to read rather than with a new one. */
+.fa-home .home-mode-tile {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(26px, 3.2vh, 34px);
+  height: clamp(26px, 3.2vh, 34px);
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
+  border: 2px solid var(--ink);
+  box-shadow: var(--ds-bevel);
+  font-size: var(--ds-t3);
+  color: var(--ink);
+  --fa-ic-ink: var(--ink);
+}
+/* The kit strip. A hairline rule separates it from the mode copy because they answer
+   two different questions and a flat row of four things reads as one. */
+.fa-home .home-mode-kit {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-inline-start: clamp(7px, 0.85vw, 12px);
+  border-inline-start: 2px solid rgba(26,18,36,0.22);
+}
+/* The WORD. 0 of 41 visible runs on this screen matched an item vocabulary before
+   this; a picture of two slots with no noun beside it is a rebus. '#4A3524' is the
+   same ink the gold row's sub-line uses and measures 7.1:1 there — on this cream it is
+   lighter still, and lf_probe reports the measured value rather than this sentence. */
+.fa-home .home-mode-kit-cap {
+  font-family: 'Rubik', sans-serif;
+  font-size: var(--ds-t1);
+  font-weight: var(--ds-w-black);
+  letter-spacing: var(--ds-track);
+  text-transform: uppercase;
+  color: #4A3524;
+  white-space: nowrap;
+}
+.fa-home .home-mode-slots { display: flex; align-items: center; gap: 4px; }
+.fa-home .home-mode-slot {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(24px, 3vh, 30px);
+  height: clamp(24px, 3vh, 30px);
+  border-radius: 8px;
+  border: 2px solid var(--ink);
+  font-size: var(--ds-t3);
+  line-height: 1;
+}
+/* A DASHED empty slot, and the dash is doing work: it is the one border style on this
+   screen that means "nothing here yet", which is what makes the empty state read as an
+   invitation rather than as a disabled control. lobby.ts 5e is deliberate about never
+   auto-equipping, so this is the state a new player is actually in. */
+/* ⚠️ WAS 'background: rgba(26,18,36,0.08)' — a grey wash — and the render is what
+   killed it. Side by side with the filled state (both captured, both looked at), the
+   EMPTY slot was the quieter of the two, and empty is the DEFAULT: lobby.ts 5e never
+   auto-equips, so every new player sees this state and only this state. The one that
+   has to invite a tap was the one reading as disabled. Mustard at 0.38 keeps the dashed
+   "nothing here yet" edge while joining the screen's act-on-this family. */
+.fa-home .home-mode-slot.is-empty {
+  background: rgba(255,201,60,0.38);
+  border-style: dashed;
+  color: #4A3524;
+  font-weight: var(--ds-w-black);
+}
+.fa-home .home-mode-slot.is-filled {
+  background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
+  box-shadow: var(--ds-bevel);
+  --fa-ic-ink: var(--ink);
+}
+/* The affordance. WAS the party glyph in mustard on the dark plate, with the reason
+   "a dark plate that is suddenly tappable needs to say so, and the glyph is the same
+   'who is in the match' mark the lobby's own count chip carries". That mark is now the
+   LEADING tile, where it labels the control; the trailing position says "this goes
+   somewhere", which a party popper never did. Mirrored 'back' — see the markup. */
 .fa-home .home-mode-go {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  font-size: var(--ds-t4);
-  color: var(--mustard-hi);
-  --fa-ic-ink: var(--mustard-hi);
+  font-size: var(--ds-t3);
+  color: var(--ink);
+  --fa-ic-ink: var(--ink);
+  transform: scaleX(-1);
+  /* WAS 0.72. At 1600x900 the mark was the faintest thing on a control whose whole job
+     is to say "this goes somewhere"; 0.85 still sits under the type without whispering. */
+  opacity: 0.85;
 }
 .fa-home .home-mode-name {
   font-family: 'Rubik', sans-serif; font-weight: var(--ds-w-black);
   font-size: var(--ds-t4);
   letter-spacing: var(--ds-track);
   text-transform: uppercase;
-  color: var(--mustard-hi);
+  /* WAS 'var(--mustard-hi)', which was correct ON THE DARK PLATE and would be 1.5:1 on
+     this one. The plate changed under the type — the exact failure the status-chip
+     comment above records as LESSONS §1 case 10 — so the type changes with it. */
+  color: var(--ink);
   text-shadow: none;
   white-space: nowrap;
 }
@@ -2072,7 +2295,10 @@ const CSS = `
   font-family: 'Rubik', sans-serif;
   font-size: var(--ds-t2);
   font-weight: var(--ds-w-bold);
-  color: rgba(255,243,222,0.94);
+  /* WAS 'rgba(255,243,222,0.94)' — cream, for the dark plate. '#4A3524' is the ink the
+     gold row's sub-line already uses; it is a value chosen against a warm light plate
+     rather than a cream dimmed on a dark one, which is what the old colour was. */
+  color: #4A3524;
   text-shadow: none;
   white-space: nowrap;
 }
@@ -2327,7 +2553,16 @@ const CSS = `
     justify-content: space-between;
     text-align: start;
   }
+  /* 'text-align' and 'align-items' are now the BASE values too, so these two lines are
+     no longer doing anything at this breakpoint. They stay because the base could move
+     back and a silently-inherited alignment is how a portrait footer regresses without
+     a rule to point at. */
   .fa-home .home-mode-lines { align-items: flex-start; }
+  /* ⚠️ AND THE MIDDLE HAS TO ABSORB THE SLACK, or 'space-between' spreads FOUR objects
+     across 370px and the tile floats away from the copy it labels. With the lines block
+     flexing, the control reads as two groups — tile + copy on the left, kit + chevron
+     on the right — which is the same left-to-right order as the landscape form. */
+  .fa-home .home-mode-lines { flex: 1 1 auto; }
   .fa-home .home-bottom { flex-wrap: wrap; }
   /* WAS, and kept per the reversed-assertion rule:
 
