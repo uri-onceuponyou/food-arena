@@ -1160,10 +1160,47 @@ export function itemWorthIt(
      * rule is "close, never escape", and the escape half of this item is unreachable for
      * anybody who is aiming.
      *
-     * WORTH: `separation > distance`. A jump shorter than the gap is a strict gain; a jump
-     * longer than it lands the bot **past** its target at roughly the separation it started
-     * from, having spent a 2,500 ms cooldown to stand somewhere else. Derived from the
-     * item's own authored distance, so it cannot go stale.
+     * 🚨 **THE `WORTH` TERM WAS A CONSTANT AND IT MADE THE ITEM ACTIVELY HARMFUL. OLD
+     * WORDING KEPT PER THE REVERSAL RULE, BECAUSE THE REASONING WAS SOUND AND THE QUESTION
+     * IT ASKED WAS THE WRONG ONE:**
+     *
+     *   > *"WORTH: `separation > distance`. A jump shorter than the gap is a strict gain; a
+     *   > jump longer than it lands the bot **past** its target at roughly the separation it
+     *   > started from, having spent a 2,500 ms cooldown to stand somewhere else. Derived
+     *   > from the item's own authored distance, so it cannot go stale."*
+     *
+     * That is a complete answer to *"will this jump overshoot?"* and **no answer at all to
+     * "do I want to be closer?"**. `ITEM_TUNING.springform.distance` is 99.61 wu and the
+     * shortest offensive reach in the roster is 128, so the old term let every ranged
+     * character leap **from a range it could already shoot from into melee**, once every
+     * 2,500 ms, at the one opponent it was fighting.
+     *
+     * **MEASURED, 2026-09-02, `ub2_price --phases 6`, mirror rosters, one carrier seat
+     * against five identical opponents with no items:**
+     *
+     *     carrier 1st-place rate   control 12.1%  ->  Springform **6.1%**
+     *     carrier mean placement   control 3.773  ->  Springform **4.773** (+1.000, WORSE)
+     *     59 of 66 paired configs moved — EXACT, no floor applies to a count
+     *
+     * It is the only one of the ten that makes its owner WORSE, and it is not close: the
+     * carrier's odds of winning are HALVED. `ub2_duel` on the 110-cell corpus shows the same
+     * shape from the other side — the bot presses it **6,156 times** and the aggregate does
+     * not move (51.4% -> 52.0% / 44.5% -> 45.9%, both inside the ~9 pp floor) while **50 of
+     * 220 matchup cells move, max 100 pp**. A busy item that changes individual fights a
+     * great deal and buys its owner nothing.
+     *
+     * **THE TERM IS NOW THE QUESTION: `separation > offensiveReach(self.characterId)` —
+     * "can I already hit them from here?"** If yes, closing is a cost, not a gain. It is the
+     * same precomputed quantity Pompa and the Shiitake Shield already ask about the TARGET,
+     * asked about `self`, so it introduces no new constant and no new radius.
+     *
+     * ⚠️ **AND IT REPLACES THE OLD TERM RATHER THAN JOINING IT, WHICH IS DELIBERATE.**
+     * `min(offensiveReach) = 128 > 99.61 = distance`, so the authored-distance test cannot
+     * bind for any character on today's roster — and this file's own block header condemns
+     * exactly that: a term that reads like a judgement and is `true` by arithmetic. Keeping
+     * both would have been one. `sim.test.mjs` §43(g) asserts the ordering, so the day a
+     * reach falls below the bounce distance the row goes red and the next reader is told
+     * which term binds instead of discovering it.
      *
      * REACH: `!movementLocked` and nothing already in flight. `movement.ts:stepPush` refuses
      * to displace a locked fighter **and burns the budget anyway** — so pressing while
@@ -1176,7 +1213,7 @@ export function itemWorthIt(
         && visible
         && !movementLocked(self, now)
         && self.push.remaining <= 0
-        && separation > ITEM_TUNING.springform.distance;
+        && separation > offensiveReach(self.characterId);
 
     /**
      * WARM MILK — Uri: *"put someone to sleep up to half a screen away, the farther he is,

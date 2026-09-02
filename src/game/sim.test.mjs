@@ -11509,7 +11509,7 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
     // `noUnusedLocals: false` means three dead imports are not even a warning, so the
     // ABSENCE is asserted here — this row goes red the day somebody implements the aura,
     // which is the correct time for a test that says "this is missing" to demand attention.
-    const simSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "sim.ts"), "utf8");
+    const simSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'sim.ts'), 'utf8');
     const auraCalls = (stripComments(simSrc).match(/ITEM_AURA_TICK_MS/g) ?? []).length;
     check('(e) 🔴 OPEN DEFECT, PINNED: Blue Cheese\'s aura is imported by `sim.ts` and called NOWHERE — 1 mention is the import alone',
       auraCalls === 1,
@@ -11552,6 +11552,20 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
     check('(g) 🔴 …and STRICTLY INSIDE the throw — otherwise "can that fighter hurt me from there" is always yes inside range',
       reaches.every(([, r]) => r < THROW),
       `max ${Math.max(...reaches.map(([, r]) => r))} vs throw ${THROW.toFixed(2)}`);
+
+    // ── 🔴 WHICH SPRINGFORM TERM BINDS, ASSERTED RATHER THAN LEFT TO BE DISCOVERED ──
+    //
+    // `itemWorthIt`'s Springform arm used to ask `separation > ITEM_TUNING.springform.distance`
+    // and now asks `separation > offensiveReach(self)`. The old term was REPLACED rather than
+    // kept beside the new one because it cannot bind: the shortest reach on the roster is
+    // wider than the bounce, so any separation past a character's reach is past the bounce
+    // too. That is the same shape this file's block header condemns — a term that reads like
+    // a judgement and is `true` by arithmetic — so the ordering is pinned here instead.
+    // The day a reach falls below the bounce distance this row goes red and the next reader
+    // is TOLD the authored distance has started to bind, rather than finding out later.
+    check('(g) 🔴 the retired Springform term CANNOT BIND: every offensive reach is wider than the bounce, so `separation > reach` implies `separation > distance`',
+      reaches.every(([, r]) => r > ITEM_TUNING.springform.distance),
+      `shortest reach ${Math.min(...reaches.map(([, r]) => r))} vs bounce ${ITEM_TUNING.springform.distance.toFixed(2)}`);
 
     // ── THE CLOG TERM THAT WAS DERIVED AND DELIBERATELY NOT SHIPPED ─────────
     //

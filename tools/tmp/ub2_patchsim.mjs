@@ -93,6 +93,19 @@ const args = (() => {
 /** The lines the patch replaces. Quoted exactly, so a reformat is a loud failure. */
 const ANCHOR = '      items: cfg.items,';
 const HP_ANCHOR = '      maxHp: cfg.maxHp ?? maxHpFor(cfg.characterId, seatIsBotOpponent ? ENEMY_MAX_HP : PLAYER_MAX_HP, lvl),';
+/**
+ * ── THE COOLDOWN DIAL, IN `combat.ts` AND NOT IN `rules.ts` ────────────────
+ *
+ * `ITEMS` is a frozen object literal ~200 lines long; patching ten `cooldownMs` fields in it
+ * would be ten anchors that can each go stale independently. `itemUsable` reads the value
+ * through exactly ONE expression, and that expression is the quantity the question is about
+ * — *"how long until this button comes back"*. One anchor, and it is the one the sim
+ * actually consults, so a dial applied here cannot disagree with the gate.
+ *
+ * ⚠️ It moves the SIM only. A HUD reading `cooldownMs` off the registry would disagree —
+ * irrelevant for an offline balance arm, stated so nobody reuses this tree for a screenshot.
+ */
+const CD_ANCHOR = '  const cooldown = def.cooldownMs ?? 0;';
 
 /**
  * The replacements. `__ub2Items` / `__ub2Hp` are declared in the same file, above
@@ -101,6 +114,7 @@ const HP_ANCHOR = '      maxHp: cfg.maxHp ?? maxHpFor(cfg.characterId, seatIsBot
  */
 const REPLACEMENT = '      items: cfg.items ?? __ub2Items(id),';
 const HP_REPLACEMENT = '      maxHp: cfg.maxHp ?? maxHpFor(cfg.characterId, seatIsBotOpponent ? ENEMY_MAX_HP : PLAYER_MAX_HP, lvl) * __ub2Hp(id),';
+const CD_REPLACEMENT = '  const cooldown = (def.cooldownMs ?? 0) * Number(process.env.UB2_CD ?? 1);';
 
 const HELPER = `
 /**
@@ -159,8 +173,10 @@ export function buildPatchedTree(outDir) {
   const simPath = join(dst, 'src', 'game', 'sim.ts');
   const before = readFileSync(simPath, 'utf8');
 
-  for (const [label, a] of [['items', ANCHOR], ['maxHp', HP_ANCHOR]]) {
-    const hits = before.split('\n').filter((l) => l === a).length;
+  const combatPath = join(dst, 'src', 'game', 'combat.ts');
+  const combatBefore = readFileSync(combatPath, 'utf8');
+  for (const [label, a, src] of [['items', ANCHOR, before], ['maxHp', HP_ANCHOR, before], ['cooldown', CD_ANCHOR, combatBefore]]) {
+    const hits = src.split('\n').filter((l) => l === a).length;
     if (hits !== 1) {
       throw new Error(`ub2_patchsim: the ${label} anchor matched ${hits} times, expected exactly 1.\n`
         + `  anchor: ${JSON.stringify(a)}\n`
@@ -179,6 +195,12 @@ export function buildPatchedTree(outDir) {
     .replace(helperAnchor, `${HELPER}\n${helperAnchor}`);
 
   writeFileSync(simPath, after);
+  writeFileSync(combatPath, combatBefore.split('\n')
+    .map((l) => (l === CD_ANCHOR ? CD_REPLACEMENT : l)).join('\n'));
+  const cdWritten = readFileSync(combatPath, 'utf8');
+  if (!cdWritten.includes(CD_REPLACEMENT) || cdWritten.includes(CD_ANCHOR)) {
+    throw new Error('ub2_patchsim: the cooldown patch did not survive the write');
+  }
 
   // Re-read from disk. "I wrote it" and "it is on disk" are different claims.
   const written = readFileSync(simPath, 'utf8');
@@ -187,7 +209,7 @@ export function buildPatchedTree(outDir) {
     || !written.includes('function __ub2Items') || !written.includes('function __ub2Hp')) {
     throw new Error('ub2_patchsim: the patch did not survive the write');
   }
-  return { simPath, gameDir: join(dst, 'src', 'game'), before, after: written };
+  return { simPath, combatPath, gameDir: join(dst, 'src', 'game'), before, after: written };
 }
 
 if (IS_MAIN) {
@@ -198,6 +220,8 @@ if (IS_MAIN) {
   // "import BOTH and print the constant from each" — nf_ffa's own instruction.
   console.log(`  REAL    ${ROOT}/src/game/sim.ts : ${ANCHOR.trim()}`);
   console.log(`  PATCHED ${r.simPath} : ${REPLACEMENT.trim()}`);
+  console.log(`  REAL    ${ROOT}/src/game/combat.ts : ${CD_ANCHOR.trim()}`);
+  console.log(`  PATCHED ${r.combatPath} : ${CD_REPLACEMENT.trim()}`);
 
   // `node --check` validates SYNTAX and never ORDER. Import it.
   const mod = await import(pathToFileURL(join(r.gameDir, 'sim.ts')).href);
@@ -276,6 +300,37 @@ if (IS_MAIN) {
       && boosted.fighters.filter((f, i) => i !== 2).every((f, i) => f.maxHp === off2.fighters[i < 2 ? i : i + 1].maxHp),
       boosted.fighters.map((f) => f.maxHp).join(','));
     delete process.env.UB2_BOOST_HP; delete process.env.UB2_BOOST_SEAT;
+
+    // ── THE COOLDOWN DIAL, BOTH DIRECTIONS ─────────────────────────────────
+    // Driven through `itemUsable`, which is the function the dial patches — a check that
+    // read `ITEMS.warm_milk.cooldownMs` instead would be reading the registry the dial does
+    // NOT touch and would pass no matter what the patch did.
+    const cm = await import(pathToFileURL(join(r.gameDir, 'combat.ts')).href);
+    const cdState = () => {
+      process.env.UB2_ITEMS = 'warm_milk';
+      const st = mod.createMatch(arena, six());
+      delete process.env.UB2_ITEMS;
+      st.phase = 'playing';
+      return st;
+    };
+    {
+      const st = cdState();
+      delete process.env.UB2_CD;
+      ok('CD OFF: a fresh slot is usable, and stamping `lastUsed` just now makes it NOT — the gate is live',
+        cm.itemUsable(st, st.fighters[0], 0)
+        && (st.fighters[0].item.lastUsed[0] = st.elapsed, !cm.itemUsable(st, st.fighters[0], 0)));
+      // One millisecond past the authored cooldown: usable at x1, refused at x3.
+      st.elapsed = st.fighters[0].item.lastUsed[0] + 5001;
+      ok('CD OFF: 🔴 one ms past the authored 5,000 ms cooldown the slot is BACK — duration equals cooldown, so uptime is 100% by construction',
+        cm.itemUsable(st, st.fighters[0], 0));
+      process.env.UB2_CD = '3';
+      ok('CD ON: 🔴 the same instant is REFUSED at x3 — the dial reaches the gate the sim actually consults',
+        !cm.itemUsable(st, st.fighters[0], 0));
+      st.elapsed = st.fighters[0].item.lastUsed[0] + 15001;
+      ok('CD ON: …and accepted once 3x the cooldown has passed, so the dial is a MULTIPLIER and not an off switch',
+        cm.itemUsable(st, st.fighters[0], 0));
+      delete process.env.UB2_CD;
+    }
 
     console.log(fails === 0 ? '\n  verify: all rows green' : `\n  verify: ${fails} FAILED`);
     if (fails) process.exit(1);
