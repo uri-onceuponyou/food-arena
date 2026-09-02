@@ -81,6 +81,12 @@ import { startGame, type GameSession } from '../../game/match';
 import { CHARACTERS } from '../../game/rules';
 import { MAX_FIGHTERS, MIN_FIGHTERS, type MatchPhase } from '../../game/state';
 import { brawlRoster } from './brawl';
+// 🚨 THE LOADOUT'S LAST HOP. `loadEquipped` and `ownedItems` both live in `lobby.ts`
+// because that is the file that WRITES the storage key, and a second reader with its own
+// copy of the format is how the two come to disagree. Importing a screen from a screen is
+// this directory's own precedent (`brawlRoster`, `placementXp` on the two lines either
+// side of this one), and there is no cycle: `lobby.ts` does not import this file.
+import { loadEquipped, ownedItems } from './lobby';
 import { placementXp } from './profile';
 import type { Route, Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
@@ -186,6 +192,31 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     // `match.ts` reads `opts.roster && …`. Passed unconditionally rather than spread in, so
     // there is one call site to read rather than two shapes of one.
     roster,
+    // ── 🚨 THE EQUIPPED LOADOUT, AND UNTIL 2026-09-02 THIS LINE DID NOT EXIST ────
+    //
+    // Ten items were implemented end to end — `combat.ts` resolves all ten effects, the
+    // economy awards them, the lobby equips two and the choice survives a reload — and
+    // **not one could reach a match**, because nothing on this screen ever read it.
+    // `lobby.ts:LOADOUT_REACHES_MATCH` named this hop and the `GameSessionOptions.items`
+    // hop as the only two missing; both are closed and that constant is now `true`.
+    //
+    // ⚠️ **READ AT MOUNT, EVERY TIME, RATHER THAN CACHED** — this runs on each navigation
+    // into a match, so equipping in the lobby and pressing start picks the new pair up
+    // with no invalidation to forget. `GameSession` then holds it for the life of the
+    // session, so a `restart()` re-equips what the match that just ended had.
+    //
+    // ⚠️ **`ownedItems(...)` RATHER THAN `ownedItemSet(...)`, AND THE DIFFERENCE IS NOT
+    // COSMETIC.** `loadEquipped` filters out any id the player does not own, so passing
+    // the raw economy set here would silently drop every item granted by
+    // `ITEM_TEST_GRANT_ALL` — Uri equips one of the ten, the match starts, and nothing
+    // arrives. One ownership expression, exported from the screen that equips through it.
+    //
+    // ⚠️ **AND `loadEquipped` IS NOT THE ONLY GUARD.** It filters by OWNERSHIP (a product
+    // rule); `match.ts:sanitiseLoadout` filters by what `state.ts:validateLoadout` will
+    // ACCEPT (a safety rule), because that function THROWS a `RangeError` from inside
+    // `createMatch` and a hand-edited `localStorage` blob must not be able to stop a match
+    // starting from a screen with no error surface. The sim's throw is untouched.
+    items: loadEquipped(ownedItems(ctx.profile.economy)),
     // The player's CHARACTER level (not the account level on the home bar). The opponent
     // mirrors it inside `GameSession` — see `enemyLevelFor`, which is where Uri's
     // "AI players adjust to the player's level" answer is expressed exactly once.

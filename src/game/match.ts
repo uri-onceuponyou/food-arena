@@ -37,8 +37,9 @@ import {
 } from './roster';
 import { boxesOverlap } from './movement';
 import {
-  CHARACTER_IDS, CHARACTERS, LEVEL_MIN, MATCH_DURATION_MS, minSafeRadiusFor,
-  SUDDEN_DEATH_MS, SUDDEN_DEATH_RADIUS, SUDDEN_DEATH_REMAINING_MS, clampLevel, type CharacterId, type Weapon,
+  CHARACTER_IDS, CHARACTERS, ITEMS, ITEM_SLOTS, LEVEL_MIN, MATCH_DURATION_MS, minSafeRadiusFor,
+  SUDDEN_DEATH_MS, SUDDEN_DEATH_RADIUS, SUDDEN_DEATH_REMAINING_MS, clampLevel,
+  type CharacterId, type ItemId, type Weapon,
 } from './rules';
 import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 // The shake falloff lives in `render/camera.ts` because both radii it needs are the
@@ -286,6 +287,26 @@ export interface MatchDebug {
    * what makes the difference assertable.
    */
   viewReason: ViewSubjectReason | 'dwell';
+  /**
+   * WHAT EACH SEAT ACTUALLY TOOK INTO THIS MATCH — `loadouts[slot]` is that fighter's
+   * `Fighter.item.equipped`, in lobby slot order.
+   *
+   * 🚨 **READ OFF THE SIM, NEVER OFF THE OPTION, AND THE DIFFERENCE IS THE WHOLE POINT.**
+   * `GameSessionOptions.items` is what a caller ASKED for; this is what
+   * `state.ts:createFighter` actually seeded after `validateLoadout` ran. Publishing the
+   * option would be `AGENT-BRIEF §4b`'s exact trap — "measure the observable, not the
+   * field you added to measure it with" — and a probe reading it would go green on a tree
+   * where `newMatch` still dropped the loadout on the floor.
+   *
+   * Six-seat shaped deliberately: at two seats "the local seat has the items and nobody
+   * else does" and "somebody has the items" are the same sentence, so an N=2-only probe
+   * cannot tell a per-seat loadout from a broadcast one.
+   *
+   * ⚠️ Reallocated per match in `spawnMatch`, not mutated per frame like every field
+   * above — a loadout cannot change mid-match, and the array has to grow with the roster
+   * for the same reason `knockback` does.
+   */
+  loadouts: readonly (readonly ItemId[])[];
 }
 
 /**
@@ -384,6 +405,39 @@ export interface GameSessionOptions {
    * flag does not get to route around it. `fightersFromQuery` refuses the same way.
    */
   roster?: readonly CharacterId[];
+  /**
+   * 🚨 **THE LOCAL SEAT'S LOADOUT — the hop that made `lobby.ts:LOADOUT_REACHES_MATCH`
+   * read `false`, and the reason Uri's question *"how do i use an item in a game?"* had
+   * the answer "you cannot".**
+   *
+   * Ten items are implemented end to end — `combat.ts` resolves all ten effects,
+   * `state.ts:createFighter` validates the loadout, the economy awards them and the lobby
+   * equips two — and **not one of them could reach a match**, because this interface had
+   * no field for them and `newMatch` built every `FighterConfig` without one. Everything
+   * from `sim.ts:FighterConfig.items` rightwards already existed.
+   *
+   * ⚠️ **SLOT 0 ONLY, AND THAT IS NOT AN OVERSIGHT.** This is the LOCAL player's
+   * equipment, exactly as `playerLevel` is the local player's level. A per-seat loadout
+   * input would be the same door `roster` refuses to open for `spawn` and `level`: it
+   * would let a caller hand five bots five different item sets, which is a *matchmaking /
+   * difficulty policy* and belongs to whoever answers it once (`ai.ts` presses items for
+   * bots today and equips them none). See `roster`'s note.
+   *
+   * ⚠️ **NOT FORWARDED VERBATIM — `sanitiseLoadout` runs first, and that is a SAFETY
+   * requirement rather than tidiness.** `state.ts:validateLoadout` **THROWS** a
+   * `RangeError` on an over-full, duplicated or unknown loadout, from inside
+   * `createMatch`, i.e. from inside this session's constructor. The value arriving here
+   * comes from `localStorage` by way of `matchScreen.ts`, so a hand-edited or
+   * format-drifted blob would not degrade to "no items" — it would **fail to start the
+   * match, from a screen with no error surface**. The sim's throw is exactly right for
+   * the ~72 `.mjs` instruments `tsc` cannot see (a typo there must not equip a ghost);
+   * the filtering therefore happens on the way IN, here and in
+   * `lobby.ts:loadEquipped`, and the sim's validation is not weakened by one line.
+   *
+   * Absent, `undefined` or `[]` → every `FighterConfig` is built exactly as it was before
+   * this field existed. `tools/tmp/us_bitid.mjs` measures that rather than asserting it.
+   */
+  items?: readonly ItemId[];
 }
 
 const DEFAULT_PLAYER: CharacterId = 'hamburger';
@@ -451,6 +505,65 @@ function fightersFromQuery(): FighterConfig[] | null {
   // Two or fewer is refused rather than honoured: at two seats the legacy form is the
   // measured-identical path and there is no reason for a QA parameter to route around it.
   return out.length >= 3 ? out : null;
+}
+
+/**
+ * THE LOADOUT GATE — every id that reaches the sim from this file passes through here.
+ *
+ * 🚨 **THIS IS THE "FILTER ON THE WAY IN" HALF OF A RULE WHOSE OTHER HALF IS A THROW,
+ * AND BOTH HALVES ARE LOAD-BEARING.** `state.ts:validateLoadout` refuses an over-full,
+ * duplicated or unknown loadout with a `RangeError` and **must keep doing so**: `ItemId`
+ * is a union `tsc` enforces for the 2 typed `createMatch` call sites in this repo and
+ * cannot enforce for the ~72 `.mjs` instruments, so a typo in a tool has to be loud.
+ *
+ * But the value this session is handed does not come from a programmer — it comes from
+ * `localStorage`, through `matchScreen.ts`. A `RangeError` thrown out of the constructor
+ * on a stale blob would leave the player on a black screen with no way back, and
+ * "the match will not start" is a strictly worse answer than "one icon is missing".
+ *
+ * ⚠️ **AND IT IS NOT A DUPLICATE OF `lobby.ts:loadEquipped`.** That one filters by what
+ * the player OWNS, which is a product rule and needs the economy. This one filters by
+ * what the SIM will accept, which is a safety rule and needs nothing — so it also covers
+ * `?items=` and any future caller that never went through the lobby. Overlapping on two
+ * of the five conditions is the point: neither is allowed to be the only guard.
+ *
+ * Total. Never throws. Drops, in this order: not a known `ItemId` · a duplicate · past
+ * `ITEM_SLOTS`. The kept ids stay in the order they arrived, because lobby slot order is
+ * the order `Fighter.item.equipped` and `lastUsed` are index-aligned on.
+ */
+function sanitiseLoadout(items: readonly string[] | undefined): ItemId[] {
+  if (!items) return [];
+  const out: ItemId[] = [];
+  for (const raw of items) {
+    if (out.length >= ITEM_SLOTS) break;
+    if (typeof raw !== 'string' || !(raw in ITEMS)) continue;
+    const id = raw as ItemId;
+    if (out.includes(id)) continue;
+    out.push(id);
+  }
+  return out;
+}
+
+/**
+ * QA-ONLY: `?items=tenderiser,springform` — the local seat's loadout, same spirit as
+ * `?player=` / `?level=` / `?fighters=`.
+ *
+ * It exists because the product path reads `localStorage`, and a probe that has to write
+ * a storage key before every navigation is a probe that measures its own fixture as much
+ * as the game. This is a TRANSPORT with no policy: it goes through the same
+ * `sanitiseLoadout` the option does, so a garbage value is dropped rather than honoured
+ * and `?items=` can never reach a shape the shipped path could not.
+ *
+ * ⚠️ **A NON-EMPTY OPTION WINS.** `opts.items` is what the lobby chose; this is a debugging
+ * override for a build with no lobby in front of it, and a URL that silently beat a real
+ * player's equipment would be a second source of truth for the loadout. ⚠️ **"Non-empty",
+ * not "present"** — `matchScreen.ts` passes the option unconditionally and it is `[]` when
+ * nothing is equipped, so a `??` here made this whole parameter inert. See the constructor.
+ */
+function itemsFromQuery(): string[] | null {
+  const raw = new URLSearchParams(location.search).get('items');
+  if (raw === null) return null;
+  return raw.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 /** QA-only numeric URL override, same spirit as `?simSpeed=`. */
@@ -550,6 +663,15 @@ export class GameSession {
    * names positions) and every `np_*` instrument depends on it.
    */
   private readonly roster: readonly CharacterId[] | null;
+  /**
+   * THE LOCAL SEAT'S LOADOUT, already sanitised — `[]` when nothing is equipped, which is
+   * the shipped default and the arm `us_bitid.mjs` proves is unchanged.
+   *
+   * Held on the session rather than read per match so that `restart()` re-equips exactly
+   * what the match that just ended had. Re-reading `localStorage` on a restart would let
+   * a second tab change the loadout of a match already in progress.
+   */
+  private readonly items: readonly ItemId[];
   /**
    * ONE MODEL PER SLOT, index-aligned with `state.fighters`.
    *
@@ -753,6 +875,7 @@ export class GameSession {
     moveX: 0, moveY: 0, attack: false, facingX: 0, facingY: 0, selectedWeapon: 0,
     pointerLocked: false, qaSpawnInsideCover: null, frames: 0,
     viewSubject: LOCAL_SLOT, viewReason: 'local',
+    loadouts: [],
   };
 
   /** QA mirror of the event → feel edge. Allocated once; see `FeelDebug`. */
@@ -821,6 +944,28 @@ export class GameSession {
     this.roster = opts.roster && opts.roster.length > MIN_FIGHTERS && opts.roster.length <= MAX_FIGHTERS
       ? opts.roster.slice()
       : null;
+    // Sanitised ONCE, here, so every downstream read is of a shape `createFighter` accepts
+    // — see `sanitiseLoadout` for why the sim's throw stays and the filter lives on this
+    // side of it. `slice()` is implicit in the rebuild, which also answers the same
+    // caller-mutates-the-array-afterwards problem `roster` above calls out.
+    //
+    // 🚨 **`.length ? :` AND NOT `??`, AND THE `??` VERSION WAS WRITTEN FIRST AND WAS DEAD.**
+    // Every other QA override on this class reads `opts.x ?? fromQuery(...) ?? DEFAULT`,
+    // because `opts.x` is genuinely absent when the caller does not care. This one is not:
+    // `matchScreen.ts` passes `items: loadEquipped(...)` UNCONDITIONALLY, and that returns
+    // `[]` when nothing is equipped. `[]` is not nullish, so `??` handed the empty array
+    // straight through and **`?items=` could never fire on the only path that reaches it in
+    // the browser** — a parameter that is documented, typed, sanitised, and inert.
+    //
+    // Caught by writing `us_loadout.mjs` §C before believing the code, not by review: the
+    // arm drives `?items=` with no storage and requires a legal loadout to arrive, and it
+    // is the ONLY arm that reaches `sanitiseLoadout` at all (everything from `localStorage`
+    // has already been through `lobby.ts:loadEquipped`).
+    //
+    // The semantics are unchanged and are the ones the field doc states: an EQUIPPED
+    // loadout always wins, because "equipped nothing" and "asked for nothing" are the same
+    // request and the URL is only consulted when there is no equipment to override.
+    this.items = sanitiseLoadout(opts.items?.length ? opts.items : (itemsFromQuery() ?? undefined));
     // The roster, in slot order. `createMatch`'s legacy 3-argument form still builds
     // exactly two fighters (`state.ts`), so this is exactly two entries on every shipped
     // navigation — but it is the ONE place the renderer's fighter count is decided, and
@@ -998,9 +1143,36 @@ export class GameSession {
       return createMatch(this.arena, this.roster.map((characterId, slot) => ({
         characterId,
         level: slot === LOCAL_SLOT ? this.levels.player : this.levels.enemy,
+        // `undefined` for every non-local seat, which is the same object shape
+        // `createMatchFromList` saw before this field existed (`cfg.items` was
+        // `undefined` there too). Bots equip nothing — see `GameSessionOptions.items`.
+        items: slot === LOCAL_SLOT ? this.items : undefined,
       })));
     }
-    return createMatch(this.arena, this.playerId, this.enemyId, this.levels);
+    // ── 🚨 THE DUEL, AND IT IS THE SHIPPED DEFAULT ────────────────────────────
+    //
+    // `seatCountFor(MIN_FIGHTERS)` maps 2 to `seats: undefined` (`brawl.ts` states why),
+    // so this branch — not the roster one — is where every navigation the product makes
+    // today lands. A loadout fix that only covered the six-seat path would have left the
+    // common case exactly as dead as it was, and would have LOOKED like it worked.
+    //
+    // The empty case still takes the legacy 4-argument overload, byte for byte the call
+    // this file has always made. That is not superstition: `createMatch`'s own header
+    // records **74 call sites, 2 of them visible to `tsc`**, and this branch is the one
+    // every `.mjs` instrument's two-seat number was measured through. Keeping it
+    // untouched makes "an empty loadout is bit-identical" true BY CONSTRUCTION for the
+    // shipped path, instead of true by a measurement someone has to re-run.
+    // (`us_bitid.mjs` re-runs it anyway — the two forms are also measured equal, so the
+    // branch is a belt, not the trousers.)
+    if (this.items.length === 0) return createMatch(this.arena, this.playerId, this.enemyId, this.levels);
+    // With items, the list form is the ONLY form that can carry them: the 4-argument
+    // overload has nowhere to put a per-seat field, and `createMatch` REFUSES the mixed
+    // call rather than dropping the levels silently. So the two levels move onto the two
+    // configs, which is exactly what the overload does internally.
+    return createMatch(this.arena, [
+      { characterId: this.playerId, level: this.levels.player, items: this.items },
+      { characterId: this.enemyId, level: this.levels.enemy },
+    ]);
   }
 
   private spawnMatch(): void {
@@ -1014,6 +1186,11 @@ export class GameSession {
     // sequence at two fighters.
     for (const m of this.models) { this.stage.scene.remove(m.root); m.dispose(); }
     const roster = fightersOf(this.state);
+    // What every seat is ACTUALLY carrying, taken from the fighters `createFighter` just
+    // built — see `MatchDebug.loadouts` for why this is read off the sim rather than off
+    // `this.items`. Reallocated here, beside `knockback`, and for the same reason: the
+    // roster length can change between matches.
+    this.debug.loadouts = roster.map((f) => f.item.equipped.slice());
     this.models = roster.map((f, i) => createCharacter(this.characterIds[i] ?? f.characterId));
     for (const m of this.models) this.stage.scene.add(m.root);
     this.models.forEach((m, i) => {

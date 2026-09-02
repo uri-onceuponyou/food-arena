@@ -172,8 +172,18 @@
  * in the same commit. `createEconomy()` seeds `items: [STARTER_ITEM]`, and `STARTER_ITEM`
  * resolves to the first member of the cheapest non-empty tier, so **a brand-new player
  * owns exactly one item and never zero**. The zero-owned state is still rendered and
- * still tested (`ul_accept.mjs` arm `own0`) because a defensive read must survive a
- * hand-edited blob, but it is NOT what a screenshot of a new player shows.
+ * still rendered because a defensive read must survive a hand-edited blob, but it is NOT
+ * what a screenshot of a new player shows.
+ *
+ * 🚨 **THIS SENTENCE SAID *"still tested (`ul_accept.mjs` arm `own0`)"* AND
+ * `tools/tmp/ul_accept.mjs` HAS NEVER EXISTED ON ANY BRANCH** (`git log --all --
+ * tools/tmp/ul_accept.mjs` is empty, re-derived 2026-09-02). Four citations of it were
+ * committed in `a80f69b` — **the same commit whose §5·0 above spends fifteen lines
+ * condemning `il_seam.mjs` for being cited six times and never existing.** The word
+ * "tested" is doing the work here and there is no test; the zero-owned arm is rendered
+ * and unmeasured. Corrected rather than deleted, per the reversal rule, because the
+ * lesson is that a citation is what made the claim *look* verified — twice, in one file,
+ * in one session, by the person who had just written the lesson.
  *
  * ── 5c. THE HONESTY LINE, AND WHY THE SLOTS ARE *NOT* `disabled` ───────────
  * §1 disables the multiplayer control because pressing it could do nothing. Equipping is
@@ -182,15 +192,30 @@
  * both derived from the tree by `ul_seam.mjs` rather than remembered:
  *
  *   `LOADOUT_REACHES_MATCH`     `matchScreen.ts` → `startGame` → `FighterConfig.items`.
- *                               **FALSE.** `GameSessionOptions` has no items field.
+ *                               ⚠️ **WAS FALSE — *"`GameSessionOptions` has no items
+ *                               field"*. TRUE since 2026-09-02**: the option exists, the
+ *                               screen calls `loadEquipped`, and `newMatch` seats it on
+ *                               BOTH the duel and the 3..6 roster path. Old wording kept
+ *                               per the reversal rule; the constant's own header carries
+ *                               the whole of it.
  *   `PLAYER_CAN_PRESS_AN_ITEM`  something writes `FighterInput.useItem`.
- *                               **FALSE.** `grep -rn useItem src/` writes it NOWHERE;
- *                               `sim.ts` reads it in one place. Bots press items through
- *                               `ai.ts` → `attemptItem`; the human has no button.
+ *                               **FALSE, still.** `grep -rn useItem src/` writes it
+ *                               NOWHERE; `sim.ts` reads it in one place. Bots press items
+ *                               through `ai.ts` → `attemptItem`; the human has no button.
  *
  * `loadoutNote()` turns those two booleans into the one sentence on the screen, so the
  * sentence cannot outlive the fact. Disabling the slots instead would make the feature
  * unreachable in order to describe it, which is strictly worse than describing it.
+ *
+ * ⚠️ **AND THE SENTENCE CHANGED WHEN THE FACT DID, WITHOUT ANYONE EDITING A STRING** —
+ * which is the only reason this shape was worth the two constants. It now reads *"Your
+ * picks go into the match now. Active items have no button yet, so only an item that needs
+ * no press can fire."*
+ *
+ * 🚨 …and the wording of THAT sentence was then corrected too, because the obvious version
+ * (*"Passive items work in a match"*) is FALSE: `blue_cheese` is a passive that does
+ * nothing, measured by `us_bitid --census`. See `loadoutNote()` for the whole of it. **Two
+ * constants make the sentence's TIMING automatic; they do not make its CONTENT true.**
  *
  * ── 5d. THE PICKER LISTS ALL TEN, INCLUDING THE ONES YOU DO NOT OWN ────────
  * ⚠️ Deliberate, and adjacent to the defect class §1 spends fifty lines on, so it is
@@ -245,8 +270,14 @@ declare global {
      * Without an injection every row about a full picker would be asserted over a
      * one-element set, and the zero-owned row over an empty one, where `[].every()` is
      * `true` — the failure mode `CLAUDE.md` rule 6 records firing three times in three
-     * files in one session. `tools/tmp/ul_accept.mjs` sets this per arm and requires the
-     * screen to MOVE between them. Costs one property read per render.
+     * files in one session. Costs one property read per render.
+     *
+     * ⚠️ **NO TOOL SETS THIS TODAY.** This said *"`tools/tmp/ul_accept.mjs` sets this per
+     * arm and requires the screen to MOVE between them"*, and that file has never
+     * existed — see §5b's correction. The hook is real and works; what is missing is the
+     * consumer. `tools/tmp/us_loadout.mjs` uses the sibling hook it does need
+     * (`localStorage` + `?items=`) and does NOT exercise this one, so the picker's
+     * own-nothing / own-all arms remain **unmeasured** rather than fictitiously measured.
      *
      * ⚠️ **`[]` IS A REAL VALUE HERE AND `null` IS NOT.** An empty array is truthy, so
      * `__faOwnedItems = []` is the own-nothing arm; `null`/`undefined` means "no
@@ -368,8 +399,20 @@ function isItemId(v: string): v is ItemId {
  * What the player owns. `ownedItemSet` is `economy/state.ts`'s own function, never a
  * re-read of the array — see the note on `EconomyState.items`: it is a SET, not an
  * inventory, and the set is the only shape the picker may reason about.
+ *
+ * 🚨 **EXPORTED, AND IT HAD TO BE, BECAUSE `loadEquipped` TAKES `owned` AS A PARAMETER.**
+ * `matchScreen.ts` is the second caller of `loadEquipped` and it holds the same profile
+ * this screen does — but if it built its own owned set from `ownedItemSet` alone it would
+ * miss BOTH overrides below, and the failure would be silent and specific: with
+ * `ITEM_TEST_GRANT_ALL` on, Uri equips any of the ten here, and `loadEquipped` on the
+ * match side filters every one of them out as "not owned". The loadout screen would work,
+ * the match would start, and no item would ever arrive. **One ownership expression, one
+ * place**, exactly the argument `loadEquipped`'s own header makes for taking a parameter.
+ *
+ * ⚠️ Takes the `EconomyState`, not the `ScreenContext` — `matchScreen.ts` has the former
+ * and the latter would drag a screen's whole context into a function about a set of ids.
  */
-function ownedItems(ctx: ScreenContext): ReadonlySet<ItemId> {
+export function ownedItems(economy: EconomyState): ReadonlySet<ItemId> {
   const injected = window.__faOwnedItems;
   // Truthiness, NOT `.length` — see the declaration above: `[]` is the own-nothing arm.
   if (injected) return new Set(injected.filter(isItemId));
@@ -395,31 +438,54 @@ function ownedItems(ctx: ScreenContext): ReadonlySet<ItemId> {
   // keeps passing, the boxes still hand over real items, and the picker shows all ten.
   // One line to revert when accounts land.
   if (ITEM_TEST_GRANT_ALL) return new Set(ITEM_IDS);
-  return ownedItemSet(ctx.profile.economy);
+  return ownedItemSet(economy);
 }
 
 /**
- * 🚨 **DOES A MATCH READ THIS LOADOUT? NO. AND THIS CONSTANT IS THE ONLY HONEST PLACE
- * TO SAY SO.**
+ * **DOES A MATCH READ THIS LOADOUT? YES, SINCE 2026-09-02 — BOTH HOPS ARE CLOSED.**
+ *
+ * ⚠️ **THIS CONSTANT SAID `false` AND THE COMMENT ABOVE IT SAID "NO". THE OLD WORDING IS
+ * KEPT BELOW PER `CLAUDE.md`'s reversal rule**, because it is the record of what was
+ * missing and it named the two hops correctly:
+ *
+ * > 🚨 **DOES A MATCH READ THIS LOADOUT? NO. AND THIS CONSTANT IS THE ONLY HONEST PLACE
+ * > TO SAY SO.** … The two missing hops are:
+ * >   1. `GameSessionOptions` (`match.ts`) has no `items` field, and `newMatch` builds
+ * >      every `FighterConfig` without one — including the duel path, which is what
+ * >      `seatCountFor(MIN_FIGHTERS)` routes to and therefore the shipped default.
+ * >   2. `matchScreen.ts` never calls `loadEquipped`.
+ * > **Both files are outside this pass's owned set** … It is REPORTED to the orchestrator
+ * > with the exact hunks, and `ul_seam.mjs` §W fails the moment either lands while this
+ * > constant still says `false` — so the screen cannot go on apologising for a limitation
+ * > that has been fixed.
+ *
+ * That last sentence is what happened: §W is a two-way row, and flipping this without the
+ * wiring goes red exactly as fast as landing the wiring without flipping this.
  *
  * The chain is `lobby → localStorage → matchScreen.ts:startGame → GameSessionOptions →
- * match.ts:newMatch → FighterConfig.items → state.ts:createFighter → Fighter.item.equipped`.
- * Everything from `FighterConfig.items` rightwards **exists and is tested** (`sim.ts`
- * declares the field, `createFighter` validates it, `combat.ts` resolves all ten
- * effects). The two missing hops are:
+ * match.ts:newMatch → FighterConfig.items → state.ts:createFighter → Fighter.item.equipped`,
+ * and every link is now real:
  *
- *   1. `GameSessionOptions` (`match.ts`) has no `items` field, and `newMatch` builds every
- *      `FighterConfig` without one — including the duel path, which is what
- *      `seatCountFor(MIN_FIGHTERS)` routes to and therefore the shipped default.
- *   2. `matchScreen.ts` never calls `loadEquipped`.
+ *   1. `GameSessionOptions.items` exists, `GameSession` sanitises it once, and `newMatch`
+ *      puts it on the LOCAL seat's `FighterConfig` **on both paths** — the 3..6 roster and
+ *      the duel. The duel mattered most: `seatCountFor(MIN_FIGHTERS)` maps 2 to
+ *      `seats: undefined`, so a six-seat-only fix would have left the shipped default dead
+ *      while looking finished.
+ *   2. `matchScreen.ts` calls `loadEquipped(ownedItems(ctx.profile.economy))` — the same
+ *      ownership expression this screen equips through, which is why `ownedItems` is
+ *      exported rather than duplicated.
  *
- * **Both files are outside this pass's owned set** (`CLAUDE.md` rule 9), and threading a
- * new option through them is behavioural, so it is not eligible for the additive release
- * valve. It is REPORTED to the orchestrator with the exact hunks, and `ul_seam.mjs` §W
- * fails the moment either lands while this constant still says `false` — so the screen
- * cannot go on apologising for a limitation that has been fixed.
+ * ⚠️ **WHAT THIS CONSTANT DOES NOT CLAIM.** It says the equipped ids ARRIVE on
+ * `Fighter.item.equipped`. It does not say every effect is visible: `PLAYER_CAN_PRESS_AN_ITEM`
+ * below is still `false`, so today the arrival buys you the three that need no press —
+ * `tenderiser`, `blue_cheese` (passive) and `leftovers` (triggered) — and the seven actives
+ * sit equipped and unpressed. `loadoutNote()` composes exactly that sentence.
+ *
+ * Measured, not asserted: `tools/tmp/us_loadout.mjs` boots the shipped screen at two seats
+ * and at six and reads `__matchDebug.loadouts` — the sim's own `Fighter.item.equipped`,
+ * not the option that was passed in.
  */
-const LOADOUT_REACHES_MATCH = false;
+const LOADOUT_REACHES_MATCH = true;
 
 /**
  * 🚨 **CAN THE PLAYER PRESS AN ACTIVE ITEM? NO — AND NOTHING ELSE ON THIS SCREEN MAY
@@ -453,7 +519,25 @@ function loadoutNote(): string {
     return 'Your picks are saved and survive a reload. A match does not read them yet.';
   }
   if (!PLAYER_CAN_PRESS_AN_ITEM) {
-    return 'Passive items work in a match. There is no button for firing an active one yet.';
+    // 🚨 THIS STRING SAID *"Passive items work in a match. There is no button for firing an
+    // active one yet."* AND THE FIRST HALF WAS MEASURABLY FALSE THE HOUR IT APPEARED.
+    // Kept above the correction per the reversal rule.
+    //
+    // `tools/tmp/us_bitid.mjs --census` equips each of the ten in turn and asks whether the
+    // sim MOVES (2026-09-02, blind differ, 8 matchups x 2 seeds at n=2 and 4 x 1 at n=6):
+    // **`blue_cheese` is dead in every column at every seat count.** It is a passive, it is
+    // equipped, and it does nothing — `combat.ts`'s switch sends it to *"`sim.ts`'s aura
+    // block"* and there is no aura block; `sim.ts` imports `ITEM_AURA_TICK_MS`,
+    // `itemDamageSource` and `hasItem` and calls none of them. So "passive items work" was
+    // exactly the UI-asserts-what-the-model-does-not-do defect §1 spends fifty lines on,
+    // written by the file that spends fifty lines on it. Reported; `sim.ts` is not this
+    // pass's file to fix.
+    //
+    // The replacement is a claim about the BUTTON — which is what this screen owns and
+    // what `PLAYER_CAN_PRESS_AN_ITEM` actually measures — and says nothing about which
+    // effects are implemented, because this file cannot know that and must not guess.
+    return 'Your picks go into the match now. Active items have no button yet, so only an '
+      + 'item that needs no press can fire.';
   }
   return '';
 }
@@ -562,8 +646,12 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
          Inside the screen root rather than on <body>: 'dispose()' removes the root and
          everything in it, and a sheet parented anywhere else is a leak the router cannot
          see. 'hidden' while closed, which is what keeps its ten rows out of
-         'menu_accept''s control census (that battery filters on a NON-ZERO rect) — they
-         are measured instead by 'ul_accept.mjs', which opens it first. -->
+         'menu_accept''s control census (that battery filters on a NON-ZERO rect).
+
+         WAS: '— they are measured instead by ul_accept.mjs, which opens it first.'
+         That file has never existed (see the correction in section 5b). The ten rows are
+         therefore measured by NOTHING while the sheet is closed, which is a real gap and
+         is now stated as one rather than covered by a citation. -->
     <div class="lobby-sheet" data-el="sheet" hidden role="dialog" aria-modal="true"
          aria-labelledby="lobby-sheet-title">
       <div class="lobby-sheet-scrim" data-el="sheet-scrim"></div>
@@ -693,7 +781,7 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
    * describing a different set from the one the slot was filled out of. Nothing on this
    * screen can grant an item, so there is nothing to invalidate.
    */
-  const owned = ownedItems(ctx);
+  const owned = ownedItems(ctx.profile.economy);
 
   /**
    * The equipped pair. Loaded through the filter, so a stale id for an item this player
@@ -1157,13 +1245,27 @@ const CSS = `
 .fa-lobby .lobby-seat-act { flex: 0 0 auto; }
 
 /* ══ THE LOADOUT ══════════════════════════════════════════════════════════════
-   🚨 EVERY SURFACE BELOW IS MEASURED AGAINST WCAG 2.1 SC 1.4.11's 3.0 FLOOR ON THE
-   RENDERED PIXELS, NOT REASONED ABOUT. 'tools/tmp/ul_accept.mjs' §C samples the real
-   PNG through 'qx_contrast.mjs:boundaryContrast' — the tool built after the match pause
-   chip shipped, working perfectly, at 1.026:1 against its own background. That is the
-   TWENTIETH instance of the rendering-and-invisible class in this project and the FOURTH
-   dark-on-dark; a control whose boundary is a 6%-alpha tint is exactly how the previous
-   three looked in source. Hence full ink borders here rather than tinted fills. */
+   🚨 THIS HEADER CLAIMED A MEASUREMENT THAT WAS NEVER TAKEN. IT READ:
+
+     'EVERY SURFACE BELOW IS MEASURED AGAINST WCAG 2.1 SC 1.4.11's 3.0 FLOOR ON THE
+      RENDERED PIXELS, NOT REASONED ABOUT. tools/tmp/ul_accept.mjs section C samples the
+      real PNG through qx_contrast.mjs:boundaryContrast'
+
+   'ul_accept.mjs' has never existed on any branch (re-derived 2026-09-02). So the
+   strongest claim in this file — 'measured on rendered pixels, not reasoned about' — was
+   itself reasoned about, and the citation is exactly what made it read as verified.
+
+   That is the SAME SENTENCE 'tools/tmp/ul_seam.mjs's own header condemns 'il_seam.mjs'
+   for: 'a measurement that was never taken, under a heading reading WHAT HAS AND HAS NOT
+   BEEN MEASURED.' It was reproduced here in the commit that wrote the condemnation.
+
+   WHAT IS ACTUALLY TRUE, and it is the DESIGN half rather than the measurement half:
+   the match pause chip shipped working, at 1.026:1 against its own background, and that
+   is the TWENTIETH rendering-and-invisible instance in this project and the FOURTH
+   dark-on-dark. A control whose boundary is a 6%-alpha tint is exactly how the previous
+   three looked in source. Hence full ink borders below rather than tinted fills — a
+   reasoned defence against a known class, and NOT a contrast measurement. Nobody has
+   sampled these pixels yet. */
 
 .fa-lobby .lobby-kit { flex: 0 0 auto; gap: 8px; }
 .fa-lobby .lobby-kit-head {

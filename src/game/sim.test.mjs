@@ -11087,6 +11087,109 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
   check('(h) NON-VACUITY: every item carries a name, a player-facing blurb and a visual brief',
     defs.length > 0 && defs.every((d) => d.name.length > 0 && d.blurb.length > 0 && d.look.length > 40),
     defs.filter((d) => !(d.name && d.blurb && d.look.length > 40)).map((d) => d.id).join(' ') || 'all complete');
+
+  // ── (i) 🚨 THE LOADOUT ARRIVES — the SIM half of the hop `lobby.ts` called dead ──
+  //
+  // Uri asked *"how do i use an item in a game?"* and the answer was "you cannot": ten
+  // items were implemented end to end and **nothing carried the equipped pair into a
+  // match**. `match.ts` now does; these rows hold the seam it hands to, so that the day
+  // somebody "simplifies" `createMatchFromList`'s `items: cfg.items` line, the failure is
+  // a red row here and not a loadout screen that silently equips nothing.
+  //
+  // 🚨 **AT SIX SEATS AS WELL AS TWO — AND THE FIRST DRAFT OF THIS COMMENT OVERCLAIMED,
+  //    SO THE MEASUREMENT IS WRITTEN DOWN INSTEAD OF THE INTUITION.** It said *"a
+  //    broadcast bug passes an N=2 assertion vacuously"*. **That is FALSE here**, and
+  //    three planted known-bads say exactly which parts of it are true (2026-09-02, each
+  //    planted in `createMatchFromList` on a detached worktree, never the shared tree):
+  //
+  //      A. `items: undefined`        — the loadout dropped:   **5 rows red**
+  //      B. `items: configs[0].items` — broadcast to everyone:  **2 rows red**, and one
+  //         of them is the N=2 row, because slot 1 is asserted EMPTY rather than merely
+  //         slot 0 asserted full. Two seats catch a full broadcast fine.
+  //      C. `items: id % 2 === 0 ? configs[0].items : cfg.items` — leaks to EVEN slots:
+  //         **1 row red, and it is the six-seat one.** Slot 1 is odd, so every N=2 row is
+  //         green and the defect ships.
+  //
+  //    So the six-seat arm earns its place against a PARTIAL leak, not against a total
+  //    one — the same shape `AGENT-BRIEF §4b` records for the shake distance term. The
+  //    value is in quantifying over FIVE other seats; one other seat can be right by luck.
+  {
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const ring = (n) => new Array(n).fill(null).map((_, i) => ({
+      characterId: 'hamburger',
+      spawn: { x: 300 + i * 200, y: 300 + i * 150 },
+    }));
+
+    // The pair is a real one out of the registry rather than two literals, so an eleventh
+    // item or a rename cannot leave this row testing ids that no longer exist.
+    const PAIR = Object.keys(ITEMS).slice(0, ITEM_SLOTS);
+    check('(i) NON-VACUITY: the registry can supply a full loadout to hand in',
+      PAIR.length === ITEM_SLOTS && PAIR.every((id) => id in ITEMS), `[${PAIR.join(', ')}]`);
+
+    // N=2 — the SHIPPED DEFAULT. `seatCountFor(MIN_FIGHTERS)` routes the lobby's "2" to
+    // the duel, so this is the arm a six-seat-only fix would have left dead.
+    {
+      const duel = createMatch(arena, [
+        { characterId: 'hamburger', items: PAIR },
+        { characterId: 'donut' },
+      ]);
+      check(`(i) 🔴 N=${MIN_FIGHTERS} (the SHIPPED path): the local seat's loadout arrives on Fighter.item.equipped`,
+        duel.fighters[0].item.equipped.length === ITEM_SLOTS
+        && duel.fighters[0].item.equipped.every((id, k) => id === PAIR[k]),
+        `slot 0 [${duel.fighters[0].item.equipped.join(', ')}]`);
+      check('(i) …and the seat that was handed NOTHING carries nothing — not a copy of slot 0\'s',
+        duel.fighters[1].item.equipped.length === 0,
+        `slot 1 [${duel.fighters[1].item.equipped.join(', ')}]`);
+      check('(i) …in LOBBY SLOT ORDER, which is what `item.lastUsed` is index-aligned on',
+        duel.fighters[0].item.lastUsed.length === duel.fighters[0].item.equipped.length,
+        `${duel.fighters[0].item.lastUsed.length} deadlines / ${duel.fighters[0].item.equipped.length} ids`);
+    }
+
+    // N=6 — where a BROADCAST bug stops looking like a per-seat one.
+    {
+      const configs = ring(MAX_FIGHTERS);
+      configs[0].items = PAIR;
+      const six = createMatch(arena, configs);
+      check(`(i) NON-VACUITY: the six-seat arm really seated ${MAX_FIGHTERS} fighters`,
+        six.fighters.length === MAX_FIGHTERS, `${six.fighters.length} seats`);
+      check(`(i) 🔴 N=${MAX_FIGHTERS}: slot 0 has the loadout`,
+        six.fighters[0].item.equipped.join(',') === PAIR.join(','),
+        `slot 0 [${six.fighters[0].item.equipped.join(', ')}]`);
+      const others = six.fighters.slice(1);
+      check('(i) NON-VACUITY: there are five other seats to check against',
+        others.length === MAX_FIGHTERS - 1, `${others.length} others`);
+      check('(i) 🔴 …and NO OTHER SEAT DOES — the only row a leak to EVEN slots turns red (known-bad C)',
+        others.every((f) => f.item.equipped.length === 0),
+        others.map((f) => `${f.id}:[${f.item.equipped.join(',')}]`).join(' '));
+    }
+
+    // ── THE THROW STAYS. `match.ts:sanitiseLoadout` filters on the way IN; it does not
+    //    relax anything here, and these rows are what would go red if somebody "fixed"
+    //    the crash by softening `validateLoadout` instead. A silent truncation would ship
+    //    a third pick that never fires, which is the promise-the-game-does-not-keep class.
+    {
+      const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+      const overFull = Object.keys(ITEMS).slice(0, ITEM_SLOTS + 1);
+      check('(i) NON-VACUITY: an over-full loadout is genuinely over-full',
+        overFull.length === ITEM_SLOTS + 1, `${overFull.length} > ${ITEM_SLOTS}`);
+      check('(i) 🔴 an OVER-FULL loadout is REFUSED, never truncated — a pick that never fires is a lie',
+        throws(() => createMatch(arena, [
+          { characterId: 'hamburger', items: overFull }, { characterId: 'donut' },
+        ])));
+      check('(i) 🔴 a DUPLICATE is REFUSED — two copies in two slots would behave as one',
+        throws(() => createMatch(arena, [
+          { characterId: 'hamburger', items: [PAIR[0], PAIR[0]] }, { characterId: 'donut' },
+        ])));
+      check('(i) 🔴 an UNKNOWN id is REFUSED — `tsc` sees 2 of ~74 call sites, so a tool\'s typo must be loud',
+        throws(() => createMatch(arena, [
+          { characterId: 'hamburger', items: ['not_an_item'] }, { characterId: 'donut' },
+        ])));
+      check('(i) CONTROL: the SAME call with a legal loadout is accepted — the refusal is the loadout, not the shape',
+        !throws(() => createMatch(arena, [
+          { characterId: 'hamburger', items: [PAIR[0]] }, { characterId: 'donut' },
+        ])));
+    }
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
