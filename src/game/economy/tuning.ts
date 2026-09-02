@@ -93,6 +93,31 @@ export const STARTING_BALANCE = {
  */
 export const ROSTER_GATED = false;
 
+/**
+ * 🚨 TESTING POSTURE, NOT SHIPPING POSTURE — grant every loadout item to every profile.
+ *
+ * Uri, 2026-09-02: *"Make sure that i have all items now so i can test it, later we'll
+ * deal with user accounts and each will have their level and progress. for now open
+ * everything."*
+ *
+ * Declared HERE, next to `ROSTER_GATED`, so the two testing postures are readable
+ * together and neither is discovered by accident inside the file it happens to affect.
+ * `ROSTER_GATED = false` already opens the roster; this opens the item set. When accounts
+ * and per-player progress land, BOTH come back — and `state.ts:createEconomy` keeps the
+ * shipping comment above the switched line so what it returns to is on the page.
+ *
+ * ⚠️ IT MUST APPLY ON **LOAD**, NOT ONLY ON CREATE. `createEconomy` runs for a NEW
+ * profile; Uri already has one with a single item in it. A grant wired only into the
+ * constructor would leave the person who asked for it with exactly what he had — which
+ * is the shape of an "it didn't work" report that is really "it was never reached".
+ * `deserialize` applies it too.
+ *
+ * ⚠️ AND IT IS DERIVED FROM `ITEM_IDS`, never a hand-written list: a literal array goes
+ * stale the moment an eleventh item lands, and it goes stale SILENTLY — the new item
+ * would simply never be granted and would read as an acquisition bug.
+ */
+export const ITEM_TEST_GRANT_ALL = true;
+
 /** The one character a new player owns. Everything else is earned. */
 export const STARTER_CHARACTER: CharacterId = CHARACTER_IDS[0]; // hamburger
 

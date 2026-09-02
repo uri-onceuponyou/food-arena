@@ -214,7 +214,7 @@ import {
   type CharacterId, type ItemDef, type ItemId,
 } from '../../game/rules';
 import {
-  ITEM_IDS, enemyLevelFor, ownedItemSet, type EconomyState,
+  ITEM_IDS, ITEM_TEST_GRANT_ALL, enemyLevelFor, ownedItemSet, type EconomyState,
 } from '../../game/economy';
 import { MIN_FIGHTERS } from '../../game/state';
 import { SEAT_CHOICES, brawlRoster, seatCountFor } from './brawl';
@@ -373,6 +373,28 @@ function ownedItems(ctx: ScreenContext): ReadonlySet<ItemId> {
   const injected = window.__faOwnedItems;
   // Truthiness, NOT `.length` — see the declaration above: `[]` is the own-nothing arm.
   if (injected) return new Set(injected.filter(isItemId));
+  // 🚨 TESTING POSTURE, AND IT IS APPLIED **HERE** RATHER THAN IN THE ECONOMY — 2026-09-02
+  //
+  // Uri: *"Make sure that i have all items now so i can test it, later we'll deal with
+  // user accounts and each will have their level and progress. for now open everything."*
+  //
+  // ⚠️ THE FIRST ATTEMPT PUT THIS IN `economy/state.ts` AND SEVEN CHECKS WENT RED. They
+  // were RIGHT to. `createEconomy` and `deserialize` define what a player has EARNED, and
+  // the suite asserts that model hard — "a brand-new player owns exactly the starter
+  // item", "a save that predates items reads back owning exactly the starter", the
+  // round-trips. Granting there does not open a door, it rewrites the ledger, and every
+  // one of those rows exists to stop exactly that.
+  //
+  // ⚠️ AND `ownedItemSet` IS NOT THE SEAM EITHER, though it looks like one because
+  // `ROSTER_GATED` works that way for characters. Its own header says why: it is "the set
+  // every item reward path tests against", so overriding it would silently convert every
+  // item drop into duplicate coins — the feature would become unearnable at the same
+  // moment it became free, which is the exact failure that header warns about.
+  //
+  // So the grant lives at the SCREEN. The economy stays truthful, every acquisition test
+  // keeps passing, the boxes still hand over real items, and the picker shows all ten.
+  // One line to revert when accounts land.
+  if (ITEM_TEST_GRANT_ALL) return new Set(ITEM_IDS);
   return ownedItemSet(ctx.profile.economy);
 }
 
