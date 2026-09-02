@@ -221,6 +221,19 @@ function interiorRect(r) {
  * NAMED, not that it was the thing". Both are reported and neither is summed with the
  * other: they are different quantities.
  */
+/**
+ * ⚠️ MEASURED LIMIT, ADDED AFTER USING IT: `edgeContrast` IS NOT COMPARABLE ACROSS A
+ * CHANGE OF PLATE COLOUR, and the A/B that produced this file proved it. The 4 px band
+ * straddles the border AND the first pixels of the plate, so which of the two wins the
+ * modal bin depends on the plate — at 844x390 it read **7.344 before and 1.699 after**
+ * on a change that made the control unmistakably MORE visible, and at 1280x800 it fell
+ * 1.799 -> 1.186 on the same change. Its known-bad arm still works (camouflage collapses
+ * it 1.607 -> 1.005), so it is not broken; it is answering "how does this border read
+ * against the backdrop", which is a WITHIN-design question. Use it to catch a border
+ * that has gone invisible inside one design. **Do not read a before/after of it across a
+ * restyle, and nothing in this pass was acted on from it** — `plateContrast` is the
+ * number that answers the discoverability question.
+ */
 function edgeRects(r, t) {
   const x = Math.round(r.x), y = Math.round(r.y), w = Math.round(r.w), h = Math.round(r.h);
   return {
