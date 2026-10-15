@@ -96,6 +96,14 @@ export interface HudCallbacks {
    * bar sits at bottom-centre, which is a perfectly ordinary place for a desktop player
    * to be aiming, and a slot that claimed clicks unconditionally would eat fire clicks
    * on a machine with no touchscreen at all.
+   *
+   * ⚠️ (B3b, COMMENTS-1) "once the player has actually touched the screen" stopped being
+   * the whole rule at `6c39d30` (F7's touch half): `game/touch.ts` now sets `fa-touch` AND
+   * `fa-touch-capable` at CONSTRUCTION on a device whose primary pointer is coarse (phones
+   * and tablets), and the slot rule opts in under either class — so on a phone the slots
+   * take pointer events from the first frame. The reasoning above still holds where it was
+   * aimed: a mouse-only machine never gets either class, and a touchscreen LAPTOP (a fine
+   * primary pointer) still waits for a real finger.
    */
   onSelectWeapon?: (index: number) => void;
   /**
@@ -3691,7 +3699,14 @@ html.fa-touch-capable .hud-radar {
    at construction, phones and tablets only, never a touchscreen laptop). So the slots
    opt in under either flag. The inert tray (0,3,0) and the AUTO/spent item !important
    rules still out-rank both. The touch.ts half (B2's file) needs nothing for this:
-   once the slot takes the event, its pointerdown handler preventDefaults it. */
+   once the slot takes the event, its pointerdown handler preventDefaults it.
+   ⚠️ (B3b, COMMENTS-1) Two sentences above went stale at 6c39d30 (F7's touch half) and
+   are kept: "which game/touch.ts only sets after a REAL finger has been seen" and
+   "fa-touch is set by the first CLAIMED finger". touch.ts now sets fa-touch AND
+   fa-touch-capable at CONSTRUCTION on a coarse-primary device, so on a phone this rule is
+   live from the first frame. Both sentences still describe a touchscreen LAPTOP (a fine
+   primary pointer: fa-touch waits for a real finger), and a mouse-only machine still
+   never reaches this rule. */
 html.fa-touch .hud-weapon-slot,
 html.fa-touch-capable .hud-weapon-slot {
   pointer-events: auto;
@@ -3822,7 +3837,9 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
    full :active depress and moves a selection ring for a weapon that cannot fire —
    the most convincing possible statement that the control works. pointer-events is
    only ever auto here under html.fa-touch (see that rule's header: .hud-root is
-   none and this is the ONE opt-in in the HUD), so this is the exact counterpart. */
+   none and this is the ONE opt-in in the HUD), so this is the exact counterpart.
+   (B3b, COMMENTS-1: "under html.fa-touch" — or html.fa-touch-capable since F7; the slot
+   rule opts in under either class, and this counterpart out-ranks both.) */
 .hud-weapons.is-inert .hud-weapon-slot { pointer-events: none; }
 /* LOCKED (U1): clogged or asleep — the sim refuses every press until it lifts. Greyed like
    the inert tray, but presses stay live: SELECTING a weapon is not firing one, and a
@@ -4110,7 +4127,11 @@ html.fa-touch-capable .hud-item-key { display: none; }
 /* The ONE opt-in to pointer events, exactly as the weapon slot's: per-slot, 58x58
    (well over the 44px floor), and gated on html.fa-touch, which game/touch.ts sets only
    after a REAL finger. .hud-root is pointer-events:none and a full-viewport layer that
-   claims events starves the canvas of firing AND aim at once — that has shipped once. */
+   claims events starves the canvas of firing AND aim at once — that has shipped once.
+   ⚠️ (B3b, COMMENTS-1) "sets only after a REAL finger" is stale since 6c39d30 (F7):
+   touch.ts sets fa-touch AND fa-touch-capable at CONSTRUCTION on a coarse-primary device,
+   and this rule opts in under either class — so on a phone the item buttons take pointer
+   events from the first frame. A touchscreen laptop still waits for a real finger. */
 html.fa-touch .hud-item-slot,
 html.fa-touch-capable .hud-item-slot {
   pointer-events: auto;
