@@ -13216,6 +13216,63 @@ console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up
       && shielded.log.some((e) => e.type === 'item-hit' && e.itemId === 'shiitake' && e.targetId === 1),
       `itemCast ${shielded.after.itemCast === null ? 'null' : 'open'} after the throw; shield resolved ${shielded.log.some((e) => e.type === 'item-hit' && e.itemId === 'shiitake')}`);
   }
+
+  // ── (c) BH-08: A DEAD OWNER'S TRAIL — WHAT IS DRAWN IS WHAT CAN HURT ──────────
+  //
+  // A Sticky Trail mark bites only during its OWNER's turn (`applyWorldTick`'s victim loop tests
+  // `mark.ownerId === fighter.id`), and a corpse takes no turn — so the moment a Donut died its
+  // marks went inert, while every one of them stayed in `state.trailMarks`, which the renderer
+  // draws with no owner filter, until `TRAIL.durationMs` ran out: a hazard on the floor that did
+  // nothing. Only at N ≥ 3 — at two seats the death ends the match.
+  //
+  // 🔴 PARKED FOR URI: the marks now LEAVE WITH THEIR OWNER — the reading that changes least,
+  // because nothing that happens in play changes (they already did no damage), only what is
+  // drawn. The other reading — the trail outlives its maker and keeps biting, as a splat and a
+  // shot in flight already do — moves outcomes in natural six-seat play; it is Uri's to choose,
+  // and the CONTROL rows below are the ones it would flip.
+  {
+    const arena = FLOOR();
+    const run = (n, kill) => {
+      const seats = [{ char: 'donut', x: 600, y: 1000 }, { char: 'hamburger', x: 500, y: 1300 }];
+      for (let i = 2; i < n; i++) seats.push({ char: 'pizza', x: 2400, y: 250 + i * 250 });
+      const st = seatMatch(arena, seats);
+      const donut = st.fighters[0], walker = st.fighters[1];
+      const lay = idle(st);
+      lay[0] = { ...NEUTRAL, move: { x: 1, y: 0 } };
+      for (let i = 0; i < 90; i++) stepMatch(st, DT, lay);   // 1.5 s of lane along y = 1000
+      const marksDown = st.trailMarks.filter((m) => m.ownerId === 0).length;
+      if (kill) applyDamage(st, donut, donut.hp, null, { kind: 'fog' }, []);
+      walker.x = 560; walker.y = 1000;                        // then the walker crosses all of it
+      const walk = idle(st);
+      walk[1] = { ...NEUTRAL, move: { x: 1, y: 0 } };
+      const hp0 = walker.hp;
+      let bites = 0, staleTicks = 0, ownMarksAfterOne = -1;
+      for (let i = 0; i < 120; i++) {
+        const evs = stepMatch(st, DT, walk);
+        bites += evs.filter((e) => e.type === 'hit-landed' && e.targetId === 1 && e.source.kind === 'trail').length;
+        if (i === 0) ownMarksAfterOne = st.trailMarks.filter((m) => m.ownerId === 0).length;
+        if (st.trailMarks.some((m) => !st.fighters[m.ownerId].alive)) staleTicks++;
+      }
+      return { marksDown, ownMarksAfterOne, bites, staleTicks, lost: hp0 - walker.hp, phase: st.phase, donutAlive: donut.alive };
+    };
+    const alive3 = run(3, false), dead3 = run(3, true), dead6 = run(6, true);
+    check('(c) NON-VACUITY: Donut laid a lane, the match goes on after its death, and a LIVING Donut\'s lane bites the walker',
+      alive3.marksDown >= 6 && dead3.marksDown === alive3.marksDown && dead3.phase === 'playing' && dead6.phase === 'playing'
+      && !dead3.donutAlive && alive3.bites >= 3,
+      `marks ${alive3.marksDown}/${dead3.marksDown}, phase ${dead3.phase}/${dead6.phase}, living-lane bites ${alive3.bites}`);
+    check('(c) 🔴 the tick after Donut dies, none of its marks is left on the floor — three seats',
+      dead3.ownMarksAfterOne === 0, `${dead3.ownMarksAfterOne} of ${dead3.marksDown} still in state.trailMarks`);
+    check('(c) 🔴 …and six seats',
+      dead6.ownMarksAfterOne === 0, `${dead6.ownMarksAfterOne} of ${dead6.marksDown} still in state.trailMarks`);
+    check('(c) 🔴 on NO tick after the death is a mark drawn whose owner is dead — what is drawn is what can hurt',
+      dead3.staleTicks === 0 && dead6.staleTicks === 0, `stale ticks: N=3 ${dead3.staleTicks}, N=6 ${dead6.staleTicks} of 120`);
+    check('(c) CONTROL: the walker crossing a dead Donut\'s lane takes NOTHING — as on the shipped tree, so no outcome moves',
+      dead3.bites === 0 && dead3.lost === 0 && dead6.bites === 0 && dead6.lost === 0,
+      `bites ${dead3.bites}/${dead6.bites}, HP lost ${dead3.lost}/${dead6.lost}`);
+    check('(c) CONTROL: a LIVING Donut\'s marks all stay down — only a dead owner\'s leave',
+      alive3.ownMarksAfterOne === alive3.marksDown && alive3.staleTicks === 0,
+      `${alive3.ownMarksAfterOne} of ${alive3.marksDown}`);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

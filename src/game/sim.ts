@@ -1026,8 +1026,34 @@ function expireGroundEffects(state: MatchState): void {
   for (let i = state.splats.length - 1; i >= 0; i--) {
     if (state.elapsed >= state.splats[i].expiresAt) state.splats.splice(i, 1);
   }
+  // ── A STICKY TRAIL LEAVES WITH ITS OWNER (BH-08) ──────────────────────────────
+  //
+  // A mark bites only during its OWNER's turn — `applyWorldTick`'s victim loop tests
+  // `mark.ownerId === fighter.id` — and a corpse takes no turn (the fighter loop's corpse guard,
+  // and `applyWorldTick`'s own precondition beneath it). So from the moment a Donut died its
+  // marks did nothing, while every one of them stayed here, in the list the renderer draws with
+  // no owner filter, until `TRAIL.durationMs` ran out: up to 4.5 s of a hazard on the floor that
+  // was not one. Only at N >= 3 — at two seats the death ends the match.
+  //
+  // 🔴 PARKED FOR URI — WHICH WAY A DEAD OWNER'S TRAIL SHOULD GO IS A DESIGN CALL, AND THIS IS
+  // THE READING THAT CHANGES LEAST: the marks are retired on the first tick after the death, so
+  // nothing that happens in play changes — they already dealt nothing — and what is drawn becomes
+  // what can hurt. The other reading, "a ground hazard outlives its maker" (a splat and a shot in
+  // flight already do), is a real rule too, and it MOVES outcomes: the BH-08 verifier's six-seat
+  // corpus (on `1090046`) had living fighters crossing a dead Donut's lane in 4 of 36 matches and
+  // two winners flip. It would be the victim
+  // loop called for a corpse ABOVE the corpse guard — never by editing that guard's two lines,
+  // which `tools/tmp/wpx_knownbad.mjs` anchors on. `sim.test.mjs` §47(c)'s CONTROL rows are the
+  // ones it would flip.
+  //
+  // ⚠️ `owner !== undefined` keeps a fixture's mark for a slot nobody sits in exactly as it was —
+  // no fighter takes that turn, so it was inert before and is inert now. And a Leftovers revive
+  // inside the SAME tick as the death leaves the marks down: the owner is alive again by the time
+  // this asks, and its marks bite again, which is what a revive means.
   for (let i = state.trailMarks.length - 1; i >= 0; i--) {
-    if (state.elapsed >= state.trailMarks[i].expiresAt) state.trailMarks.splice(i, 1);
+    const mark = state.trailMarks[i];
+    const owner = state.fighters[mark.ownerId];
+    if (state.elapsed >= mark.expiresAt || (owner !== undefined && !owner.alive)) state.trailMarks.splice(i, 1);
   }
   // Medikits expire on the same unconditional pass, for the same reason: a kit that ran out
   // while the match was ending must not still be lying there when the next tick draws.
