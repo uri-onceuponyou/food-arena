@@ -200,8 +200,19 @@ function mustReplace(src: string, needle: string, by: string, what: string): str
   return src.replace(needle, by);
 }
 
-/** Alpha-preserving blend with the material's own RGB factors. RGB output is unchanged. */
-function preserveDestinationAlpha(m: THREE.Material): void {
+/**
+ * Alpha-preserving blend with the material's own RGB factors. RGB output is unchanged.
+ *
+ * EXPORTED FOR THE VFX OWNER (`src/game/vfx.ts`, `src/vfx/**`). A translucent effect drawn
+ * over a fighter with NormalBlending blends the destination ALPHA toward its own, which
+ * thins the character tag under it, so the match contour (`contour.ts`) weakens wherever a
+ * hit splash or status glow covers a fighter's edge — by design it never smudges, it just
+ * fades. Calling this on such a material keeps the colour exactly as before and leaves the
+ * tag intact (alpha factors ZERO / ONE). Handles Normal and Additive; a Custom blend keeps
+ * its RGB factors and only gains the alpha pair; anything else (premultiplied, Multiply,
+ * Subtractive) is left alone. Idempotent.
+ */
+export function preserveDestinationAlpha(m: THREE.Material): void {
   if (m.premultipliedAlpha) return;
   if (m.blending === THREE.NormalBlending) {
     m.blending = THREE.CustomBlending;
