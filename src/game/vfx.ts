@@ -65,6 +65,9 @@ import { flatMat, toonMat } from '../render/toon';
 // direction the cast is not — `render/lighting.ts` owns the value, this file only
 // reads it.
 import { KEY_OFFSET } from '../render/lighting';
+// R1's fighter contour reads a tag in DESTINATION ALPHA; `roles.ts` exports the remedy for
+// the VFX owner. Applied to every translucent material this layer draws — see `alphaSafe`.
+import { preserveDestinationAlpha } from '../render/roles';
 // Per-weapon bespoke VFX extension point (see `vfx/weapons/types.ts` for the full
 // `WeaponVfx` contract). `getWeaponVfx()` returns `undefined` for any weapon with no
 // bespoke entry — every call site below falls back to this file's existing generic
@@ -538,6 +541,26 @@ const SLOW_TINT_CENTER_Y = CHARACTER_HEIGHT * 0.62;
  * character cool (see `SLOW_TINT_COLOR`), low enough that its own colours and face
  * still read through — a status effect, not a repaint. */
 const SLOW_TINT_PEAK_OPACITY = 0.58;
+/**
+ * ⚠️ **THE TINT IS NOW AN ONSET FLASH, NOT A STATE.** It used to sit over the head at
+ * 0.50–0.66 for the WHOLE slow — a terrain slow lasts as long as the fighter stands in the
+ * puddle — which is the *"status turns fighters into pale ghosts"* of `docs/REVAMP.md` §2.5.
+ * Measured on `d1b2621` with `tools/tmp/v1_vfx_cover.mjs` (six-seat hub ring, one 2.5 s slow
+ * forced on slot 1): the slowed seat had 42.6% of its body covered by effects, mean over its
+ * slowed samples, in an unbroken run of 3.2 s. V1's rule: no effect covers its own fighter's
+ * body for longer than a hit flash. So the wash fires when the slow LANDS (full strength for
+ * `SLOW_TINT_FLASH_HOLD_MS`, gone by `SLOW_TINT_FLASH_MS`) and the persistent state is
+ * carried by what is NOT on the body: the two-band frost ring at the feet and, for a
+ * puddle, the splash.
+ */
+const SLOW_TINT_FLASH_HOLD_MS = 70;
+const SLOW_TINT_FLASH_MS = 260;
+function slowTintOpacity(ageMs: number): number {
+  if (!(ageMs >= 0) || ageMs >= SLOW_TINT_FLASH_MS) return 0;
+  if (ageMs <= SLOW_TINT_FLASH_HOLD_MS) return SLOW_TINT_PEAK_OPACITY;
+  const t = (ageMs - SLOW_TINT_FLASH_HOLD_MS) / (SLOW_TINT_FLASH_MS - SLOW_TINT_FLASH_HOLD_MS);
+  return SLOW_TINT_PEAK_OPACITY * (1 - t) * (1 - t);
+}
 /**
  * Ground telegraph ring at a slowed fighter's feet — TWO concentric rings, a dark
  * base and a bright frost band on top of it.
@@ -1566,6 +1589,28 @@ function unionMemberPoint(object: THREE.Object3D, out: THREE.Vector3): boolean {
  * mesh for any new id via `create`, refresh every live mesh via `update`, and remove
  * meshes whose id no longer appears in `items`.
  */
+/**
+ * Every TRANSLUCENT material under `root` stops writing destination alpha (RGB unchanged).
+ *
+ * R1 (`src/render/contour.ts`) inks each fighter from a tag its opaque fragments write into
+ * destination alpha (0 in a match, the world 1). Under three's Normal/Additive blend a
+ * translucent effect drawn over a fighter writes ITS alpha into that channel, so the fighter
+ * under a splash, a status glow or a swing reads as partly world and the contour thins or
+ * vanishes there. Measured on `d1b2621` by `tools/tmp/v1_vfx_alpha.mjs` (every QA kind, every
+ * weapon of every character, status forced, six seats): **1,021 of 1,021** translucent VFX
+ * materials wrote it. Applied at the three places an object ENTERS this layer — the
+ * constructor's pools, `syncPool`, `spawnTransientObject` — rather than at each of the ~230
+ * construction sites in `vfx/weapons/**`, for the same choke-point reason `shadeVfxObject`
+ * is. Idempotent (a Custom blend just keeps the alpha pair it was given).
+ */
+function alphaSafe(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const m = (o as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+    if (!m) return;
+    for (const mm of Array.isArray(m) ? m : [m]) if (mm.transparent) preserveDestinationAlpha(mm);
+  });
+}
+
 function syncPool<T extends { id: number }>(
   pool: Map<number, THREE.Object3D>,
   group: THREE.Group,
@@ -1585,6 +1630,7 @@ function syncPool<T extends { id: number }>(
       // skipped by the map rule, which is deliberate: their internal structure was
       // authored and measured in `b967242`'s rim-polarity pass and must not be doubled.
       shadeVfxObject(obj);
+      alphaSafe(obj);
       group.add(obj);
       pool.set(item.id, obj);
     }
@@ -2676,6 +2722,9 @@ interface StatusVisual {
   wardPop: number;
   /** Colour the current pop is tinted to — the refused effect's own. */
   wardPopColor: THREE.Color;
+  /** `state.elapsed` when this fighter last became slowed; NaN while not slowed. Drives the
+   *  tint's ONSET flash — see `SLOW_TINT_FLASH_MS`. */
+  slowSince: number;
 }
 
 export class VfxLayer {
@@ -2877,7 +2926,9 @@ export class VfxLayer {
    * shrinks: a match that ends does not destroy the seats, `clear()` resets them. */
   private ensureSlots(n: number): void {
     while (this.statusBySlot.length < n) {
-      this.statusBySlot.push(this.buildStatusVisual());
+      const vis = this.buildStatusVisual();
+      for (const o of [vis.slowRing, vis.slowRingDark, vis.slowTint, ...vis.stunStars, vis.wardRing]) alphaSafe(o);
+      this.statusBySlot.push(vis);
       this.slowSplashState.push({ lastX: NaN, lastY: NaN, distAccum: 0 });
       this.statusSnapshot.push({ x: NaN, y: NaN, stunReady: true, slowReady: true });
     }
@@ -3004,7 +3055,7 @@ export class VfxLayer {
 
       return {
         slowRing, slowRingDark, slowTint, stunStars,
-        wardRing, wardMat, wardPop: 0, wardPopColor: new THREE.Color(WARD_NEUTRAL),
+        wardRing, wardMat, wardPop: 0, wardPopColor: new THREE.Color(WARD_NEUTRAL), slowSince: NaN,
       };
     };
 
@@ -3486,7 +3537,11 @@ export class VfxLayer {
 
       vis.slowRing.visible = slowed;
       vis.slowRingDark.visible = slowed;
-      vis.slowTint.visible = slowed;
+      // ONSET flash only — see `SLOW_TINT_FLASH_MS`.
+      if (!slowed) vis.slowSince = NaN;
+      else if (Number.isNaN(vis.slowSince)) vis.slowSince = state.elapsed;
+      const tintOpacity = slowed ? slowTintOpacity(state.elapsed - vis.slowSince) : 0;
+      vis.slowTint.visible = tintOpacity > 0;
       if (slowed) {
         const pulse = 0.9 + Math.sin(state.elapsed * 0.0035) * 0.12;
         const spin = state.elapsed * 0.0012;
@@ -3502,8 +3557,7 @@ export class VfxLayer {
         (vis.slowRing.material as THREE.MeshBasicMaterial).opacity = 0.9;
 
         vis.slowTint.position.set(pos.x, SLOW_TINT_CENTER_Y, pos.z);
-        const tintPulse = SLOW_TINT_PEAK_OPACITY + Math.sin(state.elapsed * 0.006) * 0.08;
-        (vis.slowTint.material as THREE.SpriteMaterial).opacity = tintPulse;
+        (vis.slowTint.material as THREE.SpriteMaterial).opacity = tintOpacity;
       }
 
       // Splash particles at the feet — ONLY while a puddle is the cause (not a
@@ -3693,6 +3747,7 @@ export class VfxLayer {
     // construction. A light term is not — it is a function of the mesh's actual
     // orientation and of the camera. See `litVfxObject`.
     litVfxObject(object);
+    alphaSafe(object);
     this.group.add(object);
     // UNION SHADE: the same choke-point argument one level up. A hook spawns its lobes
     // one at a time and knows nothing about the mass they add up to, so membership is
@@ -5433,6 +5488,7 @@ export class VfxLayer {
     sprite.visible = false;
     sprite.renderOrder = 10;
     this.group.add(sprite);
+    alphaSafe(sprite);
     const slot: ParticleSlot = {
       sprite, mat, active: false, life: 0, maxLife: 1,
       vx: 0, vy: 0, vz: 0, gravity: 0,
@@ -5470,6 +5526,7 @@ export class VfxLayer {
     sprite.visible = false;
     sprite.renderOrder = 9;
     this.group.add(sprite);
+    alphaSafe(sprite);
     const slot: UnionCoreSlot = { sprite, mat, busy: false };
     this.unionCores.push(slot);
     return slot;
@@ -5484,6 +5541,7 @@ export class VfxLayer {
     mesh.visible = false;
     mesh.renderOrder = 5;
     this.group.add(mesh);
+    alphaSafe(mesh);
     const slot: WedgeSlot = { mesh, mat, active: false, life: 0, maxLife: 1, startOpacity: 0.6 };
     this.wedges.push(slot);
     return slot;
@@ -5500,6 +5558,7 @@ export class VfxLayer {
     mesh.visible = false;
     mesh.renderOrder = 6;
     this.group.add(mesh);
+    alphaSafe(mesh);
     const slot: RingSlot = { mesh, mat, active: false, life: 0, maxLife: 1, startScale: 0.1, targetScale: 1, startOpacity: 0.9 };
     this.rings.push(slot);
     return slot;
@@ -5637,6 +5696,7 @@ export class VfxLayer {
       vis.slowRing.visible = false;
       vis.slowRingDark.visible = false;
       vis.slowTint.visible = false;
+      vis.slowSince = NaN;
       vis.stunStars.forEach((s) => { s.visible = false; });
       vis.wardRing.visible = false;
       vis.wardPop = 0;
