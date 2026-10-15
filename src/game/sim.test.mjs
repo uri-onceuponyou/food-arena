@@ -11542,6 +11542,13 @@ console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the r
   // Six seats, every one human and idle, so nobody moves and the cloud is the only thing that
   // can hurt anybody: the wearer at the centre, three opponents inside the 84 wu radius and two
   // outside it — one of them 2 wu past the edge.
+  //
+  // MEASURED on `83754a9` (the rows assert bounds; these are the readings, kept because that
+  // commit's message quoted three of them wrong from the bounds): 10 s → 9, 9, 9 ticks — sixty
+  // `1000/60` steps sum to just under 1000 in IEEE-754, so the first tick lands on frame 61
+  // (≈1016.7 ms) and each later one 60 frames on, which is why the 120 s row reads 119–120 and
+  // not 120; two clouds on one victim → 4 + 4 in 5 s; a half-HP fighter over 12 s → 35 → 32 in
+  // the cloud (the first second regenerates before the first tick) against 35 → 70 outside.
   {
     const C = { x: 1400, y: 1000 };
     const R = ITEM_TUNING.blue_cheese.radius;
