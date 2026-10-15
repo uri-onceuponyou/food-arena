@@ -1029,7 +1029,11 @@ export class LollipopCharacter extends BaseCharacter {
 
     // C1b: the identity plane tilted back 38° (`rig.tiltIdentity`, which says why > 32°):
     // the candy DISC is the identity plane, and edge-on from the side it was a stick (face 5/8 on the base tree).
-    this.rig.tiltIdentity(THREE.MathUtils.degToRad(38));
+    // ONLY the disc (and the face on it), pivoted at the disc's centre: the stick, plug and
+    // wrapper ride this head joint too, and tilting them with it swung the cream stick out in
+    // front of the body — c1a_probe read that as hi80 8.8% -> 17.6% at 58° (the stick's
+    // #B7A788 became the largest mass in frame) before the LOOK showed why.
+    this.rig.tiltIdentity(THREE.MathUtils.degToRad(38), new THREE.Vector3(0, discCenterY, 0), [discGroup]);
     // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
     // R1 role patch are built on the merged meshes.
     batchJoints(this, this.rig.joints);

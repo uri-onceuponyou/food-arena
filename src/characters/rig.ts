@@ -2218,13 +2218,18 @@ export class ChibiRig {
    * every turn, nod and breath; nothing re-derives a position, so no face can detach.
    * Call once, after the head and face are built and before `batchJoints`.
    */
-  tiltIdentity(angle: number, pivot: THREE.Vector3 = new THREE.Vector3()): THREE.Group {
+  tiltIdentity(angle: number, pivot: THREE.Vector3 = new THREE.Vector3(), only?: THREE.Object3D[]): THREE.Group {
     const head = this.joints.head;
     const g = new THREE.Group();
     g.name = 'identity_tilt';
     g.position.copy(pivot);
     g.rotation.x = -angle;
-    for (const c of [...head.children]) {
+    // `only`: tilt just these children of `head` (plus `face`, when it hangs off `head`) and
+    // leave the rest where they stand — for a head that also carries part of the BODY.
+    // Lollipop: its stick, plug and wrapper ride the head joint, and tilting them with the
+    // disc swung the stick out in front of the character like a bazooka (c1b_sheet, 20°/45).
+    const movers = only ? [...new Set([...only, this.joints.face])].filter((o) => o.parent === head) : [...head.children];
+    for (const c of movers) {
       head.remove(c);
       c.position.sub(pivot);
       g.add(c);
