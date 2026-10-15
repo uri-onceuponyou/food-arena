@@ -106,10 +106,17 @@ export interface HudCallbacks {
    * A caller that never supplies it gets buttons that show the truth and do nothing,
    * which is the honest failure and is also what `menu_accept`'s harness sees.
    *
-   * 🔴 **AND NOTHING SUPPLIES IT ON HEAD.** `game/match.ts` builds this HUD and owns
-   * `buildInput()`; both hops are one line each and are ROUTED rather than taken, because
-   * that file belongs to another owner this run. Until they land, the buttons are the
-   * third dead link in the chain `docs/ITEMS.md` describes — see `renderItems`.
+   * ⚠️ **THIS SAID "NOTHING SUPPLIES IT ON HEAD", AND B1 (`4dbf937`) MADE THAT FALSE.**
+   * Kept, because it was true for as long as the buttons were dead:
+   *
+   *   > *"🔴 AND NOTHING SUPPLIES IT ON HEAD. `game/match.ts` builds this HUD and owns
+   *   > `buildInput()`; both hops are one line each and are ROUTED rather than taken,
+   *   > because that file belongs to another owner this run. Until they land, the buttons
+   *   > are the third dead link in the chain `docs/ITEMS.md` describes."*
+   *
+   * Both hops landed in the graphics revamp's bug sweep: `match.ts` passes
+   * `onUseItem: (slot) => this.input.pressItem(slot)`, and `input.ts:pressItem` queues the
+   * press that `buildInput()` hands the sim. A press now reaches `combat.ts:attemptItem`.
    */
   onUseItem?: (slot: number) => void;
 }
@@ -1149,7 +1156,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
    * seeded by `state.ts:createFighter`), and it can legitimately change between matches
    * without this HUD being torn down.
    */
-  let itemSig = ' ';
+  let itemSig = '\u0000';
 
   /** `'KeyQ'` → `'Q'`. The cap PRINTED on a key, from the physical code `input.ts`
    *  matches on — the same split `input.ts:MOVE_KEYS` documents, kept in the UI layer
@@ -1198,9 +1205,9 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         root: slot,
         wipe: slot.querySelector<HTMLDivElement>('.hud-item-wipe')!,
         badge: slot.querySelector<HTMLDivElement>('[data-role="badge"]')!,
-        lastBadge: ' ',
-        lastState: ' ',
-        lastP: ' ',
+        lastBadge: '\u0000',
+        lastState: '\u0000',
+        lastP: '\u0000',
         wasReady: false,
       };
     });
@@ -2199,9 +2206,13 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           // idle-ready — re-triggering the CSS animation the same reflow-forcing way
           // the pooled damage numbers do above.
           // ⚠️ The EDGE is `readyNow`'s and the latch stores `readyNow`, so the tray going
-          // inert cannot manufacture a rising edge, and coming back from one (no shipped
-          // path today — nothing revives — but the next respawn mode is one) cannot flash
+          // inert cannot manufacture a rising edge, and coming back from one cannot flash
           // four slots at once for cooldowns that finished while the player was dead.
+          // ⚠️ This said *"(no shipped path today — nothing revives — but the next respawn
+          // mode is one)"*. Leftovers revives the local seat (`combat.ts`, `revivesLeft`),
+          // and since B1 (`4dbf937`) `match.ts` answers `item-revived` with a beat and a
+          // camera cut — so coming back from inert IS a shipped path, and this latch is
+          // what keeps that moment from flashing the whole tray.
           if (readyNow && !slot.wasReady && !trayInert) {
             slot.root.classList.remove('is-flash');
             void slot.root.offsetWidth;
