@@ -319,6 +319,19 @@ export const createKitchenArena: ArenaFactory = () => {
   //     running away from the plaza — island and return are an L framing the street beside the
   //     sink (fryer) counter, 160 wu wide as before.
   //
+  // ── FAIRNESS, MEASURED ON THIS LAYOUT'S DUMP (base f9bed66 -> this) ─────────────────
+  //   sx_census --n 6 --matches 600 (rosters shuffled per match, the same 600 both arms):
+  //     seat mean place  3.63 3.36 3.61 3.47 3.48 3.45  ->  3.56 3.33 3.62 3.48 3.51 3.50
+  //     spread 0.265 -> 0.282 against kx_seatfair --stats' permuted floor 0.305 / 0.307 —
+  //     INSIDE it both times; all six seats deal damage in 600/600 matches both times; mean
+  //     match 63.26 s -> 62.47 s; sudden death reached 1.5% -> 1.2%.
+  //   nf_ffa --spawns arena --maxsafe 1720.47 (all 462 rosters x 6 rotations):
+  //     N=6 seat means 3.54 3.60 3.32 3.60 3.55 3.39 -> 3.60 3.59 3.34 3.59 3.49 3.38
+  //     (largest seat move 0.06; that mode has no nuisance floor, so read it against the
+  //     census floor above). Paired, EXACT: 1,266 of 2,772 configs moved; per-character
+  //     mean place within -0.116 (soup) .. +0.099 (pizza).
+  //     N=2 seat means 1.39 1.61 -> 1.39 1.61; paired 4 of 110 configs moved.
+  //
   // ⚠️ Generated: `node tools/tmp/a2b_district.mjs --emit`, from its `DISTRICT` table, after
   // every check there passed (symmetry, clips, the 16..82 gap band, notches, rule 6, deep band
   // regions, concealment, nav, every spawn rule, puddles, the base untouched, the canonical
