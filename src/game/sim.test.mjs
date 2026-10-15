@@ -12968,6 +12968,157 @@ console.log('\n46. Combat + items, the second half — why a press is refused, t
   }
 }
 
+console.log('\n48. The bot at two, three and six seats — sudden death, what it believes, the patch, the lock (B5)');
+{
+  // `docs/REVAMP.md` §5 B5. Every finding here arrived UNVERIFIED (0 of 2 confirmations), so
+  // each 🔴 row was written first and run on `a53d8b0` before its fix, and `tools/tmp/
+  // b5_knownbad.mjs` re-runs that claim: each fix reverted on a scratch copy must turn its own
+  // rows red while the CONTROL rows stay green.
+  //
+  // ⚠️ SIX SEATS WHEREVER THE DEFECT CAN REACH ONE SEAT ONLY. `ai.ts` has shipped seven defects
+  // that were correct for one seat and silent for another (its header), and at two seats "the
+  // target" and "the only opponent" are the same sentence (`docs/AGENT-BRIEF.md` §4b).
+  const DT48 = 1000 / 60;
+  // The shipped pot, rebuilt from `rules.ts:POT` — the solid `bodyRadius * 2` box
+  // `arena/hazards.ts` registers and the `dangerRadius` burn — at the centre of a 2800x2000
+  // floor whose opening ring is the shipped half-diagonal. No other cover, no concealment.
+  const potArena48 = () => makeArena({
+    width: 2800, height: 2000, maxSafeRadius: Math.hypot(1400, 1000),
+    cover: [{ x: 1400, y: 1000, w: POT.bodyRadius * 2, h: POT.bodyRadius * 2, kind: 'pot' }],
+    hazards: [{ x: 1400, y: 1000, radius: POT.dangerRadius, kind: 'damage', damage: POT.damage, tickMs: POT.tickMs }],
+  });
+  // A PRESS is the instant a button went down: `cast-started` for a wind-up (its
+  // `weapon-fired` comes later, at the resolve), `weapon-fired` for everything else.
+  const castKey48 = (characterId, key) => (CHARACTERS[characterId].weapons.find((w) => w.key === key)?.castMs ?? 0) > 0;
+  const isPress48 = (e, f) => e.fighterId === f.id
+    && (e.type === 'cast-started' || (e.type === 'weapon-fired' && !castKey48(f.characterId, e.weaponKey)));
+  // Seats carry an optional per-slot `input` beside the `createMatch` config; it is split off
+  // before the config is handed over.
+  const seat48 = (arena, seats) => createMatch(arena, seats.map(({ input, ...cfg }) => cfg));
+
+  // ── (a) AI-B1: SUDDEN DEATH SILENCED EVERY CHASE-BRANCH BOT ──────────────────
+  //
+  // `SUDDEN_DEATH_RADIUS` is 0, so `dangerSteer`'s ring margin `safeRadius - dc` is `-dc` on
+  // every standable point, its `t` is `(AI_RING_MARGIN + dc) / AI_RING_MARGIN` >= 1.52 behind
+  // the pot box, and `urgent` held on every sudden-death tick for every bot: the chase branch
+  // chose no shot, the heal was withheld in both branches, `castBudgetMs` was 0 (so the
+  // documented `hp * 1000 / FOG_DPS` clause was dead code), and the push toward a centre that
+  // is the pot walked bots into its burn. There is nowhere to escape TO in sudden death —
+  // the fog is uniform — so `ai.ts`'s own rule ("escape outranks shooting only when escape
+  // is possible") says keep fighting. The human seat always could.
+  {
+    const arena = potArena48();
+    const CX = arena.center.x;
+    const CY = arena.center.y;
+    const LEAD = 3000;      // ms of the final circle BEFORE the trigger — the control window
+    const WINDOW = 10_000;  // ms of sudden death observed
+    const sdRun = (seats, { lead = LEAD, window = WINDOW, hp } = {}) => {
+      const st = seat48(arena, seats);
+      st.phase = 'playing';
+      st.timeRemaining = SUDDEN_DEATH_REMAINING_MS + lead;
+      if (hp) hp(st);
+      const t = st.fighters.map(() => ({ pre: 0, sd: 0, sdCasts: 0, sdHeals: 0, burnTicks: 0, sdTicks: 0 }));
+      const inputs = seats.map((s) => s.input ?? null);
+      while (st.phase === 'playing' && st.timeRemaining > SUDDEN_DEATH_REMAINING_MS - window) {
+        const evs = stepMatch(st, DT48, inputs);
+        const sd = suddenDeathActive(st.timeRemaining);
+        for (const f of st.fighters) {
+          for (const e of evs) {
+            if (!isPress48(e, f)) continue;
+            t[f.id][sd ? 'sd' : 'pre']++;
+            if (sd && e.type === 'cast-started') t[f.id].sdCasts++;
+            if (sd && CHARACTERS[f.characterId].weapons.find((w) => w.key === e.weaponKey)?.type === 'self') t[f.id].sdHeals++;
+          }
+          if (sd && f.alive) {
+            t[f.id].sdTicks++;
+            if (Math.hypot(f.x - CX, f.y - CY) < POT.dangerRadius) t[f.id].burnTicks++;
+          }
+        }
+      }
+      return { st, t };
+    };
+    const BIG = 1e5; // nobody drains, nobody reaches AI_FLEE_HP_FRACTION: every bot stays in the CHASE branch
+
+    // Two seats, every character as the bot: a motionless 1e5 human in the final circle's
+    // safe annulus east of the pot, the bot 60 wu north of it — in reach of every kit, inside
+    // the final circle, outside the burn.
+    const r0 = (POT.dangerRadius + minSafeRadiusFor(2)) / 2;
+    const duel = CHARACTER_IDS.map((c) => {
+      const { t } = sdRun([
+        { characterId: 'hamburger', controller: 'human', maxHp: BIG, spawn: { x: CX + r0, y: CY } },
+        { characterId: c, controller: 'ai', maxHp: BIG, spawn: { x: CX + r0, y: CY - 60 } },
+      ]);
+      return { c, ...t[1] };
+    });
+    const fmtA = (rows) => rows.map((r) => `${r.c} ${r.pre}/${r.sd}${r.burnTicks ? ` burn${r.burnTicks}` : ''}`).join(' · ');
+    check('(a) CONTROL: in the final circle BEFORE the trigger every character\'s bot presses — the fixture can fire',
+      duel.length === CHARACTER_IDS.length && duel.every((r) => r.pre > 0 && r.sdTicks > 0), fmtA(duel));
+    check('(a) 🔴 two seats: a chase-branch bot KEEPS PRESSING in sudden death — every character',
+      duel.every((r) => r.sd > 0), `pre/sd presses: ${fmtA(duel)}`);
+    check('(a) 🔴 two seats: …and is not walked into the pot — no character\'s bot stands in the burn during sudden death',
+      duel.every((r) => r.burnTicks === 0), `pre/sd presses, burn ticks: ${fmtA(duel)}`);
+
+    // SIX bots on a ring around the pot, inside the six-seat final circle: the shape Uri plays.
+    const SIX = ['hamburger', 'taco', 'sushi', 'pizza', 'egg', 'waterbottle'];
+    const r6 = (POT.dangerRadius + minSafeRadiusFor(6)) / 2;
+    const six = sdRun(SIX.map((c, i) => ({
+      characterId: c, controller: 'ai', maxHp: BIG,
+      spawn: { x: CX + r6 * Math.cos((i * Math.PI) / 3), y: CY + r6 * Math.sin((i * Math.PI) / 3) },
+    }))).t.map((r, i) => ({ c: SIX[i], ...r }));
+    check('(a) CONTROL: six seats — every bot presses before the trigger',
+      six.length === 6 && six.every((r) => r.pre > 0 && r.sdTicks > 0), fmtA(six));
+    check('(a) 🔴 six seats: EVERY bot keeps pressing in sudden death',
+      six.every((r) => r.sd > 0), `pre/sd presses: ${fmtA(six)}`);
+    // Not zero: six bots chasing each other ACROSS the pot still brush its burn, and the pot
+    // term is exactly what turns them back. One second of sudden death is the line between
+    // that and standing in it.
+    check('(a) 🔴 six seats: no bot spends a second of sudden death inside the burn',
+      six.every((r) => r.burnTicks < 1000 / DT48), `burn ticks: ${six.map((r) => `${r.c} ${r.burnTicks}`).join(' · ')}`);
+    // The wind-up half of "no shot, no heal, no wind-up": the roster's one cast (Mega Splash)
+    // is pressed in sudden death once `castBudgetMs` is `hp * 1000 / FOG_DPS` and not 0.
+    const wb = six.find((r) => r.c === 'waterbottle');
+    check('(a) 🔴 six seats: the wind-up is back — Water Bottle opens a cast in sudden death',
+      wb.sdCasts > 0, `waterbottle casts in sudden death: ${wb.sdCasts}`);
+
+    // THE HEAL, against the human seat as the control. A Hamburger at 40% of its own pool —
+    // above AI_FLEE_HP_FRACTION, so the chase branch; missing more than one full heal, so
+    // `rankHeal` wants it — standing next to a statue ON the trigger tick, heal ready.
+    const HEAL_I = CHARACTERS.hamburger.weapons.findIndex((w) => w.type === 'self');
+    const healRun = (controller) => sdRun([
+      { characterId: 'pizza', controller: 'human', maxHp: BIG, spawn: { x: CX + r0, y: CY } },
+      {
+        characterId: 'hamburger', controller, spawn: { x: CX + r0, y: CY - 60 },
+        input: controller === 'human' ? { move: { x: 0, y: 0 }, selectedWeapon: HEAL_I, attack: true } : undefined,
+      },
+    ], { lead: 0, window: 2000, hp: (st) => { st.fighters[1].hp = st.fighters[1].maxHp * 0.4; } }).t[1];
+    const healBot = healRun('ai');
+    const healHuman = healRun('human');
+    check('(a) CONTROL: a HUMAN Hamburger at 40% heals in sudden death (the seat the bot is measured against)',
+      HEAL_I >= 0 && healHuman.sdHeals > 0, `human heal presses ${healHuman.sdHeals}`);
+    check('(a) 🔴 …and so does the BOT — the heal is not withheld for an escape that does not exist',
+      healBot.sdHeals > 0, `bot heal presses ${healBot.sdHeals} (human ${healHuman.sdHeals})`);
+
+    // CONTROL — THE OVER-FIX. The ring term must still drive a bot out of the fog BEFORE the
+    // collapse: one standing outside the final circle with its target in reach must walk in
+    // rather than trade shots, exactly as `AI_ESCAPE_PRIORITY` says. A fix that deleted the ring
+    // term instead of exempting sudden death would pass every 🔴 row above and fail this.
+    {
+      const out = minSafeRadiusFor(2) + 120;
+      const st = seat48(arena, [
+        { characterId: 'hamburger', controller: 'human', maxHp: BIG, spawn: { x: CX + out + 50, y: CY } },
+        { characterId: 'taco', controller: 'ai', maxHp: BIG, spawn: { x: CX + out, y: CY } },
+      ]);
+      st.phase = 'playing';
+      st.timeRemaining = SUDDEN_DEATH_REMAINING_MS + 8000;
+      let fired = 0;
+      for (let k = 0; k < 60; k++) for (const e of stepMatch(st, DT48, [null, null])) if (isPress48(e, st.fighters[1])) fired++;
+      const dc = Math.hypot(st.fighters[1].x - CX, st.fighters[1].y - CY);
+      check('(a) CONTROL: before the collapse a bot in the fog still walks IN instead of trading shots — the ring term is live',
+        fired === 0 && dc < out - 30, `presses ${fired}, ${out.toFixed(0)} -> ${dc.toFixed(1)} wu from the centre`);
+    }
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) {
   console.log('\nFailed checks:');

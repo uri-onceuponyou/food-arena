@@ -542,7 +542,26 @@ function dangerSteer(
   const toCx = cx - x;
   const toCy = cy - y;
   const dc = Math.hypot(toCx, toCy);
-  if (dc > EPS) {
+  // ── 🚨 NOT IN SUDDEN DEATH (AI-B1, `docs/REVAMP.md` §5 B5). THIS LINE READ `if (dc > EPS) {` ──
+  //
+  // `SUDDEN_DEATH_RADIUS` is 0, so in sudden death `margin` below is `-dc` on every standable
+  // point and `t` is `(AI_RING_MARGIN + dc) / AI_RING_MARGIN` — at least 1.52 behind the pot's
+  // box (`dc >= 73`). `urgent` therefore held on EVERY sudden-death tick for EVERY bot, which
+  // is not "escape outranks shooting", it is a ceasefire: the chase branch chose no shot, the
+  // heal was withheld in both branches, `castBudgetMs` was 0 so its own sudden-death clause
+  // was dead code, and the push toward a centre that IS the pot walked bots into its burn.
+  // Measured on `a53d8b0` (`sim.test.mjs` §48(a)): 0 presses in 10 s of sudden death for 11
+  // of 11 characters at two seats and 5 of 6 bots at six, 418–547 ticks each in the burn —
+  // while a human Hamburger in the same spot healed.
+  //
+  // The fog is UNIFORM in sudden death — `sim.ts:applySuddenDeathFog` burns every point but
+  // the exact centre, which the pot's box makes unreachable — so there is nowhere to escape
+  // TO, and "escape outranks shooting only when escape is possible" (the `escaping` block in
+  // `stepAI`) says keep fighting. The term is skipped, not re-weighted: the pot and an
+  // incoming telegraph still push and still raise `urgent`, because those CAN be escaped.
+  // ⚠️ Before the collapse the term is unchanged, arithmetic and all — a bot in the fog still
+  // walks in rather than trading shots, and §48(a)'s over-fix CONTROL pins that.
+  if (dc > EPS && !suddenDeathActive(state.timeRemaining)) {
     const margin = state.safeRadius - dc; // > 0 inside the safe disc
     if (margin < AI_RING_MARGIN) {
       const t = Math.min(2, (AI_RING_MARGIN - margin) / AI_RING_MARGIN);
@@ -1902,6 +1921,12 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
    *      `castMs * FOG_DPS / 1000` HP flat, and `hp * 1000 / FOG_DPS` is how many ms of
    *      standing this fighter has left. `pickWeapon`'s test is `castMs >= budget`, so a
    *      wind-up that finishes exactly as the fighter dies is refused.
+   *
+   *      ⚠️ **THIS CLAUSE WAS UNREACHABLE UNTIL AI-B1** — `dangerSteer`'s ring term read the
+   *      sudden-death radius of 0 as "outside the ring by `dc`", so `urgent` (clause 1) held on
+   *      every sudden-death tick and this line was never evaluated. The ring term now sits
+   *      sudden death out (see it), so clause 1 is the pot and a telegraph only, and this one
+   *      is live — §48(a) watches Water Bottle open Mega Splash in sudden death.
    *
    *      ⚠️ **AND THERE IS NO SIM-SIDE SUDDEN-DEATH RULE, WHICH IS A DECISION.** A cast
    *      opened before the collapse still resolves inside it. Cancelling on the trigger

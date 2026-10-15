@@ -1,0 +1,92 @@
+#!/usr/bin/env node
+/**
+ * b5_knownbad — every B5 fix, REVERTED on a scratch copy of `src/`, must turn its own
+ * `sim.test.mjs` §48 rows red while its controls stay green (`docs/REVAMP.md` §5, B5 — the AI,
+ * 2026-10-15). Owner of the `b5_` prefix.
+ *
+ * `CLAUDE.md` #6: *"A guard that has not been shown to FAIL on the bug it guards against is not
+ * a guard."* Each 🔴 row in §48 went red on `a53d8b0` before its fix landed and the commits say
+ * so; this makes that claim re-runnable. The engine is B3's `tools/tmp/b3_knownbad.mjs:runArm`
+ * (imported, not copied): one textual substitution per arm, asserted to match EXACTLY ONCE, the
+ * real suite run against the copy, rows matched by name prefix.
+ *
+ * Every fix also gets an OVER-FIX arm where one is plausible — the broader change that would pass
+ * every 🔴 row — and that arm must turn a CONTROL row red. A guard that only asks "is the bug
+ * gone?" cannot tell a fix from a demolition.
+ *
+ *   node tools/tmp/b5_knownbad.mjs                 # every arm (~15 s each)
+ *   node tools/tmp/b5_knownbad.mjs --arm sd-ring
+ *   node tools/tmp/b5_knownbad.mjs --list
+ *   node tools/tmp/b5_knownbad.mjs --selftest      # the rig shown to fail: a no-op revert, a drifted anchor
+ */
+import { resolve } from 'node:path';
+import { runArm } from './b3_knownbad.mjs';
+
+const ROOT = resolve(new URL('../..', import.meta.url).pathname);
+
+const A_RED = [
+  '(a) 🔴 two seats: a chase-branch bot KEEPS PRESSING',
+  '(a) 🔴 two seats: …and is not walked into the pot',
+  '(a) 🔴 six seats: EVERY bot keeps pressing',
+  '(a) 🔴 six seats: no bot spends a second of sudden death inside the burn',
+  '(a) 🔴 six seats: the wind-up is back',
+  '(a) 🔴 …and so does the BOT',
+];
+const A_CONTROL = [
+  '(a) CONTROL: in the final circle BEFORE the trigger',
+  '(a) CONTROL: six seats — every bot presses before the trigger',
+  '(a) CONTROL: a HUMAN Hamburger at 40% heals in sudden death',
+];
+const A_OVERFIX = '(a) CONTROL: before the collapse a bot in the fog still walks IN';
+
+export const ARMS = [
+  // ── AI-B1 ──────────────────────────────────────────────────────────────────────
+  {
+    name: 'sd-ring',
+    bug: 'AI-B1 — the ring term reads sudden death\'s radius 0 as "outside the ring" (the shipped bug)',
+    file: 'game/ai.ts',
+    find: '  if (dc > EPS && !suddenDeathActive(state.timeRemaining)) {',
+    repl: '  if (dc > EPS) {',
+    mustFail: A_RED,
+    mustPass: [...A_CONTROL, A_OVERFIX],
+  },
+  {
+    name: 'ring-off',
+    bug: 'AI-B1 over-fix — the ring term deleted outright (passes every sudden-death row)',
+    file: 'game/ai.ts',
+    find: '  if (dc > EPS && !suddenDeathActive(state.timeRemaining)) {',
+    repl: '  if (false) {',
+    mustFail: [A_OVERFIX],
+    mustPass: [...A_RED, ...A_CONTROL],
+  },
+];
+
+const IS_MAIN = process.argv[1] !== undefined && resolve(process.argv[1]) === resolve(new URL(import.meta.url).pathname);
+if (IS_MAIN) {
+  const argv = process.argv.slice(2);
+  if (argv.includes('--list')) {
+    for (const a of ARMS) console.log(`${a.name.padEnd(16)} ${a.bug}`);
+    process.exit(0);
+  }
+  if (argv.includes('--selftest')) {
+    const noop = runArm({ ...ARMS[0], name: 'selftest-noop', repl: ARMS[0].find }, ROOT);
+    const drift = runArm({ ...ARMS[0], name: 'selftest-drift', find: 'THIS ANCHOR EXISTS NOWHERE' }, ROOT);
+    const okNoop = !noop.ok && noop.faults.some((f) => f.startsWith('known-bad NOT CAUGHT'));
+    const okDrift = !drift.ok && drift.faults.some((f) => f.startsWith('anchor matched 0 times'));
+    console.log(`${okNoop ? 'PASS' : 'FAIL'}  a no-op revert is reported NOT CAUGHT  (${noop.faults.length} faults)`);
+    console.log(`${okDrift ? 'PASS' : 'FAIL'}  a drifted anchor FAULTS instead of running  (${drift.faults.join('; ')})`);
+    process.exit(okNoop && okDrift ? 0 : 1);
+  }
+  const only = argv.includes('--arm') ? argv[argv.indexOf('--arm') + 1] : null;
+  const arms = only ? ARMS.filter((a) => a.name === only) : ARMS;
+  if (arms.length === 0) { console.log(`no arm named ${only}`); process.exit(2); }
+  let bad = 0;
+  for (const a of arms) {
+    const r = runArm(a, ROOT);
+    if (!r.ok) bad++;
+    console.log(`${r.ok ? 'CAUGHT' : 'FAULT '}  ${a.name.padEnd(16)} ${a.bug}  — ${r.failed.length} row(s) red`);
+    for (const f of r.faults) console.log(`          ${f}`);
+  }
+  console.log(`\nb5_knownbad: ${arms.length - bad}/${arms.length} arms caught by their own rows`);
+  process.exitCode = bad ? 1 : 0;
+}
