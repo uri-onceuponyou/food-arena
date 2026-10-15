@@ -269,7 +269,9 @@ async function main() {
   const families = allKeys.map((f) => {
     const px = series.reduce((a, s) => a + (s.famCov[f] ? s.famCov[f].reduce((x, y) => x + y, 0) : 0), 0);
     const samplesLive = series.filter((s) => (s.famLive[f] ?? 0) > 0).length;
-    return { family: f, bodyShare: totalBody ? +(px / totalBody).toFixed(4) : null, ofCovered: totalCov ? +(px / totalCov).toFixed(3) : null, samplesLive };
+    // meanLive: visible objects of this family per sample — "overlapping rings" as a COUNT.
+    const meanLive = +(series.reduce((a, s) => a + (s.famLive[f] ?? 0), 0) / series.length).toFixed(2);
+    return { family: f, bodyShare: totalBody ? +(px / totalBody).toFixed(4) : null, ofCovered: totalCov ? +(px / totalCov).toFixed(3) : null, samplesLive, meanLive };
   }).sort((a, b) => (a.family.includes(':') - b.family.includes(':')) || ((b.bodyShare ?? 0) - (a.bodyShare ?? 0)));
   const aroundPerSample = +(series.reduce((a, s) => a + s.around.reduce((x, y) => x + y, 0), 0) / series.length).toFixed(0);
   const report = { args: { PLAN, SECONDS, EVERY, SLOW, SLOW_MS, THRESH, FIGHTERS: PLAN === 'six' ? FIGHTERS : 'donut v taco' },

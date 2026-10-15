@@ -572,25 +572,32 @@ export const donutWeaponVfx: CharacterWeaponVfxMap = {
       //     that band erases the character even while its silhouette survives.
       // A hollow hoop is the only shape that can be this bright at this size without
       // hiding the thing it is giving feedback about.
-      spawnRing(ctx, x, y, z, HALO_R * 0.80 * s, HALO_R * s, '#FBF6FF', 1, 0.16,
-        { hard: true, renderOrder: 12, fadePow: 1.1, hold: 0.45 });
-      // A candy-pink hoop just inside it — the two-tone hard edge, and the colour
-      // that says whose hit this was.
-      spawnRing(ctx, x, y, z, HALO_R * 0.62 * s, HALO_R * 0.86 * s, ctx.color, 1, 0.19,
-        { hard: true, renderOrder: 11, fadePow: 1.4, hold: 0.3 });
+      //
+      // ⚠️ V1b: ONCE PER VOLLEY. Candy Barrage is three pellets landing together, and each
+      // one drew all four hoops (1. and 2.) — twelve concentric rings on one fighter, the
+      // "overlapping translucent rings" the w5 cast notes named. A later pellet of the same
+      // volley (`ctx.repeat`, see `types.ts`) draws its arcs and sprinkles and skips the hoops.
+      if (!ctx.repeat) {
+        spawnRing(ctx, x, y, z, HALO_R * 0.80 * s, HALO_R * s, '#FBF6FF', 1, 0.16,
+          { hard: true, renderOrder: 12, fadePow: 1.1, hold: 0.45 });
+        // A candy-pink hoop just inside it — the two-tone hard edge, and the colour
+        // that says whose hit this was.
+        spawnRing(ctx, x, y, z, HALO_R * 0.62 * s, HALO_R * 0.86 * s, ctx.color, 1, 0.19,
+          { hard: true, renderOrder: 11, fadePow: 1.4, hold: 0.3 });
 
-      // 2. The floor shock — two concentric hoops, NOT a filled disc (decision (3),
-      // the Sticky Trail this character paints under herself). Two-tone on purpose:
-      // the leading edge is candy pink, the body behind it near-white sugar. Donut's
-      // own trail discs are `#FF9EC4` at 0.6 opacity, so a pink-only mark would be
-      // competing inside the exact hue it must not be confused with; the pale band
-      // is the value break that settles it, and it is the same "author the one
-      // element that is not in the scene's hue stack" call `soup.ts` and `pizza.ts`
-      // both arrived at independently.
-      spawnRing(ctx, x, GROUND_Y, z, SHOCK_R * 0.20 * s, SHOCK_R * s, ctx.color, 0.95, 0.3,
-        { hard: true, renderOrder: 7, fadePow: 1.6, hold: 0.35 });
-      spawnRing(ctx, x, GROUND_Y - 0.01, z, SHOCK_R * 0.16 * s, SHOCK_R * 0.86 * s, SUGAR, 0.9, 0.34,
-        { hard: true, band: true, renderOrder: 6, fadePow: 1.4, hold: 0.3 });
+        // 2. The floor shock — two concentric hoops, NOT a filled disc (decision (3),
+        // the Sticky Trail this character paints under herself). Two-tone on purpose:
+        // the leading edge is candy pink, the body behind it near-white sugar. Donut's
+        // own trail discs are `#FF9EC4` at 0.6 opacity, so a pink-only mark would be
+        // competing inside the exact hue it must not be confused with; the pale band
+        // is the value break that settles it, and it is the same "author the one
+        // element that is not in the scene's hue stack" call `soup.ts` and `pizza.ts`
+        // both arrived at independently.
+        spawnRing(ctx, x, GROUND_Y, z, SHOCK_R * 0.20 * s, SHOCK_R * s, ctx.color, 0.95, 0.3,
+          { hard: true, renderOrder: 7, fadePow: 1.6, hold: 0.35 });
+        spawnRing(ctx, x, GROUND_Y - 0.01, z, SHOCK_R * 0.16 * s, SHOCK_R * 0.86 * s, SUGAR, 0.9, 0.34,
+          { hard: true, band: true, renderOrder: 6, fadePow: 1.4, hold: 0.3 });
+      } // !ctx.repeat
 
       // 3. The broken ring — curved arcs, thrown hard enough to CLEAR THE BODY.
       // (At 1.3 m/s over 0.38 s debris travels ~0.5 m and spends its whole life

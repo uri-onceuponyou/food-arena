@@ -324,6 +324,13 @@ const CAST_HEIGHT = 1.25;
  */
 const MUZZLE_OFF_M = 1.05;
 const MUZZLE_END_SCALE = 1.05;
+/** V1b — an impact within this long and this close (sim ms, world units) of an earlier one is a
+ *  later pellet of the same volley on the same victim (`spawnImpactBurst`). Pellets of one
+ *  volley land within a frame or two; the fastest volley-to-volley cooldown on the roster is
+ *  several hundred ms; two fighters cannot stand 30 wu apart (they collide at `PLAYER_SIZE`
+ *  42). */
+const IMPACT_REPEAT_MS = 150;
+const IMPACT_REPEAT_WU = 30;
 /**
  * Linear scale of the SUBORDINATE impact burst anchor — the one that sits under a
  * bespoke `impact()` hook. `impactAnchor`'s header carries the whole derivation.
@@ -2992,6 +2999,13 @@ export class VfxLayer {
    * its position, matching every other projectile-flight behaviour. Reset to 0 in
    * `clear()` so a match restart never reads a huge bogus first-frame delta. */
   private lastSyncElapsedMs = 0;
+  /** V1b — the recent impacts a later pellet is matched against (`spawnImpactBurst`). Pruned
+   *  on every impact; at most a few entries live (one per victim hit in the last 150 ms). */
+  private readonly recentImpacts: { x: number; y: number; t: number }[] = [];
+  /** QA: impacts drawn as REPEATS (a later pellet of a volley) since the layer was built.
+   *  Read by `tools/tmp/v1b_cover.mjs`; a separate field rather than a `VfxQaKey`, because
+   *  that union is also the `__vfxSpawnTest` kind list other probes enumerate. */
+  qaImpactRepeats = 0;
 
   // Shared geometry — every instance of a given kind reuses the same buffers.
   private readonly projectileGeo = new THREE.SphereGeometry(wu(10), 10, 8);
@@ -4828,12 +4842,32 @@ export class VfxLayer {
 
     const bespoke = source && getWeaponVfx(source.characterId, source.weapon.key)?.impact;
 
+    // ── V1b: ONE SET OF HIT MARKS PER VOLLEY, NOT ONE PER PELLET ────────────────
+    // `hit-landed` fires per PELLET and at the victim's own position, so Sprinkle Spray's
+    // five pellets drew five full generic bursts on one fighter in the same frame — ten
+    // ground rings and five star decals, concentric — and Candy Barrage's three drew three
+    // sets of the donut's hoops: the "overlapping translucent rings" 5 of 8 w5 cast critics
+    // named. A hit within `IMPACT_REPEAT_MS` / `IMPACT_REPEAT_WU` of an earlier one is a
+    // REPEAT: it keeps its per-pellet POP (flash, sparks, shards, the bespoke debris) and
+    // skips the once-per-hit GROUND marks; bespoke hooks are told via `ctx.repeat`. The
+    // window is anchored on the first hit (a repeat does not extend it), so a sustained
+    // stream still lays a fresh set of marks every `IMPACT_REPEAT_MS`.
+    const now = this.lastSyncElapsedMs;
+    let repeat = false;
+    for (let i = this.recentImpacts.length - 1; i >= 0; i--) {
+      const r = this.recentImpacts[i];
+      if (now - r.t > IMPACT_REPEAT_MS || now < r.t) { this.recentImpacts.splice(i, 1); continue; }
+      if (Math.hypot(r.x - xWU, r.y - yWU) <= IMPACT_REPEAT_WU) repeat = true;
+    }
+    if (!repeat) this.recentImpacts.push({ x: xWU, y: yWU, t: now });
+    if (repeat) this.qaImpactRepeats++;
+
     // ── THE ANCHOR, UNCONDITIONAL, UNDER THE BESPOKE HOOK ───────────────────────
     // Same position in the function, and for the same reason, as `castMuzzle` in
     // `spawnCastFlash`: the beat every weapon shares is drawn for every weapon, and a
     // bespoke `impact()` adds this weapon's identity ON TOP of it instead of replacing
     // it. `'primary'` is byte-for-byte the generic burst that used to live below.
-    this.impactAnchor(origin, color, amount, bespoke ? 'subordinate' : 'primary');
+    this.impactAnchor(origin, color, amount, bespoke ? 'subordinate' : 'primary', repeat);
 
     if (bespoke && source) {
       let dirX = 0;
@@ -4851,6 +4885,7 @@ export class VfxLayer {
         weapon: source.weapon,
         characterId: source.characterId,
         spawnTransient: (o, life, onUpdate) => { o.userData.vfxSrc = `${source.characterId}.${source.weapon.key}.impact`; this.spawnTransientObject(o, life, onUpdate); },
+        repeat,
       };
       // UNION SHADE — every lobe this hook spawns becomes a member of ONE mass, and
       // the core/edge/falloff treatment is applied to that mass rather than to each
@@ -5047,6 +5082,8 @@ export class VfxLayer {
     color: string,
     amount: number,
     role: 'primary' | 'subordinate',
+    /** V1b: a later pellet of the same volley — see `spawnImpactBurst`. */
+    repeat = false,
   ): void {
     const k = role === 'primary' ? 1 : IMPACT_ANCHOR_K;
     // `sizeFactor` is the ONE knob every element of `burst()` is multiplied by, so
@@ -5107,9 +5144,13 @@ export class VfxLayer {
     // scaled: two chunks is what makes a hit read as a hit at all.
     const shards = Math.max(2, Math.round(THREE.MathUtils.clamp(1 + amount * 0.4, 2, 8) * k));
     if (role === 'primary') {
-      this.burst(origin, color, sizeFactor, shards);
+      // V1b: a repeat keeps the POP (flash, streaks, shards — what the hit felt like) and
+      // drops the GROUND half (decal + both rings — where it landed, already marked).
+      this.burst(origin, color, sizeFactor, shards, repeat ? { skipRing: true, skipDecal: true } : undefined);
       return;
     }
+    // V1b: the subordinate anchor IS the ground half (see below), so a repeat draws none of it.
+    if (repeat) return;
 
     // ── THE SUBORDINATE ANCHOR IS THE GROUND HALF OF `burst()`, NOT A SMALL COPY ──
     //
@@ -5934,6 +5975,9 @@ export class VfxLayer {
     // Ground marks are rebuilt from `state` on every `sync()`; an empty batch is the reset.
     this.groundMarks.begin();
     this.groundMarks.end(0);
+    // A new match's clock restarts at 0: last match's impacts must not make its first hit a
+    // "repeat" (the `now < r.t` prune in `spawnImpactBurst` would catch it too).
+    this.recentImpacts.length = 0;
     this.cheeseClouds.begin();
     this.cheeseClouds.end(0);
     this.ribbons.begin();
