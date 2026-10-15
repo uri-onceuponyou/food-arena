@@ -480,6 +480,8 @@ export function ownedItems(economy: EconomyState): ReadonlySet<ItemId> {
  * below is still `false`, so today the arrival buys you the three that need no press —
  * `tenderiser`, `blue_cheese` (passive) and `leftovers` (triggered) — and the seven actives
  * sit equipped and unpressed. `loadoutNote()` composes exactly that sentence.
+ * (🔁 2026-10-15: that constant is `true` now — `056b868` wired the press — so the actives
+ * fire and `loadoutNote()` is empty. Kept above per the reversal rule.)
  *
  * Measured, not asserted: `tools/tmp/us_loadout.mjs` boots the shipped screen at two seats
  * and at six and reads `__matchDebug.loadouts` — the sim's own `Fighter.item.equipped`,
@@ -504,8 +506,16 @@ const LOADOUT_REACHES_MATCH = true;
  * `ItemKind` — *Active*, *Passive*, *Triggered* — which describes the ITEM. "Tap to use"
  * would describe a BUTTON, and this project's most expensive recorded defect class is a
  * UI sentence asserting something the model does not do.
+ *
+ * 🔁 **REVERSED 2026-10-15 — THE ANSWER IS NOW YES, and the headline above is kept because it
+ * was true for its whole life.** `056b868` (the revamp's B1 package) wired the press:
+ * `match.ts` `onUseItem` → `input.pressItem` → `buildInput` writes `FighterInput.useItem`
+ * while the match is playing. `tools/tmp/ul_seam.mjs` W2 went RED on the merge (`declared
+ * false, tree true`) — the guard firing on exactly the drift it exists for — and flipping
+ * this constant is what turns it green, which also empties `loadoutNote()`'s sentence.
+ * The "tap to use" rule still stands: this screen owns no button, and W4 still holds it.
  */
-const PLAYER_CAN_PRESS_AN_ITEM = false;
+const PLAYER_CAN_PRESS_AN_ITEM = true;
 
 /**
  * The one sentence under the slots, composed from the two facts above rather than typed.
