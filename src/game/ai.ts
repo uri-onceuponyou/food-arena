@@ -84,9 +84,16 @@
  * from a match-wide `aiSighting`. Proven bit-identical at N=2 over state AND events; see the
  * acceptance runs in the two commit messages.
  *
- * ⚠️ NOTHING IN THIS FILE IS A SEARCH BEHAVIOUR, AND THE CAP COMING OFF DID NOT ADD ONE.
+ * ~~⚠️ NOTHING IN THIS FILE IS A SEARCH BEHAVIOUR, AND THE CAP COMING OFF DID NOT ADD ONE.
  * `stepAI` walks to where it last saw its target and stops (the claim is at
- * `src/arena/types.ts:95`, not at `rules.ts:1034`).
+ * `src/arena/types.ts:95`, not at `rules.ts:1034`).~~
+ *
+ * ⚠️ **SUPERSEDED BY AI-B3 (B5, 2026-10-15), AND THE CITATION HAD DRIFTED TOO.** Kept above
+ * per house style. `stepAI` still walks to where it last saw its target — and then, if the
+ * target is still hidden and that spot is at a concealment patch inside the 168 wu contract,
+ * `searchStep` sweeps the patch along its axis. Regions wider than the contract still get no
+ * search. The size claim lives on `ArenaDefinition.concealment` in `src/arena/types.ts` — cite
+ * the SYMBOL: `:95` had become `:138` (found by the AI bug hunt) and will move again.
  *
  * WAS: *"…which `DECISIONS §48` measures as the binding constraint on the ×4 arena — 12.00 s
  * to first contact at 27 props, 21.09 s at 108, monotone in prop count."* The prop-count
@@ -149,12 +156,14 @@ import {
   AI_SLOW_MULTIPLIER,
   CHARACTERS,
   CHARACTER_IDS,
+  CONCEAL_REVEAL_RADIUS,
   FOG_DPS,
   GUARANTEED_VISIBLE_RADIUS,
   HIT_RADIUS_VS_PLAYER,
   ITEM_TUNING,
   levelHealthMultiplier,
   MEDIKIT,
+  PLAYER_SIZE,
   speedFor,
   suddenDeathActive,
   TRAIL,
@@ -163,12 +172,12 @@ import {
   type Weapon,
   type WeaponType,
 } from './rules.ts';
-import type { Fighter, GameEvent, MatchState, Medikit } from './state.ts';
+import type { Fighter, GameEvent, MatchState, Medikit, Sighting } from './state.ts';
 import {
-  actionsLocked, isCasting, movementLocked, nearestLivingOpponent, sightingIndex, weaponsLocked,
+  actionsLocked, isCasting, isLivingOpponentOf, movementLocked, nearestLivingOpponent, sightingIndex, weaponsLocked,
 } from './state.ts';
 import { attemptAttack, attemptItem, isOnOwnTrail, itemUsable } from './combat.ts';
-import { isVisibleFrom, moveToward, terrainSlowAt } from './movement.ts';
+import { concealmentOf, isVisibleFrom, moveToward, terrainSlowAt } from './movement.ts';
 
 /**
  * How far ahead a steered move aims. `moveToward` runs the flow field toward a TARGET
@@ -323,11 +332,17 @@ export interface CastThreat {
  *
  * ── WHAT THIS DELIBERATELY OVER-APPROXIMATES, AND IN WHICH DIRECTION ──────
  *
- *   * **A cast hits ONE fighter — `nearestLivingOpponent` AT THE RESOLVE** — so at N>2
+ *   * ~~**A cast hits ONE fighter — `nearestLivingOpponent` AT THE RESOLVE** — so at N>2
  *     everyone else inside the set is fleeing a shot that was never theirs. That is
  *     already true of the melee term and is left alone deliberately: predicting who will
  *     be nearest 1.1 s from now is a second, quieter statement of the target rule, and at
- *     N=2 — every corpus in this repo — the two answers are identical.
+ *     N=2 — every corpus in this repo — the two answers are identical.~~
+ *     ⚠️ **STALE, and the conclusion survives it** (found by the AI bug hunt, 2026-10-15): a
+ *     swing has hit EVERY opponent in its arc since `3483d23` and a projectile strikes
+ *     WHOEVER it touches since `5c11427`, so at N>2 a fighter inside the set is in real danger
+ *     whoever the caster was aiming at. Everyone in the set fleeing is therefore the RIGHT
+ *     behaviour now, not a tolerated over-approximation; the bullet is kept because the
+ *     reasoning it records is quoted elsewhere. Comment only — nothing here changed.
  *   * **A melee `cone` is treated as the whole disc**, unchanged from the line above.
  *   * **A fan is bounded at `range + hitRadius` along the beam**, which is the homing
  *     bound; a straight pellet chasing a receding target drifts off its own axis and dies
@@ -542,10 +557,49 @@ function dangerSteer(
   const toCx = cx - x;
   const toCy = cy - y;
   const dc = Math.hypot(toCx, toCy);
-  if (dc > EPS) {
+  // ── 🚨 NOT IN SUDDEN DEATH (AI-B1, `docs/REVAMP.md` §5 B5). THIS LINE READ `if (dc > EPS) {` ──
+  //
+  // `SUDDEN_DEATH_RADIUS` is 0, so in sudden death `margin` below is `-dc` on every standable
+  // point and `t` is `(AI_RING_MARGIN + dc) / AI_RING_MARGIN` — at least 1.52 behind the pot's
+  // box (`dc >= 73`). `urgent` therefore held on EVERY sudden-death tick for EVERY bot, which
+  // is not "escape outranks shooting", it is a ceasefire: the chase branch chose no shot, the
+  // heal was withheld in both branches, `castBudgetMs` was 0 so its own sudden-death clause
+  // was dead code, and the push toward a centre that IS the pot walked bots into its burn.
+  // Measured on `a53d8b0` (`sim.test.mjs` §48(a)): 0 presses in 10 s of sudden death for 11
+  // of 11 characters at two seats and 5 of 6 bots at six, 418–547 ticks each in the burn —
+  // while a human Hamburger in the same spot healed.
+  //
+  // The fog is UNIFORM in sudden death — `sim.ts:applySuddenDeathFog` burns every point but
+  // the exact centre, which the pot's box makes unreachable — so there is nowhere to escape
+  // TO, and "escape outranks shooting only when escape is possible" (the `escaping` block in
+  // `stepAI`) says keep fighting. The term is skipped, not re-weighted: the pot and an
+  // incoming telegraph still push and still raise `urgent`, because those CAN be escaped.
+  // ⚠️ Before the collapse the term is unchanged, arithmetic and all — a bot in the fog still
+  // walks in rather than trading shots, and §48(a)'s over-fix CONTROL pins that.
+  if (dc > EPS && !suddenDeathActive(state.timeRemaining)) {
     const margin = state.safeRadius - dc; // > 0 inside the safe disc
-    if (margin < AI_RING_MARGIN) {
-      const t = Math.min(2, (AI_RING_MARGIN - margin) / AI_RING_MARGIN);
+    const t = Math.min(2, (AI_RING_MARGIN - margin) / AI_RING_MARGIN);
+    // ── 🚨 INSIDE THE SAFE DISC, THE RING'S PUSH YIELDS TO A HAZARD PRESSING HARDER (AI-U1) ──
+    //
+    // This read `if (margin < AI_RING_MARGIN) {`, so inside the disc the term was a spring
+    // toward the centre — and the centre is the pot. At N<=4 the final circle (140 wu) is no
+    // wider than `AI_RING_MARGIN` (140), so the spring is live on EVERY standable point, and
+    // with the bot's own intent toward a target standing IN the burn it outweighed the pot's
+    // push: the bot settled inside the burn, the pot's `t >= 1` made it `urgent`, and the
+    // chase branch stopped shooting for as long as the target stayed. Measured on `a53d8b0`
+    // (`sim.test.mjs` §48(e)), a living target at 84 wu from the centre: 0-3 presses in 8 s
+    // and 399-480 of 480 ticks in the burn for 11 of 11 characters, at two seats and four —
+    // against 24-34 presses with the target 26 wu further out.
+    //
+    // Inside the disc the ring term is PRECAUTION (its `t` < 1 — nothing is burning yet); a
+    // damaging hazard whose `t` is at least as large is the more pressing danger, so the
+    // precaution stands aside and the hazard and the fighter's intent steer. Outside the disc,
+    // or wherever the ring presses harder, nothing changes — §48(e)'s over-fix CONTROL holds a
+    // bot inside the final circle while its target stands in the fog. `worst` here is the
+    // hazards' alone: the telegraph loop below has not run yet.
+    // ⚠️ At six seats the final circle is 237 wu and the term is ~0 near the pot, so this was
+    // never a six-seat defect — §48(e) keeps a six-seat CONTROL to say so.
+    if (margin < AI_RING_MARGIN && !(margin >= 0 && worst >= t)) {
       DANGER.x += (toCx / dc) * t * AI_RING_WEIGHT;
       DANGER.y += (toCy / dc) * t * AI_RING_WEIGHT;
       if (t > worst) worst = t;
@@ -695,13 +749,19 @@ type WeaponRank = (state: MatchState, self: Fighter, w: Weapon, index: number, a
  *     that defect into the ranking, so it was left exact and the aim was fixed instead).
  *     With the aim correct in both branches the cone check is a no-op wherever this key
  *     is consulted, so the key is exact.
- *   * Donut's `trailBoosted` Candy Barrage. ~~Donut has exactly one offensive weapon, so
- *     the boost cannot re-order a kit of one.~~
+ *   * ~~Donut's `trailBoosted` Candy Barrage. ~~Donut has exactly one offensive weapon, so
+ *     the boost cannot re-order a kit of one.~~~~
  *     ⚠️ **STALE since the 2026-08-24 kit pass, found by B3b (2026-10-15).** Donut has FOUR
  *     weapons (Ring, Sprinkles, Candy, Glaze) and Candy is the only boosted one (B3b took
  *     the never-applied flag off Ring), so the reason this was safe is gone: standing on
  *     its own trail, the unpriced boost CAN re-order Candy against the other three. Whether
  *     it does in practice is unmeasured — the AI package's question, not settled here.
+ *     ✅ **MEASURED AND PRICED (B5, 2026-10-15) — it does.** On its own trail Candy lands
+ *     3 x 6 = 18 inside its fan's reach, Glaze lands 15, and the unpriced key read Candy as 12
+ *     — so a Donut bot on its trail with both ready pressed Glaze and threw away 3 HP a press
+ *     (`sim.test.mjs` §48(f): pressed Glaze, priced 12 against 18 landed at 40 and 60 wu, 4
+ *     against 6 at 115). `PRESS_VALUE_ON_TRAIL` below is the same profile at the boosted
+ *     per-pellet damage, and `rankPressValue` asks `isOnOwnTrail` — the sim's predicate.
  *
  * ── ⚠️ WHAT THIS KEY STILL DOES NOT PRICE: THE TARGET IS MOVING ─────────────
  *
@@ -850,22 +910,46 @@ const PRESS_VALUE: ReadonlyMap<Weapon, PressProfile> = (() => {
 })();
 
 /**
+ * `PRESS_VALUE` again, for the weapons whose damage the TRAIL boosts, at the boosted per-pellet
+ * value — `Math.round(w.damage * TRAIL.damageBoost)`, exactly `combat.ts:trailBoostedDamage`.
+ * Only non-combo weapons: `combat.ts:deliverWeapon`'s combo branch lands `part.damage` raw, and
+ * pricing a boost the sim never applies would be the mirror of the defect this prices. Every
+ * entry is an integer multiple of the unboosted per-pellet damage, so `(d / from) * to` is exact.
+ */
+const PRESS_VALUE_ON_TRAIL: ReadonlyMap<Weapon, PressProfile> = (() => {
+  const m = new Map<Weapon, PressProfile>();
+  for (const [w, p] of PRESS_VALUE) {
+    if (!w.trailBoosted || w.comboParts || !(w.damage > 0)) continue;
+    const from = w.damage;
+    const to = Math.round(w.damage * TRAIL.damageBoost);
+    const scale = (d: number): number => (d / from) * to;
+    m.set(w, { always: scale(p.always), offAxis: p.offAxis.map((o) => ({ maxDist: o.maxDist, damage: scale(o.damage) })) });
+  }
+  return m;
+})();
+
+/**
  * Delivered damage for one press of `w` against a target `adist` away.
+ *
+ * `onOwnTrail` (default `false`, so every existing caller and `press_value.mjs`'s 183 cells
+ * are unchanged) prices the trail boost for a weapon that declares it — see
+ * `PRESS_VALUE_ON_TRAIL`. The caller asks `combat.ts:isOnOwnTrail`; this never guesses.
  *
  * Exported for the same reason `combat.ts` exports `statusReadyAt`: `sim.test.mjs` §20
  * asserts this against the damage the REAL combat path delivers, weapon by weapon and
  * band by band, so the driver's ranking key cannot silently drift away from the sim it
  * is trying to predict. A copy of the arithmetic in the test would only test the copy.
  */
-export function pressValue(w: Weapon, adist: number): number {
-  const p = PRESS_VALUE.get(w);
+export function pressValue(w: Weapon, adist: number, onOwnTrail = false): number {
+  const p = (onOwnTrail ? PRESS_VALUE_ON_TRAIL.get(w) : undefined) ?? PRESS_VALUE.get(w);
   if (!p) return w.damage; // unreachable for a weapon in CHARACTERS; fail to the old key
   let v = p.always;
   for (const o of p.offAxis) if (adist < o.maxDist) v += o.damage;
   return v;
 }
 
-const rankPressValue: WeaponRank = (_state, _self, w, _index, adist) => pressValue(w, adist);
+const rankPressValue: WeaponRank = (state, self, w, _index, adist) =>
+  pressValue(w, adist, w.trailBoosted === true && isOnOwnTrail(state, self));
 
 /**
  * The AI's only defensive resource. See `rules.ts` AUTHORISED DEVIATION #7 — until
@@ -1427,6 +1511,73 @@ export function pickItem(
 }
 
 /**
+ * ── THE SEARCH: SWEEP THE PATCH YOU LOST THEM IN (AI-B3) ────────────────────
+ *
+ * Called by `stepAI` on every tick its target is HIDDEN, with that target's belief cell. It
+ * does nothing until the fighter is STANDING ON its belief (within `SEARCH_ARRIVE`) — i.e.
+ * until it has looked at the spot and the target is not there — and nothing unless that spot
+ * is at a standing concealment patch inside the size contract. Then it moves the belief one
+ * leg across the patch: to the midpoint of the edge OPPOSITE the edge nearest the belief.
+ * Arriving there, the nearest edge is the far one, so the next leg comes straight back —
+ * a patrol along the patch's axis, deterministic and stateless (the belief IS the state).
+ *
+ * WHY IT EXISTS. This file walked to the last sighting and stopped, and sees
+ * `CONCEAL_REVEAL_RADIUS` (84 wu) from there. `DECISIONS §29.1` turned that into "patches up to
+ * roughly 168 wu across cannot become AI-denial zones" — but the last sighting is the patch's
+ * ENTRY edge, and a hider who walks to the far side is 123–145 wu from it in every shipped
+ * patch (110–130 wu). Measured on `a53d8b0`, `sim.test.mjs` §48(c): a far-corner hider was
+ * found at 0 of the 20 shipped patches in 20 s, two seats and six. §26(f)'s rule was the right
+ * one ("no interior point more than 84 wu from where a fighter entered"); the 168 was not.
+ *
+ * WHY THIS SHAPE. Walking a box's axis from edge to edge passes within HALF THE OTHER SIDE of
+ * every interior point — so for a patch whose sides are both <= 2 x `CONCEAL_REVEAL_RADIUS`
+ * (the 168 wu contract) one full leg sees all of it, and the leg out from the entry point plus
+ * the leg back cover it whatever the entry was. That is exactly the promise §29.1 made, now
+ * true by construction rather than by arithmetic that did not hold.
+ *
+ * ⚠️ ONLY INSIDE THE CONTRACT, DELIBERATELY. A region wider than 168 wu is not covered by an
+ * axis sweep, and §26(f) records the larger-region rule as "keep concealment patches small" —
+ * a bot that wandered every region would change that behaviour too, which is a different
+ * decision. §48(c) has a CONTROL that a 300 wu region is still a denial zone.
+ * ⚠️ IT MOVES THE BELIEF'S POSITION, NOT ITS `at`. The cell still records when the target was
+ * last SEEN; its x/y now say where this fighter is LOOKING, which is what every reader of the
+ * belief (separation, facing, the nav target) already treats it as. Nothing reads `at` in play.
+ * ⚠️ A STALE BELIEF THAT IS NOT AT A PATCH IS LEFT ALONE — a target can only be hidden while
+ * standing in a patch, and its last sighting is within a step of the one it walked into
+ * (`SEARCH_SLACK`), so a belief anywhere else is not a lost hider and gets no search.
+ */
+const SEARCH_ARRIVE = 8;
+/** How far OUTSIDE a patch a last sighting can lie and still be "the patch it walked into". */
+const SEARCH_SLACK = PLAYER_SIZE / 2;
+/** The size contract: a patch the axis sweep is guaranteed to cover. `DECISIONS §29.1`. */
+const SEARCH_MAX_SIDE = 2 * CONCEAL_REVEAL_RADIUS;
+
+function searchStep(state: MatchState, self: Fighter, cell: Sighting): void {
+  if (Math.hypot(cell.x - self.x, cell.y - self.y) > SEARCH_ARRIVE) return;
+  const regions = concealmentOf(state.arena);
+  for (let i = 0; i < regions.length; i++) {
+    const b = regions[i];
+    if (b.w > SEARCH_MAX_SIDE || b.h > SEARCH_MAX_SIDE) continue;
+    if (state.brokenConcealment.includes(b)) continue;
+    const hw = b.w / 2;
+    const hh = b.h / 2;
+    if (Math.abs(cell.x - b.x) > hw + SEARCH_SLACK || Math.abs(cell.y - b.y) > hh + SEARCH_SLACK) continue;
+    // The edge nearest the belief, in a fixed order on a tie (W, E, N, S) — deterministic,
+    // because the sim contains no randomness and every balance number rests on that.
+    const dW = Math.abs(cell.x - (b.x - hw));
+    const dE = Math.abs(cell.x - (b.x + hw));
+    const dN = Math.abs(cell.y - (b.y - hh));
+    const dS = Math.abs(cell.y - (b.y + hh));
+    const m = Math.min(dW, dE, dN, dS);
+    if (m === dW) { cell.x = b.x + hw; cell.y = b.y; }
+    else if (m === dE) { cell.x = b.x - hw; cell.y = b.y; }
+    else if (m === dN) { cell.x = b.x; cell.y = b.y + hh; }
+    else { cell.x = b.x; cell.y = b.y - hh; }
+    return;
+  }
+}
+
+/**
  * Advance the enemy's decision-making for one tick: face the player, chase or
  * flee-and-snipe, and fire when a usable weapon is chosen. Movement is resolved
  * with the same `tryMove` collision rule the player uses.
@@ -1465,7 +1616,11 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
   // fighting is not a perception question (you know who hit you), WHERE they are is. Making
   // the choice belief-based would let a fighter forget an opponent exists by walking behind
   // a plate, which is a design change, not a generalisation.
-  const target = nearestLivingOpponent(state, self);
+  //
+  // ⚠️ `let`, NOT `const`, SINCE AI-B4 — and the reassignment is ONE line in the perception block
+  // below, under one condition: the nearest opponent is HIDDEN and a VISIBLE one stands inside
+  // this fighter's reach. Read that block before adding a second.
+  let target = nearestLivingOpponent(state, self);
   if (self.hp <= 0 || target === null) return false;
 
   const now = state.elapsed;
@@ -1528,7 +1683,85 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
   // the separation, the facing AND the nav target in one edit. Route it to two of the three
   // and you get the sixth instance of this file's oldest defect; `sim.test.mjs` §26(k)
   // pins all three behaviourally in one experiment, with its ablation.
-  const visible = isVisibleFrom(self.x, self.y, target.x, target.y, state.arena, state, target);
+  // ── 🚨 EVERY OPPONENT THIS FIGHTER CAN SEE, NOT ONLY THE ONE IT IS FIGHTING (AI-B2) ──────
+  //
+  // This block used to refresh ONE cell — the target's, just below — and `sim.ts:createMatch`
+  // seeds every cell with the target's SPAWN at `at: 0`. So a bot's belief about anyone it
+  // was not fighting was that fighter's spawn point for the whole match, however long it had
+  // watched them walk in the open, and a bot that switched to a now-hidden opponent walked
+  // back to where that opponent had STARTED and stood there. `DECISIONS §29`'s rule is
+  // "while you are concealed, nothing that tracks you updates — the belief freezes at your
+  // LAST SIGHTING", and a sighting is a sighting whoever the bot happened to be shooting.
+  // Measured on `a53d8b0`: `sim.test.mjs` §48(b) — belief (1900,1000)@0 ms, the hider's spawn,
+  // against a last sighting at (1401,656); no press in the 10 s after its fight ended, never
+  // closer than 317 wu, against a first press at +4.93 s fixed. Six bots on an open floor:
+  // 7,200 of 9,000 pair-ticks stale, every one of them about a non-target.
+  //
+  // ⚠️ THE SAME PREDICATE, SO A CONCEALED OPPONENT'S CELL STILL FREEZES — the rule is
+  // unchanged, only its reach grew from one column to the row. The target's own cell is still
+  // written below, by the line that always wrote it, so nothing about how the target is
+  // perceived moved.
+  // ⚠️ BIT-IDENTICAL AT TWO SEATS BY CONSTRUCTION — the target is the only opponent, so the
+  // loop skips everyone — and causally unreachable on any arena without concealment, where
+  // every cell is refreshed before it is read anyway (`conceal_lab.mjs --ablate`'s argument,
+  // one column wider). `tools/tmp/b5_digest.mjs` is the measurement rather than this sentence.
+  //
+  // ⚠️ ONE `isVisibleFrom` CALL, AND THE TARGET'S ANSWER IS TAKEN FROM IT. This line read
+  // `const visible = isVisibleFrom(self.x, self.y, target.x, target.y, state.arena, state,
+  // target);` on its own; the loop asks the identical question of every living opponent and
+  // keeps the target's reply as `visible`, so the predicate is still asked from ONE call site
+  // in this file (`sim.test.mjs` §26(m) counts them — two in `src/game/`, this and
+  // `sim.ts:stepProjectiles`). The query is pure, so asking it in slot order changes nothing.
+  let visible = false;
+  // The nearest VISIBLE opponent inside this fighter's reach, other than the target (AI-B4, below).
+  let inReach: Fighter | null = null;
+  {
+    const n = state.fighters.length;
+    const reach = offensiveReach(self.characterId);
+    let inReachD = Infinity;
+    for (const other of state.fighters) {
+      if (!isLivingOpponentOf(other, self)) continue;
+      const seen = isVisibleFrom(self.x, self.y, other.x, other.y, state.arena, state, other);
+      // The target's own cell is written below, by the lines that always wrote it.
+      if (other === target) { visible = seen; continue; }
+      if (!seen) continue;
+      const cell = state.sightings[sightingIndex(self.id, other.id, n)];
+      cell.x = other.x;
+      cell.y = other.y;
+      cell.at = now;
+      // Strict `<`, in slot order: ties go to the lower slot, as `nearestLivingOpponent`'s do.
+      const d = Math.hypot(other.x - self.x, other.y - self.y);
+      if (d <= reach && d < inReachD) { inReach = other; inReachD = d; }
+    }
+  }
+  // ── 🚨 A HIDDEN NEAREST OPPONENT NO LONGER LOCKS THIS FIGHTER OUT OF FIGHTING (AI-B4) ──────
+  //
+  // The target is chosen on TRUE positions (the block above `perception` says why, and that is
+  // unchanged) and every shot below is gated on the target's VISIBILITY. Together they meant a
+  // bot whose nearest opponent was concealed more than 84 wu away shot NOBODY — including a
+  // farther, VISIBLE opponent inside its own reach that was shooting it. At two seats the only
+  // opponent is the target and this cannot happen; at three it is a bot standing at the edge of
+  // a plate taking hits. Measured on `a53d8b0` (`sim.test.mjs` §48(d)): 0 presses in 2 s while
+  // the shooter landed 24 damage, at three seats and at six.
+  //
+  // THE NARROW RULE, AND ONLY IT: switch when the nearest is hidden AND a visible opponent is
+  // inside `offensiveReach` — i.e. when this fighter could shoot somebody RIGHT NOW and the
+  // old rule had it shoot nobody. Otherwise the target is exactly what it was. ⚠️ NOT "prefer
+  // whoever is visible": that is a different targeting rule — it walks a bot off a hidden
+  // nearest opponent toward anyone it can see across the map — and the finder measured it
+  // changing 24 of 66 six-seat winners. §48(d)'s over-fix CONTROL pins the difference.
+  //
+  // ⚠️ THE SHOT IS STILL RESOLVED BY `combat.ts`, AND THAT IS WHY THIS IS SAFE. A swing hits
+  // every opponent in its arc (§35) and a projectile strikes whoever it touches (§36), so
+  // aiming at `inReach` lands on `inReach`. What a bot's projectile is still FRAMED on is
+  // `nearestLivingOpponent` (`combat.ts:deliverWeapon`'s `frame`, kept for bots by B3b so the
+  // AI corpora stay bit-identical): here that is the hidden fighter, so the shot does not home
+  // (`sim.ts:stepProjectiles` re-aims only at a VISIBLE frame) and its range budget is charged
+  // in a still frame — path length, never longer than the card. Recorded, not hidden.
+  if (!visible && inReach !== null) {
+    target = inReach;
+    visible = true;
+  }
   // THIS OBSERVER'S ROW, THIS TARGET'S COLUMN. One cell of `MatchState.sightings`, mutated
   // in place — the belief belongs to the pair, not to the match, which is why the single
   // `state.aiSighting` became an N x N matrix. At N=2 the index is 1 * 2 + 0 = 2, which is
@@ -1539,6 +1772,9 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
     sighting.x = target.x;
     sighting.y = target.y;
     sighting.at = now;
+  } else {
+    // AI-B3: standing on the belief and the target is not there — sweep the patch it is in.
+    searchStep(state, self, sighting);
   }
   const tx = sighting.x;
   const ty = sighting.y;
@@ -1902,6 +2138,12 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
    *      `castMs * FOG_DPS / 1000` HP flat, and `hp * 1000 / FOG_DPS` is how many ms of
    *      standing this fighter has left. `pickWeapon`'s test is `castMs >= budget`, so a
    *      wind-up that finishes exactly as the fighter dies is refused.
+   *
+   *      ⚠️ **THIS CLAUSE WAS UNREACHABLE UNTIL AI-B1** — `dangerSteer`'s ring term read the
+   *      sudden-death radius of 0 as "outside the ring by `dc`", so `urgent` (clause 1) held on
+   *      every sudden-death tick and this line was never evaluated. The ring term now sits
+   *      sudden death out (see it), so clause 1 is the pot and a telegraph only, and this one
+   *      is live — §48(a) watches Water Bottle open Mega Splash in sudden death.
    *
    *      ⚠️ **AND THERE IS NO SIM-SIDE SUDDEN-DEATH RULE, WHICH IS A DECISION.** A cast
    *      opened before the collapse still resolves inside it. Cancelling on the trigger

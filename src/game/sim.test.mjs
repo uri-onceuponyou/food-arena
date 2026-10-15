@@ -13475,6 +13475,690 @@ console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up
   }
 }
 
+console.log('\n48. The bot at two, three and six seats — sudden death, what it believes, the patch, the lock (B5)');
+{
+  // `docs/REVAMP.md` §5 B5. Every finding here arrived UNVERIFIED (0 of 2 confirmations), so
+  // each 🔴 row was written first and run on `a53d8b0` before its fix, and `tools/tmp/
+  // b5_knownbad.mjs` re-runs that claim: each fix reverted on a scratch copy must turn its own
+  // rows red while the CONTROL rows stay green.
+  //
+  // ⚠️ SIX SEATS WHEREVER THE DEFECT CAN REACH ONE SEAT ONLY. `ai.ts` has shipped seven defects
+  // that were correct for one seat and silent for another (its header), and at two seats "the
+  // target" and "the only opponent" are the same sentence (`docs/AGENT-BRIEF.md` §4b).
+  const DT48 = 1000 / 60;
+  // The shipped pot, rebuilt from `rules.ts:POT` — the solid `bodyRadius * 2` box
+  // `arena/hazards.ts` registers and the `dangerRadius` burn — at the centre of a 2800x2000
+  // floor whose opening ring is the shipped half-diagonal. No other cover, no concealment.
+  const potArena48 = () => makeArena({
+    width: 2800, height: 2000, maxSafeRadius: Math.hypot(1400, 1000),
+    cover: [{ x: 1400, y: 1000, w: POT.bodyRadius * 2, h: POT.bodyRadius * 2, kind: 'pot' }],
+    hazards: [{ x: 1400, y: 1000, radius: POT.dangerRadius, kind: 'damage', damage: POT.damage, tickMs: POT.tickMs }],
+  });
+  // A PRESS is the instant a button went down: `cast-started` for a wind-up (its
+  // `weapon-fired` comes later, at the resolve), `weapon-fired` for everything else.
+  const castKey48 = (characterId, key) => (CHARACTERS[characterId].weapons.find((w) => w.key === key)?.castMs ?? 0) > 0;
+  const isPress48 = (e, f) => e.fighterId === f.id
+    && (e.type === 'cast-started' || (e.type === 'weapon-fired' && !castKey48(f.characterId, e.weaponKey)));
+  // Seats carry an optional per-slot `input` beside the `createMatch` config; it is split off
+  // before the config is handed over.
+  const seat48 = (arena, seats) => createMatch(arena, seats.map(({ input, ...cfg }) => cfg));
+
+  // ── (a) AI-B1: SUDDEN DEATH SILENCED EVERY CHASE-BRANCH BOT ──────────────────
+  //
+  // `SUDDEN_DEATH_RADIUS` is 0, so `dangerSteer`'s ring margin `safeRadius - dc` is `-dc` on
+  // every standable point, its `t` is `(AI_RING_MARGIN + dc) / AI_RING_MARGIN` >= 1.52 behind
+  // the pot box, and `urgent` held on every sudden-death tick for every bot: the chase branch
+  // chose no shot, the heal was withheld in both branches, `castBudgetMs` was 0 (so the
+  // documented `hp * 1000 / FOG_DPS` clause was dead code), and the push toward a centre that
+  // is the pot walked bots into its burn. There is nowhere to escape TO in sudden death —
+  // the fog is uniform — so `ai.ts`'s own rule ("escape outranks shooting only when escape
+  // is possible") says keep fighting. The human seat always could.
+  {
+    const arena = potArena48();
+    const CX = arena.center.x;
+    const CY = arena.center.y;
+    const LEAD = 3000;      // ms of the final circle BEFORE the trigger — the control window
+    const WINDOW = 10_000;  // ms of sudden death observed
+    const sdRun = (seats, { lead = LEAD, window = WINDOW, hp } = {}) => {
+      const st = seat48(arena, seats);
+      st.phase = 'playing';
+      st.timeRemaining = SUDDEN_DEATH_REMAINING_MS + lead;
+      if (hp) hp(st);
+      const t = st.fighters.map(() => ({ pre: 0, sd: 0, sdCasts: 0, sdHeals: 0, burnTicks: 0, sdTicks: 0 }));
+      const inputs = seats.map((s) => s.input ?? null);
+      while (st.phase === 'playing' && st.timeRemaining > SUDDEN_DEATH_REMAINING_MS - window) {
+        const evs = stepMatch(st, DT48, inputs);
+        const sd = suddenDeathActive(st.timeRemaining);
+        for (const f of st.fighters) {
+          for (const e of evs) {
+            if (!isPress48(e, f)) continue;
+            t[f.id][sd ? 'sd' : 'pre']++;
+            if (sd && e.type === 'cast-started') t[f.id].sdCasts++;
+            if (sd && CHARACTERS[f.characterId].weapons.find((w) => w.key === e.weaponKey)?.type === 'self') t[f.id].sdHeals++;
+          }
+          if (sd && f.alive) {
+            t[f.id].sdTicks++;
+            if (Math.hypot(f.x - CX, f.y - CY) < POT.dangerRadius) t[f.id].burnTicks++;
+          }
+        }
+      }
+      return { st, t };
+    };
+    const BIG = 1e5; // nobody drains, nobody reaches AI_FLEE_HP_FRACTION: every bot stays in the CHASE branch
+
+    // Two seats, every character as the bot: a motionless 1e5 human in the final circle's
+    // safe annulus east of the pot, the bot 60 wu north of it — in reach of every kit, inside
+    // the final circle, outside the burn.
+    const r0 = (POT.dangerRadius + minSafeRadiusFor(2)) / 2;
+    const duel = CHARACTER_IDS.map((c) => {
+      const { t } = sdRun([
+        { characterId: 'hamburger', controller: 'human', maxHp: BIG, spawn: { x: CX + r0, y: CY } },
+        { characterId: c, controller: 'ai', maxHp: BIG, spawn: { x: CX + r0, y: CY - 60 } },
+      ]);
+      return { c, ...t[1] };
+    });
+    const fmtA = (rows) => rows.map((r) => `${r.c} ${r.pre}/${r.sd}${r.burnTicks ? ` burn${r.burnTicks}` : ''}`).join(' · ');
+    check('(a) CONTROL: in the final circle BEFORE the trigger every character\'s bot presses — the fixture can fire',
+      duel.length === CHARACTER_IDS.length && duel.every((r) => r.pre > 0 && r.sdTicks > 0), fmtA(duel));
+    check('(a) 🔴 two seats: a chase-branch bot KEEPS PRESSING in sudden death — every character',
+      duel.every((r) => r.sd > 0), `pre/sd presses: ${fmtA(duel)}`);
+    check('(a) 🔴 two seats: …and is not walked into the pot — no character\'s bot stands in the burn during sudden death',
+      duel.every((r) => r.burnTicks === 0), `pre/sd presses, burn ticks: ${fmtA(duel)}`);
+
+    // SIX bots on a ring around the pot, inside the six-seat final circle: the shape Uri plays.
+    const SIX = ['hamburger', 'taco', 'sushi', 'pizza', 'egg', 'waterbottle'];
+    const r6 = (POT.dangerRadius + minSafeRadiusFor(6)) / 2;
+    const six = sdRun(SIX.map((c, i) => ({
+      characterId: c, controller: 'ai', maxHp: BIG,
+      spawn: { x: CX + r6 * Math.cos((i * Math.PI) / 3), y: CY + r6 * Math.sin((i * Math.PI) / 3) },
+    }))).t.map((r, i) => ({ c: SIX[i], ...r }));
+    check('(a) CONTROL: six seats — every bot presses before the trigger',
+      six.length === 6 && six.every((r) => r.pre > 0 && r.sdTicks > 0), fmtA(six));
+    check('(a) 🔴 six seats: EVERY bot keeps pressing in sudden death',
+      six.every((r) => r.sd > 0), `pre/sd presses: ${fmtA(six)}`);
+    // Not zero: six bots chasing each other ACROSS the pot still brush its burn, and the pot
+    // term is exactly what turns them back. One second of sudden death is the line between
+    // that and standing in it.
+    check('(a) 🔴 six seats: no bot spends a second of sudden death inside the burn',
+      six.every((r) => r.burnTicks < 1000 / DT48), `burn ticks: ${six.map((r) => `${r.c} ${r.burnTicks}`).join(' · ')}`);
+    // The wind-up half of "no shot, no heal, no wind-up": the roster's one cast (Mega Splash)
+    // is pressed in sudden death once `castBudgetMs` is `hp * 1000 / FOG_DPS` and not 0.
+    const wb = six.find((r) => r.c === 'waterbottle');
+    check('(a) 🔴 six seats: the wind-up is back — Water Bottle opens a cast in sudden death',
+      wb.sdCasts > 0, `waterbottle casts in sudden death: ${wb.sdCasts}`);
+
+    // THE HEAL, against the human seat as the control. A Hamburger at 40% of its own pool —
+    // above AI_FLEE_HP_FRACTION, so the chase branch; missing more than one full heal, so
+    // `rankHeal` wants it — standing next to a statue ON the trigger tick, heal ready.
+    const HEAL_I = CHARACTERS.hamburger.weapons.findIndex((w) => w.type === 'self');
+    const healRun = (controller) => sdRun([
+      { characterId: 'pizza', controller: 'human', maxHp: BIG, spawn: { x: CX + r0, y: CY } },
+      {
+        characterId: 'hamburger', controller, spawn: { x: CX + r0, y: CY - 60 },
+        input: controller === 'human' ? { move: { x: 0, y: 0 }, selectedWeapon: HEAL_I, attack: true } : undefined,
+      },
+    ], { lead: 0, window: 2000, hp: (st) => { st.fighters[1].hp = st.fighters[1].maxHp * 0.4; } }).t[1];
+    const healBot = healRun('ai');
+    const healHuman = healRun('human');
+    check('(a) CONTROL: a HUMAN Hamburger at 40% heals in sudden death (the seat the bot is measured against)',
+      HEAL_I >= 0 && healHuman.sdHeals > 0, `human heal presses ${healHuman.sdHeals}`);
+    check('(a) 🔴 …and so does the BOT — the heal is not withheld for an escape that does not exist',
+      healBot.sdHeals > 0, `bot heal presses ${healBot.sdHeals} (human ${healHuman.sdHeals})`);
+
+    // CONTROL — THE OVER-FIX. The ring term must still drive a bot out of the fog BEFORE the
+    // collapse: one standing outside the final circle with its target in reach must walk in
+    // rather than trade shots, exactly as `AI_ESCAPE_PRIORITY` says. A fix that deleted the ring
+    // term instead of exempting sudden death would pass every 🔴 row above and fail this.
+    {
+      const out = minSafeRadiusFor(2) + 120;
+      const st = seat48(arena, [
+        { characterId: 'hamburger', controller: 'human', maxHp: BIG, spawn: { x: CX + out + 50, y: CY } },
+        { characterId: 'taco', controller: 'ai', maxHp: BIG, spawn: { x: CX + out, y: CY } },
+      ]);
+      st.phase = 'playing';
+      st.timeRemaining = SUDDEN_DEATH_REMAINING_MS + 8000;
+      let fired = 0;
+      for (let k = 0; k < 60; k++) for (const e of stepMatch(st, DT48, [null, null])) if (isPress48(e, st.fighters[1])) fired++;
+      const dc = Math.hypot(st.fighters[1].x - CX, st.fighters[1].y - CY);
+      check('(a) CONTROL: before the collapse a bot in the fog still walks IN instead of trading shots — the ring term is live',
+        fired === 0 && dc < out - 30, `presses ${fired}, ${out.toFixed(0)} -> ${dc.toFixed(1)} wu from the centre`);
+    }
+  }
+
+  // A human seat walking to a point: the per-tick input that moves it there and stops on it.
+  const walk48 = (f, x, y) => {
+    const dx = x - f.x;
+    const dy = y - f.y;
+    const d = Math.hypot(dx, dy);
+    return { move: d > 2 ? { x: dx / d, y: dy / d } : { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  };
+
+  // ── (b) AI-B2: A BOT'S BELIEF ABOUT AN OPPONENT IT NEVER TARGETED WAS ITS SPAWN ─────────
+  //
+  // `stepAI` refreshed ONE cell of `MatchState.sightings` — its current target's — and
+  // `createMatch` seeds every cell with the target's spawn at `at: 0`. So a bot's belief about
+  // anyone it was not fighting stayed that fighter's SPAWN however long it watched them walk in
+  // the open, and a bot that switched to a now-hidden opponent walked to where it had started
+  // the match and stood there. `DECISIONS §29`: "while you are concealed, nothing that tracks
+  // you updates — the AI's belief freezes at your LAST SIGHTING." At two seats the target is
+  // the only opponent, so the defect cannot express (`minSeats` 3).
+  {
+    // One 110 wu patch — the shipped tray size — north of an open floor; no hazards, no ring.
+    const PATCH = { x: 1400, y: 600, w: 110, h: 110, kind: 'tray_rack' };
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000, concealment: [PATCH] });
+    const edgeS = PATCH.y + PATCH.h / 2;
+    const OPEN = { x: PATCH.x, y: edgeS + 65 };   // in the open, south of the patch
+    const IN = { x: PATCH.x, y: edgeS - 35 };     // 35 wu inside — inside the 84 wu reveal from the edge
+    // Slot 0 is C — the hider, a human, so it moves FIRST and the bot sees this tick's position.
+    // Slot 1 is A — the bot under test. Slot 2 is B — a statue A fights first (nearest), killed
+    // on cue once C is hidden. `three === false` drops B: the two-seat control.
+    const run = (three) => {
+      const seats = [
+        { characterId: 'pizza', controller: 'human', maxHp: 1e5, spawn: { x: 1900, y: 1000 } },
+        { characterId: 'taco', controller: 'ai', maxHp: 1e5, spawn: { x: 1400, y: 860 } },
+      ];
+      if (three) seats.push({ characterId: 'hamburger', controller: 'human', maxHp: 1e5, spawn: { x: 1400, y: 940 } });
+      const st = seat48(arena, seats);
+      st.phase = 'playing';
+      const [C, A] = st.fighters;
+      const inputs = st.fighters.map(() => null);
+      let leg = 0;
+      let seenTicks = 0;
+      let last = null;
+      let killedAt = -1;
+      let hiddenAtKill = false;
+      let beliefAtKill = null;
+      let firstPress = -1;
+      let minSep = Infinity;
+      // Up to 15 s for the hider to walk in, then 10 s after B falls for the bot to find it.
+      for (let k = 0; k < 1500 && firstPress < 0 && (killedAt < 0 || st.elapsed - killedAt < 10_000); k++) {
+        const wp = leg === 0 ? OPEN : IN;
+        inputs[0] = walk48(C, wp.x, wp.y);
+        const evs = stepMatch(st, DT48, inputs);
+        if (leg === 0 && Math.hypot(C.x - OPEN.x, C.y - OPEN.y) < 3) leg = 1;
+        const vis = isVisibleFrom(A.x, A.y, C.x, C.y, st.arena, st, C);
+        if (vis && killedAt < 0) { seenTicks++; last = { x: C.x, y: C.y }; }
+        if (killedAt < 0 && leg === 1 && Math.hypot(C.x - IN.x, C.y - IN.y) < 3) {
+          killedAt = st.elapsed;
+          hiddenAtKill = !vis;
+          const cell = st.sightings[sightingIndex(A.id, C.id, st.fighters.length)];
+          beliefAtKill = { x: cell.x, y: cell.y, at: cell.at };
+          if (three) applyDamage(st, st.fighters[2], st.fighters[2].hp, null, { kind: 'fog' }, []);
+        }
+        if (killedAt >= 0) {
+          minSep = Math.min(minSep, Math.hypot(A.x - C.x, A.y - C.y));
+          if (evs.some((e) => isPress48(e, A))) firstPress = st.elapsed - killedAt;
+        }
+      }
+      return { killedAt, hiddenAtKill, seenTicks, last, beliefAtKill, firstPress, minSep, spawn: seats[0].spawn };
+    };
+    const three = run(true);
+    const two = run(false);
+    const fmtB = (r) => `seen ${r.seenTicks} ticks, last at (${r.last?.x.toFixed(0)},${r.last?.y.toFixed(0)}); `
+      + `belief (${r.beliefAtKill?.x.toFixed(0)},${r.beliefAtKill?.y.toFixed(0)})@${r.beliefAtKill?.at.toFixed(0)} ms; `
+      + `first press ${r.firstPress < 0 ? 'NEVER' : `+${(r.firstPress / 1000).toFixed(2)} s`}; closest ${r.minSep.toFixed(0)} wu`;
+    check('(b) NON-VACUITY: the hider walked in the bot\'s sight for over a second, and was hidden from it when B fell',
+      three.killedAt > 0 && three.hiddenAtKill && three.seenTicks > 60
+      && Math.hypot(three.last.x - three.spawn.x, three.last.y - three.spawn.y) > 4 * CONCEAL_REVEAL_RADIUS, fmtB(three));
+    check('(b) 🔴 three seats: the belief about an opponent the bot never targeted is where it last SAW it, not its spawn',
+      three.beliefAtKill !== null && three.beliefAtKill.at > 0
+      && Math.hypot(three.beliefAtKill.x - three.last.x, three.beliefAtKill.y - three.last.y) < 1, fmtB(three));
+    check('(b) 🔴 three seats: …so when its fight ends it finds the hider — a press within 8 s',
+      three.firstPress >= 0 && three.firstPress < 8000, fmtB(three));
+    check('(b) CONTROL: two seats — the hider was the target all along, and the bot finds it',
+      two.hiddenAtKill && two.firstPress >= 0 && two.firstPress < 8000, fmtB(two));
+
+    // SIX bots, open floor, nothing to hide behind — so every opponent is visible to every bot on
+    // every tick, and every cell of every bot's row must have been refreshed ON THIS TICK. On
+    // the old rule only the current target's column ever was.
+    {
+      const open = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+      const ids = ['hamburger', 'taco', 'sushi', 'pizza', 'egg', 'waterbottle'];
+      const st = seat48(open, ids.map((c, i) => ({
+        characterId: c, controller: 'ai', maxHp: 1e5,
+        spawn: { x: 1400 + 320 * Math.cos((i * Math.PI) / 3), y: 1000 + 320 * Math.sin((i * Math.PI) / 3) },
+      })));
+      st.phase = 'playing';
+      const n = st.fighters.length;
+      let pairs = 0;
+      let nonTarget = 0;
+      let stale = 0;
+      let example = '';
+      for (let k = 0; k < 300; k++) {
+        stepMatch(st, DT48, new Array(n).fill(null));
+        for (const a of st.fighters) {
+          if (!a.alive) continue;
+          const tgt = nearestLivingOpponent(st, a);
+          for (const o of st.fighters) {
+            if (o === a || !o.alive) continue;
+            pairs++;
+            if (o !== tgt) nonTarget++;
+            const cell = st.sightings[sightingIndex(a.id, o.id, n)];
+            if (cell.at !== st.elapsed) {
+              stale++;
+              if (!example) example = `t=${st.elapsed.toFixed(0)} ${ids[a.id]}->${ids[o.id]} stamped ${cell.at.toFixed(0)}`;
+            }
+          }
+        }
+      }
+      check('(b) 🔴 six seats: every bot\'s belief about every opponent it can see is refreshed on every tick',
+        pairs > 0 && nonTarget > 0 && stale === 0,
+        `${stale} stale of ${pairs} pair-ticks (${nonTarget} about a non-target)${example ? ` · e.g. ${example}` : ''}`);
+    }
+  }
+
+  // ── (c) AI-B3: THE SHIPPED PATCHES WERE PERMANENT AI-DENIAL ZONES ─────────────────────
+  //
+  // `stepAI` walked to where it last saw its target and stopped, and from there it sees
+  // `CONCEAL_REVEAL_RADIUS` (84 wu). `DECISIONS §29.1` turned that into "patches up to roughly
+  // 168 wu across cannot become denial zones" — but a hider who walks to the FAR side of a patch
+  // is measured from where the bot STOPS, the entry edge, and every shipped patch is 110–130 wu
+  // across: its far corners are 123–145 wu from the entry midpoint. §26(f)'s own rule was right
+  // ("no interior point more than 84 wu from where a fighter entered"); the 168 mistranslated it.
+  //
+  // This runs on the SHIPPED layout, read from `tools/arena.gameplay.json` (the gameplay half of
+  // `createKitchenArena()`, which pulls in Three.js and cannot be imported here), against EVERY
+  // patch it declares — so a re-layout is re-tested rather than silently skipped, and the
+  // NON-VACUITY row fails loudly if the file stops declaring any.
+  //
+  // ⚠️ AND IT MUST NOT CRASH WHERE THAT FILE IS ABSENT. A dozen tools (`b3_knownbad`'s `runArm`,
+  // the `bb_*`/`mv_*` probes, `wpx_knownbad`) copy `src/` ALONE to a scratch directory and run
+  // this whole suite there; a throw here would end their run before the summary line they parse.
+  // So a `src/`-only copy runs the same rows on one synthetic patch of each shipped size class
+  // on an open floor, and the NON-VACUITY row's detail names which layout it ran on.
+  {
+    let dump = null;
+    try {
+      dump = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../tools/arena.gameplay.json'), 'utf8'));
+    } catch { dump = null; }
+    const shippedLayout = dump !== null && Array.isArray(dump.concealment);
+    if (!shippedLayout) {
+      dump = {
+        id: 'b5-synthetic', displayName: 'b5 synthetic', width: 2800, height: 2000, center: { x: 1400, y: 1000 },
+        maxSafeRadius: Math.hypot(1400, 1000), playerSpawn: { x: 200, y: 200 }, enemySpawn: { x: 2600, y: 1800 },
+        spawns: [{ x: 200, y: 200 }, { x: 2600, y: 200 }, { x: 200, y: 1800 }, { x: 2600, y: 1800 }, { x: 1400, y: 200 }, { x: 1400, y: 1800 }],
+        cover: [], hazards: [],
+        concealment: [110, 120, 130].map((w, i) => ({ x: 700 * (i + 1), y: 1000, w, h: w, kind: 'synthetic' })),
+      };
+    }
+    const kitchen = { ...dump, build() { return {}; }, update() {} };
+    const patches = dump.concealment ?? [];
+    const HALF = PLAYER_SIZE / 2;
+    const standable = (x, y) => x >= HALF && y >= HALF && x <= dump.width - HALF && y <= dump.height - HALF
+      && !dump.cover.some((o) => Math.abs(x - o.x) < (PLAYER_SIZE + o.w) / 2 && Math.abs(y - o.y) < (PLAYER_SIZE + o.h) / 2);
+    const clear = (a, b) => {
+      const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 5));
+      for (let i = 0; i <= n; i++) if (!standable(a.x + ((b.x - a.x) * i) / n, a.y + ((b.y - a.y) * i) / n)) return false;
+      return true;
+    };
+    // Per patch, the first side (S, N, E, W) with an open straight approach: the bot starts 200 wu
+    // out from that edge's midpoint M, the hider 100 wu out — more than the 84 wu reveal behind it,
+    // so the hider is lost as it crosses the edge (the bot is the slower of the two, so the gap
+    // only grows). The hider walks to M, then on to its goal — the FAR corner (6 wu inside both
+    // far edges) or, for the control, 40 wu past M.
+    const plan = (b) => {
+      for (const [nx, ny] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        const half = nx !== 0 ? b.w / 2 : b.h / 2;
+        const M = { x: b.x + nx * half, y: b.y + ny * half };
+        const Q = { x: M.x + nx * 100, y: M.y + ny * 100 };
+        const S0 = { x: M.x + nx * 200, y: M.y + ny * 200 };
+        const FAR = nx === 0
+          ? { x: b.x - b.w / 2 + 6, y: b.y - ny * (b.h / 2 - 6) }
+          : { x: b.x - nx * (b.w / 2 - 6), y: b.y - b.h / 2 + 6 };
+        const NEAR = { x: M.x - nx * 40, y: M.y - ny * 40 };
+        if (clear(S0, M) && clear(M, FAR) && clear(M, NEAR)) return { b, M, Q, S0, FAR, NEAR };
+      }
+      return null;
+    };
+    const plans = patches.map(plan);
+    const HIDER = 'pizza';
+    const BOT = 'burrito';
+    // Two seats: [hider, bot]. Six: four statues on the shipped spawns FARTHEST from the patch,
+    // the hider in slot 1 and the bot in slot 3 — so the perception matrix is indexed at n = 6.
+    const run = (p, goal, six) => {
+      let seats;
+      let hs = 0;
+      let bs = 1;
+      const hider = { characterId: HIDER, controller: 'human', maxHp: 1e5, spawn: p.Q };
+      const bot = { characterId: BOT, controller: 'ai', maxHp: 1e5, spawn: p.S0 };
+      if (!six) seats = [hider, bot];
+      else {
+        const far = dump.spawns.slice().sort((u, v) => Math.hypot(v.x - p.b.x, v.y - p.b.y) - Math.hypot(u.x - p.b.x, u.y - p.b.y)).slice(0, 4);
+        const statue = (s, c) => ({ characterId: c, controller: 'human', maxHp: 1e5, spawn: { x: s.x, y: s.y } });
+        seats = [statue(far[0], 'egg'), hider, statue(far[1], 'soup'), bot, statue(far[2], 'donut'), statue(far[3], 'taco')];
+        hs = 1;
+        bs = 3;
+      }
+      const st = seat48(kitchen, seats);
+      st.phase = 'playing';
+      const C = st.fighters[hs];
+      const A = st.fighters[bs];
+      const r = { nearest: nearestLivingOpponent(st, A) === C, everHidden: false, settledAt: -1, presses: 0, found: -1 };
+      let leg = 0;
+      for (let k = 0; k < 3600; k++) {
+        const inputs = st.fighters.map(() => null);
+        inputs[hs] = walk48(C, leg === 0 ? p.M.x : goal.x, leg === 0 ? p.M.y : goal.y);
+        const evs = stepMatch(st, DT48, inputs);
+        if (leg === 0 && Math.hypot(C.x - p.M.x, C.y - p.M.y) < 3) leg = 1;
+        if (leg === 1 && !isVisibleFrom(A.x, A.y, C.x, C.y, st.arena, st, C)) r.everHidden = true;
+        if (r.settledAt < 0 && leg === 1 && Math.hypot(C.x - goal.x, C.y - goal.y) < 3) r.settledAt = st.elapsed;
+        if (r.settledAt >= 0) {
+          for (const e of evs) if (isPress48(e, A)) { r.presses++; if (r.found < 0) r.found = st.elapsed - r.settledAt; }
+          if (r.found >= 0 || st.elapsed - r.settledAt > 20_000) break;
+        }
+      }
+      return r;
+    };
+    const tag = (p) => `${p.b.kind}@${p.b.x},${p.b.y}/${p.b.w}`;
+    const fmtC = (rows) => rows.map(({ p, r }) => `${tag(p)} ${r.found < 0 ? 'NEVER' : `+${(r.found / 1000).toFixed(1)}s`}`).join(' · ');
+    const CONTRACT = 2 * CONCEAL_REVEAL_RADIUS;
+    check('(c) NON-VACUITY: the shipped kitchen declares patches, every one inside the 168 wu contract, each with an open approach',
+      patches.length > 0 && patches.every((b) => b.w <= CONTRACT && b.h <= CONTRACT) && plans.every((p) => p !== null),
+      `${shippedLayout ? 'SHIPPED layout' : 'src-only copy: SYNTHETIC patches'} — ${patches.length} patches, sizes ${[...new Set(patches.map((b) => b.w))].join('/')}; planned ${plans.filter(Boolean).length}`);
+    const ok = plans.filter(Boolean);
+    const near = ok.map((p) => ({ p, r: run(p, p.NEAR, false) }));
+    const far = ok.map((p) => ({ p, r: run(p, p.FAR, false) }));
+    check('(c) CONTROL: a hider 40 wu past the entry edge is found at every shipped patch',
+      near.length > 0 && near.every(({ r }) => r.found >= 0), fmtC(near));
+    check('(c) NON-VACUITY: the far-corner hider goes unseen inside every patch, and settles',
+      far.length > 0 && far.every(({ r }) => r.everHidden && r.settledAt > 0), `${far.filter(({ r }) => r.everHidden).length}/${far.length} unseen`);
+    check('(c) 🔴 two seats: a hider in the FAR corner of EVERY shipped patch is found — within 20 s',
+      far.every(({ r }) => r.found >= 0), fmtC(far));
+    // Six seats, the two largest shipped patches (the 130 wu plates) and the first 110.
+    const big = ok.filter((p) => p.b.w === Math.max(...ok.map((q) => q.b.w))).concat(ok.filter((p) => p.b.w === Math.min(...ok.map((q) => q.b.w))).slice(0, 1));
+    const six = big.map((p) => ({ p, r: run(p, p.FAR, true) }));
+    check('(c) 🔴 six seats: …and with four more seats on the map (the largest patches and a smallest one)',
+      six.length >= 2 && six.every(({ r }) => r.nearest && r.everHidden && r.found >= 0), fmtC(six));
+
+    // CONTROL — THE CONTRACT. A region BEYOND it (300 wu) is still a denial zone. The sweep below
+    // only GUARANTEES coverage inside the contract, and §26(f) states the larger-region rule
+    // ("keep concealment patches small"); a search that wandered every region would change that
+    // behaviour too, and this row is what says so.
+    {
+      const R300 = { x: 1400, y: 600, w: 300, h: 300, kind: 'test' };
+      const open = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000, concealment: [R300] });
+      const M = { x: R300.x, y: R300.y + R300.h / 2 };
+      const GOAL = { x: R300.x, y: R300.y - R300.h / 2 + 30 };   // 270 wu past the entry edge
+      const st = seat48(open, [
+        { characterId: HIDER, controller: 'human', maxHp: 1e5, spawn: { x: M.x, y: M.y + 100 } },
+        { characterId: BOT, controller: 'ai', maxHp: 1e5, spawn: { x: M.x, y: M.y + 200 } },
+      ]);
+      st.phase = 'playing';
+      const [C, A] = st.fighters;
+      let leg = 0;
+      let settled = -1;
+      let presses = 0;
+      for (let k = 0; k < 2400; k++) {
+        const evs = stepMatch(st, DT48, [walk48(C, leg === 0 ? M.x : GOAL.x, leg === 0 ? M.y : GOAL.y), null]);
+        if (leg === 0 && Math.hypot(C.x - M.x, C.y - M.y) < 3) leg = 1;
+        if (settled < 0 && leg === 1 && Math.hypot(C.x - GOAL.x, C.y - GOAL.y) < 3) settled = st.elapsed;
+        if (settled >= 0) for (const e of evs) if (isPress48(e, A)) presses++;
+      }
+      check('(c) CONTROL: a 300 wu region — outside the 168 wu contract — is still a denial zone (no search where coverage is not guaranteed)',
+        settled > 0 && presses === 0, `settled ${settled > 0}; bot presses after ${presses}`);
+    }
+  }
+
+  // ── (d) AI-B4: A HIDDEN NEAREST OPPONENT LOCKED THE BOT OUT OF RETURNING FIRE ───────────
+  //
+  // `stepAI` picks its target with `nearestLivingOpponent` on TRUE positions and gates the shot
+  // on that one target's visibility. So with the nearest opponent concealed more than 84 wu
+  // away, the bot shot NOBODY — including a farther, visible opponent standing inside its own
+  // reach and shooting it. At two seats the only opponent is the target (`minSeats` 3).
+  //
+  // The scene is set directly, at the instant it matters: the bot stands where it lost the
+  // hider (its belief IS its own feet), the hider sits 112 wu deep in a shipped-size 130 wu
+  // plate, and a visible shooter opens fire from 126 wu — farther than the hider, inside the
+  // bot's reach. Nothing here depends on how the bot would SEARCH the patch: the question is
+  // only whether the shooter gets shot back while the hider stays hidden.
+  {
+    const PLATE = { x: 1400, y: 600, w: 130, h: 130, kind: 'plate_stack' };
+    const PLATE2 = { x: 900, y: 600, w: 130, h: 130, kind: 'plate_stack' };
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000, concealment: [PLATE, PLATE2] });
+    const BOT = 'hamburger';
+    const SHOOTER = 'taco';
+    const FILLING = CHARACTERS[SHOOTER].weapons.findIndex((w) => w.key === 'Filling');
+    const A0 = { x: PLATE.x, y: PLATE.y + PLATE.h / 2 + 3 };   // just outside the plate's south edge
+    const C0 = { x: PLATE.x, y: A0.y - 112 };                    // 112 wu deep: hidden, and the NEAREST
+    // `extra` seats join the scene as they are, in slot order after A, C and B.
+    const scene = (withB, extra = []) => {
+      const seats = [
+        // Facing NORTH, at the plate it lost the hider in — so a facing that ends up on the shooter
+        // (east) or on E (east) was turned there by the bot, not inherited from a spawn default.
+        { characterId: BOT, controller: 'ai', maxHp: 1e5, spawn: A0, facing: { x: 0, y: -1 } },
+        { characterId: 'pizza', controller: 'human', maxHp: 1e5, spawn: C0 },
+      ];
+      if (withB) seats.push({ characterId: SHOOTER, controller: 'human', maxHp: 1e5, spawn: { x: A0.x + 126, y: A0.y } });
+      seats.push(...extra);
+      const st = seat48(arena, seats);
+      st.phase = 'playing';
+      const [A, C] = st.fighters;
+      const cell = st.sightings[sightingIndex(A.id, C.id, st.fighters.length)];
+      cell.x = A.x; cell.y = A.y; cell.at = 0;   // it lost the hider exactly here
+      const pre = { nearest: nearestLivingOpponent(st, A) === C, hidden: !isVisibleFrom(A.x, A.y, C.x, C.y, st.arena, st, C) };
+      return { st, A, C, pre };
+    };
+    // B aims at A and holds the trigger on Filling (128 wu, reaches A at 126).
+    const shoot = (B, A) => ({ move: { x: 0, y: 0 }, aim: { x: A.x - B.x, y: A.y - B.y }, selectedWeapon: FILLING, attack: true });
+    const fmtD = (r) => `nearest hidden ${r.pre.nearest && r.pre.hidden}; A presses ${r.aPress}; A dealt B ${r.aOnB.toFixed(1)}`
+      + `, others ${r.aOnOthers.toFixed(1)}; B dealt A ${r.bOnA.toFixed(1)}; A faced B on ${r.facingB}/${r.ticks} ticks`;
+    const watch = (extra) => {
+      const { st, A, pre } = scene(true, extra);
+      const B = st.fighters[2];
+      // The scene's geometry, read BEFORE the first tick: the bot moves once it has a target.
+      const d0 = st.fighters.map((f) => Math.hypot(f.x - A.x, f.y - A.y));
+      const vis0 = st.fighters.map((f) => f === A || isVisibleFrom(A.x, A.y, f.x, f.y, st.arena, st, f));
+      const r = { pre, d0, vis0, aPress: 0, aOnB: 0, aOnOthers: 0, bOnA: 0, facingB: 0, ticks: 0, st, A, B };
+      for (let k = 0; k < 120; k++) {
+        const inputs = st.fighters.map(() => null);
+        inputs[2] = shoot(B, A);
+        for (const e of stepMatch(st, DT48, inputs)) {
+          if (isPress48(e, A)) r.aPress++;
+          if (e.type !== 'hit-landed' || e.source?.kind !== 'weapon') continue;
+          if (e.source.attackerId === A.id) { if (e.targetId === B.id) r.aOnB += e.amount; else r.aOnOthers += e.amount; }
+          if (e.source.attackerId === B.id && e.targetId === A.id) r.bOnA += e.amount;
+        }
+        const bx = B.x - A.x;
+        const by = B.y - A.y;
+        r.ticks++;
+        if ((A.facing.x * bx + A.facing.y * by) / Math.hypot(bx, by) > 0.99) r.facingB++;
+      }
+      return r;
+    };
+
+    // THREE SEATS.
+    const three = watch([]);
+    check('(d) NON-VACUITY: three seats — the bot\'s NEAREST opponent is hidden from it, and the shooter lands hits on it',
+      three.pre.nearest && three.pre.hidden && three.bOnA > 0, fmtD(three));
+    check('(d) 🔴 three seats: the bot shoots back at the visible opponent shooting it from inside its reach — within 2 s',
+      three.aOnB > 0, fmtD(three));
+
+    // SIX SEATS. Two more visible opponents — D inside the bot's reach but farther than B, E
+    // visible and OUT of reach — and F hidden in a second plate, farther than the hider. The
+    // rule is the NEAREST VISIBLE opponent INSIDE REACH: B, and nobody else.
+    const reach = offensiveReach(BOT);
+    const six = watch([
+      { characterId: 'egg', controller: 'human', maxHp: 1e5, spawn: { x: A0.x - (reach - 4), y: A0.y } },   // D
+      { characterId: 'soup', controller: 'human', maxHp: 1e5, spawn: { x: A0.x, y: A0.y + 400 } },          // E
+      { characterId: 'donut', controller: 'human', maxHp: 1e5, spawn: { x: PLATE2.x, y: PLATE2.y } },       // F
+    ]);
+    {
+      // Slots: 0 A, 1 C (the hidden nearest), 2 B (the shooter), 3 D, 4 E, 5 F.
+      const [, dC, dB, dD, dE, dF] = six.d0;
+      const [, vC, vB, vD, vE, vF] = six.vis0;
+      const geo = dC < dB && dB < dD && dD <= reach && dE > reach && dF > dC && !vC && vB && vD && vE && !vF;
+      check('(d) NON-VACUITY: six seats — a hidden nearest, the shooter, a farther in-reach D, an out-of-reach E, a hidden F',
+        geo && six.pre.nearest && six.pre.hidden && six.bOnA > 0,
+        `geometry ${geo} (C ${dC.toFixed(0)}, B ${dB.toFixed(0)}, D ${dD.toFixed(0)}, E ${dE.toFixed(0)}, F ${dF.toFixed(0)}, reach ${reach.toFixed(0)}); ${fmtD(six)}`);
+    }
+    check('(d) 🔴 six seats: the bot turns on the NEAREST visible opponent inside its reach — the shooter, and only it',
+      six.aOnB > 0 && six.facingB > six.ticks / 2 && six.aOnOthers === 0, fmtD(six));
+
+    // CONTROL — THE OVER-FIX. A visible opponent OUTSIDE the bot's reach must not pull it off a
+    // hidden nearest one: "prefer whoever I can see" is a different targeting rule (the finder
+    // measured it changing 24 of 66 six-seat winners), not this fix.
+    {
+      const { st, A, pre } = scene(false, [{ characterId: 'soup', controller: 'human', maxHp: 1e5, spawn: { x: A0.x + 300, y: A0.y } }]);
+      const E = st.fighters[2];
+      const d0 = Math.hypot(E.x - A.x, E.y - A.y);
+      let facingE = 0;
+      for (let k = 0; k < 60; k++) {
+        stepMatch(st, DT48, [null, null, null]);
+        const ex = E.x - A.x;
+        const ey = E.y - A.y;
+        if ((A.facing.x * ex + A.facing.y * ey) / Math.hypot(ex, ey) > 0.99) facingE++;
+      }
+      const d1 = Math.hypot(E.x - A.x, E.y - A.y);
+      check('(d) CONTROL: a visible opponent OUT of reach does not pull the bot off its hidden nearest one',
+        pre.nearest && pre.hidden && facingE === 0 && d1 >= d0 - 1,
+        `facing E on ${facingE}/60 ticks; |A-E| ${d0.toFixed(1)} -> ${d1.toFixed(1)}`);
+    }
+  }
+
+  // ── (e) AI-U1: A TARGET STANDING IN THE POT'S BURN PULLED THE BOT IN AND SILENCED IT ─────
+  //
+  // Arrived UNSURE ("observed once, against a statue"); this is the test that decides. A LIVING
+  // human walks into the burn and stands there, 14 s before the collapse — the final circle. At
+  // N<=4 that circle is 140 wu, the same as `AI_RING_MARGIN`, so `dangerSteer`'s ring term is live
+  // on every standable point and pushes toward the centre — which is the pot. Ring push plus the
+  // bot's own intent (toward a target IN the burn) outweighed the pot's push, the bot settled
+  // inside the burn where the pot's `t >= 1` made it `urgent`, and the chase branch stopped
+  // shooting. At six seats the circle is 237 wu and the ring term is ~0 near the pot, so the
+  // defect needs the N<=4 floor: a CONTROL here says so rather than rounding it up to six.
+  {
+    const arena = potArena48();
+    const CX = arena.center.x;
+    const CY = arena.center.y;
+    const run = (n, bot, standR) => {
+      const seats = [
+        { characterId: 'hamburger', controller: 'human', maxHp: 1e5, spawn: { x: CX + 135, y: CY } },
+        { characterId: bot, controller: 'ai', maxHp: 1e5, spawn: { x: CX + 120, y: CY - 70 } },
+      ];
+      for (let i = 2; i < n; i++) seats.push({ characterId: CHARACTER_IDS[(i + 3) % CHARACTER_IDS.length], controller: 'human', maxHp: 1e5, spawn: { x: 300 + 500 * i, y: 200 } });
+      const st = seat48(arena, seats);
+      st.phase = 'playing';
+      st.timeRemaining = SUDDEN_DEATH_REMAINING_MS + 14_000;
+      const [T, A] = st.fighters;
+      const spot = { x: CX + standR, y: CY };
+      const inputs = st.fighters.map(() => null);
+      let at = -1;
+      const r = { presses: 0, burn: 0, ticks: 0 };
+      for (let k = 0; k < 1200 && st.phase === 'playing' && !suddenDeathActive(st.timeRemaining); k++) {
+        inputs[0] = walk48(T, spot.x, spot.y);
+        const evs = stepMatch(st, DT48, inputs);
+        if (at < 0 && Math.hypot(T.x - spot.x, T.y - spot.y) < 3) at = k;
+        if (at >= 0 && k - at >= 60 && k - at < 540) {   // 8 s, after a 1 s settle
+          r.ticks++;
+          for (const e of evs) if (isPress48(e, A)) r.presses++;
+          if (Math.hypot(A.x - CX, A.y - CY) < POT.dangerRadius) r.burn++;
+        }
+      }
+      return r;
+    };
+    const IN = 84;    // inside the 95 wu burn, outside the 73 wu the pot's box allows
+    const OUT = 110;  // in the final circle's safe annulus
+    const sweep = (n) => CHARACTER_IDS.map((c) => ({ c, inn: run(n, c, IN), out: run(n, c, OUT) }));
+    const fmtE = (rows) => rows.map((r) => `${r.c} ${r.inn.presses}p/${r.inn.burn}b (out ${r.out.presses}p)`).join(' · ');
+    const two = sweep(2);
+    check('(e) CONTROL: the target just OUTSIDE the burn is shot by every character\'s bot — the fixture can fire',
+      two.every((r) => r.out.ticks === 480 && r.inn.ticks === 480 && r.out.presses > 0 && r.out.burn === 0), fmtE(two));
+    check('(e) 🔴 two seats: a target standing IN the burn is still shot — every bot presses at least half as often as when it stands outside',
+      two.every((r) => r.inn.presses * 2 >= r.out.presses), fmtE(two));
+    check('(e) 🔴 two seats: …and no bot spends half its time in the burn following it',
+      two.every((r) => r.inn.burn * 2 < r.inn.ticks), fmtE(two));
+    const four = sweep(4);
+    check('(e) 🔴 four seats (the same 140 wu floor): …the same, every character',
+      four.every((r) => r.inn.presses * 2 >= r.out.presses && r.inn.burn * 2 < r.inn.ticks), fmtE(four));
+    const six = sweep(6);
+    check('(e) CONTROL: six seats (a 237 wu floor) — the bot already shot a target standing in the burn; the defect needs N<=4',
+      six.every((r) => r.inn.presses * 2 >= r.out.presses), fmtE(six));
+
+    // CONTROL — THE OVER-FIX. The ring term must still hold a bot inside the final circle when its
+    // target stands out in the fog beyond its reach. A fix that switched the ring term off near
+    // the pot altogether would pass every 🔴 row above and walk the bot out into the fog here.
+    {
+      const st = seat48(arena, [
+        { characterId: 'hamburger', controller: 'human', maxHp: 1e5, spawn: { x: CX + 300, y: CY } },
+        { characterId: 'taco', controller: 'ai', maxHp: 1e5, spawn: { x: CX + 120, y: CY } },
+      ]);
+      st.phase = 'playing';
+      st.timeRemaining = SUDDEN_DEATH_REMAINING_MS + 10_000;
+      let maxDc = 0;
+      for (let k = 0; k < 300; k++) {
+        stepMatch(st, DT48, [null, null]);
+        maxDc = Math.max(maxDc, Math.hypot(st.fighters[1].x - CX, st.fighters[1].y - CY));
+      }
+      check('(e) CONTROL: the ring term still holds a bot inside the final circle while its target stands in the fog',
+        maxDc <= minSafeRadiusFor(2), `farthest ${maxDc.toFixed(1)} wu from the centre, final circle ${minSafeRadiusFor(2)}`);
+    }
+  }
+
+  // ── (f) THE STALE PRICING NOTE: DONUT'S TRAIL-BOOSTED CANDY, MEASURED ───────────────────
+  //
+  // `ai.ts`'s `pressValue` header said the boost was unpriced and that this was safe because
+  // "Donut has exactly one offensive weapon". Donut has four (Ring 9, Sprinkles, Candy 3x4,
+  // Glaze 15) and Candy is the only boosted one. Measured, not argued: on its own trail Candy
+  // lands 3x6 = 18 inside its fan's reach, which beats Glaze's 15 — while the unpriced key read
+  // 12 and picked Glaze. So the boost DOES re-order the kit, and the brief's rule was "price it
+  // only if it does".
+  {
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const KIT = CHARACTERS.donut.weapons;
+    const CANDY = KIT.find((w) => w.key === 'Candy');
+    const GLAZE = KIT.find((w) => w.key === 'Glaze');
+    const boostedKeys = KIT.filter((w) => w.trailBoosted).map((w) => w.key);
+    const SEP = 60;
+    // A Donut at (1000,1000) facing east, a statue `sep` east; `onTrail` lays one live mark of
+    // Donut's own trail under its feet, exactly as §46(c) does.
+    const scene = (controller, onTrail, sep) => {
+      const st = seat48(arena, [
+        { characterId: 'donut', controller, maxHp: 1e5, spawn: { x: 1000, y: 1000 } },
+        { characterId: 'hamburger', controller: 'human', maxHp: 1e5, spawn: { x: 1000 + sep, y: 1000 } },
+      ]);
+      st.phase = 'playing';
+      st.elapsed = 20_000;
+      st.fighters[0].facing = { x: 1, y: 0 };
+      if (onTrail) {
+        st.trailMarks.push({ id: st.nextId++, ownerId: 0, ownerRole: st.fighters[0].role, x: 1000, y: 1000,
+          expiresAt: st.elapsed + TRAIL.durationMs, damagedMask: 0, damaged: false });
+      }
+      return st;
+    };
+    const pick = (onTrail) => {
+      const st = scene('ai', onTrail, SEP);
+      const ev = [];
+      stepAI(st, st.fighters[0], DT48, ev);
+      return { key: ev.find((e) => e.type === 'weapon-fired' || e.type === 'cast-started')?.weaponKey ?? 'none', trail: isOnOwnTrail(st, st.fighters[0]) };
+    };
+    // What the real combat path LANDS for one Candy press on the trail, at `sep`.
+    const landed = (sep) => {
+      const st = scene('human', true, sep);
+      attemptAttack(st, st.fighters[0], KIT.indexOf(CANDY), []);
+      let sum = 0;
+      for (let k = 0; k < 120; k++) {
+        for (const e of stepMatch(st, DT48, [null, null])) {
+          if (e.type === 'hit-landed' && e.targetId === 1 && e.source?.kind === 'weapon' && e.source.attackerId === 0) sum += e.amount;
+        }
+      }
+      return sum;
+    };
+    const priced = (sep) => pressValue(CANDY, sep, true);
+    check('(f) NON-VACUITY: Candy is Donut\'s only boosted weapon, and at 60 wu the boost lands it above Glaze (18 vs 15) while the unboosted key reads 12',
+      boostedKeys.length === 1 && boostedKeys[0] === 'Candy' && pressValue(CANDY, SEP) < pressValue(GLAZE, SEP) && landed(SEP) > pressValue(GLAZE, SEP),
+      `boosted [${boostedKeys}]; Candy unpriced ${pressValue(CANDY, SEP)}, landed on the trail ${landed(SEP)}; Glaze ${pressValue(GLAZE, SEP)}`);
+    const on = pick(true);
+    const off = pick(false);
+    check('(f) CONTROL: off its trail, with every weapon ready, a Donut bot at 60 wu presses Glaze (15 > 12)',
+      !off.trail && off.key === 'Glaze', `pressed ${off.key}`);
+    check('(f) 🔴 ON its own trail it presses Candy — 18 delivered beats Glaze\'s 15',
+      on.trail && on.key === 'Candy', `pressed ${on.key} (on trail ${on.trail})`);
+    const seps = [40, SEP, 115];
+    const exact = seps.map((d) => ({ d, priced: priced(d), landed: landed(d) }));
+    check('(f) 🔴 the priced value IS the sim\'s: `pressValue(Candy, d, onTrail)` equals what the trail-boosted press lands, inside and outside the fan\'s reach',
+      exact.every((r) => r.priced === r.landed), exact.map((r) => `${r.d} wu: priced ${r.priced}, landed ${r.landed}`).join(' · '));
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) {
   console.log('\nFailed checks:');
