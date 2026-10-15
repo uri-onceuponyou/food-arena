@@ -13270,8 +13270,71 @@ console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up
       dead3.bites === 0 && dead3.lost === 0 && dead6.bites === 0 && dead6.lost === 0,
       `bites ${dead3.bites}/${dead6.bites}, HP lost ${dead3.lost}/${dead6.lost}`);
     check('(c) CONTROL: a LIVING Donut\'s marks all stay down — only a dead owner\'s leave',
-      alive3.ownMarksAfterOne === alive3.marksDown && alive3.staleTicks === 0,
+      alive3.marksDown >= 6 && alive3.ownMarksAfterOne === alive3.marksDown && alive3.staleTicks === 0,
       `${alive3.ownMarksAfterOne} of ${alive3.marksDown}`);
+  }
+
+  // ── (d) BH-12: THE HATCHED CHICK RIDES THE BODY IT LATCHED ONTO ───────────────
+  //
+  // Egg's Hatch! strikes, then pecks its latched victim every `peckInterval` with no distance
+  // test — the prototype's rule, and the damage was right. But nothing moved the arrived chick,
+  // so against a victim that walked off it pecked from where it LANDED: drawn on bare floor while
+  // the burst and the number popped on the victim, 115 wu away by the third peck. The 2D
+  // prototype redrew the arrived chick at its target every frame; the 3D port split the sim from
+  // rendering and that line had no home. The sim now carries the chick with its victim, at the
+  // offset it struck from — never snapped to the body's centre, where the body would hide it.
+  //
+  // ⚠️ A DISTANCE TEST IS NOT THE FIX: a peck that needs contact is an 11% nerf to Egg (the
+  // verifier's known-bad). The CONTROL rows hold the damage fixed.
+  {
+    const arena = FLOOR();
+    const HATCH = CHARACTERS.egg.weapons.findIndex((w) => w.key === 'Hatch');
+    const W = CHARACTERS.egg.weapons[HATCH];
+    const run = (n, { flee = true, blocker = false } = {}) => {
+      // Egg faces east at (1000, 1000); the aimed fighter is 100 wu east. With `blocker` a third
+      // fighter stands IN the line at 60 wu, and is the one struck, latched, and running.
+      const seats = [{ char: 'egg', x: 1000, y: 1000, facing: { x: 1, y: 0 } }, { char: 'sushi', x: 1100, y: 1000 }];
+      if (blocker) seats.push({ char: 'hamburger', x: 1060, y: 1000 });
+      while (seats.length < n) seats.push({ char: 'pizza', x: 2400, y: 250 + seats.length * 250 });
+      const st = seatMatch(arena, seats);
+      const latched = blocker ? 2 : 1;
+      const hits = [];
+      for (let tick = 0; tick < 240 && hits.length < W.peckHits; tick++) {
+        const ins = idle(st);
+        if (tick === 0) ins[0] = { ...NEUTRAL, aim: { x: 1, y: 0 }, selectedWeapon: HATCH, attack: true };
+        if (hits.length > 0 && flee) ins[latched] = { ...NEUTRAL, move: blocker ? { x: 0, y: -1 } : { x: 1, y: 0 } };
+        const evs = stepMatch(st, DT, ins);
+        for (const e of evs) {
+          if (e.type !== 'hit-landed' || e.source.kind !== 'weapon' || e.source.weaponKey !== 'Hatch') continue;
+          const p = st.projectiles.find((q) => q.weapon.key === 'Hatch');
+          const gone = evs.find((x) => x.type === 'projectile-destroyed');
+          const cx = p ? p.x : gone.x, cy = p ? p.y : gone.y;
+          hits.push({ target: e.targetId, vx: e.x, vy: e.y, dx: cx - e.x, dy: cy - e.y, amount: e.amount, tick });
+        }
+      }
+      return { hits, latched, radius: st.fighters[latched].hitRadius };
+    };
+    const still = run(2, { flee: false }), flee2 = run(2), flee6 = run(6), block6 = run(6, { blocker: true });
+    const ran = (r) => Math.hypot(r.hits[r.hits.length - 1].vx - r.hits[0].vx, r.hits[r.hits.length - 1].vy - r.hits[0].vy);
+    const onBody = (r) => r.hits.every((h) => Math.hypot(h.dx, h.dy) < r.radius);
+    const heldOffset = (r) => r.hits.every((h) => Math.hypot(h.dx - r.hits[0].dx, h.dy - r.hits[0].dy) < 1e-6);
+    const fmtHits = (r) => r.hits.map((h) => Math.hypot(h.dx, h.dy).toFixed(1)).join('/');
+    check('(d) NON-VACUITY: every arm struck and pecked its full count, and every fleeing victim really moved',
+      [still, flee2, flee6, block6].every((r) => r.hits.length === W.peckHits && r.hits.every((h) => h.target === r.latched))
+      && ran(flee2) > 60 && ran(flee6) > 60 && ran(block6) > 60 && ran(still) === 0,
+      `peck counts ${[still, flee2, flee6, block6].map((r) => r.hits.length).join('/')}, ran ${[flee2, flee6, block6].map((r) => ran(r).toFixed(1)).join('/')}`);
+    check('(d) 🔴 two seats, a fleeing victim: at every peck the chick is still ON it — inside its hit radius',
+      onBody(flee2), `chick-to-victim at each hit: ${fmtHits(flee2)} (radius ${flee2.radius})`);
+    check('(d) 🔴 …at the very offset it struck from — never snapped into the body',
+      heldOffset(flee2), fmtHits(flee2));
+    check('(d) 🔴 six seats, and a BLOCKER that stepped into the line and ran: the chick rides the body it latched onto',
+      onBody(flee6) && heldOffset(flee6) && onBody(block6) && heldOffset(block6),
+      `six ${fmtHits(flee6)} · blocker ${fmtHits(block6)}`);
+    check('(d) CONTROL: the pecks themselves are untouched — the same amounts on the same ticks, still or fleeing',
+      JSON.stringify(flee2.hits.map((h) => [h.amount, h.tick])) === JSON.stringify(still.hits.map((h) => [h.amount, h.tick])),
+      `${JSON.stringify(flee2.hits.map((h) => [h.amount, h.tick]))} vs ${JSON.stringify(still.hits.map((h) => [h.amount, h.tick]))}`);
+    check('(d) CONTROL: a victim that stands still keeps the chick exactly where it struck',
+      heldOffset(still) && onBody(still), fmtHits(still));
   }
 }
 

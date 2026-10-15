@@ -1656,6 +1656,30 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
         removeProjectile(state, i, 'expired', events);
         continue;
       }
+      // ── THE CHICK RIDES THE BODY IT LATCHED ONTO (BH-12) ────────────────────────
+      //
+      // The peck below has no distance test — the 2D prototype's rule, and the damage is right.
+      // But nothing ever MOVED the arrived chick, so against a victim that walked off it pecked
+      // from where it LANDED: drawn on bare floor while the burst and the number popped on the
+      // victim, 115 wu away by the third peck (`sim.test.mjs` §47(d)). The prototype redrew the
+      // arrived chick at its target every frame; the port split the sim from rendering and that
+      // line had no home. So the chick moves by exactly what its victim moved since the last
+      // step — it keeps the OFFSET it struck from rather than snapping to the body's centre,
+      // where the body would hide it at either camera.
+      //
+      // ⚠️ `p.tx`/`p.ty` ARE THE VICTIM'S POSITION AT THE LAST STEP — the field's own doc ("the
+      // target's position when this projectile last stepped"), re-anchored on the body actually
+      // struck at the strike below. After arrival the range budget they were kept for is never
+      // read again (this branch `continue`s), so no new `Projectile` field: a new key would show
+      // up in every bit-identity differ that walks the state with `Object.keys`.
+      // ⚠️ POSITION ONLY. Nothing below reads `p.x`/`p.y` but the final `projectile-destroyed`;
+      // the peck's damage, its timing and its `hit-landed` (at the victim) are untouched.
+      if (p.tx !== undefined && p.ty !== undefined) {
+        p.x += target.x - p.tx;
+        p.y += target.y - p.ty;
+      }
+      p.tx = target.x;
+      p.ty = target.y;
       p.peckTimer = (p.peckTimer ?? 0) + dt;
       if (p.peckTimer >= (w.peckInterval ?? 500)) {
         p.peckTimer = 0;
@@ -1784,6 +1808,11 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
         p.arrived = true;
         p.peckTimer = 0;
         p.hitsSoFar = 1;
+        // The latch's anchor (BH-12): from here on `tx`/`ty` follow the body STRUCK — which is
+        // not the aimed `target` when a bystander stepped into the line — so the peck branch
+        // above moves the chick with it.
+        p.tx = victim.x;
+        p.ty = victim.y;
         continue;
       }
       removeProjectile(state, i, 'hit-target', events);
