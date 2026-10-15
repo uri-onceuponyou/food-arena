@@ -228,12 +228,25 @@ export function createPointerLock(opts: PointerLockOptions): PointerLockControll
     lastError = reason === undefined ? 'refused' : String((reason as Error)?.message ?? reason);
     publishDebug();
     if (disposed || !wantsLock || isLocked()) return;
+    // A decided match has nothing to freeze and nothing to resume into — see `matchActive`.
+    if (!matchActive) { setState('hidden'); return; }
     opts.pause();
     setState('lost');
   }
 
+  /**
+   * ⚠️ **NEVER WHILE THE MATCH IS NOT ACTIVE (ML-6's last leg).** `setMatchActive(false)`
+   * gives the mouse back at the whistle so the result card's buttons work — but `engage()`,
+   * the blur path, a refused request and an unexpected loss all ignored `matchActive`, so a
+   * window blur on the result card raised the "Paused / Click to resume" scrim over it, and
+   * clicking it RE-CAPTURED the mouse on a screen whose buttons need a free cursor. Measured
+   * by `tools/tmp/b2_input.mjs` §PL on `8586f00` (`?pointerLock=sim`): blur -> state 'lost',
+   * session paused; a click on the frame -> captured. Every one of the four now asks first.
+   * Play Again still re-captures: `GameSession.restart()` → `spawnMatch()` → `notifyPhase()`
+   * re-activates ('countdown') before its `resume()` reaches here.
+   */
   function engage(): void {
-    if (disposed || !available || !wantsLock || isLocked() || pending) return;
+    if (disposed || !available || !matchActive || !wantsLock || isLocked() || pending) return;
     if (simulated) {
       simLocked = true;
       onLockChange();
@@ -314,8 +327,8 @@ export function createPointerLock(opts: PointerLockOptions): PointerLockControll
     }
 
     // Unexpected loss: Esc, alt-tab, window blur, tab switch. The player has no
-    // control, so the match must not keep running.
-    if (wantsLock) {
+    // control, so the match must not keep running — unless it is not running at all.
+    if (wantsLock && matchActive) {
       opts.pause();
       setState('lost');
     } else {
@@ -332,7 +345,7 @@ export function createPointerLock(opts: PointerLockOptions): PointerLockControll
   // Belt and braces. `pointerlockchange` already fires on blur in every engine we
   // support, but a match left running because one engine did not is a lost fight.
   const onBlur = (): void => {
-    if (disposed || !wantsLock || !available) return;
+    if (disposed || !wantsLock || !available || !matchActive) return;
     if (isLocked()) return;
     if (state !== 'lost') {
       opts.pause();

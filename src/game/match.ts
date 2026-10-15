@@ -1109,6 +1109,10 @@ export class GameSession {
 
   /** Start a brand-new match: fresh sim state, fresh models, camera snapped back. */
   restart(): void {
+    // ⚠️ `spawnMatch()` ends in `notifyPhase()`, which marks the pointer lock ACTIVE again
+    // ('countdown') BEFORE the resume below — and `pointerLock.engage()` refuses while it is
+    // not (a decided match must never re-capture). That order is load-bearing for Play Again;
+    // `tools/tmp/b2_input.mjs` §PL pins it (`--plant no-reactivate` drops the notify: red).
     this.spawnMatch();
     // Via resume(), not `isPaused = false`, so a restart re-captures the mouse. The
     // only caller is the HUD's Play Again button, so the request carries the user

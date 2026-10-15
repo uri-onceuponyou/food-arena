@@ -30,6 +30,8 @@
  *                          during 3-2-1, so a countdown click fires at GO   → §F2 countdown red
  *   --plant held-latch     the latch is consumed only when not held — a held press leaves a
  *                          stale latch that fires one extra frame after release → §F2 held red
+ *   --plant no-reactivate  spawnMatch() without its notifyPhase(), so restart()'s resume meets
+ *                          engage()'s new !matchActive gate → §PL Play Again red
  * Each plant must MATCH the served source or the run is void (`plant hits` row).
  *
  *   node tools/tmp/sx_snap.mjs --root <worktree> -- node tools/tmp/b2_input.mjs --url '{URL}'
@@ -73,6 +75,14 @@ const PLANTS = {
   'short-circuit': {
     from: /const pressed = this\.input\.takeAttackPress\(\);\s*const attack = playing && \(this\.input\.attackHeld \|\| pressed\);/,
     to: 'const attack = playing && (this.input.attackHeld || this.input.takeAttackPress());',
+  },
+  // §PL: `spawnMatch()` without the `notifyPhase()` that re-activates the pointer lock before
+  // `restart()` resumes. ⚠️ The first cut of this plant removed a `setMatchActive(true)` added
+  // to `restart()` — and the row stayed GREEN under it, because `spawnMatch()` already
+  // re-activates synchronously: the added line was redundant and was taken back out.
+  'no-reactivate': {
+    from: /this\.lastPhase = null;\n(\s*)this\.notifyPhase\(\);/,
+    to: 'this.lastPhase = null;',
   },
   'held-latch': {
     from: /const pressed = this\.input\.takeAttackPress\(\);/,
