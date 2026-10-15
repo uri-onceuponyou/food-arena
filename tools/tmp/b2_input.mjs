@@ -40,6 +40,16 @@
  *
  * Exit 0 iff every row passed. Read-only on the game: URL params, storage, synthetic DOM
  * events and CDP input; the plants rewrite the SERVED copy, never a file.
+ *
+ * ── REDS THESE FIXES CAUSE IN OTHER TOOLS, BY CONSTRUCTION (not edited — not B2's files) ──
+ *   tools/tmp/touchprobe.mjs  'touch/no-fa-touch-before-a-real-finger' (fa-touch=true) and
+ *                             'weapons/slots-inert-before-any-touch' (pointer-events=auto):
+ *                             both assert the pre-F7 rule on an isMobile context. Measured
+ *                             with --url on snapshots: green on 8586f00 in 2/2 runs, red on
+ *                             the F7 tree in 2/2. ⚠️ touchprobe reads `--url` and NOT
+ *                             PREVIEW_BASE — without the flag it silently measures :5173.
+ *   tools/audio-probe.mjs     same trap with `--base`: under sx_snap it still loads :5173
+ *                             unless `--base '{URL}'` is passed.
  */
 import { chromium } from 'playwright';
 import { mkdirSync } from 'node:fs';
