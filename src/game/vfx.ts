@@ -1900,6 +1900,95 @@ function buildStreakTexture(): THREE.CanvasTexture {
  * shading — this is what turns it into a directional swoosh with a bright leading
  * edge (like a blade catching light) instead of one uniform flat colour.
  */
+// ═══════════════════════════════════════════════════════════════════════════════
+// THE MELEE SWOOSH — a swept CRESCENT, not a filled fan (graphics campaign V1)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// `docs/REVAMP.md` §2.5: *"melee swings are flat pie fans"*. The wedge filled the WHOLE cone
+// from the pivot to the rim at 0.88 for 0.3 s — a static slice of colour on the floor with no
+// direction of travel, drawn from the attacker's own feet outward (over his own body at the
+// pivot). A swing is a MOTION: the reference grammar is a crescent band near the reach, thick
+// in the middle and tapered at both ends, with a bright leading edge that SWEEPS across the
+// cone and a tail that fades behind it.
+//
+// So: the same pool, the same hitbox — outer radius is the weapon's `range`, angular span its
+// `cone` — but the mesh is an annulus SECTOR from `MELEE_SWOOSH_INNER` of the reach outward
+// (nothing at the pivot, nothing on the attacker), and its alpha map is a crescent whose
+// leading edge sweeps from one side of the cone to the other over `MELEE_SWOOSH_SWEEP_S`
+// (a per-slot texture offset — `WedgeSlot.crescentMap`), then the whole band fades.
+const MELEE_SWOOSH_INNER = 0.42;
+const MELEE_SWOOSH_SWEEP_S = 0.11;
+
+/** Crescent alpha/value map. u (x) runs along the sweep and only its LEFT HALF is the swoosh
+ *  (tail at 0, leading edge at 0.5); the right half is empty so `offset.x` can slide the
+ *  swoosh in from nothing (see `spawnMeleeArc`). v (y) is radial, 0 inner -> 1 outer. */
+function buildCrescentTexture(): THREE.CanvasTexture {
+  const w = 256; const h = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d')!;
+  const img = ctx.createImageData(w, h);
+  const ss = (a: number, b: number, x: number): number => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  for (let y = 0; y < h; y++) {
+    // flipY is OFF, so uv.y = 0 samples canvas row 0: row index IS v (0 inner -> 1 outer).
+    // (The first build wrote 1 - row and drew the hot lip at the INNER radius — the swoosh
+    // came out a small blob near the attacker, short of the reach it is meant to mark.)
+    const v = (y + 0.5) / h;
+    for (let x = 0; x < w; x++) {
+      const u = (x + 0.5) / w;
+      let a = 0; let val = 0;
+      if (u < 0.5) {
+        const s = u / 0.5;                  // 0 tail .. 1 leading edge
+        // Crescent thickness: thickest just behind the leading edge, tapering to nothing at
+        // the tail and to a rounded point at the edge itself.
+        const thick = 0.92 * Math.pow(Math.sin(Math.PI * Math.min(1, s * 0.92 + 0.04)), 0.65);
+        const inner = 1 - thick;
+        a = ss(inner, inner + 0.22, v) * (1 - ss(0.94, 1.0, v)) * Math.pow(s, 0.8) * (1 - ss(0.985, 1.0, s));
+        // Value: a hot outer lip, the body a step down, the inner edge softest.
+        val = 0.62 + 0.38 * ss(inner + 0.25, 0.9, v);
+      }
+      const i = (y * w + x) * 4;
+      const g = Math.round(255 * val);
+      img.data[i] = g; img.data[i + 1] = g; img.data[i + 2] = g; img.data[i + 3] = Math.round(255 * a);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.flipY = false;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.repeat.set(0.5, 1);
+  tex.needsUpdate = true;
+  return tex;
+}
+
+/** Annulus sector in the XZ plane, apex at the origin pointing +Z like `buildWedgeGeometry`:
+ *  u along the sweep (0 at -cone/2), v radial (0 at `inner`, 1 at the rim). */
+function buildCrescentGeometry(radiusM: number, coneDeg: number, innerFrac: number): THREE.BufferGeometry {
+  const half = THREE.MathUtils.degToRad(THREE.MathUtils.clamp(coneDeg, 1, 360)) / 2;
+  const segments = Math.max(10, Math.round(coneDeg / 6));
+  const r0 = radiusM * innerFrac;
+  const positions: number[] = [];
+  const uvs: number[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const a = -half + (i / segments) * half * 2;
+    const sx = Math.sin(a); const cz = Math.cos(a);
+    positions.push(sx * r0, 0, cz * r0, sx * radiusM, 0, cz * radiusM);
+    uvs.push(i / segments, 0, i / segments, 1);
+  }
+  const indices: number[] = [];
+  for (let i = 0; i < segments; i++) {
+    const a = i * 2; const b = a + 1; const c = a + 2; const d = a + 3;
+    indices.push(a, c, b, b, c, d);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
 function buildWedgeGradientTexture(): THREE.CanvasTexture {
   const w = 8;
   const h = 64;
@@ -2691,6 +2780,11 @@ interface WedgeSlot {
   life: number;
   maxLife: number;
   startOpacity: number;
+  /** This slot's OWN view of `crescentTex` (a clone: same GPU image, own `offset`), so the
+   *  sweep reveal can be animated per swing — see `spawnMeleeArc`. */
+  crescentMap: THREE.Texture;
+  /** True while the slot is drawing a melee crescent (the reveal runs in `updateEffects`). */
+  crescent: boolean;
 }
 
 interface RingSlot {
@@ -2889,6 +2983,8 @@ export class VfxLayer {
   private readonly streakTex = buildStreakTexture();
   private readonly shardTex = buildShardTexture();
   private readonly wedgeGradientTex = buildWedgeGradientTexture();
+  /** The melee swoosh's crescent map; every wedge slot draws through its own clone. */
+  private readonly crescentTex = buildCrescentTexture();
   /** The cast telegraph's outer band. Deliberately NOT `wedgeGradientTex` — see
    * `buildTelegraphRimTexture` for the rendered-PNG evidence that reusing it turned the
    * two-tone telegraph into one pale film. */
@@ -3672,6 +3768,8 @@ export class VfxLayer {
       // swept cone should read as a clean, held shape, not something dissolving
       // from the instant it appears.
       w.mat.opacity = w.startOpacity * (1 - Math.pow(t, 1.8));
+      // The swoosh's leading edge crosses the cone in `MELEE_SWOOSH_SWEEP_S` (ease-out).
+      if (w.crescent) w.crescentMap.offset.x = 0.5 - 0.5 * easeOutCubic(Math.min(1, w.life / MELEE_SWOOSH_SWEEP_S));
     }
 
     for (const r of this.rings) {
@@ -4435,17 +4533,22 @@ export class VfxLayer {
     bumpVfxQaCount('meleeArc');
     const origin = groundPos(xWU, yWU);
     const radiusM = wu(rangeWU);
-    const key = `${Math.round(coneDeg)}_${radiusM.toFixed(3)}`;
+    // A CRESCENT, swept — see "THE MELEE SWOOSH". The old filled fan (`buildWedgeGeometry`
+    // from the pivot) is kept for the impact star decal's pool-mate only.
+    const key = `crescent_${Math.round(coneDeg)}_${radiusM.toFixed(3)}`;
     let geo = this.wedgeGeoCache.get(key);
     if (!geo) {
-      geo = buildWedgeGeometry(radiusM, coneDeg);
+      geo = buildCrescentGeometry(radiusM, coneDeg, MELEE_SWOOSH_INNER);
       this.wedgeGeoCache.set(key, geo);
     }
     const w = this.allocWedge();
+    w.mat.map = w.crescentMap;
+    w.crescentMap.offset.x = 0.5;   // nothing yet: the sweep slides the swoosh in
+    w.crescent = true;
     w.active = true;
     w.life = 0;
     w.maxLife = 0.3;
-    w.startOpacity = 0.88;
+    w.startOpacity = 0.95;
     w.mesh.visible = true;
     w.mesh.geometry = geo;
     w.mesh.rotation.y = Math.atan2(facing.x, facing.y);
@@ -5542,7 +5645,8 @@ export class VfxLayer {
     mesh.renderOrder = 5;
     this.group.add(mesh);
     alphaSafe(mesh);
-    const slot: WedgeSlot = { mesh, mat, active: false, life: 0, maxLife: 1, startOpacity: 0.6 };
+    const slot: WedgeSlot = { mesh, mat, active: false, life: 0, maxLife: 1, startOpacity: 0.6,
+      crescentMap: this.crescentTex.clone(), crescent: false };
     this.wedges.push(slot);
     return slot;
   }
@@ -5633,6 +5737,7 @@ export class VfxLayer {
       slot.mat.map = this.wedgeGradientTex;
       slot.mat.needsUpdate = true;
     }
+    slot.crescent = false;
     // ── AND THE SAME RESET FOR THE VERTEX-COLOUR MULTIPLY, FOR THE SAME REASON ────
     // The star decal below turns it ON (see `spawnImpactStarDecal`), the melee arc
     // wants it OFF because its structure is already in `wedgeGradientTex`'s apex→rim
@@ -5748,7 +5853,8 @@ export class VfxLayer {
     this.telegraphRimTex.dispose();
     for (const p of this.particles) p.mat.dispose();
     for (const c of this.unionCores) c.mat.dispose();
-    for (const w of this.wedges) w.mat.dispose();
+    for (const w of this.wedges) { w.mat.dispose(); w.crescentMap.dispose(); }
+    this.crescentTex.dispose();
     for (const r of this.rings) r.mat.dispose();
     this.wedgeGeoCache.forEach((g) => g.dispose());
     this.wedgeGeoCache.clear();
