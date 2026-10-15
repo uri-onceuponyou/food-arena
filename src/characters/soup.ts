@@ -2159,125 +2159,13 @@ export class SoupCharacter extends BaseCharacter {
     const trimMat = toonMat({ color: RIM_TRIM, roughness: 0.4 });
     const bootMat = toonMat({ color: BOOT_STONE, roughness: 0.7 });
 
-    this.rig.dressLimbs((part: LimbPart, size) => {
-      switch (part) {
-        case 'upperArmL':
-        case 'upperArmR': {
-          const side = part === 'upperArmL' ? 1 : -1;
-          // WAS: `radius * 0.60` constant, `bowOut 1.0`. A quadratic bezier whose
-          // control point is a FULL segment-length out to the side is not a bowed
-          // limb — it is a hook, and with the forearm hooking back the other way at
-          // -0.85 the pair rendered as a tentacle. `lobby_yaw35.png` before.
-          //
-          // 1.0 -> 0.42, and the segment now tapers 0.72 -> 0.60 of `armRadius` so
-          // it hands off to the forearm at exactly the forearm's own top radius.
-          // "A moulded loop of roughly constant thickness" was the old intent and it
-          // is what produced the visible step at the elbow: two constant-radius
-          // tubes at different constants cannot meet.
-          // 0.72/0.60 -> 0.62/0.52 of `armRadius`. The ARM/LEG separator this pass is
-          // for needs a THICKNESS gap as well as a value one: at 0.72 the upper arm
-          // was 0.83 of the thigh's top radius, which is not a difference a viewer
-          // reads. At 0.62 it is 0.60, and soup keeps STOUT's planted read because
-          // the LEGS carry it — they got thicker in the same edit.
-          return buildHandleArc(size.len, size.radius * 0.62, size.radius * 0.52, side, 0.42, 0.10, sleeveMat);
-        }
-        case 'forearmL':
-        case 'forearmR': {
-          const side = part === 'forearmL' ? 1 : -1;
-          // Bows the OTHER way relative to the upper arm, so the two segments
-          // together read as one D-shaped handle looping back toward the body
-          // rather than a straight tube bent once at a joint.
-          // -0.85 / 0.12 -> -0.38 / 0.34. Measured: both forearms delivered 0.337 and
-          // 0.383 with the food mass covering **0.005 and 0.004** of them — the bowl
-          // was not the occluder, the character's own upper arm was, because the
-          // forearm bowed back INSIDE the D the upper arm makes. Swapping most of the
-          // inward bow for a forward one keeps the D reading while putting the segment
-          // where this camera could see it. **Both variants measured WORSE and were
-          // reverted**: -0.38/0.34 gave 0.322/0.386 and +0.34/0.34 gave 0.257/0.294,
-          // against the original's 0.337/0.383. Recorded because the reasoning was
-          // sound and the result was not — whatever is covering these forearms is not
-          // answered by the bow, and the next attempt should isolate the occluder with
-          // an ID-buffer pass (`tools/tmp/islands.mjs`) before moving geometry again.
-          //
-          // ── AND THAT WHOLE PARAGRAPH IS ABOUT THE WRONG QUANTITY ──────────────
-          // Every number in it is `delivered` at the MATCH camera. Uri's complaint
-          // is *"limbs disattached or intersecting with the body that causes weird
-          // shapes"*, at the LOBBY camera, and it is about SHAPE, not coverage. The
-          // bow is now -0.28 rather than -0.85: enough to keep the D-shaped handle
-          // read the design asked for, not enough to hook the forearm back inside
-          // the upper arm's own arc. Radii run 0.60 -> 0.46 of `armRadius`, starting
-          // exactly where the upper arm ended, so there is no step at the elbow.
-          // ⚠️ If `delivered` regresses at 58 degrees, the answer recorded above
-          // still stands: isolate the occluder before moving the bow again.
-          return buildHandleArc(size.len, size.radius * 0.52, size.radius * 0.42, side, -0.28, 0.22, cuffMat, false);
-        }
-        case 'handL':
-        case 'handR': {
-          // Sized against the FOREARM it terminates, not against `handRadius`.
-          // `handRadius` is an independent rig constant, and at `0.062H` it made this
-          // sphere `0.114H` across — **1.40x the forearm tube's diameter and 1.37x
-          // the whole forearm's LENGTH**. Ablation put 25.9% of the right forearm's
-          // entire footprint behind it (`tools/tmp/occluder.mjs`), which is the same
-          // defect round 1 found on waterbottle: "the occluder was its own hand,
-          // which is wider than the forearm was long."
-          //
-          // It is also redundant geometry — `buildHandleArc` already closes the
-          // segment with a `radius * 0.9` knob — so matching the tube is what the
-          // file's own description asked for all along: "a bowl handle terminates as
-          // a rounded lip of the same moulded ceramic, not a separate hand shape
-          // grafted on." `handRadius` itself is left alone because the ladle prop is
-          // sized off it.
-          // 1.30 x the forearm tube (sphere radius 1.20x it) is the measured
-          // setting, not a guessed one. At the old `handRadius` sizing — 1.40x the
-          // tube and 2.09x the forearm's whole LENGTH — the forearms delivered
-          // 0.337 / 0.383. At 1.15x they delivered 0.515 / 0.560 but the hand itself
-          // dropped to 0.379, because a knob that barely clears the tube is not a
-          // shape. 1.30x, with the forearm's duplicate end knob removed, is the
-          // point where BOTH clear the 0.50 gate and soup passes idle for the first
-          // time. `handRadius` itself is untouched because the ladle prop is sized
-          // off it.
-          //
-          // The SIZE is kept exactly (`armRadius * 0.92 * 0.52 * 1.30`, measured, and
-          // the forearm's own tip radius is now 0.46 of `armRadius` which lands
-          // within 3% of the old 0.92*0.52) — only the MATERIAL changes, from the
-          // arm's cream to a cream CLOTH mitt against a grey sleeve. That is the one
-          // value break the old "one continuous loop of the bowl's own material"
-          // read could never have, and `rules.ts` names it: cream mitts.
-          // 1.30 -> 1.55 of the forearm's tip, plus a thumb and a wrist cuff. See
-          // `buildHandleCap`: this is the ARM/LEG separator, and the numbers that
-          // capped the old sizing are still respected (1.55x the tip is 1.24x the
-          // tube, under the 1.40x that measured as an occluder).
-          const forearmR = this.rig.metrics.armRadius * 0.92 * 0.52;
-          return buildHandleCap(forearmR * 1.55, mittMat, trimMat, part === 'handL' ? 1 : -1);
-        }
-        case 'thighL':
-        case 'thighR':
-          // 1.0/0.93 -> 1.04/0.94: thicker than the arm by construction (see the
-          // upper-arm note), and STOUT is the archetype whose whole read is planted.
-          return taperedLimb(size.len, size.radius * 1.04, size.radius * 0.94, legMat);
-        case 'shinL':
-        case 'shinR':
-          // Same material, and the shin's TOP radius is now exactly the thigh's
-          // BOTTOM radius (0.93). It was already written that way and it did not
-          // hold, because `taperedLimb` silently replaced the thigh's `rBot` with
-          // `len * 0.45` on any segment shorter than it is thick — see the fix in
-          // that function. So "no taper break at the knee" was true of the numbers
-          // passed in and false of the geometry that came out.
-          // 🚨 0.93 -> 1.044, AND THE COMMENT ABOVE WAS WRONG ABOUT ITS OWN NUMBER.
-          // "The shin's TOP radius is now exactly the thigh's BOTTOM radius (0.93)"
-          // was true of the FACTOR and false of the RADIUS: `dressLimbs` hands the
-          // thigh `legRadius` and the shin `legRadius * 0.9`, so `0.93` on each gave
-          // 0.1445 m against 0.1301 m — a **10% step at the knee**, which is exactly
-          // the two-stacked-cups defect `taperedLimb`'s own cap fix was written to
-          // remove, surviving in the call site. 0.94 / 0.9 = 1.0444 makes them equal.
-          return taperedLimb(size.len, size.radius * 1.0444, size.radius * 0.95, legMat);
-        case 'footL':
-        case 'footR':
-          return buildWorkBoot(size.len, bootMat, trimMat, size.groundY);
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`): one material per limb (no two-tone bead at
+    // the elbow or knee), a mitten attached over the wrist, a shoe seated on the floor. WAS:
+    // pot-handle ARCS for arms (a sleeve arc over a cuff arc), cream handle-cap hands with a trim
+    // ring, stoneware posts for legs, and a trimmed work boot.
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: sleeveMat, leg: legMat, hand: mittMat, shoe: bootMat,
+    }));
   }
 
   /** The rig owns all body motion; the base class's whole-body pass would fight it. */

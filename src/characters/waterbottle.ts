@@ -1764,85 +1764,13 @@ export class WaterBottleCharacter extends BaseCharacter {
     const capMat = toonMat({ color: CAP, roughness: 0.4 });
     const capDarkMat = toonMat({ color: CAP_DARK, roughness: 0.4 });
 
-    this.rig.dressLimbs((part: LimbPart, size) => {
-      switch (part) {
-        // ⚠️ A THIRD lever was tried here and reverted — a `CAP_DARK` joint collar
-        // on every ribbed segment. Four `dLcontact` pairs got worse (hipL|kneeL by
-        // 0.0736, nineteen 1/255 floors) and the pair it was aimed at moved
-        // +0.0020. The numbers and the render are in the block above `ribbedLimb`.
-        // ── 🚨 ARMS AND LEGS WERE THE SAME OBJECT, SO THIS READ AS A SPIDER ──────
-        // Before this round the four slots below called ONE helper with ONE material
-        // and radii that differed by at most 0.18 of a radius:
-        //     upperArm 1.02/0.72   forearm 0.70/0.52
-        //     thigh    1.00/0.84   shin    0.84/0.66
-        // — four identical blue ribbed chains, differing only in the terminal cap,
-        // which is the smallest element on screen and is DARK NAVY on both ends
-        // (`buildCapHand` and `buildBottleFoot` share `capDarkMat`). A human at the
-        // lobby camera could not say which pair was which, and the honest read of
-        // the render is a spider.
-        //
-        // Three separations, in decreasing order of how far they carry:
-        //
-        //   1. SHAPE. The ribbed hose is now the ARM only (`ribCount 3`). The legs
-        //      are `ribCount 0` — smooth tapered columns, the bottle's own body
-        //      profile in miniature, with the ankle ridge as their one break. A
-        //      corrugated flexible tube and a smooth rigid column are different
-        //      objects at 8 px wide; two corrugated tubes are not.
-        //   2. MASS. **The arms were FATTER THAN THE LEGS**, which no animal is:
-        //      STUB's `armRadiusF` is 0.062 and `legRadiusF` is 0.058, and the
-        //      multipliers above then made the upper arm wider still. Reversed — the
-        //      legs are now ~1.5x the arm's width and the arms are genuinely thin.
-        //   3. ATTACHMENT (see the block below `dressLimbs`'s signature for the
-        //      probe numbers). The upper arm gets a hard deltoid flare, 1.62 -> 0.60
-        //      over one bone, so its top is a shoulder rather than a plate.
-        // ⚠️ 1.62 -> 1.24 -> 1.06, and both intermediate values were rendered and
-        // rejected by eye. At 1.62 the shoulder ball is 0.21 m across on a 2.1 m
-        // character and, because the ring is perpendicular to an arm that hangs ~20
-        // degrees off vertical, it projects almost horizontally: both shoulders read
-        // as WATER WINGS (`shots/cc/after2/waterbottle_p20.png`). 1.24 was still a
-        // bulb on a stalk (`shots/cc/after3/`). 1.06 reaches inward to
-        // 0.449 - 0.138 = 0.311 against a 0.354-0.421 wall — still 4-11 cm inside the
-        // shell, so the arm is still buried — and it stops being a separate object.
-        // The arm/leg separation does not depend on it: the legs are 1.42/1.20 radii
-        // against the arm's 1.06/0.72, on a bigger radius, all the way down.
-        case 'upperArmL':
-        case 'upperArmR':
-          return ribbedLimb(size.len, size.radius * 1.06, size.radius * 0.72, plasticMat, 3, 16, size.len * 0.24);
-        // 2 ribs, not 3. The forearm is the thinnest segment on the character (0.09 m
-        // across) and three bulges on it is the bead-chain read this whole round is
-        // about, at the one place where there is no room for a wave.
-        case 'forearmL':
-        case 'forearmR':
-          return ribbedLimb(size.len, size.radius * 0.72, size.radius * 0.54, plasticMat, 2, 16, size.len * 0.12, 0.08);
-        case 'handL':
-        case 'handR':
-          return buildCapHand(size.radius * 0.86, capMat, capDarkMat);
-        case 'thighL':
-        case 'thighR':
-          // `ribCount 0` — smooth. And a bigger `rise` than the arm gets, because the
-          // probe says the bottle is WIDER above the hip (0.455 at the elbow band vs
-          // 0.405 at the hip) and NARROWER above the shoulder (the neck): rising is
-          // worth something on the leg and nothing on the arm.
-          return ribbedLimb(size.len, size.radius * 1.42, size.radius * 1.20, plasticMat, 0, 20, size.len * 0.40);
-        case 'shinL':
-        case 'shinR': {
-          const g = new THREE.Group();
-          g.add(ribbedLimb(size.len, size.radius * 1.20, size.radius * 0.94, plasticMat, 0, 20, size.len * 0.14));
-          // One ridge at the ankle. The legs gave up the ribbing to separate from the
-          // arms; this keeps ONE grip-ridge on them so they still belong to the same
-          // moulded-plastic object. ⚠️ Deliberately ONE, at the ankle, not a collar at
-          // the knee — a collar at every joint is the `cuffedLimb` experiment above,
-          // which cost `hipL|kneeL` 0.0736 of `dLcontact` (nineteen 1/255 floors).
-          g.add(ridgeRing(-size.len * 0.86, size.radius * 0.99, size.radius * 0.09, capMat));
-          return g;
-        }
-        case 'footL':
-        case 'footR':
-          return buildBottleFoot(size.radius, capDarkMat, plasticMat);
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`): one material per limb (no two-tone bead at
+    // the elbow or knee), a mitten attached over the wrist, a shoe seated on the floor. WAS:
+    // glossy plastic bead stacks — the 'bead-stack limbs' of REVAMP §2.6 — ending in cap-blue
+    // knobs. Cap-blue mittens and shoes now.
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: plasticMat, leg: plasticMat, hand: capMat, shoe: capMat,
+    }));
   }
 
   /** The rig owns all body motion; the base class's whole-body pass would fight it. */

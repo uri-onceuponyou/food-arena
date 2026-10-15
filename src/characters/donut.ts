@@ -680,140 +680,16 @@ export class DonutCharacter extends BaseCharacter {
     // half of `kneeL|footL`'s 0.0015 miss against the 0.10 gate; the shin tone
     // above carries the other half.
     const chocFootMat = glossyMat({ rim: true, color: CHOC_DIP, roughness: 0.34 });
-    this.rig.dressLimbs((part, size) => {
-      switch (part) {
-        // ── The radii are CONTINUITY constraints, not taste ────────────────────
-        // The rig hands the lower segment a smaller base radius than the upper one
-        // — published as `metrics.forearmRadius` and `metrics.shinRadius`, which
-        // `limbSlots()` and `buildLimbs()` both READ BACK, so published and built
-        // cannot diverge — so matching multipliers do NOT produce a matching diameter.
-        // These are chosen so the upper segment's BOTTOM and the lower segment's TOP
-        // are the same width in metres — arm 0.86*0.1302 = 0.112 against
-        // 0.935*0.1198 = 0.112, leg 0.86*0.1218 = 0.1048 against 0.956*0.1096 =
-        // 0.1048 — which is what turns two abutting meshes into one limb that
-        // changes colour at the joint instead of two beads on a string.
-        // ── 🚨 AND THE FOUR LIMBS WERE THE SAME OBJECT IN FOUR PLACES ──────────
-        // `upperArm` and `thigh` shared `limbPinkMat`, `forearm` and `shin` shared
-        // `limbPinkDarkMat`, and the radii differed by 4%. So an arm and a leg were
-        // the same mass in the same two tones, distinguishable only by the terminal
-        // cap — a glaze mitt against a choc boot, the two smallest elements on the
-        // character — and the read at the lobby camera is a four-legged animal.
-        //
-        // The split is on HUE, not on value, and that is deliberate: every value on
-        // this character is already spoken for. `head|shoulderL` is the weakest
-        // boundary on the model at `dLcontact` **0.0315**, because a mid-pink arm
-        // meets a light-pink ring; `hips|thighL` needs the haunch's berry to stay
-        // clear of the thigh; `kneeL|footL` cleared its gate by **0.0015**. Moving
-        // any of those four tones to separate the pairs breaks one of them.
-        //
-        // ⚠️ SO THE ARMS TAKE THE DOUGH FAMILY AND THE LEGS KEEP THE BERRY FAMILY.
-        // That is not a new idea — it is the fix the removed-cuff note at the bottom
-        // of this file explicitly names: *"the honest fix is lighting or a DIFFERENT
-        // ARM TONE, not a shape bolted onto the boundary to satisfy the statistic."*
-        // A hoop at the shoulder was built, measured and rejected there; recolouring
-        // the sleeve buys the same boundary with no new geometry at all, and gold on
-        // a glazed donut is the food's own second colour rather than an invention —
-        // it is the band already visible inside the ring.
-        case 'upperArmL': case 'upperArmR': {
-          // `capBotFrac` 0.05: this end meets the forearm's top at the same radius
-          // and is never seen. See the interior/exterior cap note in
-          // `taperedSegment` — this is the argument that stops the limb pinching to
-          // zero width at the elbow, which is what an ink hull traces as a bead.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.90, size.radius * 0.79, 16, { capTopFrac: 0.30, capBotFrac: 0.05 }), sleeveDoughMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'thighL': case 'thighR': {
-          // 1.02 -> 1.12 while the arm went 0.98 -> 0.90. The two were within 4% of
-          // each other, which at this on-screen size is no difference at all; they
-          // are now 24% apart, and the heavier pair being the LEGS is the one
-          // proportion cue that survives any pose.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.12, size.radius * 0.945, 16, { capTopFrac: 0.30, capBotFrac: 0.05 }), limbPinkMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'forearmL': case 'forearmR': {
-          // Top radius matches the upper arm's bottom in METRES, not in multiplier:
-          // 0.79 * 0.1302 = 0.1029 against 0.859 * 0.1198 = 0.1029. The rig hands the
-          // lower segment a smaller base radius (`metrics.forearmRadius`), so equal
-          // multipliers would put a step in the outline at the elbow.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.859, size.radius * 0.72, 16, { capTopFrac: 0.05, capBotFrac: 0.30 }), sleeveDoughDarkMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'shinL': case 'shinR': {
-          // Same continuity, on the leg: 0.945 * 0.1218 = 0.1151 against
-          // 1.05 * 0.1096 = 0.1151.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.05, size.radius * 0.88, 16, { capTopFrac: 0.05, capBotFrac: 0.34 }), limbPinkDarkMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'handL': case 'handR': {
-          const g = new THREE.Group();
-          // 0.98 -> 0.86. `bodies.ts` already cut STUB's `handRadiusF` 0.078 -> 0.068
-          // because "the mitt is wider than the limb is long and simply contains it";
-          // at 0.98 of what is left, the ball is still 0.274 m across against a
-          // forearm that now ends at 0.187 m, and at profile it reads as a second
-          // foot. 0.86 keeps a clear mitt without swallowing the arm.
-          const ball = new THREE.Mesh(new THREE.SphereGeometry(size.radius * 0.86, 16, 14), glazeHandMat);
-          ball.position.y = -size.radius * 0.86;
-          ball.scale.set(1, 1.06, 1);
-          ball.name = `${part}_mesh`;
-          ball.castShadow = true;
-          ball.receiveShadow = true;
-          g.add(ball);
-          // A small drip nub at the bottom — the same trick the head/torso glaze
-          // uses, carried down to the extremities instead of stopping at the neck.
-          const drip = new THREE.Mesh(new THREE.SphereGeometry(size.radius * 0.22, 8, 8), glazeHandMat);
-          drip.position.y = -size.radius * 1.85;
-          drip.scale.set(1, 1.6, 1);
-          drip.userData.noOutline = true;
-          g.add(drip);
-          return g;
-        }
-        case 'footL': case 'footR': {
-          // `taperedSegment`'s own convention hangs the FULL `len` down from the
-          // joint origin — correct for an arm/leg bone, but the foot joint already
-          // sits barely above true ground level, so the previous `size.len * 1.3`
-          // (a full leg-segment length) sank the whole foot 30-40cm through the
-          // floor: a verified defect (the character's own measured height came out
-          // ~0.8m taller than the cast norm because the bounding box was being
-          // measured down into the floor, not because anything visible got taller).
-          // Shortened to a true foot-scaled drop, matching the shallow droop every
-          // other character's own foot geometry keeps.
-          // ── SEATED ON `groundY`, which this builder was ignoring ───────────────
-          // `LimbSize.groundY` is the joint-local height of the world floor and
-          // `rig.ts` added it precisely because "every bespoke boot in the cast
-          // guessed its own seat and every one of them guessed low". This one
-          // guessed too — `size.len * 0.55` is 0.132 m against an ankle 0.126 m off
-          // the floor, so the toe sat 6 mm under it. Taking the min of the two makes
-          // the boot as long as the character can stand on and no longer.
-          // Also 1.2 -> 1.0 at the top: the old top radius was 0.128 m against a
-          // shin that now ends at 0.088 m, i.e. a boot half again as wide as the leg
-          // wearing it — the exact defect `FOOT_WIDTH_RATIO` was retuned to remove.
-          const footLen = Math.min(size.len * 0.62, -size.groundY * 0.98);
-          const foot = new THREE.Mesh(taperedSegment(footLen, size.radius * 1.0, size.radius * 0.34, 12), chocFootMat);
-          // A foot points FORWARD. The lathe is radially symmetric, so the shape has
-          // to come from the scale: 1.5x in Z reads as a shoe, 1.0x reads as a cone.
-          foot.scale.set(1, 1, 1.35);
-          foot.position.z = size.radius * 0.34;
-          foot.name = `${part}_mesh`;
-          foot.castShadow = true;
-          foot.receiveShadow = true;
-          return foot;
-        }
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`). WAS: four `taperedSegment` tones (dough
+    // sleeves over a darker dough forearm, violet thighs over a near-black-violet shin) whose
+    // flattened interior caps met as two-tone beads, a glaze ball for a hand and a near-black
+    // chocolate puck for a foot. Now: baked-dough arms, violet legs, one material per limb, a
+    // glaze mitten and a glaze shoe — the hands and shoes in one colour, the oldest cartoon
+    // convention there is, and the one that keeps the shoe off the floor's value (the
+    // chocolate boot was the darkest thing on the character, standing on a dark floor).
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: sleeveDoughMat, leg: limbPinkMat, hand: glazeHandMat, shoe: glazeHandMat,
+    }));
 
     this.buildAttachments();
     this.buildFace(R, ringR, tubeR);

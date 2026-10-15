@@ -1581,74 +1581,13 @@ export class HotDogCharacter extends BaseCharacter {
     // a step AWAY from both the bun and the limb tan rather than into either.
     const sleeveMat = glossyMat({ rim: true, color: MUSTARD, roughness: 0.25 });
 
-    this.rig.dressLimbs((part: LimbPart, size) => {
-      switch (part) {
-        // ── 🚨 ARMS AND LEGS WERE THE SAME OBJECT ───────────────────────────────
-        // Before this round all four upper segments were `bunMat` and all four lower
-        // segments were `bunDarkMat`, built by ONE helper at radii within 0.10 of a
-        // radius of each other (arm 1.28/0.92 -> 0.90/0.64, leg 1.18/0.94 -> 0.94/
-        // 0.76). Four identical tan-over-brown chains, differing only in the terminal
-        // cap. On this character the arms also hang close to vertical, so the lobby
-        // render is a four-legged animal with two small red claws at the front.
-        //
-        // Two separations, and the `rise` that attaches them. Probe
-        // (`tools/tmp/cc_probe.mjs`, body half-width from vertices, HEAD):
-        //   upperArmL gap +0.041   upperArmR +0.073   thighL +0.102   thighR +0.044
-        // — small gaps, unlike waterbottle's 0.10-0.22, and the thighs' `riseTo` is
-        // only 0.02-0.04 m up. So here `rise` IS the lever and no lateral move is
-        // needed; the segment radii do the rest.
-        //
-        //   1. MASS. Arms 1.28 -> 0.98 at the shoulder and 0.90 -> 0.74 at the elbow;
-        //      legs 1.18 -> 1.46 and 0.94 -> 1.12. The leg is now half again the
-        //      arm's width all the way down, which is the read every quadruped
-        //      silhouette test is actually asking about.
-        //   2. A SLEEVE. The upper arm carries a cream `bunPaleMat` cuff at the
-        //      shoulder — the TORSO's own bun tone, so the arm starts as part of the
-        //      body and steps down into limb tan. The legs have no such step, so the
-        //      arm chain is three values and the leg chain is two.
-        case 'upperArmL':
-        case 'upperArmR': {
-          const g = new THREE.Group();
-          g.add(taperedLimb(size.len, size.radius * 0.98, size.radius * 0.74, bunMat, 12, size.len * 0.30));
-          // ⚠️ A segment shorter than its own radius stops being a segment and becomes
-          // a bauble — the failure `pizza.ts` records for a `CRUST_RIM` cuff that
-          // rendered as a lampshade. This one survives because its two radii are
-          // nearly EQUAL (1.02 / 0.94), so the lathe closes into a ball with no rim to
-          // catch the eye, where pizza's 1.58-over-the-arm's-1.16 left a wide flat
-          // brim. Trimmed 1.16/1.02 -> 1.02/0.94 after rendering: at 1.16 it is 0.28 m
-          // across on a 2.1 m character and reads as a tennis ball on the shoulder.
-          // 1.02 * `armRadius` = 0.124 still covers the 0.041-0.073 m the probe
-          // measures between this joint and the bun.
-          const cuff = taperedLimb(size.len * 0.34, size.radius * 1.02, size.radius * 0.94, sleeveMat, 12, size.len * 0.34);
-          cuff.name = 'arm_sleeve';
-          g.add(cuff);
-          return g;
-        }
-        // Lower segments step DOWN a value into `bunDark`. Every limb, hand, boot
-        // and the torso were one identical `PALETTE.bun` tan, so the whole body
-        // below the head was a single unbroken flat mass with no joint reading at
-        // all — the reason it looked naked rather than simply plain.
-        case 'forearmL':
-        case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.74, size.radius * 0.54, bunDarkMat, 12, size.len * 0.12);
-        case 'handL':
-        case 'handR': {
-          const side = part === 'handL' ? 1 : -1;
-          return buildSausageFingers(size.radius, side, sausageMat);
-        }
-        case 'thighL':
-        case 'thighR':
-          return taperedLimb(size.len, size.radius * 1.46, size.radius * 1.12, bunMat, 14, size.len * 0.34);
-        case 'shinL':
-        case 'shinR':
-          return taperedLimb(size.len, size.radius * 1.12, size.radius * 0.86, bunDarkMat, 14, size.len * 0.12);
-        case 'footL':
-        case 'footR':
-          return buildBunBoot(size.len, bootMat, ketchupMat, size.groundY);
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`): one material per limb (no two-tone bead at
+    // the elbow or knee), a mitten attached over the wrist, a shoe seated on the floor. WAS:
+    // bun upper segments with a mustard sleeve over darker bun forearms and shins, sausage
+    // hands and a char boot with a ketchup accent. Ketchup shoes now.
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: bunMat, leg: bunMat, hand: sausageMat, shoe: ketchupMat,
+    }));
   }
 
   /** The rig owns all body motion; the base class's whole-body pass would fight it. */

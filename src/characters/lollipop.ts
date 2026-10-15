@@ -1014,109 +1014,13 @@ export class LollipopCharacter extends BaseCharacter {
     // mesh its own inverted hull, so a value flip at the elbow put a different colour
     // inside every ink contour — which is a bead, not a joint. One tone per limb, with
     // radii continuous across the joint, leaves the contour as the only separator.
-    this.rig.dressLimbs((part, size) => {
-      switch (part) {
-        case 'upperArmL': case 'upperArmR': {
-          const g = new THREE.Group();
-          // ── 0.66 -> 0.95 OF THE RIG RADIUS, AND IT IS AN ATTACHMENT FIX ────────
-          // See the `shoulderWidth` note in the constructor: the connectivity window
-          // this character's proportions are solved against was computed with the
-          // RIG's `armRadius` (0.124) while this call site built the segment at 0.66
-          // of it (0.082). The arm was 0.042 m thinner than the arithmetic that
-          // placed it, on a body 0.20 m wide, and that is most of the gap.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.95, size.radius * 0.80, 12, { capTopFrac: 0.30, capBotFrac: 0.05 }), stickLimbMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          g.add(m);
-          for (const f of [0.34, 0.70]) {
-            const ring = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.86, size.radius * 0.11, 6, 14), stripeMat);
-            ring.rotation.x = Math.PI / 2;
-            ring.position.y = -size.len * f;
-            ring.userData.noOutline = true;
-            g.add(ring);
-          }
-          return g;
-        }
-        case 'forearmL': case 'forearmR': {
-          const g = new THREE.Group();
-          // Top radius matches the upper arm's bottom in METRES, not in multiplier:
-          // 0.80 * 0.1240 = 0.0992 against 0.870 * 0.1140 = 0.0992. The rig gives the
-          // forearm a smaller base radius (`metrics.forearmRadius`), so equal
-          // multipliers would put a step in the outline at the elbow.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.870, size.radius * 0.70, 12, { capTopFrac: 0.05, capBotFrac: 0.30 }), forearmMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          g.add(m);
-          for (const f of [0.30, 0.62]) {
-            const ring = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.72, size.radius * 0.09, 6, 14), stripeMat);
-            ring.rotation.x = Math.PI / 2;
-            ring.position.y = -size.len * f;
-            ring.userData.noOutline = true;
-            g.add(ring);
-          }
-          // The cuff — the one shape that says "sleeve" rather than "leg", and the
-          // only place `LIMB_TEAL_DARK` still appears now that the forearm is not a
-          // second tone. `noOutline`: an ink hull round a ring this small at this
-          // on-screen size is most of the ring.
-          const cuff = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.64, size.radius * 0.14, 6, 14), cuffMat);
-          cuff.rotation.x = Math.PI / 2;
-          cuff.position.y = -size.len * 0.94;
-          cuff.userData.noOutline = true;
-          cuff.castShadow = true;
-          g.add(cuff);
-          return g;
-        }
-        case 'thighL': case 'thighR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.10, size.radius * 0.92, 12, { capTopFrac: 0.30, capBotFrac: 0.05 }), legMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'shinL': case 'shinR': {
-          // 0.92 * 0.1160 = 0.1067 against 1.022 * 0.1044 = 0.1067.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.022, size.radius * 0.84, 12, { capTopFrac: 0.05, capBotFrac: 0.34 }), legDeepMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'handL': case 'handR': {
-          const g = new THREE.Group();
-          const ball = new THREE.Mesh(new THREE.SphereGeometry(size.radius * 0.62, 14, 12), candyHandMat);
-          ball.position.y = -size.radius * 0.62;
-          ball.name = `${part}_mesh`;
-          ball.castShadow = true;
-          ball.receiveShadow = true;
-          g.add(ball);
-          const swirl = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 0.34, size.radius * 0.07, 6, 16, Math.PI * 1.4), candySwirlMat);
-          swirl.position.set(0, -size.radius * 0.62, size.radius * 0.5);
-          swirl.userData.noOutline = true;
-          g.add(swirl);
-          return g;
-        }
-        case 'footL': case 'footR': {
-          const boot = new THREE.Mesh(
-            roundedBox(size.radius * 1.6, size.len * 0.55, size.radius * 2.6, size.radius * 0.28, 3),
-            toonMat({ color: BOOT, roughness: 0.55 })
-          );
-          // Seated on the floor via `size.groundY` (the joint-local y of the world
-          // ground, new on `LimbSize`) rather than by eye. `types.ts` convention #1
-          // is "feet at y=0" and the whole cast was 0.08-0.25 m under it; `Math.min`
-          // keeps the authored droop as the floor for the value so this can only ever
-          // raise a foot, never sink one.
-          boot.position.set(0, Math.max(size.groundY + size.len * 0.275, -size.len * 0.42), size.radius * 0.55);
-          boot.name = `${part}_mesh`;
-          boot.castShadow = true;
-          boot.receiveShadow = true;
-          return boot;
-        }
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`): one material per limb (no two-tone bead at
+    // the elbow or knee), a mitten attached over the wrist, a shoe seated on the floor. WAS:
+    // striped teal arms with wrapper cuffs over a darker forearm, red legs over a deeper red
+    // shin, a candy-swirl ball hand. Teal arms and shoes, red legs and mittens now.
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: stickLimbMat, leg: legMat, hand: candyHandMat, shoe: stickLimbMat,
+    }));
 
     this.buildSilhouetteEvents(R, discCenterY, discOuterR);
 

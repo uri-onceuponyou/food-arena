@@ -1183,115 +1183,15 @@ export class TacoCharacter extends BaseCharacter {
     // projectile's colour on the character, and a BAND AT THE WRIST is an
     // arm-exclusive feature — a leg has no wrist — so it pays for itself twice.
     const cuffMat = glossyMat({ rim: true, color: ONION, roughness: 0.32 });
-    this.rig.dressLimbs((part, size) => {
-      switch (part) {
-        case 'upperArmL': case 'upperArmR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.72, size.radius * 0.58, 8, { rise: size.len * 0.30 }), limbShellMat);
-          m.scale.z = 0.72;
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'thighL': case 'thighR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.06, size.radius * 0.86, 8, { rise: size.len * 0.30 }), limbShellMat);
-          m.scale.z = 0.72;
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'forearmL': case 'forearmR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.58, size.radius * 0.46, 8, { rise: size.len * 0.22 }), limbShellDarkMat);
-          m.scale.z = 0.72;
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'shinL': case 'shinR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.86, size.radius * 0.70, 8, { rise: size.len * 0.22 }), limbShellDarkMat);
-          m.scale.z = 0.72;
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'handL': case 'handR': {
-          // ── THE PURPLE ICOSAHEDRA READ AS GEMS, NOT AS FISTS ─────────────────
-          // `IcosahedronGeometry(radius * 0.92, 0)` is a twenty-faced solid with hard
-          // edges, in a saturated violet, hung off a near-black forearm at hip
-          // height. At the lobby camera that is a jewel on a stick — two of them,
-          // mirrored, which is also why they read as a PAIR of props rather than as
-          // hands. The old comment defended the colour ("breaks from the cast's
-          // repeated cream/white mitt"); the colour was never the problem, the
-          // FACETED SOLID was, and a hand is the one place on a character where the
-          // reference is unanimous: big, soft, one silhouette, with a thumb.
-          const g = new THREE.Group();
-          // Sized off the FOREARM it terminates, not off `handRadius`, for the same
-          // reason `soup.ts` records: `handRadius` is an independent rig constant and
-          // a hand wider than its own arm is long is an occluder, not a hand.
-          // ⚠️ NOT `size.radius`. `dressLimbs` hands the hand slot `m.handRadius`,
-          // an independent rig constant (0.095H = 0.1995 m here) that has nothing to
-          // do with the arm it terminates — sizing off it is how the old icosahedron
-          // ended up 0.367 m across, wider than the whole forearm is long.
-          // ⚠️ This line used to RE-TYPE the derivation as `armRadius * 0.92 * 0.46`.
-          // Identical arithmetic, and that is exactly the trap: `0.92` is the rig's
-          // number, not this file's, and a copy of it here goes stale silently the day
-          // the rig changes it. `metrics.forearmRadius` is the SAME value `limbSlots()`
-          // builds the forearm at, published so there is nothing left to re-type.
-          const tipR = this.rig.metrics.forearmRadius * 0.46;
-          const mitt = new THREE.Mesh(new THREE.SphereGeometry(tipR * 1.62, 16, 12), mittMat);
-          mitt.position.y = -tipR * 1.25;
-          mitt.scale.set(1, 0.94, 0.82);
-          mitt.name = `${part}_mesh`;
-          mitt.castShadow = true;
-          mitt.receiveShadow = true;
-          g.add(mitt);
-          // Thumb — a stub off the inner-forward quadrant. It is the smallest element
-          // here and it is the one that makes the mass NAMEABLE: a rounded blob is a
-          // ball, a rounded blob with a thumb is a hand, at any resolution.
-          const sx = part === 'handL' ? 1 : -1;
-          const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(tipR * 0.46, tipR * 0.72, 4, 8), mittMat);
-          thumb.position.set(sx * tipR * 1.15, -tipR * 0.62, tipR * 0.52);
-          thumb.rotation.set(0.35, 0, sx * 0.85);
-          thumb.castShadow = true;
-          g.add(thumb);
-          // Wrist cuff — arm-exclusive, and it also hides the join between the dark
-          // forearm and the pale mitt so the value jump reads as a garment edge.
-          const cuff = new THREE.Mesh(new THREE.TorusGeometry(tipR * 1.06, tipR * 0.26, 8, 16), cuffMat);
-          cuff.rotation.x = Math.PI / 2;
-          cuff.scale.z = 0.82;
-          cuff.castShadow = true;
-          g.add(cuff);
-          return g;
-        }
-        case 'footL': case 'footR': {
-          // Was a `radius*2.2 x len*0.85 x radius*2.6` slab hung at -len*0.5:
-          // 0.45 m across and 0.54 m deep on a 2.1 m character, with its
-          // underside 0.21 m BELOW y=0. Two separate defects in one mesh — it
-          // read as a house brick rather than a foot, and it broke the "feet at
-          // y=0" convention harder than anything else in this cohort (which also
-          // inflated every measured height for this character by that 0.21 m).
-          const foot = new THREE.Mesh(
-            roundedBox(size.radius * 1.85, size.len * 0.55, size.radius * 2.15, size.radius * 0.30, 3),
-            bootMat
-          );
-          // Seated on the floor via `size.groundY` (the joint-local y of the world
-          // ground, new on `LimbSize`) rather than by eye. `types.ts` convention #1
-          // is "feet at y=0" and the whole cast was 0.08-0.25 m under it; `Math.min`
-          // keeps the authored droop as the floor for the value so this can only ever
-          // raise a foot, never sink one.
-          foot.position.set(0, Math.max(size.groundY + size.len * 0.275, -size.len * 0.26), size.radius * 0.5);
-          foot.name = `${part}_mesh`;
-          foot.castShadow = true;
-          foot.receiveShadow = true;
-          return foot;
-        }
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`). WAS: limbs flattened to 72% depth in two
+    // shell tones (the forearm and shin a near-black `LIMB_SHELL_DARK`), an icosahedron-era
+    // masa ball with a capsule thumb and a lilac onion CUFF ring at every wrist, and a
+    // rounded-box boot — the "jumble of overlapping shapes" eight of eight w1/w2 cast critics
+    // named first on this character: five materials and a ring per limb, none of them the
+    // food. Now one shell tone per limb, a masa mitten and a charred-corn shoe.
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: limbShellMat, leg: limbShellMat, hand: mittMat, shoe: bootMat,
+    }));
 
     this.buildSilhouetteEvents();
 
