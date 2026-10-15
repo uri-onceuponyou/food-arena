@@ -24,6 +24,7 @@ Remote: https://github.com/uri-onceuponyou/food-arena — push freely.
 | file | what it is |
 |---|---|
 | 🆕 **`docs/HANDOVER.md`** | **Read this FIRST.** The session snapshot: where the project stands, the three things to know before acting, ranked next work, and the traps that cost time. ⚠️ It is a SNAPSHOT and says so — it names the confound that makes cross-session quality numbers unsafe, so reading it before `STATE.md` stops you trusting a comparison you should not. **Linked here deliberately: `AGENT-BRIEF.md` is the cautionary tale of a file that existed so a brief could not vanish, and then vanished from the handover by being referenced by nothing.** |
+| 🆕 **`docs/REVAMP.md`** | **The graphics campaign + bug sweep started 2026-10-15** — today's blind score (r0), the measured diagnosis, the work packages with owned file sets, the waves (≤3 agents at once), the stop rules and the scoreboard. **Build agents in this campaign are pointed here first.** |
 | **`docs/STATE.md`** | What is DONE (with evidence) and what is PENDING (ranked). Start here. |
 | **`docs/DECISIONS-FOR-URI.md`** | Every judgement call parked for Uri, with what was assumed and what reversing costs. Opens with a one-screen answer sheet. |
 | **`docs/LESSONS.md`** | Every hard-won learning. Reading it is cheaper than re-learning any of it. |
@@ -368,6 +369,7 @@ a coordinate.**
 Brawl Stars is **not cel-shaded**. Smooth-shaded, hyper-saturated, high-key, vinyl-toy, soft specular,
 almost no ink outline. `toonMat` returns `MeshStandardMaterial`. **No filmic tonemapping** (it
 desaturates; removed deliberately). ⚠️ **Do not fix anything by desaturating** — falsified four times.
+⚠️ **"Almost no ink outline" is CONTRADICTED for the cast at gameplay scale** (measured 2026-10-15, `docs/REVAMP.md` §2.1): reference fighters carry a near-black contour ~3–5 px wide at 900-px-equivalent; ours reads 0.009 dark-contour share against ~0.07. It still holds for the ENVIRONMENT. The old line is kept above per house style; the call in force is `DECISIONS §91a`.
 
 Reference plates live in `reference/images/curated/` — `gameplay_topdown/` for the arena and cast,
 `menus/` for the screens (6 plates supplied by Uri).

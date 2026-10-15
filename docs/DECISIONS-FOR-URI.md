@@ -25,6 +25,7 @@ indistinguishable from a live one, and it is the row you act on.*
 
 | # | question | in force | what I'd do | cost to reverse |
 |---|---|---|---|---|
+| **§91** | 🆕 🔴 **The graphics revamp is running (`docs/REVAMP.md`) and eight calls are in force so it can.** The two that change what you will SEE: fighters get a **dark outline** in the match (91a — measured, it contradicts `CLAUDE.md`'s "almost no ink outline") and a **coloured ring under every fighter** (91b: you bright, opponents red). The one that needs YOU: four **player handles** read off the plates were in tracked files — scrubbed, but **still in git history** (91f) | outline + rings proceed; no history rewrite | 🔴 **91f** (rewrite history or not), then 91b's colours | a flag; a colour table |
 | **§83** | 🆕 🔴 **Your §80 said a super must be dodgeable. There is now exactly one decision left between that answer and the game.** Shrinking the Giant made a wind-up affordable for the first time: the same derivation that returned **5400 ms — 77.1% of the weapon's own cooldown, a dead button** — at 400 wu returns **2300 ms (32.9%)** at 157.22. At 2300 ms the escapable band is **−24.94 wu** — the slowest fighter in the roster clears the **whole** disc during the wind-up | **`castMs` 0 — no wind-up at all** | **add it — but it lands on Lollipop, which §81 already made the weakest character at two seats, and §77 forbids paying that back by re-tuning anyone else** | one field on one weapon |
 | **§84** | 🆕 🔴 **Everyone dying is now a reachable ending.** At six seats the slower game produced **28 total wipes in 360 matches where there were 0**, and mean survivors at the end went **1.00 → 0.92**. Nothing is broken — all 360 still resolved, 360 KOs, 0 timeouts — the endgame just got long enough for a simultaneous last-two kill | **allowed, undesigned** | **decide what a wipe IS.** Today `lastFighterStanding` calls it *"a defensible outcome rather than a designed one"*. Draw? Last-to-die wins? Or leave it | a rule in `state.ts`, plus whatever the result card must say |
 | **§85** | 🆕 🔴 **Both balance answers you gave made the roster MORE polarised, and I did not hide it.** §75's speed drop took settled matchups **23 → 37 (`smart2`) and 44 → 58 (`chase`) — +14 on BOTH policies** — while both aggregates sat inside the ~9 pp floor and **97 of 110 paired cells moved, max 87.5 pp**. §81's shrink then made **Lollipop the weakest character in the game at two seats** (60.6% → **25.0%** `smart2`, next lowest 29.5%) | **not compensated** | **leave it, and take the next balance pass as a pass** — a re-tune aimed at these two numbers is exactly what §77 withholds permission for, and both were priced before they landed | a roster pass, not a constant |
@@ -6200,3 +6201,48 @@ deliberate emissive accent. A critic flagged them as a max-saturation green frin
 character, which is a fair aesthetic objection but not a defect. They are **1,187 px at the lobby and
 17 px at match**, so this is a lobby question. Whether that accent belongs on that character is a
 design call.
+
+---
+
+## 91. 🆕 The graphics revamp (2026-10-15) — the calls I made so the work could keep moving
+
+**Context:** you asked to *"take the graphics a few levels up"* and to fix gameplay bugs. The plan,
+the score and the evidence are in **`docs/REVAMP.md`**. Today's blind score (one fresh critic per
+sheet, canonical rubric): arena **4.60**, six-seat **4.97**, fighter crop **4.51**, home **5.37**,
+select **5.83**, against **7.9–8.4** for the reference side. Nothing below is blocking; each line
+says what is in force and what reversing costs.
+
+| # | the call | in force | cost to reverse |
+|---|---|---|---|
+| **91a** | 🔴 **Fighters get a dark outline in the match.** `CLAUDE.md` says the reference carries *"almost no ink outline"*. Measured at gameplay scale it does: near-black contours ~3–5 px wide; our dark-contour share is **0.009 against ~0.07**. Our current line is per-part hulls at 1.5 px that read as broken specks — and they cost **~336 draw calls at six seats** on your phone | a screen-space silhouette contour, ~2.5–3.5 px, **match only**; the lobby keeps its current look | one flag in `stage.ts` |
+| **91b** | **A coloured ring under every fighter** — every reference frame has one; we have none anywhere in source. Six-player is free-for-all, so: | **you = a reserved bright hue, every opponent = red** | one colour table (per-seat hues instead is the alternative) |
+| **91c** | **The cast gets re-coloured from pastel to saturated mid-tones.** Our fighters' median brightness is 0.71–0.82 against the reference's 0.41–0.50; 20–56% of their pixels are near-white against 4–8%. **Saturation goes UP, never down** (desaturating was falsified four times) | proceeds in wave 3 (`docs/REVAMP.md` C1), checked at both cameras | per-character palette constants |
+| **91d** | **"Good enough" = every scored frame ≥ 7.0** on the canonical rubric (6 = "shipped but visibly weaker than the leaders", 8 = "competitive with them") | the campaign's stop condition, with an early stop if an element goes flat for two waves | a number |
+| **91e** | The reference's blocks imply a camera **~48–52°** steep; ours is **58°** | **unchanged** — an experiment only after the cast work, gated by `aspect.mjs` fairness | — |
+| **91f** | 🔴 **Four player handles and 12 third-party character names were in tracked files** (read off the reference plates). Scrubbed in `6be481f`. **They remain in git history.** | **no history rewrite** — it needs a force-push to a public repo | your call: a rewrite + force-push removes them from history |
+| **91g** | The **"everything unlocked for testing"** switch (`9b67ff5`) is **still ON in the shipped build**, and bots carry no items — so equipped items are a large edge against bots | **left ON** — you set it for testing | one switch |
+| **91h** | **Bots equip no items in shipped play**; `ai.ts`'s item logic only runs in instruments. Any item is close to a guaranteed win against bots | unchanged | give bots loadouts (needs tuning) |
+
+### Design questions the bug hunt found — real behaviour, not defects, so NOT fixed
+
+Each was reproduced at the stated seat count and classified *design* by its finder or verifiers.
+In force for every row: **unchanged**.
+
+- **Warm Milk, Pompa and Liquorice** have cooldown = duration (5,000 ms): one holder can keep one
+  target locked 100% of the time.
+- **Seaweed Bait / Big Catch lure** is inert in the shipped duel and **map-wide** at six seats.
+- **Squid Ink** has no effect on a bot, so in shipped play it does nothing.
+- **Tenderiser** counts every pellet as a consecutive attack: one press of a five-pellet weapon climbs
+  five stacks.
+- **Leftovers** never triggers when its holder is killed by a shot from an already-dead fighter.
+- **Touch drag-aim** fires its first shot along the OLD facing and spends the cooldown on it.
+- **Aim** intersects the ground plane, so a cursor on a body points 13–26 wu beyond it at 58°.
+- **Weapon selection persists**: after firing a long-cooldown slot, holding fire does nothing until
+  you re-select.
+- **Uncaptured play keeps running on blur / alt-tab**; only mouse capture pauses.
+- A **dead player at three or more seats can Quit** to dodge the trophy loss their placement owes.
+- A trophy-road node you reached but did not claim **locks again** if your trophies drop below it.
+- **Seat fairness at three seats:** the human seat is unpursued and finishes 1.63 against a fair 2.00.
+- The human's **diagonal movement is √2 faster** (prototype parity).
+- Two low-HP bots can **flee and regenerate at each other** for over a minute, dragging a six-seat
+  match into sudden death.
