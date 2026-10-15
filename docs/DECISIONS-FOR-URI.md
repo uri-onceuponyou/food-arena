@@ -1264,13 +1264,13 @@ shoulder camera) to score a top-down game, repeating a defect already recorded f
 characters clearing the silhouette floor changed nothing.
 
 ⚠️ **And a constant was moved on a wrong number.** Our character is **10.4% of frame height** (14.2%
-with legs) against **Shelly at 12.5%** in the same plate — two blind critics independently measured
+with legs) against **a reference fighter at 12.5%** in the same plate — two blind critics independently measured
 ~12%. The 14–21% figure that justified `CHARACTER_HEIGHT` 2.1 → 2.35 **was wrong**; the critic's
 10–12% was right. That is being re-derived. **The sheet I sent you still stands as a look — just not
 as a size correction.**
 
 **One concrete defect, fully verified:** **24.3% of our egg is clipped near white** (p95 0.981)
-against Shelly 0.2% and Barley 0.0%, on exactly the top-facing surfaces a top-down camera sees most
+against two reference fighters at 0.2% and 0.0%, on exactly the top-facing surfaces a top-down camera sees most
 of. Empty-floor controls read 0.0%, so it is the character. That is the cost of the value pass,
 visible at the pixel — and it is fixable without any critic at all.
 

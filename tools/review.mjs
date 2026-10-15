@@ -89,8 +89,8 @@
  *   framing are NOT stacked against us. The Brawl Stars plates are 1176x~730 marketing
  *   crops that arrive UPSCALED 1.33-1.43x, delivering 0.42-0.48x our edge acuity, and
  *   they still score 8. And subject scale is matched, not 25-35% short — measured off
- *   a ruled frame, our character is 10.4-14.2% of frame height against Shelly 12.5%
- *   and Barley ~11-13.6% in the same plate, and two blind critics measured ~12%
+ *   a ruled frame, our character is 10.4-14.2% of frame height against reference fighter A 12.5%
+ *   and reference fighter B ~11-13.6% in the same plate, and two blind critics measured ~12%
  *   independently and said the failure is MASS, not scale. `CHARACTER_HEIGHT` should
  *   not move on framing grounds.
  */

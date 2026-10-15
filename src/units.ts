@@ -40,14 +40,14 @@ export function groundPos(x: number, y: number): { x: number; z: number } {
  * known-answer fixture**, rather than by eye on either side.
  *
  *   our cast (at 2.35)     10.4% of frame, 14.2% counting the legs
- *   Shelly                 12.5%
- *   Barley                 11-13.6%
+ *   reference fighter A    12.5%
+ *   reference fighter B    11-13.6%
  *   two blind critics      ~12% each, measured independently
  *
  * **The 14-21% band does not exist.** At 2.35 the cast is at or slightly ABOVE the
  * real band, not under it, and the direction of the original fix was backwards. At
  * 2.10 the same figures come to 9.3% / 12.7% — 12.7% sits almost exactly on
- * Shelly's 12.5% and inside Barley's range, which is the whole of the case.
+ * reference fighter A's 12.5% and inside fighter B's range, which is the whole of the case.
  *
  * ── The second, independent reason, which pointed the same way all along ─────
  * `tools/tmp/castbox.mjs` measures the widest FOOD MASS half-width against

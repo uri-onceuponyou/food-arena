@@ -16,7 +16,7 @@
  * ── Why the SAME fraction on both sides ─────────────────────────────────────
  * `tools/compare.mjs` normalises both panels to the same HEIGHT, which preserves
  * fraction-of-frame and destroys pixels-on-subject (`tools/tmp/packet_audit.mjs`). Our
- * character is 10.4% of frame height against Shelly's 12.5% in the same plate, so the
+ * character is 10.4% of frame height against a reference fighter's 12.5% in the same plate, so the
  * WHOLE frames are already close to subject-matched. Cropping both sides by the same
  * fraction of frame height therefore keeps them matched — whereas cropping ours to a
  * fixed pixel box and the plates to "whatever looks right" would silently re-open the
@@ -73,12 +73,12 @@ const HUD_FRAC = 0.30;    // of frame height; box is full width
  * instrument to validate.
  */
 const PLATE_CENTRES = {
-  'bs_01.png': [0.51, 0.52],   // El Primo's super, Dynamike right, Bull below
-  'bs_02.png': [0.41, 0.56],   // Piper left, Bibi/Maisie centre, Nita above
-  'bs_03.png': [0.63, 0.42],   // Piper above the smoke, Poco right
-  'bs_04.png': [0.43, 0.43],   // bork6 / thepapa / mnaw2 / nrb around the crates
-  'bs_05.png': [0.54, 0.33],   // Barley left, Shelly right, Bull above the poison
-  'bs_06.png': [0.34, 0.72],   // Brock + Griff at the pipe row
+  'bs_01.png': [0.51, 0.52],   // the super burst, two fighters right and below
+  'bs_02.png': [0.41, 0.56],   // fighters left, centre and above
+  'bs_03.png': [0.63, 0.42],   // fighters above the smoke and to the right
+  'bs_04.png': [0.43, 0.43],   // four fighters around the crates
+  'bs_05.png': [0.54, 0.33],   // fighters left, right and above the poison
+  'bs_06.png': [0.34, 0.72],   // two fighters at the pipe row
 };
 
 /** 16:9 box of `frac` of frame height, centred on (cx,cy), clamped inside the frame. */

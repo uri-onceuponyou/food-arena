@@ -118,7 +118,7 @@ const BOOT_CHAR = '#0A0501';       // boots — darker again
  * shipped camera and shipped facing, and the same code over the six hand-verified
  * Brawl Stars full-body plates gives the band: **0.0072-0.0929, median 0.0249**,
  * p95 0.805-0.9685. An independent critic audit measured the same thing on gameplay
- * plates and got even less headroom — Shelly 0.2%, Barley 0.0%, with empty-floor
+ * plates and got even less headroom — two reference fighters at 0.2% and 0.0%, with empty-floor
  * controls at 0.0%, so it is the character and not the frame.
  *
  * This character measured **8.87%** clipped and p95 **0.9574**.

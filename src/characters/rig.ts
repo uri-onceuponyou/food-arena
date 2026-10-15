@@ -7,7 +7,7 @@
  * rather than as a character. The root cause was structural, not cosmetic.
  *
  * Every reference character — Brawl Stars and Zooba alike — is a CHARACTER first
- * and a theme second. Penny is a person who happens to be a pirate: head, torso,
+ * and a theme second. A pirate fighter is a person who happens to be a pirate: head, torso,
  * arms, hands, legs, feet, all poseable, with the theme carried by costume and
  * silhouette landmarks. Modelling a food item and bolting stub arms onto it can't
  * reach that bar, because gesture is most of what sells "character".

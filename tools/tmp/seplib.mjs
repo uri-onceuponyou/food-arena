@@ -272,7 +272,7 @@ export function notchAtRow(rm, rowAbs, opts = {}) {
  *
  * `clipShare` rides along because it needs exactly the same mask+luma pair: the
  * share of the character above luma `clipAt`. The audit measured **our egg at
- * 24.3% against Shelly 0.2% and Barley 0.0%**, with empty-floor controls at 0.0%,
+ * 24.3% against two reference fighters at 0.2% and 0.0%**, with empty-floor controls at 0.0%,
  * i.e. it is the character and not the frame.
  */
 export function massSplit(mask, luma, W, H, opts = {}) {
