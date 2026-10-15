@@ -58,7 +58,7 @@ import {
 // the HUD reads a seat NAME any more. Slots come from `roster.ts`, and the only two-valued
 // strings left are the CSS modifiers `--player` / `--enemy`, which are a look, not an
 // identity (see `buildFighterSlots`).
-import { livingFighterCount, weaponsLocked, type Fighter, type MatchState } from '../game/state';
+import { livingFighterCount, type Fighter, type MatchState } from '../game/state';
 import { fightersOf, LOCAL_SLOT, localFighter, slotKey, slotOf } from '../game/roster';
 // 🚨 THE ITEM BUTTONS ASK THE SIM'S OWN PREDICATE WHETHER THEY MAY BE PRESSED.
 // `combat.ts:itemUsable`'s header says why it is exported at all: *"the HUD must be able
@@ -66,7 +66,11 @@ import { fightersOf, LOCAL_SLOT, localFighter, slotKey, slotOf } from '../game/r
 // `is-ready` below is toggled from this call and from nothing else; the reason chips are
 // a SECOND, purely explanatory derivation and are never allowed to arm a button.
 // (Precedent for a presentation module importing this one: `game/vfx.ts:statusReadyAt`.)
-import { itemUsable } from '../game/combat';
+// …and the WEAPON TRAY asks `combat.ts:weaponRefusal` — the gates `attemptAttack` itself
+// asks, in its order — so it can say WHY a press is refused (asleep / clogged) instead of
+// greying out on a boolean that cannot tell the two apart (U1, B3b). It replaced this file's
+// import of `state.ts:weaponsLocked`, which F1 had wired for the same tray.
+import { itemUsable, weaponRefusal } from '../game/combat';
 import { isVisibleFrom } from '../game/movement';
 // The keyboard half of the item buttons, imported rather than transcribed — the same
 // argument `input.ts:MOVE_KEYS` makes for `settings.ts`: two copies of one mapping is a
@@ -1145,9 +1149,17 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
 
   let playerCharId: CharacterId | null = null;
   let weaponSlots: WeaponSlotEls[] = [];
+  // U1 (B3b): the caption that names a tray-wide refusal — "ASLEEP 2.4" / "CLOGGED 3.0".
+  // Created once and re-appended by every rebuild below, because `buildWeaponSlots` clears
+  // the tray with `innerHTML = ''`. It lives INSIDE `.hud-weapons` so it follows the tray
+  // into the touch layout's 2x2 corner cluster without a second copy of that geometry.
+  const weaponsWhyEl = document.createElement('div');
+  weaponsWhyEl.className = 'hud-weapons-why';
+  weaponsWhyEl.setAttribute('aria-live', 'polite');
 
   function buildWeaponSlots(weapons: Weapon[]): void {
     weaponsEl.innerHTML = '';
+    weaponsEl.appendChild(weaponsWhyEl);
     weaponSlots = weapons.map((w, i) => {
       const slot = document.createElement('div');
       slot.className = 'hud-weapon-slot';
@@ -2333,11 +2345,34 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // `tools/tmp/f1_hud_logic.mjs` U1: 4/4 ready while clogged and while asleep on the
       // base tree, 0/4 with this; the controls (free, and the lock lifting) stay 4/4.
       // Latent in shipped play (bots equip no items, DECISIONS §91h) — live the day they do.
-      const trayLocked = !trayInert && weaponsLocked(localFighter(state), state.elapsed);
+      //
+      // ── …AND IT NOW SAYS WHICH LOCK, BECAUSE THE TWO GREYS WERE THE SAME GREY ──────
+      // (B3b.) It read `const trayLocked = !trayInert && weaponsLocked(localFighter(state),
+      // state.elapsed);` — right about "no", silent about "why": a clogged tray and a
+      // sleeping tray rendered identical DOM. `combat.ts:weaponRefusal` is `attemptAttack`'s
+      // own gate list, so the tray reads the reason from the same place the press is refused
+      // and can never name a lock the sim is not applying. 'asleep' / 'clogged' are the
+      // presser's, not a slot's (they sit above every per-weapon gate), so slot 0 answers for
+      // the tray. `tools/tmp/b3b_hud_tray.mjs`: 12 rows red on `d46f750`, green with this.
+      const me = localFighter(state);
+      const trayWhy = trayInert ? null : weaponRefusal(state, me, 0);
+      const trayLock = trayWhy === 'asleep' || trayWhy === 'clogged' ? trayWhy : null;
+      const trayLocked = trayLock !== null;
       weaponsEl.classList.toggle('is-locked', trayLocked);
+      if (trayLock) weaponsEl.dataset.refusal = trayLock;
+      else delete weaponsEl.dataset.refusal;
+      // The lock's OWN time left — the deadline `state.ts:actionsLocked` / `weaponsLocked`
+      // compare against — printed in the slot timers' format, so "when can I fire" is
+      // answered where the question is asked.
+      const lockLeft = trayLock === 'asleep' ? me.item.sleepUntil - state.elapsed
+        : trayLock === 'clogged' ? me.item.clogUntil - state.elapsed : 0;
+      const whyText = trayLock
+        ? `${trayLock === 'asleep' ? 'ASLEEP' : 'CLOGGED'} ${(Math.max(0, lockLeft) / 1000).toFixed(1)}`
+        : '';
+      if (weaponsWhyEl.textContent !== whyText) weaponsWhyEl.textContent = whyText;
       if (playerCharId) {
         const weapons = CHARACTERS[playerCharId].weapons;
-        const lastUsed = localFighter(state).lastUsed;
+        const lastUsed = me.lastUsed;
         weaponSlots.forEach((slot, i) => {
           const w = weapons[i];
           if (!w) return;
@@ -2348,7 +2383,14 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           // on the REAL cooldown edge. Collapsing the two would arm the one-shot flash to
           // fire on whatever the next transition happened to be.
           const readyNow = frac <= 0;
-          const ready = readyNow && !trayInert && !trayLocked;
+          // ⚠️ `is-ready` IS THE SIM'S ANSWER for this slot too (B3b), with ONE reading
+          // mapped: 'phase'. The countdown and the result card own those phases on screen,
+          // and the tray has always read ready under "3, 2, 1" — refusing there would grey
+          // every tray for the whole countdown and change a look nobody asked to change.
+          // It was `readyNow && !trayInert && !trayLocked`; for every other reason the two
+          // agree, including 'casting' (the one cast weapon is cooling while it winds up).
+          const slotWhy = trayInert ? null : weaponRefusal(state, me, i);
+          const ready = readyNow && !trayInert && (slotWhy === null || slotWhy === 'phase');
           slot.root.classList.toggle('is-ready', ready);
           slot.root.classList.toggle('is-selected', !trayInert && i === frame.selectedWeapon);
           // Numeric countdown on top of the radial wipe — a lone dark wedge reads as
@@ -3784,11 +3826,47 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 .hud-weapons.is-inert .hud-weapon-slot { pointer-events: none; }
 /* LOCKED (U1): clogged or asleep — the sim refuses every press until it lifts. Greyed like
    the inert tray, but presses stay live: SELECTING a weapon is not firing one, and a
-   locked player picking the slot to fire the instant the lock lifts is the right play. */
-.hud-weapons.is-locked {
+   locked player picking the slot to fire the instant the lock lifts is the right play.
+
+   ⚠️ THE FADE MOVED FROM THE TRAY TO ITS SLOTS (B3b), and the slots look exactly as they
+   did. It read ".hud-weapons.is-locked { filter: grayscale(1); opacity: 0.5; }". A filter
+   or opacity on the container applies to EVERY descendant, and the tray now holds the
+   caption that says WHY it is locked — which would have been greyed and halved with the
+   icons it explains. The slots do not overlap (gap 8-10px), so per-slot opacity composites
+   to the same pixels as the group's. */
+.hud-weapons.is-locked .hud-weapon-slot {
   filter: grayscale(1);
   opacity: 0.5;
 }
+/* WHY IT IS LOCKED (B3b): "ASLEEP 2.4" / "CLOGGED 3.0", stamped across the greyed icons at
+   full strength. Inside the tray's own box on purpose — the touch layout's corner cluster
+   has the radar above it and the item column beside it (see that media rule's measured
+   free band), so a label ABOVE the tray would need space this HUD does not have. It takes
+   no pointer events, so a press still reaches the slot under it (selecting is not firing).
+   The dark ink and light text are the slot timer's own pair (#1a1224 / #FFF3DE), so the
+   caption reads as the same family as the countdown digits it stands in for. */
+.hud-weapons-why {
+  display: none;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 4;
+  padding: 4px 10px;
+  border: 2px solid #FFF3DE;
+  border-radius: 10px;
+  background: #1a1224;
+  color: #FFF3DE;
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 2px 0 rgba(0,0,0,0.35);
+}
+.hud-weapons.is-locked .hud-weapons-why { display: block; }
 
 /* ═══════════════════════════════════════════════════════════════════════════
    THE ITEM BUTTONS

@@ -58,6 +58,12 @@ import { castThreat, itemWorthIt, offensiveReach, pickItem, pressValue, stepAI }
 import {
   applyDamage, attemptAttack, isOnOwnTrail, ITEM_AURA_TICK_MS, itemUsable, resolveDueCast, statusReadyAt,
 } from './combat.ts';
+// §46(a) reads `weaponRefusal` / `weaponUsable` through a NAMESPACE, not a named import, and
+// that is load-bearing for the known-bad rule: a named import of an export that does not exist
+// is a LINK error that kills all ~1,000 rows before the first runs, so on the base tree the
+// section could not be shown red — it could only be shown absent. Through the namespace a
+// missing export is `undefined`, and §46(a)'s rows fail one by one with a reason.
+import * as COMBAT from './combat.ts';
 // Section 26 tests CONCEALMENT. The predicates are imported rather than re-derived for
 // the same reason `pressValue` and `statusReadyAt` are: the section's entire claim is that
 // ONE rule is read by four call sites, and a copy of the AABB test here would pass forever
@@ -12435,6 +12441,99 @@ console.log('\n45. A knocked-out seat\'s place is final at the knockout (six sea
     check('(e) 🔴 …and once no revive is left, the second knockout\'s place holds to the whistle (5th: seat 1 went out before it)',
       st.fighters[0].item.revivesLeft === 0 && st.phase === 'ended' && atSecond === MAX_FIGHTERS - 2 && trail.every((p) => p === atSecond),
       `revivesLeft ${st.fighters[0].item.revivesLeft}, phase ${st.phase}, places ${trail.map((p) => p + 1).join(' ')}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 46. COMBAT + ITEMS, THE SECOND HALF (`docs/REVAMP.md` §5 B3 → B3b, 2026-10-15)
+//
+// B3 fixed six of ten combat/item bugs and stopped with worked designs for the rest; B3b
+// finishes them here. Every row marked 🔴 was run RED on `d46f750` before its fix landed, and
+// `tools/tmp/b3b_knownbad.mjs` re-runs that claim: each arm reverts ONE fix on a scratch copy
+// of `src/` and requires its own 🔴 rows to go red and its controls to stay green.
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n46. Combat + items, the second half — why a press is refused, the aimed shot, the Ring, the lure');
+{
+  // ── (a) U1: WHY IS THIS PRESS REFUSED? ONE ANSWER, AND IT IS THE SIM'S ─────────
+  //
+  // The tray read READY over a clogged (Pompa) or sleeping (Warm Milk) fighter while
+  // `attemptAttack` refused every press. F1 (`b0eaa81`) made the tray ask
+  // `state.ts:weaponsLocked`, which stops the lie but cannot say WHICH lock, and any finer
+  // answer written in `hud.ts` would be a second copy of `attemptAttack`'s gates — the shape
+  // `combat.ts:itemUsable`'s header calls "a button that lies". So the gates are named once,
+  // in `combat.ts:weaponRefusal`, IN `attemptAttack`'S OWN ORDER, and `attemptAttack` asks it.
+  //
+  // ⚠️ Two seats suffice: every gate is a property of the presser alone (`minSeats` 2).
+  {
+    const weaponRefusal = typeof COMBAT.weaponRefusal === 'function' ? COMBAT.weaponRefusal : () => 'MISSING';
+    const weaponUsable = typeof COMBAT.weaponUsable === 'function' ? COMBAT.weaponUsable : () => 'MISSING';
+    check('(a) 🔴 `combat.ts` exports `weaponRefusal` and `weaponUsable` — a reader can ask the sim WHY',
+      typeof COMBAT.weaponRefusal === 'function' && typeof COMBAT.weaponUsable === 'function',
+      `${typeof COMBAT.weaponRefusal} / ${typeof COMBAT.weaponUsable}`);
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const KIT = CHARACTERS.waterbottle.weapons;
+    const MEGA = KIT.findIndex((w) => w.key === 'Mega');
+    const fresh = () => {
+      const st = createMatch(arena, [
+        { characterId: 'waterbottle', spawn: { x: 1000, y: 1000 }, controller: 'human' },
+        { characterId: 'hamburger', spawn: { x: 1000 + REACH.meleeQuick * 0.5, y: 1000 }, controller: 'human' },
+      ]);
+      st.phase = 'playing';
+      st.elapsed = 20_000;
+      for (let i = 0; i < st.fighters[0].lastUsed.length; i++) st.fighters[0].lastUsed[i] = -1e9;
+      return st;
+    };
+    // Each case is a STATE; the expected answer is per weapon. `casting` is the one case where
+    // the weapons disagree: only a second CAST weapon is refused mid-wind-up (`DECISIONS §78`
+    // removed the lockout for everything else), and its own cooldown, already stamped by the
+    // press that opened the wind-up, is NOT the reason given — the cast gate sits above it.
+    const CASES = [
+      ['free', () => {}, () => null],
+      ['phase', (st) => { st.phase = 'countdown'; }, () => 'phase'],
+      ['asleep', (st) => { st.fighters[0].item.sleepUntil = st.elapsed + 3000; }, () => 'asleep'],
+      ['clogged', (st) => { st.fighters[0].item.clogUntil = st.elapsed + 3000; }, () => 'clogged'],
+      ['asleep+clogged', (st) => { st.fighters[0].item.sleepUntil = st.elapsed + 3000; st.fighters[0].item.clogUntil = st.elapsed + 3000; }, () => 'asleep'],
+      ['clogged+cooling', (st) => { st.fighters[0].item.clogUntil = st.elapsed + 3000; st.fighters[0].lastUsed.fill(st.elapsed - 1); }, () => 'clogged'],
+      ['casting', (st) => { attemptAttack(st, st.fighters[0], MEGA, []); }, (wi) => (wi === MEGA ? 'casting' : null)],
+      ['cooling', (st) => { st.fighters[0].lastUsed.fill(st.elapsed - 1); }, () => 'cooldown'],
+    ];
+    const grid = [];
+    for (const [name, setup, expect] of CASES) {
+      for (let wi = 0; wi <= KIT.length; wi++) {   // `wi === KIT.length` is the no-weapon slot
+        const st = fresh();
+        setup(st);
+        const me = st.fighters[0];
+        const before = JSON.stringify([me.lastUsed, me.cast, me.item]);
+        const why = weaponRefusal(st, me, wi);
+        const usable = weaponUsable(st, me, wi);
+        const pure = JSON.stringify([me.lastUsed, me.cast, me.item]) === before;
+        const ev = [];
+        const ok = attemptAttack(st, me, wi, ev);
+        const spent = JSON.stringify([me.lastUsed, me.cast, me.item]) !== before || ev.length > 0;
+        grid.push({ name, wi, why, want: name !== 'phase' && wi === KIT.length ? 'no-weapon' : expect(wi), usable, pure, ok, spent });
+      }
+    }
+    const refused = grid.filter((c) => c.ok === false);
+    const fired = grid.filter((c) => c.ok === true);
+    const reasons = new Set(grid.map((c) => c.want).filter((r) => r !== null));
+    check('(a) NON-VACUITY: the grid holds refused AND accepted presses, and every reason is planted at least once',
+      refused.length > 0 && fired.length > 0 && reasons.size === 6
+      && ['phase', 'no-weapon', 'asleep', 'clogged', 'casting', 'cooldown'].every((r) => reasons.has(r)),
+      `${grid.length} cells: ${refused.length} refused, ${fired.length} fired; reasons [${[...reasons].join(' ')}]`);
+    const wrong = grid.filter((c) => c.why !== c.want);
+    check('(a) 🔴 every refusal is NAMED — phase / no-weapon / asleep / clogged / casting / cooldown — in `attemptAttack`\'s order',
+      wrong.length === 0,
+      wrong.slice(0, 4).map((c) => `${c.name}#${c.wi}: got ${c.why}, want ${c.want}`).join(' · ') || 'all named');
+    const disagree = grid.filter((c) => (c.why === null) !== c.ok);
+    check('(a) 🔴 …and it AGREES with `attemptAttack` on every cell — null exactly when the press goes off',
+      disagree.length === 0,
+      disagree.slice(0, 4).map((c) => `${c.name}#${c.wi}: refusal ${c.why}, attemptAttack ${c.ok}`).join(' · ') || `${grid.length}/${grid.length}`);
+    check('(a) 🔴 `weaponUsable` is exactly `weaponRefusal === null`, and asking either changes NOTHING',
+      grid.every((c) => c.usable === (c.why === null) && c.pure),
+      `${grid.filter((c) => c.usable !== (c.why === null)).length} usable mismatches, ${grid.filter((c) => !c.pure).length} impure`);
+    check('(a) CONTROL: a refused press spends nothing and emits nothing; an accepted one stamps its cooldown',
+      refused.every((c) => !c.spent) && fired.every((c) => c.spent),
+      `${refused.filter((c) => c.spent).length} refused-but-spent, ${fired.filter((c) => !c.spent).length} fired-but-free`);
   }
 }
 

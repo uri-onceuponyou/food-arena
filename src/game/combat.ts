@@ -1165,61 +1165,46 @@ export function resolveDueCast(state: MatchState, fighter: Fighter, events: Game
 }
 
 /**
- * Attempt one attack with `weapons[weaponIndex]` for `attacker`. Returns false
- * only when the attack could not even be attempted (unknown weapon slot, still
- * on cooldown, or a SECOND wind-up while one is already running) — everything else (too far, wrong facing
- * for a melee cone, target already dead) still returns true and still consumes the
- * cooldown, because that is exactly what the prototype does: `w.lastUsed = now` is set
- * unconditionally, before any range/cone/target checks run. Whether the attack actually
- * connected is only observable via a `hit-landed`/`projectile-spawned` event in `events`.
+ * WHY A WEAPON PRESS WOULD BE REFUSED RIGHT NOW, OR `null` WHEN IT WOULD GO OFF (U1).
  *
- * ── ⚠️ IT IS NOW THE *PRESS*, AND FOR ONE WEAPON THE PRESS IS NOT THE ATTACK ──
+ * One answer per gate of `attemptAttack`, **in `attemptAttack`'s own order**, because
+ * `attemptAttack` IS this function followed by the spend: it asks `weaponRefusal` first and
+ * refuses on any non-null answer, so the two cannot disagree about whether a press goes off
+ * (`sim.test.mjs` §46(a) runs the whole grid — every reason, every weapon — against the
+ * real `attemptAttack` and requires agreement on every cell).
  *
- * `rules.ts:Weapon.castMs` above 0 makes this open an `ActiveCast` and return, leaving
- * the caster rooted with its aim frozen until `resolveDueCast` fires the attack `castMs`
- * later. Everything the press half does — the cooldown gate, stamping `lastUsed`, and
- * spending cover — is unchanged and happens at the PRESS in both paths, because all three
- * are consequences of pressing rather than of connecting. That is the same line this
- * function has always drawn: "too far", "wrong direction" and "target already dead" all
- * still consume the press.
+ * ── WHY IT EXISTS: THE TRAY COULD SAY "NO" BUT NOT "WHY" ─────────────────────
  *
- * 🚨 **A FIGHTER MID-CAST CANNOT OPEN A SECOND CAST. IT MAY PRESS EVERYTHING ELSE.**
+ * The HUD weapon tray read READY over a clogged (Pompa) or sleeping (Warm Milk) fighter
+ * while every press was refused. F1 (`b0eaa81`) made it ask `state.ts:weaponsLocked`, which
+ * ends the lie but cannot tell a clog from sleep, and any finer answer typed into `hud.ts`
+ * would be a second copy of these gates — the shape `itemUsable`'s header below names
+ * exactly: *"a copy of this rule anywhere else is a button that lies"*. So the reasons are
+ * named HERE, once, and the tray reads them.
  *
- * ⚠️ **THIS PARAGRAPH IS REVERSED AND THE OLD WORDING IS KEPT, because it is the sentence
- * `DECISIONS §78` overturned.** It read, verbatim:
+ * ⚠️ **SLEEP IS ASKED BEFORE THE CLOG, AND THAT IS NOT AN ORDER `attemptAttack` EVER HAD
+ * TO STATE.** It asked `weaponsLocked` — `actionsLocked(f) || clogUntil` — as one boolean.
+ * Splitting it into two answers changes no outcome (both refuse), and sleep is named first
+ * because it is the WIDER lock: a sleeping fighter does nothing at all, so "asleep" is the
+ * true reason even while a clog is also running, and the clog is what is left when it lifts.
  *
- *   > *"🚨 **A FIGHTER MID-CAST CANNOT PRESS ANYTHING.** Without that gate a caster could
- *   > stack a second cast over the first (the second press would overwrite `cast` and the
- *   > first weapon's cooldown would be spent on nothing) or interleave a cheap ranged shot
- *   > into a window it has committed to standing still in. One `ActiveCast` per fighter,
- *   > and the refusal is stated once, here, for the human and the AI alike — they share
- *   > this function precisely so the two sides cannot play by different rules."*
- *
- * **Half of that survives and is now the whole rule: one `ActiveCast` per fighter.** The
- * other half — "or interleave a cheap ranged shot" — was the *lockout*, and Uri's answer
- * on 2026-08-18 is that **a wind-up costs POSITION, not SILENCE**: the root and the frozen
- * aim stay (they are what make the telegraph tell the truth about where the effect lands,
- * and the arm run to confirm the opposite story REFUTED it — removing the root costs its
- * owner 6.6 pp), and the attack lockout goes. See the gate below for what that measured.
- *
- * The refusal is still stated once, here, for the human and the AI alike — they share this
- * function precisely so the two sides cannot play by different rules.
+ * ⚠️ **PURE.** It reads `state` and `f` and writes nothing — the HUD calls it every frame.
  */
-export function attemptAttack(
-  state: MatchState,
-  attacker: Fighter,
-  weaponIndex: number,
-  events: GameEvent[],
-): boolean {
-  if (state.phase !== 'playing') return false;
+export type WeaponRefusal = 'phase' | 'no-weapon' | 'asleep' | 'clogged' | 'casting' | 'cooldown';
 
-  const w = CHARACTERS[attacker.characterId].weapons[weaponIndex];
-  if (!w) return false;
+export function weaponRefusal(state: MatchState, f: Fighter, weaponIndex: number): WeaponRefusal | null {
+  if (state.phase !== 'playing') return 'phase';
+
+  const w = CHARACTERS[f.characterId].weapons[weaponIndex];
+  if (!w) return 'no-weapon';
 
   const now = state.elapsed;
-  const castMs = w.castMs ?? 0;
 
   // ── 🚨 POMPA CLOGS THE WEAPON, AND WARM MILK STOPS THE TURN ────────────────
+  //
+  // (Moved here from `attemptAttack` verbatim with U1; "HERE" below now means "in the
+  // gate list `attemptAttack` asks first", which is still the function the human and the
+  // AI share.)
   //
   // Uri: *"pompa — clogs their weapons for 5 secons"* and *"You can put someone to sleep"*.
   // `state.ts:weaponsLocked` is the one statement of both, and it is asked HERE — in the
@@ -1239,7 +1224,12 @@ export function attemptAttack(
   // `resolveDueCast` is a commitment already paid for. Sleep is different and says so
   // separately — it cancels, through `cancelCast`, because a sleeping fighter is not
   // finishing anything.
-  if (weaponsLocked(attacker, now)) return false;
+  //
+  // IT USED TO READ `if (weaponsLocked(attacker, now)) return false;` — one boolean. It is
+  // two answers now (see this function's header for the order); `weaponsLocked` is exactly
+  // `actionsLocked || clogUntil`, so the refused set is unchanged.
+  if (actionsLocked(f, now)) return 'asleep';
+  if (weaponsLocked(f, now)) return 'clogged';
 
   // ── 🚨 THE SECOND-CAST GATE. IT USED TO BE THE ATTACK LOCKOUT. ──────────────
   //
@@ -1284,8 +1274,87 @@ export function attemptAttack(
   // the counterplay the telegraph exists for. `sim.test.mjs` §33(p) measures exactly that
   // — the dodge under a caster that is now shooting back — and is the row to read before
   // anyone concludes this was free.
-  if (attacker.cast !== null && castMs > 0) return false;
-  if (now - attacker.lastUsed[weaponIndex] < w.cooldown) return false;
+  //
+  // (Was `if (attacker.cast !== null && castMs > 0) return false;` in `attemptAttack`, with
+  // `castMs = w.castMs ?? 0` — the same comparison, moved with U1.)
+  if (f.cast !== null && (w.castMs ?? 0) > 0) return 'casting';
+  if (now - f.lastUsed[weaponIndex] < w.cooldown) return 'cooldown';
+  return null;
+}
+
+/** May this weapon be pressed right now? Exactly `weaponRefusal(...) === null` — the
+ *  yes/no reading for callers that do not need the reason. */
+export function weaponUsable(state: MatchState, f: Fighter, weaponIndex: number): boolean {
+  return weaponRefusal(state, f, weaponIndex) === null;
+}
+
+/**
+ * Attempt one attack with `weapons[weaponIndex]` for `attacker`. Returns false
+ * only when the attack could not even be attempted (unknown weapon slot, still
+ * on cooldown, or a SECOND wind-up while one is already running — exactly when
+ * `weaponRefusal` names a reason) — everything else (too far, wrong facing
+ * for a melee cone, target already dead) still returns true and still consumes the
+ * cooldown, because that is exactly what the prototype does: `w.lastUsed = now` is set
+ * unconditionally, before any range/cone/target checks run. Whether the attack actually
+ * connected is only observable via a `hit-landed`/`projectile-spawned` event in `events`.
+ *
+ * ── ⚠️ IT IS NOW THE *PRESS*, AND FOR ONE WEAPON THE PRESS IS NOT THE ATTACK ──
+ *
+ * `rules.ts:Weapon.castMs` above 0 makes this open an `ActiveCast` and return, leaving
+ * the caster rooted with its aim frozen until `resolveDueCast` fires the attack `castMs`
+ * later. Everything the press half does — the cooldown gate, stamping `lastUsed`, and
+ * spending cover — is unchanged and happens at the PRESS in both paths, because all three
+ * are consequences of pressing rather than of connecting. That is the same line this
+ * function has always drawn: "too far", "wrong direction" and "target already dead" all
+ * still consume the press.
+ *
+ * 🚨 **A FIGHTER MID-CAST CANNOT OPEN A SECOND CAST. IT MAY PRESS EVERYTHING ELSE.**
+ *
+ * ⚠️ **THIS PARAGRAPH IS REVERSED AND THE OLD WORDING IS KEPT, because it is the sentence
+ * `DECISIONS §78` overturned.** It read, verbatim:
+ *
+ *   > *"🚨 **A FIGHTER MID-CAST CANNOT PRESS ANYTHING.** Without that gate a caster could
+ *   > stack a second cast over the first (the second press would overwrite `cast` and the
+ *   > first weapon's cooldown would be spent on nothing) or interleave a cheap ranged shot
+ *   > into a window it has committed to standing still in. One `ActiveCast` per fighter,
+ *   > and the refusal is stated once, here, for the human and the AI alike — they share
+ *   > this function precisely so the two sides cannot play by different rules."*
+ *
+ * **Half of that survives and is now the whole rule: one `ActiveCast` per fighter.** The
+ * other half — "or interleave a cheap ranged shot" — was the *lockout*, and Uri's answer
+ * on 2026-08-18 is that **a wind-up costs POSITION, not SILENCE**: the root and the frozen
+ * aim stay (they are what make the telegraph tell the truth about where the effect lands,
+ * and the arm run to confirm the opposite story REFUTED it — removing the root costs its
+ * owner 6.6 pp), and the attack lockout goes. See the gate below for what that measured.
+ *
+ * The refusal is still stated once, here, for the human and the AI alike — they share this
+ * function precisely so the two sides cannot play by different rules.
+ */
+export function attemptAttack(
+  state: MatchState,
+  attacker: Fighter,
+  weaponIndex: number,
+  events: GameEvent[],
+): boolean {
+  // ── THE GATES ARE `weaponRefusal`'S, ASKED FIRST, IN THE ORDER THEY ALWAYS RAN ──
+  //
+  // U1. Until then this function opened with the five refusals inline — `phase !==
+  // 'playing'`, `!w`, `weaponsLocked(attacker, now)`, `attacker.cast !== null && castMs > 0`,
+  // and the cooldown comparison — each `return false`, and their reasoning (the clog, the
+  // second-cast gate and what the lockout cost) moved WITH them into `weaponRefusal` above.
+  // The order is unchanged and every refusal still lands BEFORE the cooldown stamp below, so
+  // a refused press still costs nothing; `sim.test.mjs` §46(a) checks agreement cell by
+  // cell, and `tools/tmp/b3b_digest.mjs` found every AI and scripted-human match on the
+  // shipped kitchen bit-identical to the inline version.
+  if (weaponRefusal(state, attacker, weaponIndex) !== null) return false;
+
+  // Unreachable once `weaponRefusal` returned null (it answers 'no-weapon' first); kept as
+  // the type narrowing, not as a second rule.
+  const w = CHARACTERS[attacker.characterId].weapons[weaponIndex];
+  if (!w) return false;
+
+  const now = state.elapsed;
+  const castMs = w.castMs ?? 0;
   attacker.lastUsed[weaponIndex] = now;
 
   if (castMs > 0) {
