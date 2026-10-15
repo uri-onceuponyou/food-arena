@@ -31,6 +31,7 @@ import { wu, groundPos, CHARACTER_HEIGHT } from '../units';
 import { PALETTE, fogOpeningRadiusFor } from '../game/rules';
 import {
   makeTileWearTexture,
+  TILE_WEAR_CALM,
   makeWoodGrainTexture,
   makeButcherBlockTexture,
   makeBrushedMetalTexture,
@@ -1194,8 +1195,10 @@ export function buildMaterials() {
   // `./textures.ts` for the generators and the shared design rules) are assigned as
   // `map` below on every major surface family so the fix is broad, not another single
   // spot-fix. Built once per arena instance, same lifetime as everything else here.
-  const tileWearA = makeTileWearTexture(4001);
-  const tileWearB = makeTileWearTexture(4029);
+  // A1: the stone field takes the calm settings (`TILE_WEAR_CALM`, see its note in
+  // `textures.ts`); `utilityMatTex` below keeps the generator's defaults.
+  const tileWearA = makeTileWearTexture(4001, TILE_WEAR_CALM);
+  const tileWearB = makeTileWearTexture(4029, TILE_WEAR_CALM);
   const woodGrainWarm = makeWoodGrainTexture(4111);
   const butcherBlockTex = makeButcherBlockTexture(4177);
   // ── THE BRUSHED-METAL BAND SWING — see `compressValueRange` for the measurement ──
