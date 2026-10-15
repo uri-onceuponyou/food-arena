@@ -36,6 +36,7 @@
       // MATCH_DURATION_MS without editing rules.ts (owned by a peer).
       import { createHud } from '/src/ui/hud.ts';
       import { MATCH_DURATION_MS } from '/src/game/rules.ts';
+      import { createFighter } from '/src/game/state.ts';
       import { FAIR_PLAY } from '/src/render/camera.ts';
 
       // Published so a probe never has to hardcode either of them.
@@ -50,10 +51,19 @@
 
       const hud = createHud(document.getElementById('hud'), { onRestart() {} });
 
+      // The `item` block is taken from the REAL `createFighter`, not typed here: the HUD reads
+      // `f.item.*` since items went live (2026-10-15), and a hand-copied block is exactly what
+      // went stale — this harness threw on every HUD read of it, so hud_fit was red on every
+      // tree from ef26eeb on. Seeding it from the constructor keeps it in step with state.ts.
       function fighter(id, x, y, hp, maxHp) {
+        const seeded = createFighter({
+          id: 0, controller: 'human', characterId: id, spawn: { x, y }, maxHp,
+          size: 0, hitRadius: 0, facing: { x: 1, y: 0 },
+        });
         return {
           role: 'player', characterId: id, x, y, hp, maxHp, alive: hp > 0,
           facing: 0, speed: 0, lastUsed: [0, 0, 0, 0], statuses: [], vx: 0, vy: 0,
+          item: seeded.item,
         };
       }
 
@@ -82,6 +92,10 @@
           },
           nextId: 1,
         };
+        // The HUD reads the N-seat `state.fighters` (zoneInfo, the scoreboard); this harness
+        // predates it and passed only player/enemy, so every update threw on `.length`.
+        state.player.id = 0; state.enemy.id = 1; state.enemy.role = 'enemy';
+        state.fighters = [state.player, state.enemy];
         hud.update(state, { selectedWeapon: 0, safeArrow: null, aim: null });
         return true;
       };
