@@ -76,7 +76,7 @@ import { preserveDestinationAlpha } from '../render/roles';
 import { getWeaponVfx } from '../vfx/weapons';
 import type { WeaponVfx, WeaponVfxCtx } from '../vfx/weapons/types';
 // Persistent ground marks — one dark union, one draw (graphics campaign V1).
-import { GroundMarkBatch, linAtLC } from '../vfx/groundMarks';
+import { GroundMarkBatch, linAtLC, stainFactor } from '../vfx/groundMarks';
 import { VFX_SIGNATURE, effectColor } from '../vfx/palette';
 // Blue Cheese's stink cloud, drawn from state (graphics campaign V1).
 import { BlueCheeseClouds } from '../vfx/blueCheese';
@@ -725,25 +725,64 @@ const PUDDLE_SPLASH_DIST_WU = 18;
 // keyed to the OWNER's C1a signature hue (`src/vfx/palette.ts`) — Donut's trail is a dark
 // violet, not slot 0's rose.
 
-/** OKLab lightness / chroma of a mark's BODY. The floor measured L 0.48–0.52, C 0.12–0.14 on
- *  `d1b2621`'s canonical frames; V1's acceptance asks ΔL ≤ −0.15. Set from the rendered
- *  measurement in the commit that introduced it, not from this algebra. */
-const MARK_BODY_L = 0.33;
-const MARK_BODY_C = 0.13;
-/** The RIM — between the body and the floor. It must stay LIGHTER than the body's brightest
- *  churn (`groundMarks.ts` FRAG: body x 1.06 at most) or a neighbour's rim prints inside the
- *  union. */
-const MARK_RIM_L = 0.44;
-const MARK_RIM_C = 0.15;
-/** Rim band width, in units of the mark's radius. */
-const MARK_RIM_W = 0.11;
-/** The AA fringe ramps toward rim x this, which must be at or above any floor it lands on —
- *  `min` then resolves the fringe to the floor itself. Too high only sharpens the edge; too
- *  low leaves a step where the fragment is discarded. */
-const MARK_EDGE_K = 2.6;
+// ⚠️ **V1b REVERSED THE VALUES BELOW, AND THE OLD WORDING IS KEPT PER THIS FILE'S RULE.** V1 drew
+// the union with `MIN` at a fixed body/rim colour:
+//   *"OKLab lightness / chroma of a mark's BODY. The floor measured L 0.48–0.52, C 0.12–0.14 on
+//   `d1b2621`'s canonical frames; V1's acceptance asks ΔL ≤ −0.15."* — `MARK_BODY_L = 0.33`,
+//   `MARK_BODY_C = 0.13`, `MARK_RIM_L = 0.44`, `MARK_RIM_C = 0.15`, `MARK_RIM_W = 0.11` (radius
+//   units), `MARK_EDGE_K = 2.6` (the AA fringe ramped toward rim x this so `min` resolved it to
+//   the floor).
+// It met "spent dark" at ΔL −0.19…−0.23 and the w5 blind round read it as a HOLE (6 of 8 cast
+// notes: "dark purple smoke blob", "a near-black smear that reads like a hole torn in the floor"):
+// `MIN` REPLACES the floor, so its seams vanished inside the union (2–21% of their contrast kept,
+// `tools/tmp/v1b_stain.py` on `f6aabdc`). The stain is now a MULTIPLY over a per-pixel union
+// (`src/vfx/groundMarks.ts` header): darker, tinted FLOOR, its seams and cells still there.
+
+// ── THE MULTIPLY HAPPENS BEFORE THE GRADE, SO ITS ON-SCREEN STEP IS MEASURED, NOT ASSUMED ──
+// The scene renders linear into a half-float target and `render/stage.ts`'s `ToyGradeEffect` then
+// grades it in display space — a shadow toe, a contrast S, and a gamut-limited SATURATION BOOST
+// about luma (1.19). A scene-space multiply is therefore not the screen-space multiply it looks
+// like: the first build solved these constants against the floor's SCREEN colour, at tint 0.5 /
+// −0.08, and measured on screen a per-channel ratio of (0.47, 0.21, 1.00) where the factor was
+// (0.62, 0.47, 0.83) — ΔL −0.10…−0.12 and chroma +0.015 over the floor (`v1b_stain.py`). The
+// grade, emulated from its shader and its shipped uniforms, reproduces that ratio to ±0.01
+// (0.471, 0.205, 0.992), and inverting it puts the floor's SCENE colour at (0.225, 0.118, 0.164):
+// far less saturated than what reaches the screen. The constants below are solved there.
+
+/** How far below the floor the stain sits, in OKLab L, on `STAIN_REF_FLOOR` in SCENE space. The
+ *  grade stretches it: −0.055 here is ~−0.08 on screen (emulated −0.079; measured by
+ *  `tools/tmp/v1b_stain.py`, see the commit), inside the V1b brief's [−0.12, −0.04] — a clear
+ *  step, not near-black. Prop shadows on this floor sit ~0.05 below it, so the stain is a step
+ *  past a shadow and the owner's dye says what kind of step. */
+const STAIN_DL = -0.055;
+/** The dye's strength: 0 = a neutral darkening, 1 = the owner's colour, normalised to its brightest
+ *  channel, as the full multiply. The grade roughly doubles a multiply's hue shift and adds chroma
+ *  to it, so 0.25 is the most dye that keeps the stain at the floor's own chroma ON SCREEN (emulated
+ *  ΔC +0.004 for Donut's violet, hue 353° -> 340°; at 0.5 it was +0.04, i.e. louder than the
+ *  floor it stains — V1's §2.5 defect in a new colour). */
+const STAIN_TINT = 0.25;
+/** The floor the dye is solved against, in SCENE-LINEAR sRGB (before the grade): the grade
+ *  inverted from the floor's on-screen colour under V1's five canonical stains on `f6aabdc`
+ *  (linear (0.33, 0.055, 0.15): OKLab L 0.51, C 0.128, h 353°). A different surface takes the same
+ *  FACTOR, i.e. a proportionally darker version of itself. */
+const STAIN_REF_FLOOR: [number, number, number] = [0.225, 0.118, 0.164];
+/** The soft edge, in METRES either side of the union's boundary (the sim's damage radius x
+ *  lobes): coverage is 1 at `-STAIN_SOFT_IN`, 0.5 on the boundary, 0 at `+STAIN_SOFT_OUT`. A
+ *  0.20 m ramp is ~9 px at the canonical match framing — soft, and the hazard's edge still sits
+ *  where it hurts. */
+const STAIN_SOFT_IN = 0.10;
+const STAIN_SOFT_OUT = 0.10;
+/** A dried EDGE: a little extra darkening in a band just inside the union's boundary (a stain's
+ *  "coffee ring"), so the boundary of the area that hurts is legible without a hard outline. It is
+ *  a function of the UNION's distance, so it prints only on the pile's outer boundary.
+ *  `STAIN_RIM_K` multiplies the dye at the band's peak (1 = no rim). */
+const STAIN_RIM_K = 0.88;
+const STAIN_RIM_C = 0.16;
+const STAIN_RIM_W = 0.12;
 /** A new mark grows from nothing over this long, and an expiring one shrinks to nothing over
  *  the last `MARK_SHRINK_MS` of its life — so the union's tail RECEDES instead of a whole
- *  lobe blinking out. Radius, not opacity: `MIN` has no opacity. */
+ *  lobe blinking out. Radius, not opacity: `MIN` has no opacity (V1b: the multiply has no opacity
+ *  either — coverage comes from the union's distance — so radius is still the only knob). */
 const MARK_GROW_MS = 140;
 const MARK_SHRINK_MS = 700;
 /** Splats carry no owner (`state.ts:Splat`), so they keep one hue: tomato red-orange, the
@@ -2968,14 +3007,17 @@ export class VfxLayer {
   private readonly shellSize = new THREE.Vector3();
 
   // ── PERSISTENT GROUND MARKS — one union, one draw (see `src/vfx/groundMarks.ts`) ──
-  // The trail and the splats share ONE batch: `MIN` makes their overlap idempotent too, and
-  // the pile costs one draw call whatever its size (the old path was one per mark).
+  // The trail and the splats share ONE batch: the per-pixel union makes their overlap
+  // idempotent too (V1: `MIN` did), and the pile costs one draw call whatever its size (the
+  // old path was one per mark).
   // Built here, before the pools, so its place in `this.group` is fixed and early — the
   // same scene-graph-order argument `statusBySlot` below makes for its own visuals.
-  private readonly groundMarks = new GroundMarkBatch('vfx_ground_mark', TRAIL_Y, MARK_RIM_W, MARK_EDGE_K);
-  /** Body/rim colours per hue source, memoised: an OKLab solve is cheap but not free, and
-   *  it runs per mark per frame otherwise. */
-  private readonly markColors = new Map<string, { body: [number, number, number]; rim: [number, number, number] }>();
+  private readonly groundMarks = new GroundMarkBatch('vfx_ground_mark', TRAIL_Y, {
+    softIn: STAIN_SOFT_IN, softOut: STAIN_SOFT_OUT, rimK: STAIN_RIM_K, rimC: STAIN_RIM_C, rimW: STAIN_RIM_W,
+  });
+  /** Stain factors per hue source, memoised: the solve is a 40-step bisection, cheap but not
+   *  free, and it would run per mark per frame otherwise. */
+  private readonly markColors = new Map<string, { stain: [number, number, number] }>();
   /** Blue Cheese: one cloud per living wearer, one draw for all of them. Above the marks so a
    *  wearer walking through goo still shows his boundary. */
   private readonly ribbons = new RibbonBatch(RIBBON_MAX, RIBBON_POINTS);
@@ -2983,13 +3025,14 @@ export class VfxLayer {
   private readonly ribbonRgb = new Map<string, [number, number, number]>();
   private readonly cheeseClouds = new BlueCheeseClouds(TRAIL_Y + 0.03, MAX_FIGHTERS, CHEESE_HAZE, CHEESE_EDGE, CHEESE_HAZE_A, CHEESE_EDGE_A);
 
-  /** The (linear) body and rim a mark keyed to `hex` draws in — `hex`'s hue at this file's
-   *  mark VALUES. Public for QA: a probe reads the colour a character's trail resolves to
-   *  through the same function the draw uses. */
-  markColorFor(hex: string): { body: [number, number, number]; rim: [number, number, number] } {
+  /** The (linear) MULTIPLY factor a mark keyed to `hex` stains the floor with at full coverage —
+   *  `hex` as a dye at `STAIN_TINT`, darkened to `STAIN_DL` on `STAIN_REF_FLOOR`. (Until V1b this
+   *  returned a `MIN` body and rim colour.) Public for QA: a probe reads the factor a character's
+   *  trail resolves to through the same function the draw uses. */
+  markColorFor(hex: string): { stain: [number, number, number] } {
     let c = this.markColors.get(hex);
     if (!c) {
-      c = { body: linAtLC(hex, MARK_BODY_L, MARK_BODY_C), rim: linAtLC(hex, MARK_RIM_L, MARK_RIM_C) };
+      c = { stain: stainFactor(hex, STAIN_REF_FLOOR, STAIN_DL, STAIN_TINT) };
       this.markColors.set(hex, c);
     }
     return c;
@@ -3654,7 +3697,7 @@ export class VfxLayer {
       const pos = groundPos(t.x, t.y);
       this.groundMarks.push({
         x: pos.x, z: pos.z, r: markRadius(t.expiresAt - TRAIL.durationMs, t.expiresAt, TRAIL.radius),
-        seed: (spinForId(t.id) / (Math.PI * 2)) % 1, body: col.body, rim: col.rim,
+        seed: (spinForId(t.id) / (Math.PI * 2)) % 1, stain: col.stain,
       });
     }
     {
@@ -3663,7 +3706,7 @@ export class VfxLayer {
         const pos = groundPos(sp.x, sp.y);
         this.groundMarks.push({
           x: pos.x, z: pos.z, r: markRadius(sp.expiresAt - SPLAT_DURATION_MS, sp.expiresAt, SPLAT_RADIUS),
-          seed: (spinForId(sp.id) / (Math.PI * 2)) % 1, body: col.body, rim: col.rim,
+          seed: (spinForId(sp.id) / (Math.PI * 2)) % 1, stain: col.stain,
         });
       }
     }
