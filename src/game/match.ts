@@ -1005,9 +1005,19 @@ export class GameSession {
     // `onSelectWeapon` is the touch equivalent of the 1-4 keys — the HUD's weapon bar
     // is the only control a phone player has for it. Reads `this.input` lazily, which
     // is why it may be wired before the controller below exists.
+    //
+    // `onUseItem` is the same shape for the ITEM buttons, and `input.ts:pressItem` is the one
+    // entry point both item controls share (Q/E reach it from `onKeyDown`). 🚨 IT WAS
+    // MISSING, and so was the `takeItemPress()` in `buildInput()` below — the two hops
+    // `174d046` routed here on 2026-09-02 as *"STILL DEAD ON HEAD, BY ONE HUNK IN A FILE THIS
+    // PASS DOES NOT OWN"*. For 43 days every active item was a button the HUD drew READY
+    // (amber ring, Q/E cap, the usable-now flash) that did nothing when pressed; the sim half
+    // was live the whole time. Red/green: `tools/tmp/up_item_press.mjs` (default mode) and
+    // `tools/tmp/b1_match.mjs` §I.
     this.hud = createHud(opts.hudRoot, {
       onRestart: () => this.restart(),
       onSelectWeapon: (index) => this.input.selectWeapon(index),
+      onUseItem: (slot) => this.input.pressItem(slot),
     });
     this.hud.setCharacters(this.characterIds);
 
@@ -1455,7 +1465,32 @@ export class GameSession {
 
     const attack = playing && this.input.attackHeld;
 
-    return { move, aim, selectedWeapon: this.input.selectedWeapon, attack };
+    // ── THE ITEM PRESS — CONSUMED ON EVERY STEPPING FRAME, PASSED ONLY WHILE PLAYING ──
+    //
+    // ⚠️ **NOT `playing ? this.input.takeItemPress() : null`, WHICH IS THE FORM `174d046`
+    // ROUTED, AND THE DIFFERENCE IS THE COUNTDOWN.** That form leaves a press made during
+    // 3-2-1 QUEUED, so it fires on the first playing frame with no further input — measured
+    // by three independent verifiers on the patched build: Q pressed while both buttons read
+    // `WAIT` launched a Springform 99.6 wu at GO. A button that says WAIT and then acts
+    // anyway is the defect `hud.ts` names as *"a slot that reads READY and refuses the press"*,
+    // inverted. So the press is TAKEN every stepping frame and handed to the sim only while
+    // playing — the same pre-step `playing` gate `move`, `aim` and `attack` above use, so all
+    // four inputs agree on which frames are live.
+    //
+    // What is NOT changed: `input.ts`'s documented pause buffering. The loop skips
+    // `buildInput()` entirely while paused, so a press made behind the pause sheet is still
+    // delivered on the first frame after the resume, and `reset()` still drops it on restart.
+    //
+    // ⚠️ The sim would drop a countdown press on its own too — `sim.ts` runs no fighter turn
+    // outside `'playing'`, so `combat.ts:itemUsable`'s phase gate is never even reached, and
+    // the sim keeps no queue. `sim.test.mjs` §44(d) pins that half, so the session and the
+    // sim cannot come to disagree about it.
+    const itemPress = this.input.takeItemPress();
+
+    return {
+      move, aim, selectedWeapon: this.input.selectedWeapon, attack,
+      useItem: playing ? itemPress : null,
+    };
   }
 
   private syncModelTransform(model: CharacterModel, fighter: Fighter): void {

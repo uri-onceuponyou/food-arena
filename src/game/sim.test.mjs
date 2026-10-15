@@ -11651,6 +11651,146 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 44. THE HUMAN PRESS — `MatchInput.useItem` through `stepMatch`, the hop `match.ts` lacked
+//
+// 🚨 FOR 43 DAYS EVERY ACTIVE ITEM WAS A BUTTON THAT DID NOTHING, AND NO ROW IN THIS FILE
+// COULD HAVE SAID SO. `match.ts:buildInput()` never set `useItem` and the HUD was never handed
+// `onUseItem` (routed in `174d046` on 2026-09-02, landed by the B1 package on 2026-10-15),
+// while the sim half — `sim.ts`'s human branch reading `fi.useItem` into `attemptItem` — was
+// live and UNTESTED: not one row here drove it, because every `stepMatch` caller in this file
+// predates items. The break lived in `match.ts`, which Node cannot import (extensionless Vite
+// imports, `three`, the DOM), so the red/green for the DEFECT is the browser's:
+// `tools/tmp/up_item_press.mjs` (default mode) and `tools/tmp/b1_match.mjs` §I, both red on
+// `2b2e792`. These rows pin the CONTRACT that fix stands on, from this side of the seam:
+//
+//   (b)/(c) the same tick without and with the key — the shape that shipped, and the live one;
+//   (d) the sim keeps NO queue and runs no fighter turn in the countdown, so a countdown press
+//       is gone by GO — `match.ts` now drops it at the session too, and the two must agree;
+//   (e) a corpse's press is refused at SIX seats — unreachable at two, as §34 says of every
+//       corpse rule, so the fixture is six seats and asserts its own corpse is real;
+//   (f) an empty loadout pressed is a no-op, BIT-identical to not pressing — with the
+//       comparator first shown able to tell a press from no press, or "identical" means nothing.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n44. The human item press reaches `attemptItem` through `stepMatch` (and only in play)');
+{
+  const DT = 16.667;
+  const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  const PRESS0 = { ...NEUTRAL, useItem: 0 };
+  const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+  /** Slot 0 HUMAN — `createMatch`'s default, stated anyway — every other seat AI, spaced
+   *  300 wu apart on clear floor. Left in `'countdown'`; `play()` opens it. */
+  const humanMatch = (n, items) => createMatch(arena, Array.from({ length: n }, (_, i) => ({
+    characterId: CHARACTER_IDS[i % CHARACTER_IDS.length],
+    controller: i === 0 ? 'human' : 'ai',
+    spawn: { x: 600 + i * 300, y: 400 },
+    ...(i === 0 && items ? { items } : {}),
+  })));
+  const play = (st) => { st.phase = 'playing'; return st; };
+  const used = (evs) => evs.filter((e) => e.type === 'item-used');
+
+  // ── (a) NON-VACUITY: a real human seat holding a real ACTIVE item the sim would accept ──
+  {
+    const st = play(humanMatch(2, ['springform']));
+    const me = st.fighters[0];
+    check('(a) NON-VACUITY: slot 0 is HUMAN, its slot 0 holds an ACTIVE item, and `itemUsable` accepts it',
+      me.controller === 'human' && ITEMS[me.item.equipped[0]]?.kind === 'active' && itemUsable(st, me, 0),
+      `controller ${me.controller}, equipped [${me.item.equipped.join(',')}], usable ${itemUsable(st, me, 0)}`);
+  }
+
+  // ── (b)/(c) THE SAME TICK, WITHOUT AND WITH THE KEY ────────────────────────
+  {
+    const dead = play(humanMatch(2, ['springform']));
+    const live = play(humanMatch(2, ['springform']));
+    const evDead = stepMatch(dead, DT, NEUTRAL);
+    const evLive = stepMatch(live, DT, PRESS0);
+    check('(b) the input `match.ts` shipped for 43 days (no `useItem`) spends nothing — the dead chain, from this side',
+      dead.fighters[0].item.lastUsed[0] === -Infinity && used(evDead).length === 0,
+      `lastUsed[0] ${dead.fighters[0].item.lastUsed[0]}, item-used ×${used(evDead).length}`);
+    const u = used(evLive);
+    check('(c) 🔴 the same tick WITH `useItem: 0` spends it: cooldown stamped NOW, one `item-used` for seat 0 slot 0',
+      live.fighters[0].item.lastUsed[0] === live.elapsed && u.length === 1 && u[0].fighterId === 0 && u[0].slot === 0,
+      `lastUsed[0] ${live.fighters[0].item.lastUsed[0]} vs elapsed ${live.elapsed}, events ${JSON.stringify(u)}`);
+  }
+
+  // ── (d) NO QUEUE, AND NO TURN IN THE COUNTDOWN ─────────────────────────────
+  //
+  // Pressed on every one of ten countdown ticks (167 ms — the countdown is three whole
+  // seconds, so it cannot finish inside the window, and the row asserts that rather than
+  // trusting it), then the match is opened and stepped once with NO key. Nothing may fire.
+  // Then the CONTROL: the very next tick with the key DOES fire, so "nothing fired" above
+  // was the countdown and the queue, not an item that was never usable.
+  {
+    const st = humanMatch(2, ['springform']);
+    const before = st.phase;
+    const evs = [];
+    for (let i = 0; i < 10; i++) evs.push(...stepMatch(st, DT, PRESS0));
+    check('(d) NON-VACUITY: the fixture was in the countdown for all ten pressed ticks',
+      before === 'countdown' && st.phase === 'countdown', `${before} -> ${st.phase}`);
+    check('(d) 🔴 ten countdown presses spend nothing — no fighter turn runs outside `\'playing\'`',
+      st.fighters[0].item.lastUsed[0] === -Infinity && used(evs).length === 0,
+      `lastUsed[0] ${st.fighters[0].item.lastUsed[0]}, item-used ×${used(evs).length}`);
+    play(st);
+    const afterGo = stepMatch(st, DT, NEUTRAL);
+    check('(d) 🔴 …and nothing was QUEUED: the first playing tick with no key fires nothing',
+      st.fighters[0].item.lastUsed[0] === -Infinity && used(afterGo).length === 0,
+      `lastUsed[0] ${st.fighters[0].item.lastUsed[0]}, item-used ×${used(afterGo).length}`);
+    const ctl = stepMatch(st, DT, PRESS0);
+    check('(d) CONTROL: the next tick WITH the key fires — so the silence above was the countdown, not the item',
+      used(ctl).length === 1 && st.fighters[0].item.lastUsed[0] === st.elapsed,
+      `item-used ×${used(ctl).length}`);
+  }
+
+  // ── (e) A CORPSE'S PRESS, AT SIX SEATS ─────────────────────────────────────
+  {
+    const kill = (st) => {
+      const evs = [];
+      const w = CHARACTERS[st.fighters[1].characterId].weapons[0];
+      applyDamage(st, st.fighters[0], 9999, null,
+        { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: 1 }, evs);
+      return evs;
+    };
+    const alive = play(humanMatch(MAX_FIGHTERS, ['springform']));
+    const corpse = play(humanMatch(MAX_FIGHTERS, ['springform']));
+    kill(corpse);
+    check(`(e) NON-VACUITY: at N=${MAX_FIGHTERS} seat 0 is a CORPSE in a match that is still playing`,
+      corpse.fighters.length === MAX_FIGHTERS && corpse.fighters[0].alive === false && corpse.phase === 'playing',
+      `seats ${corpse.fighters.length}, alive ${corpse.fighters[0].alive}, phase ${corpse.phase}`);
+    const evAlive = stepMatch(alive, DT, PRESS0);
+    const evCorpse = stepMatch(corpse, DT, PRESS0);
+    check(`(e) CONTROL: the same press from a LIVING seat 0 at N=${MAX_FIGHTERS} fires`,
+      used(evAlive).some((e) => e.fighterId === 0), `item-used ×${used(evAlive).length}`);
+    check('(e) 🔴 a dead human seat\'s press is refused — the corpse rule (§34) covers items too',
+      corpse.fighters[0].item.lastUsed[0] === -Infinity && !used(evCorpse).some((e) => e.fighterId === 0),
+      `lastUsed[0] ${corpse.fighters[0].item.lastUsed[0]}`);
+  }
+
+  // ── (f) AN EMPTY LOADOUT, PRESSED, IS BIT-IDENTICAL TO NOT PRESSING ────────
+  //
+  // `match.ts` now hands the sim every Q/E a player presses, including from a player who
+  // equipped nothing — the shipped default. That must cost nothing and change nothing.
+  {
+    const run = (input, items) => {
+      const st = play(humanMatch(2, items));
+      const evs = [];
+      for (let i = 0; i < 30; i++) evs.push(...stepMatch(st, DT, input));
+      return JSON.stringify({ st, evs });
+    };
+    const discriminates = run(NEUTRAL, ['springform']) !== run(PRESS0, ['springform']);
+    check('(f) NON-VACUITY: the comparator tells a press from no press when an item IS equipped',
+      discriminates);
+    let threw = null;
+    let same0 = false;
+    let same1 = false;
+    try {
+      same0 = run(NEUTRAL, undefined) === run(PRESS0, undefined);
+      same1 = run(NEUTRAL, undefined) === run({ ...NEUTRAL, useItem: 1 }, undefined);
+    } catch (err) { threw = String(err); }
+    check('(f) 🔴 Q and E with an EMPTY loadout: no throw, and 30 ticks bit-identical to never pressing',
+      threw === null && same0 && same1, `threw ${threw}, slot0 identical ${same0}, slot1 identical ${same1}`);
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) {
   console.log('\nFailed checks:');
