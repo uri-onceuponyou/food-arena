@@ -736,13 +736,19 @@ type WeaponRank = (state: MatchState, self: Fighter, w: Weapon, index: number, a
  *     that defect into the ranking, so it was left exact and the aim was fixed instead).
  *     With the aim correct in both branches the cone check is a no-op wherever this key
  *     is consulted, so the key is exact.
- *   * Donut's `trailBoosted` Candy Barrage. ~~Donut has exactly one offensive weapon, so
- *     the boost cannot re-order a kit of one.~~
+ *   * ~~Donut's `trailBoosted` Candy Barrage. ~~Donut has exactly one offensive weapon, so
+ *     the boost cannot re-order a kit of one.~~~~
  *     ⚠️ **STALE since the 2026-08-24 kit pass, found by B3b (2026-10-15).** Donut has FOUR
  *     weapons (Ring, Sprinkles, Candy, Glaze) and Candy is the only boosted one (B3b took
  *     the never-applied flag off Ring), so the reason this was safe is gone: standing on
  *     its own trail, the unpriced boost CAN re-order Candy against the other three. Whether
  *     it does in practice is unmeasured — the AI package's question, not settled here.
+ *     ✅ **MEASURED AND PRICED (B5, 2026-10-15) — it does.** On its own trail Candy lands
+ *     3 x 6 = 18 inside its fan's reach, Glaze lands 15, and the unpriced key read Candy as 12
+ *     — so a Donut bot on its trail with both ready pressed Glaze and threw away 3 HP a press
+ *     (`sim.test.mjs` §48(f): pressed Glaze, priced 12 against 18 landed at 40 and 60 wu, 4
+ *     against 6 at 115). `PRESS_VALUE_ON_TRAIL` below is the same profile at the boosted
+ *     per-pellet damage, and `rankPressValue` asks `isOnOwnTrail` — the sim's predicate.
  *
  * ── ⚠️ WHAT THIS KEY STILL DOES NOT PRICE: THE TARGET IS MOVING ─────────────
  *
@@ -891,22 +897,46 @@ const PRESS_VALUE: ReadonlyMap<Weapon, PressProfile> = (() => {
 })();
 
 /**
+ * `PRESS_VALUE` again, for the weapons whose damage the TRAIL boosts, at the boosted per-pellet
+ * value — `Math.round(w.damage * TRAIL.damageBoost)`, exactly `combat.ts:trailBoostedDamage`.
+ * Only non-combo weapons: `combat.ts:deliverWeapon`'s combo branch lands `part.damage` raw, and
+ * pricing a boost the sim never applies would be the mirror of the defect this prices. Every
+ * entry is an integer multiple of the unboosted per-pellet damage, so `(d / from) * to` is exact.
+ */
+const PRESS_VALUE_ON_TRAIL: ReadonlyMap<Weapon, PressProfile> = (() => {
+  const m = new Map<Weapon, PressProfile>();
+  for (const [w, p] of PRESS_VALUE) {
+    if (!w.trailBoosted || w.comboParts || !(w.damage > 0)) continue;
+    const from = w.damage;
+    const to = Math.round(w.damage * TRAIL.damageBoost);
+    const scale = (d: number): number => (d / from) * to;
+    m.set(w, { always: scale(p.always), offAxis: p.offAxis.map((o) => ({ maxDist: o.maxDist, damage: scale(o.damage) })) });
+  }
+  return m;
+})();
+
+/**
  * Delivered damage for one press of `w` against a target `adist` away.
+ *
+ * `onOwnTrail` (default `false`, so every existing caller and `press_value.mjs`'s 183 cells
+ * are unchanged) prices the trail boost for a weapon that declares it — see
+ * `PRESS_VALUE_ON_TRAIL`. The caller asks `combat.ts:isOnOwnTrail`; this never guesses.
  *
  * Exported for the same reason `combat.ts` exports `statusReadyAt`: `sim.test.mjs` §20
  * asserts this against the damage the REAL combat path delivers, weapon by weapon and
  * band by band, so the driver's ranking key cannot silently drift away from the sim it
  * is trying to predict. A copy of the arithmetic in the test would only test the copy.
  */
-export function pressValue(w: Weapon, adist: number): number {
-  const p = PRESS_VALUE.get(w);
+export function pressValue(w: Weapon, adist: number, onOwnTrail = false): number {
+  const p = (onOwnTrail ? PRESS_VALUE_ON_TRAIL.get(w) : undefined) ?? PRESS_VALUE.get(w);
   if (!p) return w.damage; // unreachable for a weapon in CHARACTERS; fail to the old key
   let v = p.always;
   for (const o of p.offAxis) if (adist < o.maxDist) v += o.damage;
   return v;
 }
 
-const rankPressValue: WeaponRank = (_state, _self, w, _index, adist) => pressValue(w, adist);
+const rankPressValue: WeaponRank = (state, self, w, _index, adist) =>
+  pressValue(w, adist, w.trailBoosted === true && isOnOwnTrail(state, self));
 
 /**
  * The AI's only defensive resource. See `rules.ts` AUTHORISED DEVIATION #7 — until

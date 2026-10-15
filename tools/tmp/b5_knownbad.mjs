@@ -105,6 +105,9 @@ const E_RED = [
 ];
 const E_CONTROL = ['(e) CONTROL: the target just OUTSIDE the burn', '(e) CONTROL: six seats (a 237 wu floor)'];
 const E_OVERFIX = '(e) CONTROL: the ring term still holds a bot inside the final circle';
+const F_PICK = '(f) 🔴 ON its own trail it presses Candy';
+const F_EXACT = '(f) 🔴 the priced value IS the sim\'s';
+const F_CONTROL = ['(f) NON-VACUITY: Candy is Donut\'s only boosted weapon', '(f) CONTROL: off its trail'];
 
 export const ARMS = [
   // ── AI-B1 ──────────────────────────────────────────────────────────────────────
@@ -222,6 +225,34 @@ export const ARMS = [
     // over-fix control exists.
     mustFail: [E_OVERFIX],
     mustPass: [...E_RED, '(e) CONTROL: six seats (a 237 wu floor)'],
+  },
+  // ── the trail pricing note ─────────────────────────────────────────────────────
+  {
+    name: 'trail-unpriced',
+    bug: 'pricing — the ranking ignores the trail boost (the shipped key)',
+    file: 'game/ai.ts',
+    find: '  pressValue(w, adist, w.trailBoosted === true && isOnOwnTrail(state, self));',
+    repl: '  pressValue(w, adist);',
+    mustFail: [F_PICK],
+    mustPass: [...F_CONTROL, F_EXACT],
+  },
+  {
+    name: 'trail-priced-everywhere',
+    bug: 'pricing over-fix — the boost priced whether or not the bot stands on its trail',
+    file: 'game/ai.ts',
+    find: '  pressValue(w, adist, w.trailBoosted === true && isOnOwnTrail(state, self));',
+    repl: '  pressValue(w, adist, w.trailBoosted === true);',
+    mustFail: ['(f) CONTROL: off its trail'],
+    mustPass: [F_PICK, F_EXACT],
+  },
+  {
+    name: 'trail-profile-unboosted',
+    bug: 'pricing — the on-trail profile built at the UNBOOSTED damage (priced, but wrong)',
+    file: 'game/ai.ts',
+    find: '    const to = Math.round(w.damage * TRAIL.damageBoost);',
+    repl: '    const to = w.damage;',
+    mustFail: [F_PICK, F_EXACT],
+    mustPass: F_CONTROL,
   },
 ];
 

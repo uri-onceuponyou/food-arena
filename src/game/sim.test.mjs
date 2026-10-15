@@ -13585,6 +13585,71 @@ console.log('\n48. The bot at two, three and six seats — sudden death, what it
         maxDc <= minSafeRadiusFor(2), `farthest ${maxDc.toFixed(1)} wu from the centre, final circle ${minSafeRadiusFor(2)}`);
     }
   }
+
+  // ── (f) THE STALE PRICING NOTE: DONUT'S TRAIL-BOOSTED CANDY, MEASURED ───────────────────
+  //
+  // `ai.ts`'s `pressValue` header said the boost was unpriced and that this was safe because
+  // "Donut has exactly one offensive weapon". Donut has four (Ring 9, Sprinkles, Candy 3x4,
+  // Glaze 15) and Candy is the only boosted one. Measured, not argued: on its own trail Candy
+  // lands 3x6 = 18 inside its fan's reach, which beats Glaze's 15 — while the unpriced key read
+  // 12 and picked Glaze. So the boost DOES re-order the kit, and the brief's rule was "price it
+  // only if it does".
+  {
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const KIT = CHARACTERS.donut.weapons;
+    const CANDY = KIT.find((w) => w.key === 'Candy');
+    const GLAZE = KIT.find((w) => w.key === 'Glaze');
+    const boostedKeys = KIT.filter((w) => w.trailBoosted).map((w) => w.key);
+    const SEP = 60;
+    // A Donut at (1000,1000) facing east, a statue `sep` east; `onTrail` lays one live mark of
+    // Donut's own trail under its feet, exactly as §46(c) does.
+    const scene = (controller, onTrail, sep) => {
+      const st = seat48(arena, [
+        { characterId: 'donut', controller, maxHp: 1e5, spawn: { x: 1000, y: 1000 } },
+        { characterId: 'hamburger', controller: 'human', maxHp: 1e5, spawn: { x: 1000 + sep, y: 1000 } },
+      ]);
+      st.phase = 'playing';
+      st.elapsed = 20_000;
+      st.fighters[0].facing = { x: 1, y: 0 };
+      if (onTrail) {
+        st.trailMarks.push({ id: st.nextId++, ownerId: 0, ownerRole: st.fighters[0].role, x: 1000, y: 1000,
+          expiresAt: st.elapsed + TRAIL.durationMs, damagedMask: 0, damaged: false });
+      }
+      return st;
+    };
+    const pick = (onTrail) => {
+      const st = scene('ai', onTrail, SEP);
+      const ev = [];
+      stepAI(st, st.fighters[0], DT48, ev);
+      return { key: ev.find((e) => e.type === 'weapon-fired' || e.type === 'cast-started')?.weaponKey ?? 'none', trail: isOnOwnTrail(st, st.fighters[0]) };
+    };
+    // What the real combat path LANDS for one Candy press on the trail, at `sep`.
+    const landed = (sep) => {
+      const st = scene('human', true, sep);
+      attemptAttack(st, st.fighters[0], KIT.indexOf(CANDY), []);
+      let sum = 0;
+      for (let k = 0; k < 120; k++) {
+        for (const e of stepMatch(st, DT48, [null, null])) {
+          if (e.type === 'hit-landed' && e.targetId === 1 && e.source?.kind === 'weapon' && e.source.attackerId === 0) sum += e.amount;
+        }
+      }
+      return sum;
+    };
+    const priced = (sep) => pressValue(CANDY, sep, true);
+    check('(f) NON-VACUITY: Candy is Donut\'s only boosted weapon, and at 60 wu the boost lands it above Glaze (18 vs 15) while the unboosted key reads 12',
+      boostedKeys.length === 1 && boostedKeys[0] === 'Candy' && pressValue(CANDY, SEP) < pressValue(GLAZE, SEP) && landed(SEP) > pressValue(GLAZE, SEP),
+      `boosted [${boostedKeys}]; Candy unpriced ${pressValue(CANDY, SEP)}, landed on the trail ${landed(SEP)}; Glaze ${pressValue(GLAZE, SEP)}`);
+    const on = pick(true);
+    const off = pick(false);
+    check('(f) CONTROL: off its trail, with every weapon ready, a Donut bot at 60 wu presses Glaze (15 > 12)',
+      !off.trail && off.key === 'Glaze', `pressed ${off.key}`);
+    check('(f) 🔴 ON its own trail it presses Candy — 18 delivered beats Glaze\'s 15',
+      on.trail && on.key === 'Candy', `pressed ${on.key} (on trail ${on.trail})`);
+    const seps = [40, SEP, 115];
+    const exact = seps.map((d) => ({ d, priced: priced(d), landed: landed(d) }));
+    check('(f) 🔴 the priced value IS the sim\'s: `pressValue(Candy, d, onTrail)` equals what the trail-boosted press lands, inside and outside the fan\'s reach',
+      exact.every((r) => r.priced === r.landed), exact.map((r) => `${r.d} wu: priced ${r.priced}, landed ${r.landed}`).join(' · '));
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
