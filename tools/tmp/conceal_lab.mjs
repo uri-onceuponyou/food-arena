@@ -1168,10 +1168,13 @@ if (args.selftest) {
   // and CAUGHT at 15-vs-1, and both halves are asserted: the first is what proves the
   // default corpus is blind here, the second is what proves `--levels` fixes it.
   {
+    // ⚠️ RE-ANCHORED 2026-10-15 (B3, CL-1). It quoted `const dealt = attacker ? amount *
+    // attacker.damageMul : amount;`, which the item system (`f6c13aa`) rewrote — `applied[0]`
+    // went false and this arm sat at 78/80, unable to plant its known-bad, from the item merge on.
     const { dir, applied } = patchedSimDir('selftest-attacker', [
       ['combat.ts',
-        'const dealt = attacker ? amount * attacker.damageMul : amount;',
-        'const dealt = attacker ? amount * target.damageMul : amount;'],
+        'let dealt = attacker && !isItemDamage ? amount * attacker.damageMul : amount;',
+        'let dealt = attacker && !isItemDamage ? amount * target.damageMul : amount;'],
     ]);
     ok('the wrong-attacker known-bad was actually patched into combat.ts', applied[0]);
     const ATK = await loadSim(dir);
