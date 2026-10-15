@@ -1756,8 +1756,15 @@ const GATES = [
   // eleven agents to repaint eleven characters for one puddle. One allowed failure keeps
   // the gate sensitive to a character that is genuinely weak everywhere (hotdog: 3 of 18)
   // while attributing a shared hostile station to the station.
-  { key: 'dlBelow10', label: 'stations with dL < 0.10 (of the VALID 18)', max: 1, target: 0,
-    why: "this project's own recorded lighting standard: figure/ground >= 0.10, |dL| < 0.05 = none. NOT a reference figure — said out loud. One station is allowed because `grease_in` fails for 9 of 11 and is an ARENA fix. Stations where the mask and the value disagree (the fighter is occluded) contribute NO number and are counted in the nInv column — they used to contribute the OCCLUDER'S luma, which is what made this key fail for all eleven characters on both sides of the value pass." },
+  // 🔁 REPORT-ONLY since 2026-10-15 — it no longer fails a character. Its own `why` says it is
+  // "NOT a reference figure", and the reference was then MEASURED: fighter-vs-surround ΔL is
+  // −0.02 on the plates, i.e. the reference does NOT separate its fighters by value; it marks
+  // them (contour, seat ring, saturated mid-value body — `docs/REVAMP.md` §2.1). The revamp's
+  // C1a re-keyed the cast toward that (median luma 0.45–0.60, `DECISIONS §91c`/§91p) and
+  // this key then failed 6 characters BY DESIGN. Kept printed, so the separation is still
+  // visible; `info: true` takes it out of the verdict. The old gate is the text below.
+  { key: 'dlBelow10', info: true, label: 'stations with dL < 0.10 (of the VALID 18)', max: 1, target: 0,
+    why: "REPORT-ONLY (see above). Was: this project's own recorded lighting standard: figure/ground >= 0.10, |dL| < 0.05 = none. NOT a reference figure — said out loud. One station is allowed because `grease_in` fails for 9 of 11 and is an ARENA fix. Stations where the mask and the value disagree (the fighter is occluded) contribute NO number and are counted in the nInv column — they used to contribute the OCCLUDER'S luma, which is what made this key fail for all eleven characters on both sides of the value pass." },
   // ⚠️ READ THE SHAPE OF THIS ONE BEFORE ACTING ON A MOVE IN IT. It is a CLIFF, and it is
   // built on the parts' WHOLE-PART medians while the contacts it weights by are counted at
   // the BOUNDARY. `dLcontact` and the `weakBc%`/`flip` columns exist because of that; the
@@ -1964,6 +1971,7 @@ async function modeGate() {
       verdictFlips: flips,
     };
     const fails = GATES.filter((g) => {
+      if (g.info) return false;   // printed, never a verdict (dlBelow10 — see its note)
       const x = v[g.key];
       if (x == null) return true;
       return g.min != null ? x < g.min : x > g.max;
