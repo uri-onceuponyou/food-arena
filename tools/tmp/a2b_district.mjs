@@ -58,8 +58,11 @@ export function baseArena() {
 //     gantry. It splits the 390 wu cardinal lane between the NE and SE islands into two
 //     167.5 wu streets, the way the sink and fryer counters already split the N/S lanes into
 //     two 160 wu streets — so all four approaches to the plaza now read alike. Its inner end
-//     is 290 wu from the pot (rule 6 needs 279), its outer corner 71.1 wu from the south
-//     puddle's centre (the disc is r 50: every cell stays standable).
+//     is 290 wu from the pot (rule 6 needs 279). ⚠️ 125 wu long, not the 190 first drawn: the
+//     190 put FIVE repo fixtures inside its collar (`arena-scan`'s `west_choke` (900,1000) —
+//     the scan refused to run — and its copies in `valuescan`/`simfix`, plus `simfix`'s
+//     (1840,970) / (940,1030)); none of those files is this package's to re-site, so the
+//     pass got shorter. `fixtureFaults` below now finds that class before a browser does.
 //   * THE NE RUN: a counter butted onto the NE island's outer end, so the island becomes one
 //     295 wu wall along the north side of the east lane; 85 wu short of the cook line (a
 //     corridor, not a slit).
@@ -69,7 +72,7 @@ export function baseArena() {
 //     one, and a station a fighter cannot stand on is a broken tool, not a style choice.
 // ─────────────────────────────────────────────────────────────────────────────────────────
 export const DISTRICT = [
-  [1785, 1000, 190, 55, 'pass_counter', 'buildPassCounter(M, w, d)'],
+  [1752.5, 1000, 125, 55, 'pass_counter', 'buildPassCounter(M, w, d)'],
   [1867.5, 760, 125, 55, 'prep_counter', 'buildPrepCounter(M, w, d, { rollingPin: true })'],
   [1137.5, 675, 55, 80, 'counter_run', 'buildCounterRun(M, w, d)'],
 ];
@@ -132,6 +135,35 @@ export function stationFaults(arena, stations = STATIONS) {
   return stations.filter((s) => blockedAt(s.x, s.y, arena)).map((s) => `${s.id} (${s.x},${s.y}) is inside a cover collar`);
 }
 
+/**
+ * EVERY FIXTURE POINT IN THE REPO that a fighter could be put on (`al_lib.extract`, role `pos`:
+ * station tables, `?px=&py=`, `fighters=` lists) which was LEGAL on the base and is inside a
+ * cover COLLAR on this arena. ⚠️ `al_guard` §C tests the BOX, not the collar, and the game
+ * refuses a seat whose 42 wu body overlaps a box: `arena-scan`'s `west_choke` (900,1000) sat
+ * 20 wu clear of the first pass's box and `al_guard` was green while `arena-scan` refused to
+ * run. Only points the district BREAKS are reported — a fixture already inside a collar on the
+ * base is someone else's finding, not this layout's.
+ */
+let FIXTURES = null;
+export async function fixturePoints() {
+  if (FIXTURES) return FIXTURES;
+  const L = await import(`${ROOT}/tools/tmp/al_lib.mjs`);
+  const out = [];
+  for (const rel of L.scanFiles()) {
+    if (rel === 'tools/tmp/a2b_district.mjs') continue;
+    for (const h of L.extract(rel, readFileSync(`${ROOT}/${rel}`, 'utf8'))) {
+      if (h.role === 'pos' && Array.isArray(h.value)) out.push({ id: `${rel}:${h.line}`, x: h.value[0], y: h.value[1] });
+    }
+  }
+  FIXTURES = out;
+  return out;
+}
+export function fixtureFaults(arena, base, points) {
+  const inField = (p) => p.x >= HALF && p.x <= base.width - HALF && p.y >= HALF && p.y <= base.height - HALF;
+  return points.filter((p) => inField(p) && !blockedAt(p.x, p.y, base) && blockedAt(p.x, p.y, arena))
+    .map((p) => `${p.id} (${p.x},${p.y}) was legal on ${BASE_SHA} and is inside a collar now`);
+}
+
 /** `arena_probe --occl`, same constants: 40x40 grid, 72 rays, 140 wu rung, 12 wu ray box,
  * the ring from maxSafeRadius to MIN_SAFE_RADIUS in 8 steps. Returns the series. */
 export function occlusionSeries(arena, minSafe = 140, rung = 140) {
@@ -159,7 +191,7 @@ export function occlusionSeries(arena, minSafe = 140, rung = 140) {
   return rows;
 }
 
-export function allFaults(arena, base, { deep = true } = {}) {
+export function allFaults(arena, base, { deep = true, fixtures = null } = {}) {
   const f = {};
   f.symmetry = X4.symmetryFaults(arena);
   f.overlap = X4.overlapFaults(arena);
@@ -174,14 +206,15 @@ export function allFaults(arena, base, { deep = true } = {}) {
   f.puddles = puddleFaults(arena);
   f.base = baseFaults(arena, base);
   f.stations = stationFaults(arena);
+  if (fixtures) f.fixtures = fixtureFaults(arena, base, fixtures);
   const occ = occlusionSeries(arena);
   f.occlusion = occ[8].occl <= occ[0].occl ? [] : [`the endgame CLOSES: ${(occ[0].occl * 100).toFixed(1)}% -> ${(occ[8].occl * 100).toFixed(1)}%`];
   return { faults: f, nav, occ };
 }
 
-function report(arena, base, label) {
+async function report(arena, base, label) {
   if (!arena.cover.length || !base.cover.length) throw new Error('a2b_district: an EMPTY cover list — refusing to certify nothing');
-  const { faults, nav, occ } = allFaults(arena, base);
+  const { faults, nav, occ } = allFaults(arena, base, { fixtures: await fixturePoints() });
   const area = (a) => a.cover.reduce((s, c) => s + c.w * c.h, 0) / (a.width * a.height);
   const added = arena.cover.length - base.cover.length;
   console.log(`\n== A2B DISTRICT — ${label}`);
@@ -214,7 +247,7 @@ function emit() {
 }
 
 // ── selftest: every check must FAIL on its own bug ────────────────────────────────────────
-function selftest() {
+async function selftest() {
   let pass = 0, fail = 0;
   const check = (name, ok, detail = '') => { if (ok) pass++; else fail++; console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}${ok ? '' : `  ${detail}`}`); };
   const base = baseArena();
@@ -246,6 +279,19 @@ function selftest() {
   check('KNOWN-BAD occlusion: furniture packed round the pot', mut((a) => {
     for (let k = 0; k < 16; k++) { const t = (k / 16) * Math.PI * 2; a.cover.push({ x: 1400 + Math.cos(t) * 160, y: 1000 + Math.sin(t) * 160, w: 30, h: 30, kind: 'kb' }); }
   }).occlusion.length > 0);
+  // fixtures: the corpus must be non-empty, and arena-scan's west_choke must be SEEN when a box
+  // is pushed into its collar (the exact case al_guard's box test missed)
+  const fx = await fixturePoints();
+  check('the fixture corpus is non-empty (>= 100 points)', fx.length >= 100, `${fx.length}`);
+  check('the corpus holds arena-scan\'s west_choke (900,1000)', fx.some((p) => p.x === 900 && p.y === 1000 && /arena-scan/.test(p.id)));
+  // ⚠️ The first version of this pair planted its box at (940,1000) — 30 wu from (900,1000), so
+  // NOT in its collar — and still went green, because the 190 wu pass it was written against
+  // had already put west_choke in a collar. A known-bad that passes on someone else's bug is
+  // the vacuity CLAUDE.md rule 6 names; so the clean arm is asserted first, then the plant.
+  check('control: on the shipped design west_choke is NOT reported', !fixtureFaults(cand, base, fx).some((m) => /arena-scan\.mjs:\d+ \(900,1000\)/.test(m)));
+  const fb = JSON.parse(JSON.stringify(cand)); fb.cover.push({ x: 925, y: 1000, w: 20, h: 20, kind: 'kb' });
+  check('KNOWN-BAD fixtures: a box whose collar takes west_choke (900,1000) is reported', fixtureFaults(fb, base, fx).some((m) => /arena-scan\.mjs:\d+ \(900,1000\)/.test(m)));
+  check('the shipped design breaks no fixture', fixtureFaults(cand, base, fx).length === 0, fixtureFaults(cand, base, fx).join(' | '));
   // shipped-equality: the --shipped comparison must see a dropped district box
   const short = JSON.parse(JSON.stringify(cand)); short.cover.pop();
   check('KNOWN-BAD shipped: a dump missing one district box does not equal the candidate', !sameCover(short, cand));
@@ -265,7 +311,7 @@ if (IS_MAIN) {
   const argv = process.argv.slice(2);
   const val = (k) => { const i = argv.indexOf(k); return i >= 0 && argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[i + 1] : null; };
   if (argv.includes('--selftest')) {
-    process.exitCode = selftest() ? 1 : 0;
+    process.exitCode = (await selftest()) ? 1 : 0;
   } else if (argv.includes('--emit')) {
     console.log(emit());
   } else if (argv.includes('--json')) {
@@ -276,9 +322,9 @@ if (IS_MAIN) {
     const shipped = JSON.parse(readFileSync(p, 'utf8'));
     const same = sameCover(shipped, candidate(base));
     console.log(`\n   shipped dump ${p.replace(ROOT + '/', '')} ${same ? 'EQUALS' : 'DIFFERS FROM'} base ${BASE_SHA} + DISTRICT (box for box)`);
-    const bad = report(shipped, base, `SHIPPED ${p.replace(ROOT + '/', '')}`) + (same ? 0 : 1);
+    const bad = (await report(shipped, base, `SHIPPED ${p.replace(ROOT + '/', '')}`)) + (same ? 0 : 1);
     process.exitCode = bad ? 1 : 0;
   } else {
-    process.exitCode = report(candidate(), baseArena(), `CANDIDATE base ${BASE_SHA} + DISTRICT`) ? 1 : 0;
+    process.exitCode = (await report(candidate(), baseArena(), `CANDIDATE base ${BASE_SHA} + DISTRICT`)) ? 1 : 0;
   }
 }

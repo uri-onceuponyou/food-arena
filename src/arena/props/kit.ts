@@ -500,9 +500,11 @@ export const KP = {
    * steel frame round it is the brighter thing and reads as the edge. (#67A2E6, luma 0.60, was
    * tried first: the frame read barely a step above it.) */
   tile: srgb('#5692D6'),
-  /** A2b: kitchen china and cloth — plates, the towel over a front edge */
-  china: srgb('#F4F1EA'),
-  cloth: srgb('#EEE8DC'),
+  /** A2b: kitchen china and cloth — plates, the towel over a front edge. Below white on
+   * purpose: `arena-scan` put a cream towel (#EEE8DC) in a hub station's top-2 salience cells
+   * and the player's rank fell — "actors own the top of the range" (REVAMP §5 A2) */
+  china: srgb('#D8D0C2'),
+  cloth: srgb('#3E8F9A'),
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────────────
