@@ -149,9 +149,15 @@ export const ARMS = [
     name: 'lure-victim',
     why: 'the lure pulls only the fighter it struck — RED at six seats, GREEN at two',
     file: 'game/combat.ts',
-    find: '    for (const victim of state.fighters) {\n      if (!isLivingOpponentOf(victim, attacker)) continue;\n      const dx = ax - victim.x;',
+    // ⚠️ RE-ANCHORED (orchestrator, routed from B3b, 2026-10-15). It matched
+    //   `      const dx = ax - victim.x;`
+    // as the loop's third line — and BH-09 (`f50ca49`) replaced that body with one call to
+    // `movement.ts:lureFighter`, so this arm FAULTed "anchor matched 0 times" on the merge.
+    // Same mutation, new third line; B3b checked it through `runArm`: its 3 must-fail rows go
+    // red and its 3 controls stay green.
+    find: '    for (const victim of state.fighters) {\n      if (!isLivingOpponentOf(victim, attacker)) continue;\n      lureFighter(victim, target, lure);',
     repl: '    for (const victim of [target]) { // WPX KNOWN-BAD: "every enemy" becomes "the one it hit"\n'
-      + '      if (!isLivingOpponentOf(victim, attacker)) continue;\n      const dx = ax - victim.x;',
+      + '      if (!isLivingOpponentOf(victim, attacker)) continue;\n      lureFighter(victim, target, lure);',
     mustFail: [
       '(c) 🔴 EVERY living opponent was pulled toward the impact',
       '(c) 🔴 …and each of them closed by the AUTHORED distance',
