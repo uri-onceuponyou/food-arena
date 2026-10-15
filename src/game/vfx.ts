@@ -77,7 +77,7 @@ import { getWeaponVfx } from '../vfx/weapons';
 import type { WeaponVfx, WeaponVfxCtx } from '../vfx/weapons/types';
 // Persistent ground marks — one dark union, one draw (graphics campaign V1).
 import { GroundMarkBatch, linAtLC } from '../vfx/groundMarks';
-import { VFX_SIGNATURE } from '../vfx/palette';
+import { VFX_SIGNATURE, effectColor } from '../vfx/palette';
 // Blue Cheese's stink cloud, drawn from state (graphics campaign V1).
 import { BlueCheeseClouds } from '../vfx/blueCheese';
 
@@ -3342,7 +3342,7 @@ export class VfxLayer {
             THREE,
             position: new THREE.Vector3(pos.x, PROJECTILE_HEIGHT, pos.z),
             direction: new THREE.Vector3(dir.x, 0, dir.y),
-            color: p.color,
+            color: effectColor(owner.characterId, p.color),
             damage: p.damage,
             weapon: p.weapon,
             characterId: owner.characterId,
@@ -3366,7 +3366,7 @@ export class VfxLayer {
           this.measureShell(obj);
           return obj;
         }
-        const mesh = new THREE.Mesh(this.projectileGeo, this.materialFor(p.color));
+        const mesh = new THREE.Mesh(this.projectileGeo, this.materialFor(effectColor(owner.characterId, p.color)));
         mesh.name = `projectile:${owner.characterId}.${p.weapon.key}`;
         this.measureShell(mesh);
         return mesh;
@@ -3380,7 +3380,7 @@ export class VfxLayer {
         if (!bespoke) {
           // ── Generic path — unchanged from before this system existed. ──────────
           const mesh = obj as THREE.Mesh;
-          mesh.material = this.materialFor(p.color);
+          mesh.material = this.materialFor(effectColor(owner.characterId, p.color));
           // Egg's Hatch!: once the projectile has arrived and is pecking in place
           // (`p.arrived`), pulse its scale on each peck interval instead of just
           // sitting still, so the repeated hits read as an actual attack rather than
@@ -3430,7 +3430,7 @@ export class VfxLayer {
             THREE,
             position: obj.position.clone(),
             direction: new THREE.Vector3(dir.x, 0, dir.y),
-            color: p.color,
+            color: effectColor(owner.characterId, p.color),
             damage: p.damage,
             weapon: p.weapon,
             characterId: owner.characterId,
@@ -3466,6 +3466,8 @@ export class VfxLayer {
       (p) => {
         const owner = fighterOf(state, p.ownerId, p.ownerRole);
         const key = `${owner.characterId}.${p.weapon.key}`;
+        // The identity re-key (`vfx/palette.ts:effectColor`) — the halo follows the shot.
+        const haloSrc = effectColor(owner.characterId, p.color);
         // The projectile pool ran first (see the block above), so its object exists and
         // already carries the measurement. `??` rather than `!`: a future caller that
         // reordered the pools would get a legible default instead of a crash.
@@ -3475,11 +3477,11 @@ export class VfxLayer {
         const shell = new THREE.Group();
         shell.name = `projectile_shell:${key}`;
 
-        let haloMat = this.haloMats.get(p.color);
+        let haloMat = this.haloMats.get(haloSrc);
         if (!haloMat) {
           haloMat = new THREE.SpriteMaterial({
             map: this.haloTex,
-            color: new THREE.Color(haloColorFor(p.color)),
+            color: new THREE.Color(haloColorFor(haloSrc)),
             transparent: true,
             opacity: 1,
             // ⚠️ NOT `AdditiveBlending`. See the block above `buildProjectileHaloTexture`:
@@ -3488,7 +3490,7 @@ export class VfxLayer {
             // that survives a light background.
             depthWrite: false,
           });
-          this.haloMats.set(p.color, haloMat);
+          this.haloMats.set(haloSrc, haloMat);
         }
         const halo = new THREE.Sprite(haloMat);
         halo.name = `projectile_halo:${key}`;
@@ -4197,7 +4199,8 @@ export class VfxLayer {
       this.wedgeGeoCache.set(geoKey, geo);
     }
 
-    const c = new THREE.Color(weapon.color);
+    // Identity re-key for effects — see `vfx/palette.ts:effectColor`.
+    const c = new THREE.Color(effectColor(characterId, weapon.color));
     const rotY = Math.atan2(facing.x, facing.y);
 
     /** One telegraph layer. `map: null` is a FLAT fill; `wedgeGradientTex` puts the
@@ -4382,7 +4385,12 @@ export class VfxLayer {
    * `match.ts` keeps only the non-VFX consequences of a giant slam (HUD flash, camera
    * shake, hit-stop) because those are not this layer's to own.
    */
-  spawnWeaponCast(xWU: number, yWU: number, facing: Vec2, weapon: Weapon, characterId: CharacterId): void {
+  spawnWeaponCast(xWU: number, yWU: number, facing: Vec2, weaponIn: Weapon, characterId: CharacterId): void {
+    // Identity re-key for EFFECTS (`vfx/palette.ts:effectColor`): a donut's Ring Spin swoosh is
+    // its violet, not the floor-pink its `rules.ts` colour still carries. A copy only when it
+    // changes — every other weapon passes through as the same object.
+    const reColor = effectColor(characterId, weaponIn.color);
+    const weapon = reColor === weaponIn.color ? weaponIn : { ...weaponIn, color: reColor };
     const bespokeCast = !!getWeaponVfx(characterId, weapon.key)?.cast;
 
     this.spawnCastFlash(xWU, yWU, facing, weapon, characterId);
@@ -4663,6 +4671,9 @@ export class VfxLayer {
   ): void {
     bumpVfxQaCount('impact');
     const origin = groundPos(xWU, yWU);
+    // `match.ts:colorForDamageSource` hands a weapon hit its weapon's `rules.ts` colour; the
+    // EFFECT takes the attacker's identity re-key (`vfx/palette.ts:effectColor`).
+    if (source && color.toUpperCase() === source.weapon.color.toUpperCase()) color = effectColor(source.characterId, color);
 
     // ── Was this hit's STATUS shrugged off? ─────────────────────────────────────
     // Runs before the bespoke branch on purpose: a weapon with its own `impact()`

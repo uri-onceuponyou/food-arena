@@ -64,7 +64,7 @@ import type { CharacterWeaponVfxMap, WeaponVfxCtx } from './types';
 // channels below ~10/255.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SHELL = '#FFF8EA';        // `PALETTE.egg` — matte porcelain
+const SHELL = '#33AFAF';        // V1: was #FFF8EA (`PALETTE.egg`, matte porcelain) — C1a's robin's-egg teal SHELL; the inside (SHELL_IN) stays pale, as a real one is
 const SHELL_IN = '#E4D6AE';     // the shaded inside of a broken piece
 const SHELL_HOT = '#FFFFFF';    // the freshly-split edge, at the instant it splits
 /**
