@@ -33,7 +33,9 @@
  *     twice is a splash you are trapped in" — `types.ts`), so pushing it would make
  *     Back from home land on a splash that immediately auto-continues to home again.
  *   * Everything else PUSHES, so Back and the Android hardware back button move the
- *     player one screen out, including out of a match.
+ *     player one screen out, ~~including out of a match~~ — except out of a LIVE match,
+ *     where Back opens the pause sheet (`DECISIONS §31`; `onPopState`, ML-4). After the
+ *     whistle it leaves as before.
  *
  * ── ...and what "resume" means for a MATCH, which is a decision ─────────────
  * A match is the one route that cannot be restored. It is a live simulation with no
@@ -184,7 +186,33 @@ function parseRoute(raw: unknown): Route | null {
       ? { name, player, enemy, seats: seatsOf(seats) }
       : null;
   }
+  // META-03: the lobby's fighter picker. Dropping this field here is exactly `seats`' old
+  // failure one route over — Android Back onto a lobby-entered roster would bring back the
+  // plain roster, whose Fight! is a duel. Anything but the one legal value is ignored.
+  if (name === 'characters') {
+    return (raw as { returnTo?: unknown }).returnTo === 'lobby'
+      ? { name, returnTo: 'lobby' }
+      : { name };
+  }
   return { name } as Route;
+}
+
+/**
+ * The boot route, with what only `history.state` knows put back on it.
+ *
+ * A RELOAD keeps `history.state` but `main.ts:bootRoute` reads only the URL, so a route field
+ * that is deliberately NOT in the URL — `characters.returnTo` — would be lost by every reload
+ * (a phone evicting the tab is one): the lobby's fighter picker would come back as the plain
+ * roster and its Fight! would start a duel, META-03 again. The state is trusted only when it
+ * names the SAME screen the URL boots; an address-bar edit or a link creates a fresh entry
+ * whose state is `null`, so it cannot carry a stale field across.
+ */
+function withRestoredState(route: Route): Route {
+  if (route.name !== 'characters') return route;
+  let state: unknown = null;
+  try { state = window.history.state; } catch { return route; }
+  const prior = parseRoute((state as { route?: unknown } | null)?.route);
+  return prior !== null && prior.name === route.name ? prior : route;
 }
 
 /**
@@ -229,6 +257,9 @@ function sameRoute(a: Route, b: Route): boolean {
   if (a.name === 'match' && b.name === 'match') {
     return a.player === b.player && a.enemy === b.enemy && a.seats === b.seats;
   }
+  // The same rule for the lobby's fighter picker: the plain roster and the lobby's are two
+  // places, so Back between them must re-mount rather than be swallowed as a no-op.
+  if (a.name === 'characters' && b.name === 'characters') return a.returnTo === b.returnTo;
   return true;
 }
 
@@ -373,7 +404,7 @@ export function createShell(opts: ShellOptions): Shell {
     switch (route.name) {
       case 'opening': return createOpeningScreen(ctx);
       case 'home': return createHomeScreen(ctx);
-      case 'characters': return createCharacterSelectScreen(ctx);
+      case 'characters': return createCharacterSelectScreen(ctx, route);
       case 'trophies': return createTrophyRoadScreen(ctx);
       // Pure DOM, no WebGL: the shop defines no `update()`, so mounting it stops the
       // shell's rAF loop entirely rather than ticking an idle portrait behind it.
@@ -745,8 +776,34 @@ export function createShell(opts: ShellOptions): Shell {
       ?? { name: 'home' };
     if (sameRoute(route, currentRoute)) return;
     if (swapping) { queuedPop = route; return; }
+    // ── 🚨 BACK DURING A LIVE MATCH OPENS THE PAUSE SHEET (ML-4, `DECISIONS §31`) ──
+    //
+    // Uri answered §19 with *"Pause menu is fine"* and §31 records it as SETTLED — *"Back
+    // during a live match opens the pause sheet; it no longer abandons the match silently"* —
+    // but nothing in `src/` ever did it: this handler tore the match down like any other
+    // screen. Measured on `f65af2c` (`tools/tmp/b6_screens.mjs` §ML4): Back mid-duel and
+    // Back mid-six-seat-match both left for the previous screen, no sheet, no confirm, the
+    // match gone and nothing banked. A decision recorded as done is not a decision shipped.
+    //
+    // The browser has ALREADY moved the address bar, so keeping the screen means putting
+    // its entry back — a push, which also drops the entry Back just left, so the stack is the
+    // same length it was. The SCREEN decides (`Screen.onBack`), because only it knows whether
+    // there is anything to abandon: after the whistle the match returns false and Back
+    // leaves exactly as it always did.
+    if (screenKeepsBack()) { writeHistory(currentRoute, 'push'); return; }
     go(route, 'none');
   };
+
+  /** Ask the mounted screen whether Back is its own. Never throws: a hook that breaks must
+   *  not trap the player on a screen, so a throw means "navigate as usual". */
+  function screenKeepsBack(): boolean {
+    try {
+      return current?.onBack?.() === true;
+    } catch (err) {
+      report(`screen "${currentRoute.name}" onBack() threw`, err);
+      return false;
+    }
+  }
 
   function drainQueuedPop(): void {
     const route = queuedPop;
@@ -860,7 +917,7 @@ export function createShell(opts: ShellOptions): Shell {
         // "cold launch", `main.ts` already answers it with the title card, and writing
         // `?screen=opening` would make a refresh during the 4.5 s splash replay the
         // splash instead of getting on with it.
-        mount(route, route.name === 'opening' ? 'none' : 'replace');
+        mount(withRestoredState(route), route.name === 'opening' ? 'none' : 'replace');
         window.__screenReady = true;
         return;
       }

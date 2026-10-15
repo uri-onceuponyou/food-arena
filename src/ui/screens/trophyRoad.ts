@@ -29,7 +29,7 @@
  * `game/economy/`. There is not one economy literal in this file.
  */
 
-import { CHARACTERS, RARITY_COLORS, type CharacterId, type Rarity } from '../../game/rules';
+import { CHARACTERS, ITEMS, RARITY_COLORS, type CharacterId, type Rarity } from '../../game/rules';
 import {
   CONTAINERS,
   CONTAINER_KINDS,
@@ -572,9 +572,28 @@ export function createTrophyRoadScreen(ctx: ScreenContext): Screen {
           <span class="tr-odds-pct">${formatPercent(r.percent)}</span>
         </li>
       `).join('');
+      // ── WHO IS IN EACH ROW, ITEMS INCLUDED (META-07) ──────────────────────────
+      //
+      // 🚨 THIS NAMED THE FIGHTER POOLS AND NOT THE ITEM POOLS. It was written a week before
+      // item rows existed (`2228c2b` vs `bb62b05`) and filtered on `r.pool`, which item rows
+      // never carry — `containers.ts` puts them in `itemPool` on purpose, so a renderer not
+      // yet taught about items SKIPS them rather than throwing. The skip was the safe
+      // direction and it was also the defect: 17 item rows over 5 boxes published a rate and
+      // named 0 of the 10 items, while the shop's sheet named all of them. A rate without the
+      // names is "a percentage the player cannot act on" (`shop.ts:poolLines`).
+      //
+      // ⚠️ KEYED BY THE ROW'S OWN LABEL, NOT BY ITS RARITY. The old key was `${r.rarity}:`, and
+      // with item rows added it prints every rarity twice with nothing saying which list is
+      // gear — "Normal: Springform · Normal: Hamburger, Donut". `r.label` is the exact text of
+      // the row above ("Normal item", "Normal fighter"), so each list says what it is a list of.
+      // That also retires an older ambiguity: "Normal: Hamburger, Donut" sat under BOTH a
+      // "Normal item" and a "Normal fighter" row and read as the item pool.
       const pools = containerOdds(kind)
-        .filter((r) => r.pool && r.pool.length > 0)
-        .map((r) => `${r.rarity}: ${r.pool!.map((id) => CHARACTERS[id].name).join(', ')}`)
+        .filter((r) => (r.pool && r.pool.length > 0) || (r.itemPool && r.itemPool.length > 0))
+        .map((r) => `${r.label}: ${[
+          ...(r.pool ?? []).map((id) => CHARACTERS[id].name),
+          ...(r.itemPool ?? []).map((id) => ITEMS[id].name),
+        ].join(', ')}`)
         .join(' · ');
       return `
         <section class="tr-odds-block">

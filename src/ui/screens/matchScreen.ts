@@ -87,7 +87,7 @@ import { brawlRoster } from './brawl';
 // copy of the format is how the two come to disagree. Importing a screen from a screen is
 // this directory's own precedent (`brawlRoster`, `placementXp` on the two lines either
 // side of this one), and there is no cycle: `lobby.ts` does not import this file.
-import { loadEquipped, ownedItems } from './lobby';
+import { loadEquipped, ownedItems, rememberSeatCount } from './lobby';
 import { placementXp } from './profile';
 import type { Route, Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
@@ -259,8 +259,10 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
 
   // ── 🚨 DECISIONS §66'S FLAG, AND IT IS OFF UNLESS A ROUTE SAYS OTHERWISE ─────
   //
-  // `route.seats` is OPTIONAL and every shipped navigation omits it
-  // (`characterSelect.ts:444` is the only one in the product), so `roster` is `undefined`
+  // `route.seats` is OPTIONAL and ~~every shipped navigation omits it
+  // (`characterSelect.ts:444` is the only one in the product)~~ — stale since 2026-08-12:
+  // the lobby's Start sets it (`DECISIONS §74`), and the citation had drifted besides (both
+  // found by META-03's verifiers). Every OTHER navigation omits it, so `roster` is `undefined`
   // and `startGame` takes the two-seat path with not one branch changed — `match.ts`
   // ignores the field entirely when it is absent.
   //
@@ -268,6 +270,9 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   // `tools/tmp/sp6_seats.mjs` §D is a source census — no screen but `main.ts` may set
   // `seats`, and `Route.match.seats` must stay optional; both are proved red by mutating the
   // real tree (`--selftest`, seven mutations, each required to fail the row it aims at).
+  // ⚠️ §D's "no SCREEN sets `seats`" row has been RED since the lobby shipped (58/1 on
+  // `f65af2c`, flagging `lobby.ts`): its `FLAG_OWNERS` was never widened after Uri answered
+  // §66, and the tool is in no gate table, so nothing ran it. Routed, not edited here.
   // `tools/tmp/sp6_play.mjs` §A is the behavioural half: it boots the shipped URL with no
   // `seats` and requires exactly two plates, and its known-bad `--arm leak` appends
   // `&seats=6` — so the control is falsified by the on-state rather than by nothing, which
@@ -500,8 +505,21 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   const sheetIsOpen = (): boolean => sheet.classList.contains('is-open');
   pauseBtn.addEventListener('click', () => setPaused(!sheetIsOpen()));
   q<HTMLButtonElement>('resume').addEventListener('click', () => setPaused(false));
+  // ── 🚨 "CHANGE FIGHTER" FROM A SEATED MATCH GOES BACK THROUGH THE LOBBY (META-03) ──
+  //
+  // It navigated to the plain roster, whose Fight! starts a duel, so a six-player match came
+  // back from the pause sheet as a 1v1: sim 6 -> Change Fighter -> Fight! -> sim 2
+  // (`tools/tmp/b6_screens.mjs` §M3 B on `f65af2c`). Written on 2026-08-04 (`da22f58`), when
+  // every match was a duel and that was the same thing; it became wrong when the lobby made
+  // six seats reachable. A match WITH `seats` came from the lobby (or a `?seats=` QA URL), so
+  // the roster opens as the lobby's picker and hands the player back to it — and on Leave the
+  // lobby is told this match's count, so it comes back at the count being left whichever way
+  // the match was started. A duel (`seats` absent) keeps today's path exactly.
+  const changeRoute: Route = roster
+    ? { name: 'characters', returnTo: 'lobby' }
+    : { name: 'characters' };
   q<HTMLButtonElement>('change').addEventListener('click',
-    () => showConfirm({ name: 'characters' }, 'Change Fighter', 'swap'));
+    () => showConfirm(changeRoute, 'Change Fighter', 'swap'));
   q<HTMLButtonElement>('quit').addEventListener('click',
     () => showConfirm({ name: 'home' }, 'Quit to Home', 'home'));
   q<HTMLButtonElement>('keep').addEventListener('click', () => setPaused(false));
@@ -515,6 +533,7 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     // so a seat the knockout already banked is not banked twice.
     const ko = session.knockedOutOutcome();
     if (payable(ko)) bankOnce(ko, null);
+    if (roster && pendingExit === changeRoute) rememberSeatCount(roster.length);
     ctx.navigate(pendingExit);
   });
   exitBtn.addEventListener('click', () => ctx.navigate({ name: 'home' }));
@@ -533,13 +552,26 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   // SAME signal, so pointer and keyboard agree. Nothing is mapped in its place: the whistle
   // itself releases the mouse, so a reflexive Escape there must not throw the player off a
   // card they have not read yet.
-  const onKey = (ev: KeyboardEvent): void => {
-    if (ev.key !== PAUSE_KEY) return;
-    if (root.classList.contains('is-ended')) return;
-    ev.preventDefault();
-    if (pendingExit !== null) { closeConfirm(); return; }
+  //
+  // ── 🚨 AND BROWSER / ANDROID BACK IS THE SAME ACTION (ML-4, `DECISIONS §31`) ──
+  // Uri's answer to §19 was *"Pause menu is fine"*, recorded in §31 as settled — yet Back
+  // still tore a live match down with no sheet and no confirm (measured on `f65af2c`,
+  // `tools/tmp/b6_screens.mjs` §ML4: Back mid-match landed on the previous screen, the
+  // session gone). `backOut` is the ONE body both bindings run, so the key a desktop player
+  // cancels with and the button a phone player cancels with cannot drift apart: with the
+  // match live it backs out of an open confirm first, otherwise toggles the sheet; once the
+  // match is DECIDED it returns false and lets the key — or the Back — through, so Back on
+  // the result card still leaves, exactly as before. The shell asks via `Screen.onBack`.
+  function backOut(): boolean {
+    if (root.classList.contains('is-ended')) return false;
+    if (pendingExit !== null) { closeConfirm(); return true; }
     // The sheet, not the session — see `sheetIsOpen` (F6).
     setPaused(!sheetIsOpen());
+    return true;
+  }
+  const onKey = (ev: KeyboardEvent): void => {
+    if (ev.key !== PAUSE_KEY) return;
+    if (backOut()) ev.preventDefault();
   };
   window.addEventListener('keydown', onKey);
 
@@ -554,6 +586,7 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   return {
     root,
     resize() { session.resize(); },
+    onBack: backOut,
     dispose() {
       window.removeEventListener('keydown', onKey);
       // The arming timer outlives the screen otherwise. It only touches a detached
