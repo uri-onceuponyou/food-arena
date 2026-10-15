@@ -457,9 +457,48 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     if (on) session.pause(); else session.resume();
     sheet.classList.toggle('is-open', on);
     setChip(on);
+    // Back in the fight, the GAME owns the keyboard (F3): a control of this screen that kept
+    // focus would be re-pressed by the next Space or Enter. Covers the keyboard player who
+    // Tabbed to the chip; a mouse click never gives it focus at all (see the chip's mousedown).
+    const focused = document.activeElement;
+    if (!on && focused instanceof HTMLElement && root.contains(focused)) focused.blur();
   }
 
-  pauseBtn.addEventListener('click', () => setPaused(!session.paused));
+  /**
+   * ── A MOUSE CLICK ON THE CHIP TAKES NO FOCUS (F3) ───────────────────────────
+   *
+   * 🚨 **SPACE AND ENTER RE-PRESSED IT.** Chromium focuses a `<button>` on mousedown and nothing
+   * in a match moved focus away again, so after a click on the chip (sheet open) and Escape
+   * (sheet closed), the next Space — unbound in the game — or Enter pressed the still-focused
+   * chip and paused the match. Measured by `tools/tmp/b2_input.mjs` §F3 on `8586f00`: chip
+   * clicks 1 -> 2 and the sheet open again, for both keys.
+   *
+   * `preventDefault` on MOUSEDOWN is the narrow cure: it stops the focus a pointer would give
+   * and nothing else — the click still fires, and a keyboard player can still Tab here and
+   * toggle with Enter (a `blur()` in the click handler, the first idea, took that away). The
+   * same rule is on `pointerLock.ts`'s chips and buttons.
+   */
+  pauseBtn.addEventListener('mousedown', (ev) => ev.preventDefault());
+
+  /**
+   * ── THE CHIP AND ESCAPE TOGGLE THE SHEET, NOT THE SESSION (F6) ──────────────
+   *
+   * 🚨 **WITH MOUSE CAPTURE ON, THE PAUSE SHEET WAS UNREACHABLE.** Both used to toggle on
+   * `!session.paused`. But Escape under capture releases the lock and `pointerLock.ts` pauses
+   * the SESSION itself, under its own "Paused / Click to resume" scrim — so `session.paused`
+   * was true while this sheet was closed, and the chip labelled "Pause" called
+   * `setPaused(false)`: it RESUMED the match and re-captured the mouse. Change Fighter and
+   * Quit could not be reached at all while captured. Measured by `tools/tmp/b2_input.mjs` §F6
+   * on `8586f00` (`?pointerLock=sim`): capture, Escape, the chip -> sheet closed, mouse
+   * re-captured; and Escape ON the scrim did the same without a click.
+   *
+   * The sheet's own open state is what both controls are FOR, so it is what they read. The
+   * session can be paused by two owners (this sheet and the capture scrim); only this one is
+   * the player's menu. Escape on the scrim now opens the sheet instead of asking for a re-lock
+   * that a real browser refuses anyway (Escape grants no activation — `pointerLock.ts` rule 2).
+   */
+  const sheetIsOpen = (): boolean => sheet.classList.contains('is-open');
+  pauseBtn.addEventListener('click', () => setPaused(!sheetIsOpen()));
   q<HTMLButtonElement>('resume').addEventListener('click', () => setPaused(false));
   q<HTMLButtonElement>('change').addEventListener('click',
     () => showConfirm({ name: 'characters' }, 'Change Fighter', 'swap'));
@@ -499,7 +538,8 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     if (root.classList.contains('is-ended')) return;
     ev.preventDefault();
     if (pendingExit !== null) { closeConfirm(); return; }
-    setPaused(!session.paused);
+    // The sheet, not the session — see `sheetIsOpen` (F6).
+    setPaused(!sheetIsOpen());
   };
   window.addEventListener('keydown', onKey);
 
@@ -637,6 +677,12 @@ const CSS = `
   pointer-events: auto;
 }
 .fa-match .match-sheet.is-open { display: flex; }
+/* ONE "Paused" card, not two (F6). With mouse capture on, the sheet now opens OVER the capture
+   scrim ('pointerLock.ts', a layer below '#screens'), which stays in its 'lost' state — two
+   0.62 backdrops, a 2px blur, and the scrim card's edges either side of this one. Hidden
+   only while the sheet is open: if Resume's re-capture is then refused (Chrome rate-limits
+   a re-lock for ~1s after an Esc), the scrim is still 'lost' and comes back by itself. */
+body:has(.fa-match .match-sheet.is-open) .plk-scrim { display: none; }
 .fa-match .match-sheet-card {
   display: flex;
   flex-direction: column;

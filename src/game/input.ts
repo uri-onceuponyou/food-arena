@@ -91,8 +91,41 @@ export const MUTE_KEY = 'KeyM';
  * number is one of the few places where what is printed on the key is the thing the
  * player means. No character in `rules.ts` carries more than 4 weapons, and the extra
  * headroom costs nothing; `setWeaponCount()` is what actually bounds it at runtime.
+ *
+ * ⚠️ **THE CHARACTER ALONE LOCKED OUT EVERY NON-QWERTY NUMBER ROW (F4)**, so it is now the
+ * character FIRST and the physical code as the fallback — see `weaponSlotForKey`.
  */
 export const MAX_WEAPON_SLOT_KEY = 9;
+
+/**
+ * ── WHICH WEAPON SLOT (0-based) A KEY PRESS PICKS, OR NULL ───────────────────
+ *
+ * 🚨 **ON AZERTY THE NUMBER ROW DID NOT SWITCH WEAPONS (F4).** Unshifted, the French row
+ * types `& é " ' ( - è _ ç à` — no digits — so `Number(e.key)` was NaN for every key on it
+ * and the only way to pick weapon 2 was Shift+é. Belgian AZERTY, Czech, Slovak and
+ * Lithuanian rows are the same shape. `settings.ts` has always REFUSED `Digit1`-`Digit9` as
+ * movement keys "because they pick a weapon" — true only on a QWERTY row. Measured by
+ * `tools/tmp/b2_input.mjs` §F4 on `8586f00`: code `Digit2` / key `é` left slot 3 selected.
+ *
+ * So: the CHARACTER first, exactly as before (QWERTY, the numpad with NumLock on and every
+ * Shift+digit layout are bit-identical), then the PHYSICAL CODE — `Digit1`-`Digit9` /
+ * `Numpad1`-`Numpad9` — which is the same position on every layout, the binding model the
+ * rest of this file already uses (`MOVE_KEYS` is codes for the same reason).
+ *
+ * ⚠️ The fallback is skipped under Ctrl / Meta / Alt (AltGr reports Ctrl+Alt on Windows):
+ * those are shortcuts and dead-key compositions, not a weapon pick — the same modifier gate
+ * mute and the item keys use. Exported for `tools/tmp/b2_logic.mjs`, which pins this table
+ * without a browser.
+ */
+export function weaponSlotForKey(
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey'>,
+): number | null {
+  const n = Number(e.key);
+  if (Number.isInteger(n) && n >= 1 && n <= MAX_WEAPON_SLOT_KEY) return n - 1;
+  if (e.ctrlKey || e.metaKey || e.altKey) return null;
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  return m && Number(m[1]) <= MAX_WEAPON_SLOT_KEY ? Number(m[1]) - 1 : null;
+}
 
 /**
  * ── ONE KEY PER EQUIP SLOT, AND THE PRESS NAMES ITS OWN SLOT ────────────────
@@ -119,6 +152,11 @@ export const MAX_WEAPON_SLOT_KEY = 9;
  * key that moves AND fires an item, and the Controls reference does not mention items at
  * all. The fix is two lines in a file this pass does not own; the export exists so it is
  * one import when somebody takes it.
+ *
+ * ⚠️ **CLOSED (F8) — kept above because it was true for 43 days and became a live defect
+ * the day `056b868` made the press reach the sim.** `settings.ts` now imports this table
+ * into `RESERVED_KEYS` (refusing Q/E as movement keys, and dropping a stored binding on
+ * either) and prints a "Use item" row off it.
  */
 export const ITEM_KEYS = ['KeyQ', 'KeyE'] as const;
 
@@ -165,6 +203,11 @@ export class InputController {
    * collected yet. See `pressItem` / `takeItemPress`.
    */
   private itemPress: number | null = null;
+  /**
+   * A left-button PRESS EDGE nobody has collected yet. See `takeAttackPress` — `mouseDown`
+   * is the level, this is the edge, and the attack needs both.
+   */
+  private attackPress = false;
 
   // ── Virtual cursor (pointer lock only) ──────────────────────────────────────
   private locked = false;
@@ -186,20 +229,47 @@ export class InputController {
   /** Reused for the touch aim offset so polling it every frame allocates nothing. */
   private readonly touchOffset = { x: 0, y: 0 };
 
+  /**
+   * ── THE MOUSE LISTENS ON THE CANVAS'S HOST, NOT ON THE CANVAS (F5) ──────────
+   *
+   * 🚨 **ON A LETTERBOXED OR PILLARBOXED WINDOW THE MOUSE COULD NOT AIM OR FIRE IN THE BARS.**
+   * `stage.ts` masks any viewport outside `SUPPORTED_ASPECT` (that is what buys the 0.00 wu
+   * fairness guarantee), so at 600x600 the canvas is 600x450 with a 75 px bar above and below
+   * it — and the three mouse listeners sat on the canvas, so a cursor or a press in a bar
+   * reached nothing. Measured by `tools/tmp/b2_input.mjs` §F5 on `8586f00`: the cursor moved
+   * into the bottom bar left the fighter facing exactly where it was, and a held press there
+   * reached the sim on 0 frames.
+   *
+   * The host (`#game`) is the same surface `touch.ts` already claims for the same reason
+   * (its `ownsTarget` comment measures 83.3% of a portrait thumb band hit-testing to it). It
+   * holds the canvas and nothing else — `#hud`, `#screens` and `.plk-root` are its siblings,
+   * so no control can bubble a press into it — and pointer-lock events, which target the
+   * canvas, bubble through it unchanged.
+   *
+   * ⚠️ NDC stays relative to the CANVAS rect and is NOT clamped to ±1: aim is a direction,
+   * the camera has no roll, and a clamp would bend the bearing of every point in a bar (the
+   * pointer-lock and touch paths already send out-of-range NDC through the same raycast).
+   * ⚠️ Stored once rather than re-read from `parentElement` at dispose: `stage.dispose()`
+   * removes the canvas, and an ordering nobody asserts is not a contract.
+   */
+  private readonly surface: HTMLElement;
+
   constructor(private readonly canvas: HTMLElement) {
     const sens = queryNumber('aimSens');
     this.sensitivity = sens !== null && sens > 0 ? Math.min(6, sens) : 1;
     this.freeAim = new URLSearchParams(location.search).get('aimMode') === 'free';
     this.touch = createTouchControls({ canvas });
+    this.surface = canvas.parentElement ?? canvas;
 
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
     document.addEventListener('visibilitychange', this.onVisibilityChange);
-    canvas.addEventListener('mousemove', this.onMouseMove);
-    canvas.addEventListener('mousedown', this.onMouseDown);
+    this.surface.addEventListener('mousemove', this.onMouseMove);
+    this.surface.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mouseup', this.onMouseUp);
-    canvas.addEventListener('contextmenu', this.onContextMenu);
+    // With the other two, so a right-click in a bar stops opening the browser's menu too.
+    this.surface.addEventListener('contextmenu', this.onContextMenu);
   }
 
   /** Call once the player's character is known, so digit keys only select real slots. */
@@ -273,9 +343,49 @@ export class InputController {
   }
 
   /** Either fire control. Held mouse OR a finger on the aim stick — never one or the
-   * other, so a hybrid device can use whichever is in the player's hand. */
+   * other, so a hybrid device can use whichever is in the player's hand.
+   *
+   * ⚠️ A LEVEL, sampled once per stepping frame — so on its own it cannot see a press that
+   * goes down AND up between two samples. `takeAttackPress` is the edge that covers that. */
   get attackHeld(): boolean {
     return this.mouseDown || this.touch.firing;
+  }
+
+  /**
+   * ── CONSUME THE PENDING FIRE PRESS (F2) ─────────────────────────────────────
+   *
+   * 🚨 **A CLICK OR TAP SHORTER THAN ONE FRAME USED TO NEVER FIRE.** `attackHeld` is a level
+   * and `match.ts:buildInput()` reads it once per stepping frame, so a press whose down AND
+   * up edges both landed between two reads reached the sim as `attack: false` on every frame
+   * — mouse and touch alike. The window is one loop interval: 16.7 ms at 60 fps, 33 ms on a
+   * phone's p95 frame, a whole second on a first-use shader-compile hitch, and ALL of it for
+   * an input stack that synthesises the down/up pair together (a trackpad tap-to-click is the
+   * suspected case). Measured by `tools/tmp/b2_input.mjs` §F2 on `8586f00`: a same-task
+   * mousedown+mouseup and a same-task touchstart+touchend each reached the sim on **0** frames
+   * and stamped no `lastUsed`.
+   *
+   * So the press EDGE is latched (the left button's `mousedown`, and a finger NEWLY claiming
+   * the aim stick — `touch.ts:takeFirePress`) and consumed here, once per stepping frame. A
+   * press held across frames is unchanged: the edge and the level agree on its first frame and
+   * the latch is spent there, so a held press reaches the sim on exactly the frames it is held
+   * and never once more after the release.
+   *
+   * ⚠️ **BOTH LATCHES ARE READ AND CLEARED BEFORE THEY ARE COMBINED.** `mouse || touch.take()`
+   * would skip the touch read whenever the mouse latch was set, and that touch press would then
+   * fire a frame late, on a frame the player did not press.
+   *
+   * ⚠️ **SAME LIFETIME AS `takeItemPress`, BY DESIGN.** `buildInput()` takes it on every
+   * stepping frame and hands it to the sim only while playing, so a click during 3-2-1 is
+   * spent there and never fires at GO. The loop skips `buildInput()` while paused, so an edge
+   * latched in the very frame a pause began fires on the first frame after the resume — no
+   * NEW press can land behind the pause sheet or the capture scrim, which both cover the
+   * viewport and own the pointer. `reset()` and `onBlur` drop it.
+   */
+  takeAttackPress(): boolean {
+    const mouse = this.attackPress;
+    this.attackPress = false;
+    const touch = this.touch.takeFirePress();
+    return mouse || touch;
   }
 
   /** Normalized device coords of the last known mouse position, or null before any
@@ -359,6 +469,8 @@ export class InputController {
     this.mouseDown = false;
     // A press queued in the last match must not fire the first item of the next one.
     this.itemPress = null;
+    // ...nor the first shot of it. (`touch.reset()` below drops the touch latch.)
+    this.attackPress = false;
     this.touch.reset();
     if (this.locked) {
       this.offX = 0;
@@ -372,10 +484,10 @@ export class InputController {
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
-    this.canvas.removeEventListener('mousemove', this.onMouseMove);
-    this.canvas.removeEventListener('mousedown', this.onMouseDown);
+    this.surface.removeEventListener('mousemove', this.onMouseMove);
+    this.surface.removeEventListener('mousedown', this.onMouseDown);
     window.removeEventListener('mouseup', this.onMouseUp);
-    this.canvas.removeEventListener('contextmenu', this.onContextMenu);
+    this.surface.removeEventListener('contextmenu', this.onContextMenu);
   }
 
   /** Radius of the aim ring, in CSS px. Scales with the short axis so the stick feels
@@ -414,11 +526,9 @@ export class InputController {
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     this.keys.add(e.code);
-    const n = Number(e.key);
-    if (Number.isInteger(n) && n >= 1 && n <= MAX_WEAPON_SLOT_KEY) {
-      const idx = n - 1;
-      if (idx < this.weaponCount) this.weaponIndex = idx;
-    }
+    // The character first, the physical code as the fallback — see `weaponSlotForKey` (F4).
+    const idx = weaponSlotForKey(e);
+    if (idx !== null && idx < this.weaponCount) this.weaponIndex = idx;
     // Items, on the KEYDOWN EDGE and gated on `repeat` for the same reason mute is:
     // the OS repeats a held key at ~30 Hz, and an item press is an EDGE (see
     // `takeItemPress`). Without `!e.repeat` a leaned-on Q would re-arm the item on the
@@ -464,7 +574,11 @@ export class InputController {
   };
 
   private readonly onMouseDown = (e: MouseEvent): void => {
-    if (e.button === 0) this.mouseDown = true;
+    if (e.button !== 0) return;
+    this.mouseDown = true;
+    // The EDGE, latched — see `takeAttackPress`. ⚠️ Never cleared in `onMouseUp`: a release
+    // that also cleared it would put back exactly the sub-frame drop this exists to remove.
+    this.attackPress = true;
   };
 
   private readonly onMouseUp = (e: MouseEvent): void => {
@@ -477,6 +591,7 @@ export class InputController {
     // Same reason the held stick is dropped below: a press made on the way out of the
     // app must not fire an item when the player comes back to a fight that has moved on.
     this.itemPress = null;
+    this.attackPress = false;
     // A finger held while the app is backgrounded never sends its `touchend`, so
     // without this the fighter walks into a wall for as long as the player is away.
     this.touch.reset();

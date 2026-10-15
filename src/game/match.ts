@@ -567,7 +567,13 @@ function sanitiseLoadout(items: readonly string[] | undefined): ItemId[] {
   const out: ItemId[] = [];
   for (const raw of items) {
     if (out.length >= ITEM_SLOTS) break;
-    if (typeof raw !== 'string' || !(raw in ITEMS)) continue;
+    // ⚠️ AN OWN-PROPERTY TEST, NOT `raw in ITEMS` (META-09). `in` walks the prototype chain,
+    // so `constructor`, `toString`, `__proto__`, `hasOwnProperty`… were all "known items":
+    // `?items=constructor,springform` equipped `["constructor","springform"]` on `8586f00`
+    // (`tools/tmp/b2_input.mjs` §M9), past this gate AND `state.ts:validateLoadout`'s copy of
+    // the same `in` (B3's file, routed). `Object.hasOwn` is ES2022 — the tsconfig lib and the
+    // Vite target — and the same Safari 15.4 floor `structuredClone` in `src/net` already sets.
+    if (typeof raw !== 'string' || !Object.hasOwn(ITEMS, raw)) continue;
     const id = raw as ItemId;
     if (out.includes(id)) continue;
     out.push(id);
@@ -1109,6 +1115,10 @@ export class GameSession {
 
   /** Start a brand-new match: fresh sim state, fresh models, camera snapped back. */
   restart(): void {
+    // ⚠️ `spawnMatch()` ends in `notifyPhase()`, which marks the pointer lock ACTIVE again
+    // ('countdown') BEFORE the resume below — and `pointerLock.engage()` refuses while it is
+    // not (a decided match must never re-capture). That order is load-bearing for Play Again;
+    // `tools/tmp/b2_input.mjs` §PL pins it (`--plant no-reactivate` drops the notify: red).
     this.spawnMatch();
     // Via resume(), not `isPaused = false`, so a restart re-captures the mouse. The
     // only caller is the HUD's Play Again button, so the request carries the user
@@ -1515,7 +1525,19 @@ export class GameSession {
       }
     }
 
-    const attack = playing && this.input.attackHeld;
+    // ── THE ATTACK — THE HELD LEVEL, OR A PRESS EDGE LATCHED SINCE THE LAST FRAME (F2) ──
+    //
+    // 🚨 WAS `playing && this.input.attackHeld`, a LEVEL read once per stepping frame, so a
+    // click or tap whose down AND up both landed between two frames reached the sim on no
+    // frame at all — 0 attack frames and no `lastUsed`, measured by `tools/tmp/b2_input.mjs`
+    // §F2 on `8586f00`. `input.ts:takeAttackPress` has the full account.
+    //
+    // ⚠️ TAKEN ON EVERY STEPPING FRAME, BEFORE THE `playing` GATE — the same shape, and the
+    // same reason, as the item press below. `playing && (held || take())` short-circuits
+    // during 3-2-1, leaves the countdown click latched, and fires it at GO: §F2's countdown
+    // row goes red under `--plant short-circuit`.
+    const pressed = this.input.takeAttackPress();
+    const attack = playing && (this.input.attackHeld || pressed);
 
     // ── THE ITEM PRESS — CONSUMED ON EVERY STEPPING FRAME, PASSED ONLY WHILE PLAYING ──
     //
@@ -1933,6 +1955,21 @@ export class GameSession {
         case 'hit-landed': {
           const targetSlot = slotOf(ev.targetId, ev.targetRole);
           const model = this.models[targetSlot];
+          // ── 🧀 THE BLUE CHEESE TICK IS QUIET ─────────────────────────────────────
+          // The aura (B3) hurts every victim inside the wearer's radius ONCE A SECOND through
+          // `combat.ts:itemDamageSource` — `kind: 'weapon'` with `itemId: 'blue_cheese'` — so
+          // it arrived here as a full weapon hit: burst, camera kick, knockback nudge, hit
+          // flash and a >= 16 ms hit-stop, per victim, every second, for as long as anyone
+          // stands near the wearer. `ITEMS.blue_cheese.look`: *"the one item that must NOT be
+          // loud"*. Measured by `tools/tmp/b2_input.mjs` §BC on `8586f00` (a synthetic tick
+          // on the local seat through `__feelEvent`): vfx 1, shake 1, hitStop 1, knockback 1.
+          // So it gets the fog's shape — an early branch out of the impact treatment below —
+          // and less than the fog: a small damage number and nothing else, not even the hit
+          // flash (this very comment's next paragraph measures the flash as the loudest
+          // channel in a hit). The cloud itself is the cause on screen; the HP bar and the
+          // number are the effect. `lastHitColor` / `lastHitBy` are still recorded below, so a
+          // tick that kills is still attributed to the wearer.
+          const quietTick = ev.source.kind === 'weapon' && ev.source.itemId === 'blue_cheese';
           // ⚠️ `intensity` is passed and is currently IGNORED — `CharacterModel.play`
           // declares `opts.intensity` (characters/types.ts) and `BaseCharacter.play`
           // does not read it. It is passed anyway, deliberately, because this is where
@@ -1943,7 +1980,7 @@ export class GameSession {
           // at least tries. Wiring it is one line in `applyHitFlash`, in a file this
           // owner does not have; see the report accompanying this commit. Until then
           // this call site is correct and inert rather than absent and forgotten.
-          model?.play('hit', { intensity: THREE.MathUtils.clamp(ev.amount / 12, 0.25, 1) });
+          if (!quietTick) model?.play('hit', { intensity: THREE.MathUtils.clamp(ev.amount / 12, 0.25, 1) });
 
           const color = this.colorForDamageSource(ev.targetRole, ev.source);
           lastHitColor[targetSlot] = color;
@@ -1969,6 +2006,13 @@ export class GameSession {
             // The edge vignette is the LOCAL screen's "the zone is killing YOU" —
             // it must not fire because somebody else took a fog tick.
             if (targetSlot === LOCAL_SLOT) { this.hud.flashFogTick(); this.feel.responses.screenFlash++; }
+            break;
+          }
+          // 🧀 See `quietTick` above: a small number, no burst, no kick, no freeze, no nudge.
+          // (`hud.ts` sizes the number by amount; the aura's tick is the game's smallest hit.)
+          if (quietTick) {
+            const tickPos = this.projectPointToScreen(ev.x, ev.y, 1.3);
+            if (tickPos) { this.hud.spawnDamageNumber(tickPos, ev.amount); this.feel.responses.damageNumber++; }
             break;
           }
 
