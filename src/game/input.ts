@@ -191,20 +191,47 @@ export class InputController {
   /** Reused for the touch aim offset so polling it every frame allocates nothing. */
   private readonly touchOffset = { x: 0, y: 0 };
 
+  /**
+   * ── THE MOUSE LISTENS ON THE CANVAS'S HOST, NOT ON THE CANVAS (F5) ──────────
+   *
+   * 🚨 **ON A LETTERBOXED OR PILLARBOXED WINDOW THE MOUSE COULD NOT AIM OR FIRE IN THE BARS.**
+   * `stage.ts` masks any viewport outside `SUPPORTED_ASPECT` (that is what buys the 0.00 wu
+   * fairness guarantee), so at 600x600 the canvas is 600x450 with a 75 px bar above and below
+   * it — and the three mouse listeners sat on the canvas, so a cursor or a press in a bar
+   * reached nothing. Measured by `tools/tmp/b2_input.mjs` §F5 on `8586f00`: the cursor moved
+   * into the bottom bar left the fighter facing exactly where it was, and a held press there
+   * reached the sim on 0 frames.
+   *
+   * The host (`#game`) is the same surface `touch.ts` already claims for the same reason
+   * (its `ownsTarget` comment measures 83.3% of a portrait thumb band hit-testing to it). It
+   * holds the canvas and nothing else — `#hud`, `#screens` and `.plk-root` are its siblings,
+   * so no control can bubble a press into it — and pointer-lock events, which target the
+   * canvas, bubble through it unchanged.
+   *
+   * ⚠️ NDC stays relative to the CANVAS rect and is NOT clamped to ±1: aim is a direction,
+   * the camera has no roll, and a clamp would bend the bearing of every point in a bar (the
+   * pointer-lock and touch paths already send out-of-range NDC through the same raycast).
+   * ⚠️ Stored once rather than re-read from `parentElement` at dispose: `stage.dispose()`
+   * removes the canvas, and an ordering nobody asserts is not a contract.
+   */
+  private readonly surface: HTMLElement;
+
   constructor(private readonly canvas: HTMLElement) {
     const sens = queryNumber('aimSens');
     this.sensitivity = sens !== null && sens > 0 ? Math.min(6, sens) : 1;
     this.freeAim = new URLSearchParams(location.search).get('aimMode') === 'free';
     this.touch = createTouchControls({ canvas });
+    this.surface = canvas.parentElement ?? canvas;
 
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
     document.addEventListener('visibilitychange', this.onVisibilityChange);
-    canvas.addEventListener('mousemove', this.onMouseMove);
-    canvas.addEventListener('mousedown', this.onMouseDown);
+    this.surface.addEventListener('mousemove', this.onMouseMove);
+    this.surface.addEventListener('mousedown', this.onMouseDown);
     window.addEventListener('mouseup', this.onMouseUp);
-    canvas.addEventListener('contextmenu', this.onContextMenu);
+    // With the other two, so a right-click in a bar stops opening the browser's menu too.
+    this.surface.addEventListener('contextmenu', this.onContextMenu);
   }
 
   /** Call once the player's character is known, so digit keys only select real slots. */
@@ -419,10 +446,10 @@ export class InputController {
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
-    this.canvas.removeEventListener('mousemove', this.onMouseMove);
-    this.canvas.removeEventListener('mousedown', this.onMouseDown);
+    this.surface.removeEventListener('mousemove', this.onMouseMove);
+    this.surface.removeEventListener('mousedown', this.onMouseDown);
     window.removeEventListener('mouseup', this.onMouseUp);
-    this.canvas.removeEventListener('contextmenu', this.onContextMenu);
+    this.surface.removeEventListener('contextmenu', this.onContextMenu);
   }
 
   /** Radius of the aim ring, in CSS px. Scales with the short axis so the stick feels
