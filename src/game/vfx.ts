@@ -43,13 +43,13 @@
 
 import * as THREE from 'three';
 import type {
-  Fighter, FighterId, FighterRole, MatchState, Medikit, Projectile, Splat, TrailMark, Vec2,
+  Fighter, FighterId, FighterRole, MatchState, Medikit, Projectile, Vec2,
 } from './state';
 // The presentation-side seat rules, stated once for all four consumers of the event
 // stream — see `roster.ts` for why every resolver has a legacy-role fallback.
 import { fighterOf, fightersOf, slotOf } from './roster';
 import { MAX_FIGHTERS } from './state';
-import { SPLAT_RADIUS, TRAIL, REACH, MEDIKIT } from './rules';
+import { SPLAT_RADIUS, SPLAT_DURATION_MS, TRAIL, REACH, MEDIKIT } from './rules';
 // The sim's own predicate for "may this status be applied yet", exported by
 // `combat.ts` specifically so this layer can render the shrug-off window without
 // re-deriving the arithmetic (see its doc comment). Importing it rather than copying
@@ -72,6 +72,9 @@ import { KEY_OFFSET } from '../render/lighting';
 // existed.
 import { getWeaponVfx } from '../vfx/weapons';
 import type { WeaponVfx, WeaponVfxCtx } from '../vfx/weapons/types';
+// Persistent ground marks — one dark union, one draw (graphics campaign V1).
+import { GroundMarkBatch, linAtLC } from '../vfx/groundMarks';
+import { VFX_SIGNATURE } from '../vfx/palette';
 
 declare global {
   interface Window {
@@ -240,7 +243,9 @@ const PROJECTILE_ROUGHNESS = 0.30;
  */
 const GROUND_CLEAR_Y = 0.30;
 /** Ground-decal layer heights. See `GROUND_CLEAR_Y` for how these were derived. */
-const SPLAT_Y = GROUND_CLEAR_Y;
+// ⚠️ `SPLAT_Y` (= `GROUND_CLEAR_Y`) is gone: splats and trail marks are one batch now
+// (`src/vfx/groundMarks.ts`), drawn at `TRAIL_Y`. `MIN` blending makes their mutual order
+// irrelevant, which is the only thing the 0.01 separation ever documented.
 const TRAIL_Y = GROUND_CLEAR_Y + 0.01;
 
 // ── MEDIKITS ────────────────────────────────────────────────────────────────────
@@ -611,8 +616,13 @@ const PUDDLE_SPLASH_DIST_WU = 18;
 //     **47.6% of the cast's figure/ground** spent. `splatMat`'s clean bill of health was
 //     stale too — the arena was lifted a full stop after it was written, and at opacity
 //     0.55 the old #C2461F composited to within **~0.01 luma of the floor**.
-//     Now fixed — see `TRAIL_COLOR` / `SPLAT_COLOR` / `buildGlazeMarkTexture`, including
+//     Now fixed — see `TRAIL_COLOR` / `SPLAT_COLOR` / `buildGlazeMarkTexture` (removed by V1; `git show d1b2621:src/game/vfx.ts`), including
 //     why the `match.ts` desync that blocked it was not a real constraint.
+//     ⚠️ **AND THEN UN-FIXED, AND RE-FIXED BY THE BLEND (V1).** Those three were later taken
+//     BRIGHT on purpose ("THE POLARITY IS NOW BRIGHT, WHICH REVERSES RULE 3") and measured
+//     +0.17–0.21 OKLab L ABOVE the floor on `d1b2621`. All three are removed; see the
+//     "PERSISTENT GROUND MARKS" block below and `src/vfx/groundMarks.ts`, where `MIN`
+//     blending makes "never brighter than the floor" a property of the equation.
 //     **The rule is now checkable, and there is an instrument that checks it:** a ground
 //     mark must clear the FLOOR IT IS DRAWN ON by >= 0.10 luma DOWNWARD, and must not be
 //     flatter than that floor.
@@ -662,199 +672,56 @@ const PUDDLE_SPLASH_DIST_WU = 18;
 // env-in-cast-band both moved TOWARD target.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/**
- * Mean lobe radius of a glaze mark, as a fraction of its quad's half-size. The mesh is
- * scaled by `1 / GLAZE_FILL` so the mark's AVERAGE radius still equals the sim's own
- * damage radius (`TRAIL.radius`, `SPLAT_RADIUS`) — the lobes over- and under-shoot it,
- * they do not shrink it.
- */
-const GLAZE_FILL = 0.80;
-/** How many distinct lobe silhouettes exist. Selected by mark id, so the shape is
- * stable for a given mark across frames and a trail is not a row of identical discs. */
-const GLAZE_VARIANTS = 3;
+// ═══════════════════════════════════════════════════════════════════════════════
+// PERSISTENT GROUND MARKS (Sticky Trail, splats) — DARK, ONE UNION, ONE DRAW
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// ⚠️ **REVERSED, AND THE OLD WORDING IS KEPT PER THIS FILE'S RULE.** Until graphics campaign
+// V1 this block carried ~900 lines of history for a per-mark textured quad under an
+// ACCUMULATING blend (`GROUND_MARK_BLEND`: `out = C·V + below·(1 − A)`), a per-SLOT palette
+// (`TRAIL_COLOR`, slot 0 rose `#F5475E`, slot 1 gold `#F5C147`, slots 2–5 unmeasured —
+// `DECISIONS §49e`) and, last, a deliberate reversal of rule 3: *"🚨 AND THE POLARITY IS NOW
+// BRIGHT, WHICH REVERSES RULE 3'S 'SPENT DARK' ... the body sits at ~1.3x the ground it lies
+// on, the PITS carry the dark half"*. All of it is in `git show d1b2621:src/game/vfx.ts`.
+//
+// What that produced, measured on `d1b2621` (`tools/tmp/gx_vfx_cap.mjs --plan live` +
+// `gx_vfx_salience.py`, five canonical Donut-vs-Taco instants): the trail drawn at OKLab L
+// **0.686–0.691 over a floor at 0.478–0.519**, and owning **58–72% of the frame's top-2% most
+// chromatic pixels** from 5–7% of its area. `docs/REVAMP.md` §2.5: the loudest object in the
+// canonical frame was a floor hazard, and 8 of 8 cast critics named it.
+//
+// Rule 3 is back in force, and is now a property of the blend rather than of a hex:
+// `src/vfx/groundMarks.ts` draws every live mark in ONE instanced draw with `MIN`, so the pile
+// is idempotent (no overlap lens), its body is a world-space field (no seams), its rim is
+// lighter than its body and therefore prints only on the UNION's boundary, and nothing it
+// draws can be brighter than the ground under it. Colours are chosen in OKLab by VALUE and
+// keyed to the OWNER's C1a signature hue (`src/vfx/palette.ts`) — Donut's trail is a dark
+// violet, not slot 0's rose.
 
-// ── Persistent ground marks: the colours, and what they are measured against ────
-/**
- * This file's OWN hue contract (rule 3, below) already said persistent ground marks
- * "must be spent DARK", already named `trailMats.enemy` (#FFD27A, luma 0.74) as
- * violating it and `trailMats.player` (#FF9EC4, hue 336) as sitting in the arena's
- * WALKABLE rose family while meaning "this ground damages you" — and then left both
- * alone: *"the same two hexes are duplicated in `match.ts:colorForDamageSource`...
- * Flagged, not fixed."*
- *
- * Six of six blind critics on the cast (and five of six on the arena) then named the
- * consequence unprompted, and `tools/tmp/trail_probe.mjs` measured it on HEAD by
- * same-frame ablation:
- *
- *     mark   hue 332.8   sat 0.920   L 0.7544
- *     floor  hue 333.1   sat 0.378   L 0.4809     -> hue distance **0.3 degrees**
- *     cast   hue 331.5   sat 0.546   L 0.4562     -> hue distance **1.3 degrees**
- *
- * The trail is chromatically INDISTINGUISHABLE from both the floor it lies on and the
- * character standing in it, at 1.7x that character's saturation and +0.30 luma. It is
- * not "a bit close" — it is the same hue to within a degree of both, which is why the
- * judgement frame shows a pink donut dissolving into a pink pool of its own colour.
- *
- * ── The `match.ts` coupling is resolved, not ignored ────────────────────────────
- *
- * The desync that blocked this is not real, and saying why matters more than the hexes:
- * the two uses have OPPOSITE legibility requirements. A floating damage number is
- * composited over the whole arena and must be LIGHT to read; a ground mark sits under a
- * fighter and must not be that fighter's colour. What carries the "this number came
- * from that goo" association is the HUE FAMILY, and it is preserved — pink for the
- * player, gold for the enemy. `match.ts` therefore needs no edit and is not touched.
- *
- * ── Why the colour below is the RIM colour and not the mark's colour ────────────
- *
- * Because the first attempt at this was measured and was a REGRESSION. Taking the marks
- * uniformly dark (#78112B, composited L 0.215) fixed the floor collision and created a
- * CAST collision in its place: |dL| to the cast 0.132, under the 0.15 this file asks of
- * a transient, at 6 degrees of hue. The cast band and the floor band are only ~0.10
- * luma apart, so there is no single value that is far from both.
- *
- * So the mark occupies TWO values instead of one. `buildGlazeMarkTexture` is a
- * MULTIPLIER map running 0.30 (body) to 1.0 (a thin rim just inside the silhouette),
- * and the hexes below are the RIM. Composited over the measured floor at
- * `GROUND_MARK_OPACITY`, the body lands ~0.19 below it and the rim ~0.13 above it —
- * straddling the cast rather than colliding with it, which is what persistent ground
- * hazards do in the reference bar and why they stay readable under a fighter.
- *
- * Every value here is measured against the floor as it is TODAY. The arena was lifted a
- * full stop in `ce49cd3` and its stains and kerbs re-valued after, so no recorded figure
- * was trusted — including this file's own claim about `splatMat`, which turned out to be
- * stale by the width of the whole defect.
- */
-/**
- * ⚠️ **A LIST INDEXED BY SLOT, WHERE IT WAS `Record<FighterRole, string>`.** A two-key
- * record cannot hold a third fighter's trail, and the fallback a missing key produces is
- * `undefined` handed to `new THREE.Color()`, which is black — a mark that vanishes into
- * the floor rather than an obviously-wrong one.
- *
- * 🚨 **ENTRIES 0 AND 1 ARE THE MEASURED HEXES ABOVE AND MUST NOT MOVE.** Everything the
- * comment above establishes is about those two values against the floor as it is today.
- *
- * 🔴 **ENTRIES 2..5 ARE UNMEASURED AND ARE PARKED WITH URI (`DECISIONS §49e`).** They are
- * placed in the same L band as the two that were measured (rim luma ~0.72-0.78, high
- * saturation) and spread around the wheel away from the arena's walkable rose 330-340 —
- * but the whole point of the block above is that this cannot be settled by reading a hue
- * wheel, only by ablating against the floor and the cast. Nothing seats more than two
- * fighters, so no shipped frame contains one of these yet, and they exist so that the
- * first six-way match draws six distinguishable trails instead of four black ones.
- */
-const TRAIL_COLOR: readonly string[] = [
-  /** hue 352 — 21 degrees off the arena's WALKABLE rose 330-340 AND off Donut's own
-   * 331, still unmistakably the pink family the #FF9EC4 damage number belongs to. */
-  '#F5475E',
-  /** hue 42, the gold family of the #FFD27A damage number. */
-  '#F5C147',
-  '#47C4F5', // hue 197 — cyan
-  '#6BE05A', // hue 112 — green
-  '#B36BF5', // hue 273 — violet
-  '#F58A47', // hue 24  — orange
-];
-/**
- * Splat RIM colour, and this one was assumed rather than measured for a long time.
- * Rule 3 asserts "`splatMat` at luma 0.44 honours that" — against a floor that has
- * since moved. At opacity 0.55 over a floor measured at 0.4809 the old #C2461F
- * composites to ~0.46, i.e. **within ~0.02 luma of the floor it is drawn on**: a splat
- * was very nearly invisible against the arena's own tile field, and the clean bill of
- * health in the contract above was simply out of date. Same hue family (~14, warm
- * red-orange), so nothing about what a splat MEANS changes.
- */
-const SPLAT_COLOR = '#EF5B2E';
-/**
- * How much of the ground the mark's BODY hides.
- *
- * ⚠️ **KEPT, AND THE NUMBER MOVED 0.78 -> 0.62 BECAUSE THE BLEND UNDER IT CHANGED.**
- * The old wording, per this file's rule: *"Opacity, up from 0.6/0.55. A hazard marker
- * has to read the same on rose tile, on a teal mat and on an amber grease pool; at 0.6
- * the surface underneath was contributing 40% of the mark's final value, which is why
- * one number could never satisfy all three. At 0.78 the mark's own colour dominates and
- * its value is a property of the mark rather than of whatever it landed on."*
- *
- * That argument is about `NormalBlending`, where alpha does two jobs at once — it scales
- * the SOURCE and it hides the DESTINATION — so "more of the mark's own colour" and "less
- * of the ground" are the same dial and 0.78 was the compromise. `GROUND_MARK_BLEND`
- * below splits them: the source is no longer multiplied by alpha, so alpha now means
- * ONLY "how much ground is hidden" and the mark's own strength is carried by the
- * texture's value. 0.62 is the number that leaves the body one-third of the ground and
- * lets a pile of marks ACCUMULATE rather than converge to a single flat value.
- */
-const GROUND_MARK_OPACITY = 0.62;
-/** Ground hidden by an interior speckle. LOW on purpose — see `GROUND_MARK_BLEND`: a
- * low alpha with a high value is the "adds light" end of this blend, so speckles are
- * where the pile reaches a hot value at all. 0.32 -> 0.28 so a stack of three CLIPS
- * rather than merely approaching: the converged value is `S / A`, and at 0.4589 / 0.28
- * that is 1.64, i.e. over the top of the range with room to spare. */
-const MARK_A_SPECKLE = 0.28;
-/** Ground hidden by a dark pit. HIGH: a pit is the one place the mark is meant to be a
- * hole rather than a glow, and the dark half of the value range lives here now that the
- * body sits at the ground's own value. */
-const MARK_A_PIT = 0.85;
-/**
- * ⚠️ **THE RIM BAND IS GONE, AND THIS IS THE FOURTH POLARITY THIS FILE HAS TRIED.**
- * Kept per house style: *"Ground hidden by the rim band. 1.0, so the rim's delivered
- * value is `C·V` with no dependence on what is underneath — which is what makes it
- * self-cancelling."* The algebra was right and INCOMPLETE. A rim at `A = 1` delivers a
- * CONSTANT, so it cancels against the body only where the body has reached exactly that
- * constant — and the body carries a diagonal RAMP, so half of every mark sits above the
- * rim's value and the other half below it. Rendered
- * (`shots/gm/after_own/vfx_on.png`, 4x): a hairline dark contour around every lobe,
- * i.e. *"hard cartoon outlines"*, the exact complaint, arriving for the fourth time by a
- * fourth mechanism.
- *
- * There is nothing left for it to buy. Under `GROUND_MARK_BLEND` the mark's body is now
- * ABOVE the floor it lies on, so the union's own boundary is a large step (~0.10 linear)
- * with no band drawn at all — a rim was only ever needed when the mark and the floor
- * were the same value. **The union edge is now free; the rim was only a cost.**
- */
-const MARK_A_RIM_REMOVED = true;
-/**
- * Body value ramp on `markBodyTint`'s two-segment axis: 1.0 is the mark's own hue at
- * full strength, above 1.0 is a lerp toward `markHotColor`, below it is that hue scaled
- * down.
- *
- * ⚠️ **MEASURED, NOT MODELLED, AND THE MODEL WAS WRONG BY ~3.5x.** The first pass solved
- * these from the composite algebra — the pile converges to `C·V / A`, the ground under
- * it measures 82.84 sRGB = 0.0862 linear, so V = 0.376 for ~1.3x — and the rendered
- * frame came back at `underRatio` **0.681, not 1.3**. The delivered body was BELOW a
- * single layer's own source term, so something between the fragment and the reported
- * pixel (the post grade, the contact shadow that draws over the mark at `renderOrder`
- * 1, a pile shallower than assumed) eats roughly two thirds of it. Rather than guess
- * which, the second pass CALIBRATED on that measurement: 0.681 -> ~1.15 asks for ~3.5x
- * the source, and 0.2473 -> 0.3243 linear luma is what `v = 1.35` delivers.
- *
- * ⚠️ **AND THE SECOND PASS OVERSHOT, WHICH IS WHY THESE READ 0.90/1.15/1.45 AND NOT
- * 1.05/1.35/1.70.** `v = 1.35` measured `underRatio` **1.633** against an acceptance
- * band of 0.9-1.6 — 2% over the top — and, more importantly, the rendered frame showed
- * the body had gone fully ORANGE. This file's own hue contract says the mark's HUE
- * FAMILY is what carries "this goo made that damage number" (pink for the player, gold
- * for the enemy), and a pink fighter's trail that reads gold has spent an identity to
- * buy a value. `v = 1.15` is 15% of the way from the base hue toward the hot one
- * instead of 35%: the SPECKLES still reach the hot colour undiluted, so the pile keeps
- * a gold core, and the body stays in the red-pink family.
- *
- * 🚨 The lesson is `CLAUDE.md` rule 10 in another costume: **the algebra gives you the
- * SHAPE of the dial, never its zero.** Every number here is one rendered measurement
- * away from being wrong, and the commit carries the measurement it was set from.
- *
- * ⚠️ THE AXIS IS LINEAR-LIGHT, NOT sRGB, and the difference is not small — the old 0.376
- * painted as grey 163 in the canvas, not grey 96. The canvas is written in sRGB and the
- * texture is decoded back to linear (`SRGBColorSpace`, set explicitly below rather than
- * left to a three default that has changed before), so every value is converted at the
- * point it is painted.
- */
-const MARK_V_BODY_LO = 0.90;
-const MARK_V_BODY_MID = 1.15;
-const MARK_V_BODY_HI = 1.45;
-/** Speckle value: 2.0 is the top of `markBodyTint`'s scale, i.e. the hot colour
- *  undiluted. It used to be written as `rgb(255,255,255)` in the speckle loop, which
- *  meant the same thing by a different route; naming it keeps the two ends of the ramp
- *  comparable on one axis. */
-const MARK_V_SPECKLE = 2.0;
-/** Dark pit value. Two-sided range: the pits are the bottom of the histogram now that
- * the body is no longer the bottom of it. */
-const MARK_V_PIT = 0.30;
+/** OKLab lightness / chroma of a mark's BODY. The floor measured L 0.48–0.52, C 0.12–0.14 on
+ *  `d1b2621`'s canonical frames; V1's acceptance asks ΔL ≤ −0.15. Set from the rendered
+ *  measurement in the commit that introduced it, not from this algebra. */
+const MARK_BODY_L = 0.33;
+const MARK_BODY_C = 0.13;
+/** The RIM — between the body and the floor. It must stay LIGHTER than the body's brightest
+ *  churn (`groundMarks.ts` FRAG: body x 1.06 at most) or a neighbour's rim prints inside the
+ *  union. */
+const MARK_RIM_L = 0.44;
+const MARK_RIM_C = 0.15;
+/** Rim band width, in units of the mark's radius. */
+const MARK_RIM_W = 0.11;
+/** The AA fringe ramps toward rim x this, which must be at or above any floor it lands on —
+ *  `min` then resolves the fringe to the floor itself. Too high only sharpens the edge; too
+ *  low leaves a step where the fragment is discarded. */
+const MARK_EDGE_K = 2.6;
+/** A new mark grows from nothing over this long, and an expiring one shrinks to nothing over
+ *  the last `MARK_SHRINK_MS` of its life — so the union's tail RECEDES instead of a whole
+ *  lobe blinking out. Radius, not opacity: `MIN` has no opacity. */
+const MARK_GROW_MS = 140;
+const MARK_SHRINK_MS = 700;
+/** Splats carry no owner (`state.ts:Splat`), so they keep one hue: tomato red-orange, the
+ *  splatter weapons' family. */
+const SPLAT_HUE_HEX = '#EF5B2E';
 
 const WHITE = new THREE.Color('#ffffff');
 /** Deep desaturated ink, matching `render/toon.ts`'s outline colour (kept as a local
@@ -1011,7 +878,7 @@ const FX_KEY_DIR = KEY_OFFSET.clone().normalize();
  *
  * The EDGE term is also the answer to the *"~15 individually-readable overlapping
  * primitives"* half, and the reason is measured elsewhere in this file:
- * `buildGlazeMarkTexture` records at length that **a BRIGHT rim on overlapping marks
+ * `buildGlazeMarkTexture` (removed by V1; `git show d1b2621:src/game/vfx.ts`) records at length that **a BRIGHT rim on overlapping marks
  * stacks into concentric contour rings while a DARK one draws a single contour around
  * the union.** Darkening each blob toward its own silhouette is that finding applied
  * to geometry instead of to a texture.
@@ -1227,7 +1094,7 @@ function shadeVfxMaterial(mat: THREE.Material): boolean {
  *                false zeros in one ablation this way, including an opacity knob that
  *                was declared and never read.
  *   ADDITIVE     already light. Lighting light is not a thing.
- *   MAPPED       the map IS the value structure (`buildGlazeMarkTexture` authors a
+ *   MAPPED       the map IS the value structure (`buildGlazeMarkTexture` (removed by V1; `git show d1b2621:src/game/vfx.ts`) authors a
  *                whole body/speckle/pit histogram into its alpha and RGB). A diffuse
  *                term would fight it, and `shadeVfxGeometry` already skips mapped
  *                materials for the same reason — `FX_SHADE_STATS.skippedMapped`.
@@ -1700,7 +1567,7 @@ function syncPool<T extends { id: number }>(
       obj = create(item);
       // On the way IN, once per object, never per frame — see `shadeVfxObject`. This is
       // the sim-owned half (projectiles, splats, trail marks); `spawnTransientObject` is
-      // the other. Splats and trail marks are mapped (`buildGlazeMarkTexture`) and so are
+      // the other. Splats and trail marks are mapped (`buildGlazeMarkTexture` (removed by V1; `git show d1b2621:src/game/vfx.ts`)) and so are
       // skipped by the map rule, which is deliberate: their internal structure was
       // authored and measured in `b967242`'s rim-polarity pass and must not be doubled.
       shadeVfxObject(obj);
@@ -1717,19 +1584,9 @@ function syncPool<T extends { id: number }>(
   }
 }
 
-/**
- * Turn off depth writing on a transparent material and say so at the call site.
- *
- * `render/toon.ts`'s `flatMat` has no `depthWrite` option, and three's default is
- * `true` — so every `flatMat(..., { transparent: true })` in this project is a silent
- * occluder until something like this is applied. Kept as a named helper rather than
- * an inline assignment so the sweep is greppable: `noDepthWrite(` should appear on
- * every transparent `flatMat` in this file, and a new one without it is a bug.
- */
-function noDepthWrite<T extends THREE.Material>(mat: T): T {
-  mat.depthWrite = false;
-  return mat;
-}
+// `noDepthWrite()` lived here; its only callers were the ground-mark materials, which are a
+// `ShaderMaterial` with `depthWrite: false` now (`src/vfx/groundMarks.ts`). The trap it
+// guarded is unchanged: `flatMat(..., { transparent: true })` keeps three's `depthWrite: true`.
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 
@@ -2117,638 +1974,6 @@ function buildTelegraphRimTexture(): THREE.CanvasTexture {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// GROUND_MARK_BLEND — WHY THE PERSISTENT MARK STOPPED BEING `NormalBlending`
-// ═══════════════════════════════════════════════════════════════════════════════
-//
-// Uri, from play: *"projectiles and explosions still look very flat and not like what
-// they are supposed to."* A builder/critic loop scored 5, 5, 5 on that over three
-// rounds against a reference at 8, and the reason it could not move is structural:
-// `litVfxMaterial` EXCLUDES transparent materials (12 converted / 111 skipped) and the
-// union core only fires inside `spawnImpactBurst`, so three rounds of levers could not
-// reach the element that owns the frame — **this one.** Measured on `57ca1c4` by
-// same-frame ablation (`tools/tmp/fx_own.mjs`): 23 `PlaneGeometry` marks carrying
-// `TRAIL_COLOR[0]` own **18,449 px = 47.0% of every VFX-owned pixel in the frame.**
-//
-// ── THE THREE MEASURED FAULTS, and they are all one fault ──────────────────────
-//
-//  1. It is a DARK HOLE. `tools/tmp/gm_ratio.mjs` on that capture: the mark's strict
-//     interior reads **29.37** sRGB luma against **82.84** for the very same pixels
-//     with the layer ablated away — **underRatio 0.355** — and 133.42 for the ground
-//     beside it (**adjRatio 0.220**). Every reference analogue sits at or near its own
-//     ground's value (0.82 / 0.98 / 1.62 by a box method on three plates).
-//  2. NO LIGHT IS ADDED ANYWHERE. 4 of 125 visible VFX objects blend additively and
-//     they own 9.0% of the layer's pixels; the other 91% is `NormalBlending`, so
-//     **overlapping lobes composite DARKER and denser instead of brighter.**
-//  3. IT NEVER REACHES A HOT VALUE. p99.9 luma inside the trail's own mask is **130.4**
-//     and the whole VFX layer's is 247.2, against 253-255 on the plates.
-//
-// ── WHY NO AMOUNT OF TUNING THE OLD SETUP COULD FIX 1 AND 3 TOGETHER ───────────
-//
-// A multiply map cannot brighten. Under `NormalBlending` a mark delivers
-// `A·C·V + (1−A)·below` with `V ≤ 1`, so its ceiling is `C` itself — luma 125.7 sRGB
-// for `#F5475E`. Raising `V` to 1.0 buys ratio ~1.4 and a FLAT slab, and still cannot
-// approach 253 because **Rec.709 luma is 71% GREEN and this hue has almost none**: the
-// converged colour of a pink mark, however many layers deep, is a pink. That is not a
-// taste argument for the round-3 critic's *"hue-shift the interior toward the weapon
-// colour's high-luma neighbour"* — it is the only arithmetic that reaches a hot value
-// without desaturating, which this project has falsified five times.
-//
-// ── THE BLEND ─────────────────────────────────────────────────────────────────
-//
-//     src = ONE                       out = C·V  +  below·(1 − A)
-//     dst = ONE_MINUS_SRC_ALPHA
-//
-// Alpha stops scaling the source. `V` (the texture's value) and `A` (the texture's
-// alpha) become INDEPENDENT dials — "how much light do I put down" and "how much ground
-// do I hide" — and the consequences are the three faults above, in order:
-//
-//   • A pile ACCUMULATES. Depth `n` gives `C·V·(1 − (1−A)^n)/A`, converging to `C·V/A`
-//     rather than to `C·V`. **Overlap now means brighter, which is what an explosion
-//     does and what `NormalBlending` structurally cannot do.** It is also what fuses
-//     the union: the middle of a pile is deeper than its edge, so a hot centre and a
-//     cooler rim appear with no per-mark contour drawn anywhere.
-//   • A speckle can sit at low `A` and high `V` — mostly light, barely occluding — and
-//     three of them stacked clip to 255. That is where p99.9 comes from.
-//   • The union edge stops needing a BAND at all. A rim existed in three previous
-//     polarities because the mark's body and the floor were nearly the same value, so
-//     the silhouette had to be drawn. A body sitting ABOVE the floor draws its own
-//     silhouette — the step IS the mark, not a stroke — and `MARK_A_RIM_REMOVED`
-//     records the rendered frame where a fourth attempt at a band put a hairline
-//     contour back around every lobe.
-//
-// 🚨 **THE ROUND-3 PRESCRIPTION'S *MECHANISM* IS REJECTED AND ITS *SYMPTOM* IS NOT.**
-// It asks for *"the darkness pushed to a thin outer edge"*. A dark band inside the
-// silhouette is the defect `pl_stack.mjs` was built to measure: worked over the shipped
-// hexes, the interior contour and the union contour came out **16.9 and 17.0 luma —
-// the same number** — because a band that does not depend on `below` draws itself just
-// as hard over a neighbour as over the floor. The critic named the right symptom (one
-// mass, dark where it ends) and a mechanism that cannot produce it. The dark half of
-// the range is carried by the PITS, which are interior and therefore stack into texture
-// rather than into contour, and by the floor itself where the mark thins out.
-//
-// ── THE HUE SHIFT LIVES IN `mat.color`, AND THE PINK IS THE MULTIPLIER ─────────
-//
-// `map` is per-material and `color` is the per-slot tint (`TRAIL_COLOR[slot]`), so the
-// hot interior cannot come from the map: a multiplier can only take green AWAY. So the
-// two swap roles. `markHotColor()` puts the hue-shifted HIGH-LUMA colour on the
-// material — `#F5475E` -> `#f6a15e`, linear luma 0.2473 -> 0.4589 — and the body
-// multiplies it back DOWN to
-// the base pink, which multiplication can do because pink has less green than gold.
-// The mark's hue family is unchanged where it is spent and hot where it is dense.
-//
-// ⚠️ **`fx_own.mjs --trailHex` SELECTS THE MARKS BY MATERIAL COLOUR AND ITS DEFAULT IS
-// NOW WRONG.** The selected OBJECTS are identical (the same 23 meshes), only the value
-// that names them moved, so a before/after pair is still single-variable — but the
-// after arm must be run with `--trailHex f6a15e` or its trail ablation is VACUOUS, and
-// it will say so rather than reporting 0 px as a result. The meshes are also NAMED now
-// (`vfx_ground_mark`), which is the durable selector.
-// ═══════════════════════════════════════════════════════════════════════════════
-
-/** sRGB 0-255 triple from a `#rrggbb` literal. Deliberately not `THREE.Color`: with
- *  colour management on, `Color` stores LINEAR components and this file needs both
- *  spaces explicitly, one for the canvas and one for the blend arithmetic. */
-function srgb255(hex: string): [number, number, number] {
-  const h = hex.replace('#', '');
-  return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
-}
-const srgbToLinear = (s: number): number => (s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4));
-const linearToSrgb = (l: number): number => (l <= 0.0031308 ? l * 12.92 : 1.055 * Math.pow(l, 1 / 2.4) - 0.055);
-
-/** The hue this file shifts a mark's interior TOWARD — the maximum-luma region of the
- *  wheel. Not a taste constant: luma is 71% green, so "hot" and "toward yellow" are the
- *  same direction for every hue in `TRAIL_COLOR`. */
-const MARK_HOT_HUE = 42;
-/** How far along the short arc toward `MARK_HOT_HUE` the hot colour sits. 1.0 would put
- *  every mark's hot end at the same gold and lose the per-fighter identity the palette
- *  exists for; 0.70 keeps the family readable. */
-const MARK_HOT_MIX = 0.70;
-/** HSL lightness of the hot colour. It has to be high enough that the body multiplier
- *  computed from it stays <= 1 in every channel — see `markHotColor`. */
-const MARK_HOT_L = 0.66;
-
-/**
- * The material colour a ground mark is drawn with: the mark's own hue rotated toward
- * `MARK_HOT_HUE` and lifted to `MARK_HOT_L`, then clamped UP so that it is >= the base
- * colour in every channel.
- *
- * 🚨 **THE CLAMP IS LOAD-BEARING, NOT DEFENSIVE.** The texture's body has to multiply
- * this colour back down to the base — that is the whole trick — and a multiplier is
- * `base / hot` per channel. If `hot` were below `base` anywhere the multiplier would
- * exceed 1 there, silently clip, and the mark's spent body would come out the wrong
- * HUE rather than merely the wrong value. `markBodyTint` asserts nothing; this
- * guarantees it instead, which is the cheaper place to put the invariant.
- */
-function markHotColor(hex: string): string {
-  const [r0, g0, b0] = srgb255(hex).map((v) => v / 255) as [number, number, number];
-  const max = Math.max(r0, g0, b0); const min = Math.min(r0, g0, b0);
-  const l = (max + min) / 2;
-  const d = max - min;
-  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
-  let h = 0;
-  if (d !== 0) {
-    if (max === r0) h = 60 * (((g0 - b0) / d) % 6);
-    else if (max === g0) h = 60 * ((b0 - r0) / d + 2);
-    else h = 60 * ((r0 - g0) / d + 4);
-  }
-  if (h < 0) h += 360;
-  // Short arc toward the hot hue.
-  let delta = MARK_HOT_HUE - h;
-  if (delta > 180) delta -= 360;
-  if (delta < -180) delta += 360;
-  const h2 = (h + delta * MARK_HOT_MIX + 360) % 360;
-  const c2 = (1 - Math.abs(2 * MARK_HOT_L - 1)) * s;
-  const x2 = c2 * (1 - Math.abs(((h2 / 60) % 2) - 1));
-  const m2 = MARK_HOT_L - c2 / 2;
-  const seg = Math.floor(h2 / 60) % 6;
-  const rgb = [[c2, x2, 0], [x2, c2, 0], [0, c2, x2], [0, x2, c2], [x2, 0, c2], [c2, 0, x2]][seg]!;
-  const out = rgb.map((v, i) => Math.max(v + m2, [r0, g0, b0][i]!));
-  const hx = (v: number): string => Math.round(Math.min(1, v) * 255).toString(16).padStart(2, '0');
-  return `#${hx(out[0]!)}${hx(out[1]!)}${hx(out[2]!)}`;
-}
-
-/**
- * The canvas fill that takes `markHotColor(hex)` to a chosen point on the mark's value
- * axis. `v` runs 0 -> 2 and the axis is in two segments:
- *
- *     v in [0, 1]   the base colour SCALED  — `hex` at `v` of its own linear light
- *     v in [1, 2]   the base colour SHIFTED — lerp from `hex` toward `markHotColor(hex)`
- *
- * so `v = 1` is exactly the shipped hue at full strength and the two halves meet there
- * continuously.
- *
- * 🚨 **THE SECOND SEGMENT IS NOT COSMETIC AND CLAMPING WAS NOT A SUBSTITUTE FOR IT.**
- * The first version of this ran `ratio · v` for all `v` and clamped at 1, which reads
- * like the same thing and is not: the red and blue channels of `base/hot` for
- * `#F5475E` are 0.973 and 1.000, so they clamp almost immediately and only GREEN keeps
- * moving. Worked out, `v = 1.15` that way lands at linear luma **0.2595 against 0.2473
- * at `v = 1`** — a 5% lift for a 15% ask, i.e. the dial stops working exactly where it
- * was needed. Lerping the tint toward white instead moves every channel and reaches the
- * hot colour's 0.4589 at `v = 2`.
- *
- * The ratio is taken in LINEAR light because that is where the GPU multiplies, and the
- * result is converted to sRGB because that is what a `<canvas>` byte means.
- */
-/**
- * Linear LUMA the mark delivers per layer at axis position `v`, including the 8-bit
- * sRGB round-trip the canvas imposes — so this is what the GPU will actually multiply,
- * not an idealised value.
- */
-function markSrcLuma(hex: string, v: number): number {
-  const m = /rgb\((\d+),(\d+),(\d+)\)/.exec(markBodyTint(hex, v))!;
-  const hot = srgb255(markHotColor(hex)).map((c) => srgbToLinear(c / 255));
-  const t = [1, 2, 3].map((i) => srgbToLinear(Number(m[i]) / 255));
-  return 0.2126 * hot[0]! * t[0]! + 0.7152 * hot[1]! * t[1]! + 0.0722 * hot[2]! * t[2]!;
-}
-
-/**
- * The reference colour every other mark colour is VALUE-MATCHED to.
- *
- * 🚨 **THIS EXISTS BECAUSE THE CALIBRATION WAS MEASURED ON ONE SLOT AND IS NOT
- * TRANSFERABLE.** `MARK_V_BODY_MID` was solved against a rendered frame of `#F5475E`,
- * slot 0. Run the same `v` through the rest of the palette and the delivered linear
- * luma comes out **2.10x** for slot 1's gold, 1.88x for slot 2's cyan and 2.13x for
- * slot 3's green — because `v` is a position on a hue's own axis, not a value, and a
- * gold's axis starts much higher than a pink's. Slot 1 is not hypothetical: every
- * Donut-vs-Donut match draws it, which is exactly the match `pl_stack.mjs` runs.
- * A body measured into a 0.9-1.6 band on one slot would have shipped at ~3x on another.
- *
- * So `v` is the axis for THIS colour and every other colour solves for the `v` that
- * delivers the SAME luma. The palette then varies in hue and not in value, which is
- * what a palette is for. Slot 0 returns `v` unchanged by construction, so every number
- * measured for this change still describes what slot 0 draws.
- */
-const MARK_REF_COLOR = '#F5475E';
-
-/** The `v` at which `hex` delivers the same linear luma `MARK_REF_COLOR` delivers at
- *  `v`. Bisection rather than algebra: `markBodyTint` is a two-segment lerp with an
- *  8-bit round-trip in the middle of it, monotone in `v` but not cheaply invertible.
- *  28 halvings of [0, 2] is exact to 1e-8 and runs three times per texture, once. */
-function markVFor(hex: string, v: number): number {
-  if (hex === MARK_REF_COLOR) return v;
-  const target = markSrcLuma(MARK_REF_COLOR, v);
-  let lo = 0; let hi = 2;
-  for (let i = 0; i < 28; i++) {
-    const mid = (lo + hi) / 2;
-    if (markSrcLuma(hex, mid) < target) lo = mid; else hi = mid;
-  }
-  // Clamped by the search bounds: a hue whose hot colour is DARKER than the reference's
-  // (slot 4's violet is 0.3634 against 0.4589) cannot reach a speckle target and lands
-  // at 2.0, its own ceiling. That under-delivers rather than over-delivering, which is
-  // the safe direction, and slots 2..5 are unmeasured and parked (`DECISIONS §49e`).
-  return (lo + hi) / 2;
-}
-
-function markBodyTint(hex: string, v: number): string {
-  const base = srgb255(hex).map((c) => srgbToLinear(c / 255));
-  const hot = srgb255(markHotColor(hex)).map((c) => srgbToLinear(c / 255));
-  // `markHotColor`'s clamp guarantees `hot >= base` in every channel, so `ratio <= 1`
-  // and the first segment never needs a clamp of its own.
-  const ratio = base.map((b, i) => b / Math.max(1e-6, hot[i]!));
-  const t = Math.max(0, Math.min(1, v - 1));
-  const px = ratio.map((r) => Math.round(255 * linearToSrgb(v <= 1 ? r * Math.max(0, v) : r + (1 - r) * t)));
-  return `rgb(${px[0]},${px[1]},${px[2]})`;
-}
-
-function buildGlazeMarkTexture(variant: number, colorHex: string): THREE.CanvasTexture {
-  const size = 128;
-  const c = size / 2;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  // ── THE SECOND CANVAS IS THE ALPHA FIELD, AND IT IS PAINTED BY THE SAME CALLS ──
-  //
-  // Under `GROUND_MARK_BLEND` the value and the alpha are independent (see the block
-  // above), so a region is now a PAIR — "how much light" and "how much ground hidden" —
-  // and every fill below writes both. Keeping them in lockstep by construction, rather
-  // than by two separate passes that could drift apart, is why `dotOn` takes both
-  // contexts and paints them with one call rather than being invoked twice.
-  const aCanvas = document.createElement('canvas');
-  aCanvas.width = size;
-  aCanvas.height = size;
-  const actx = aCanvas.getContext('2d')!;
-  const greyOf = (a: number): string => { const v = Math.round(255 * a); return `rgb(${v},${v},${v})`; };
-
-  // Deterministic per-variant lobe phases — no RNG, so a given variant always draws
-  // the same silhouette and a judgement screenshot is reproducible.
-  const p1 = 1.9 * variant;
-  const p2 = 3.3 * variant + 0.7;
-  // Mean radius is exactly `GLAZE_FILL` of the half-size, which is what lets the mesh
-  // be scaled by 1/GLAZE_FILL to keep the mark's average footprint equal to
-  // `TRAIL.radius` — the SIM's own damage radius. A visual that is not the hitbox is
-  // a different bug.
-  const radiusAt = (a: number): number =>
-    c * (GLAZE_FILL + 0.13 * Math.sin(a * 3 + p1) + 0.06 * Math.sin(a * 5 + p2));
-  // Takes its target context, because the ALPHA PASS below needs the same path on a
-  // second canvas and a closure over one `ctx` cannot give it.
-  const outlineOn = (t: CanvasRenderingContext2D): void => {
-    t.beginPath();
-    const steps = 96;
-    for (let i = 0; i <= steps; i++) {
-      const a = (i / steps) * Math.PI * 2;
-      const r = radiusAt(a);
-      const x = c + Math.cos(a) * r;
-      const y = c + Math.sin(a) * r;
-      if (i === 0) t.moveTo(x, y);
-      else t.lineTo(x, y);
-    }
-    t.closePath();
-  };
-  const outline = (): void => outlineOn(ctx);
-
-  // Body: a DARK diagonal ramp. The map is a multiplier and the material colour is the
-  // mark's colour, so the body is a deep version of that hue and the SPECKLES below are
-  // the only place near-full colour appears.
-  //
-  // ⚠️ WIDENED 104-52 -> 98-35, AND THE MIDPOINT IS DELIBERATELY *LOWER*, 76 -> 67.
-  //
-  // Two separate things are happening and they were measured separately.
-  //
-  //  1. WIDER (52 wide -> 63) buys back the value range the dark rim used to carry. A
-  //     smooth diagonal ramp is the one place it can be bought WITHOUT re-introducing a
-  //     contour: a linear gradient's Sobel magnitude is near zero everywhere, so
-  //     `pl_stack`'s interior-contour term cannot see it while `tr_area`'s `mark L
-  //     stdev` can. That is the whole trade, stated as two instruments.
-  //
-  //  2. DARKER pays back the one measured COST of moving the rim into alpha. The dark
-  //     rim was ~3% of ONE mark but the marks overlap almost completely, so across a
-  //     40-mark pile its bands tile a large share of the interior and they were holding
-  //     the composite down. Removing it lifted the mark's composited luma **0.2871 ->
-  //     0.3163 (n=2 per arm, ranges 0.2753-0.2988 and 0.3119-0.3207, non-overlapping)**
-  //     and closed `|dL| vs CAST` from **0.0866 to 0.0493** against a contract that asks
-  //     0.15 — a contract this effect was ALREADY failing, made worse. The mark's own
-  //     term is ~0.237 of that 0.316 (the rest is the floor showing through at 1-0.78),
-  //     so scaling the body by (0.237-0.029)/0.237 = **0.88** returns it. 112/76/40 x
-  //     0.88 = 98/67/35.
-  //
-  // ⚠️ THE SPECKLE PEAK IS NOT SCALED WITH IT. 255 is the material colour undiluted and
-  // the block below records that a first pass which lowered it "MEASURED FLATTER". Only
-  // the body moves, so the body-to-speckle range gets WIDER, not narrower.
-  //
-  // ══ 🚨 AND THE POLARITY IS NOW BRIGHT, WHICH REVERSES RULE 3'S "SPENT DARK" ═════
-  //
-  // Everything above is kept because it is the reasoning that was reversed. What it
-  // was RIGHT about is that a mark and the cast cannot both be far from the floor
-  // when the two bands are 0.10 luma apart, so the mark must occupy TWO values. What
-  // it was wrong about is WHICH value gets the area. The body was 98/67/35 of 255 as a
-  // sRGB MULTIPLIER — measured, delivered, `underRatio 0.355` — i.e. a hole where the
-  // reference analogues sit at 0.82-1.62 of their own ground. Rule 3's instrument
-  // ("clear the floor by >= 0.10 luma DOWNWARD") is what a mark 47% of the VFX frame
-  // wide was passing while being the second-most-named defect in the game.
-  //
-  // The straddle is not abandoned, it is INVERTED: the body sits at ~1.3x the ground
-  // it lies on (`MARK_V_BODY_*`, solved against the measured 82.84), the PITS carry the
-  // dark half at ~0.7x, and separation from the CAST is bought by the speckles' hot end
-  // rather than by the body's dark one. The values are in LINEAR light and the canvas
-  // is sRGB, which is why 0.376 paints as grey ~163 and not ~96.
-  outline();
-  const body = ctx.createLinearGradient(size * 0.18, size * 0.12, size * 0.86, size * 0.92);
-  body.addColorStop(0, markBodyTint(colorHex, markVFor(colorHex, MARK_V_BODY_HI)));
-  body.addColorStop(0.5, markBodyTint(colorHex, markVFor(colorHex, MARK_V_BODY_MID)));
-  body.addColorStop(1, markBodyTint(colorHex, markVFor(colorHex, MARK_V_BODY_LO)));
-  ctx.fillStyle = body;
-  ctx.fill();
-  outlineOn(actx);
-  actx.fillStyle = greyOf(GROUND_MARK_OPACITY);
-  actx.fill();
-
-  ctx.save();
-  outline();
-  ctx.clip();
-  actx.save();
-  outlineOn(actx);
-  actx.clip();
-  // ── THE RIM POLARITY, AND WHY IT IS NOW DARK ──────────────────────────────────
-  //
-  // Kept above this, because it is the reasoning that was reversed and this file's rule
-  // is to keep the old wording with the reason: *"A dark body with a BRIGHT rim cannot
-  // make that trade, because it occupies two values at once: composited, the body sits
-  // ~0.19 BELOW the floor and the rim ~0.13 ABOVE it, straddling the cast."* And the
-  // hairline was chosen over a thick bright rim because *"marks drop every 160 ms and
-  // overlap almost completely, so every mark's rim drew over the previous mark's body
-  // and a trail stacked into concentric contour rings, a red flower rather than a
-  // spill."*
-  //
-  // ⚠️ BOTH HALVES OF THAT ARE FALSIFIED, and by the judgement PNG the second half
-  // itself invokes. Thinning the bright rim from 0.055 to 0.028 did not stop the rings;
-  // it made them thinner. `shots/review/cr1/stage/match_donut_taco_03.png` — the frame
-  // the blind round actually scored — shows a chain of ~20 INDIVIDUALLY OUTLINED
-  // lozenges, because at `dropIntervalMs` 160 every mark's bright rim draws over the
-  // previous mark's body and it does so whatever the line width. The five-of-six critic
-  // complaint did not move across the hue fix; only the adjective did ("opaque flat-pink
-  // cloud" -> "large flat semi-transparent RED BLOB").
-  //
-  // And the "straddling the cast" claim was never true as shipped. The rim is a
-  // hairline, so it is ~3% of the mark's pixels and contributes almost nothing to the
-  // mark's mean. Measured by same-frame ablation (`tools/tmp/trail_probe.mjs`, this
-  // tree): mark L 0.3473 against a cast at L 0.4225 — **|dL| 0.0752**, which is not
-  // merely under the 0.15 the contract asks, it is WORSE than the 0.132 that got the
-  // uniform-dark `#78112B` variant rejected as a regression. The reason is that the
-  // OTHER operand moved: that decision was taken against "a Donut whose own mean is
-  // 0.347" and the cast has since been lifted to 0.4225 by the render/cast passes. The
-  // premise expired, the conclusion did not (`docs/LESSONS.md` §5's "a baseline is
-  // itself a measurement", one level up — a REASON can go stale the same way).
-  //
-  // ── The polarity flip, and why it is self-solving ──────────────────────────────
-  //
-  // A DARK rim is invisible where it lands on a neighbouring mark's dark body and
-  // strongly visible where it meets the FLOOR — so a pile of overlapping marks draws
-  // exactly ONE contour, around the union, which is what the reference plate's poison
-  // cloud does (`reference/.../bs_05.png`: one hot rim around the whole cloud, none
-  // between its lobes). A bright rim does the precise opposite: it is loudest where it
-  // crosses a neighbour and quietest against the floor. Stacking contrast falls from
-  // |238-58| = 180 to |26-68| = 42, a 4.3x reduction, with no change to the mark's
-  // footprint — the hitbox is `TRAIL.radius` and is not touched.
-  //
-  // Shoulder first (wide, mid), rim second (narrow, dark) — `stroke()` centres on the
-  // path and the clip discards the outer half, so each lands as a band of half its
-  // width just INSIDE the silhouette.
-  //
-  // ══ 🚨 AND "SELF-SOLVING" WAS FALSIFIED TOO — SAME DEFECT, THIRD POLARITY ══════
-  //
-  // The two strokes above are GONE and the wording is kept, per this file's rule, with
-  // the reason. The dark rim never became invisible over a neighbour. It cannot:
-  //
-  //     a mark composites  0.78·C·tex + 0.22·below
-  //
-  // so the difference between a rim pixel and a body pixel is **0.78·C·(0.30 − 0.102)
-  // ≈ 0.15·C, a CONSTANT, whatever `below` is.** The rim is a multiplicative darkening
-  // of the mark's own colour, and `below` cancels out of the comparison entirely. The
-  // premise — "invisible where it lands on a neighbouring mark's dark body" — is not
-  // approximately wrong, it is structurally impossible. Worked at the shipped hexes,
-  // over the measured floor: the interior contour is |36.3 − 19.4| = **16.9 luma** and
-  // the union contour |48.8 − 31.8| = **17.0 luma. THE TWO ARE THE SAME NUMBER**, which
-  // is exactly what "reads as N shapes rather than one" means.
-  //
-  // Measured, not argued (`tools/tmp/pl_stack.mjs`, the segmentation census that
-  // `docs/LESSONS.md` §6b says did not exist — mean Sobel luma over the STRICT INTERIOR
-  // of the pile's ablated union, cast body removed): interiorEdge **42.726** against a
-  // **5.851** floor read on the same pile with every glaze texture repainted flat.
-  // **86% of the interior contour energy was drawn by this texture.** And three fresh
-  // critics named it on three different sheets across two capture dates —
-  // *"hard-edged overlapping circular boundaries"*, *"flat, unshaded stacked circles"*,
-  // *"hard cartoon outlines"* — the last one on 2026-08-12 pixels, i.e. SIX DAYS AFTER
-  // the polarity flip landed. The adjective moved again; the noun never has.
-  //
-  // ── THE RIM IS NOW IN THE ALPHA CHANNEL, AND *THAT* IS SELF-CANCELLING ─────────
-  //
-  // Same band, same width, no change to the value map: the rim keeps the body's own
-  // grey and is marked **fully opaque**, while the body carries `GROUND_MARK_OPACITY`.
-  // The material's own opacity moves to 1.0 and the map's alpha owns the blend.
-  //
-  //   over the FLOOR      1.0·C·body   vs   0.78·C·body + 0.22·Floor
-  //                       → a contour of 0.22·(C·body − Floor) ≈ 16 luma. UNCHANGED.
-  //   over a NEIGHBOUR    the pixel underneath is ALREADY ≈ C·body, so raising alpha
-  //                       moves it by 0.22·(C·body − C·body) ≈ 0. **≈ 4 luma at one
-  //                       layer of depth and vanishing with every further layer.**
-  //
-  // The dark-rim version claimed this property and could not have it, because a
-  // MULTIPLIER cannot know what is beneath it. An ALPHA can — that is what alpha is.
-  // Predicted 16.9 → ~3.8 luma of interior contour, a 4.4x reduction, with the union
-  // contour held; `pl_stack.mjs` is the instrument that can tell those two apart.
-  //
-  // ⚠️ The value range this stroke was carrying is NOT free. It was ~3% of the mark's
-  // pixels at 26–44 against a body of 52–104, and removing it takes the bottom off the
-  // histogram — the exact trade this file records going wrong in the other direction
-  // ("a first pass replaced the bright rim with speckles … and MEASURED FLATTER").
-  // `tr_area`'s `mark L stdev` is the number that governs it and it is reported in the
-  // commit; the dark PITS below still populate the dark half.
-  // ── INTERIOR SPECKLES — where the upward half of the value range went ──────────
-  //
-  // The rim used to be the mark's only bright value and it could not be one, being a
-  // hairline. These carry it instead, and they are the shape the reference actually
-  // uses: `bs_05`'s cloud is a dark body carrying many small BRIGHT pockets, measured
-  // (same code, `tools/tmp/tr_area.mjs --ref`) at an internal L stdev of **0.1371**
-  // against our shipped **0.0929** — the "flat" half of the critic phrase, in numbers,
-  // and the half the hue fix never addressed.
-  //
-  // Every speckle is placed well INSIDE the silhouette (|centre| <= 0.30 of the texture
-  // from the middle, against a mean lobe radius of 0.40), for the same reason the rim
-  // is dark: anything on the boundary stacks into a contour when marks overlap, and
-  // anything in the interior stacks into texture. Deterministic per variant — no RNG,
-  // so a judgement screenshot is reproducible.
-  //
-  // ── 🚨 THE SPECKLES WERE THE *BIGGER* HALF OF "STACKED CIRCLES", NOT THE RIM ───
-  //
-  // The rim's move into alpha (above) took the interior contour structure from
-  // **34.595 to 27.638** on `pl_stack.mjs` — real, 25x its 0.274 between-run floor, and
-  // the lobe outlines are visibly gone from the PNG. It left **80% of the term
-  // standing**, because a mark carries ONE rim and **NINE hard-edged discs**: seven
-  // speckles at 255-207 and two pits at 24-20, every one of them a flat `fill()` with a
-  // step of up to 3.4x against a body of 52-104. Read on the after-frame they stopped
-  // being "one of the things in there" and became THE internal feature — which is the
-  // critics' phrase almost word for word: *"flat, unshaded stacked circles with hard
-  // edges"*, *"hard-edged overlapping circular boundaries"*.
-  //
-  // ⚠️ AND THE FIX IS NOT TO REMOVE THEM — the block below already records that trap,
-  // and it is kept verbatim because it is still true. So the peak VALUE is untouched
-  // (255 and 20 both stay) and only the PROFILE changes: full strength across the core,
-  // then a ramp to nothing. The circle stops having a boundary; the value range keeps
-  // its two ends.
-  //
-  // The radius is grown to pay for the ramp rather than losing the bright mass with it.
-  // For a linear alpha ramp from `CORE` to 1 the mean alpha over the annulus is ~0.5, so
-  // a disc of outer radius R carries ~pi.R^2.(0.5 + 0.5.CORE^2) of the flat disc's mass;
-  // setting that equal to the old pi.r^2 gives **R = r / sqrt(0.5 + 0.5.CORE^2)**, which
-  // at CORE 0.45 is 1.29x. That is where `SPECKLE_GROW` comes from — it is solved, not
-  // picked, so changing CORE keeps the mass automatically.
-  //
-  // ⚠️ Alpha inside the texture is SAFE HERE and is not the compounding bug the alpha
-  // pass warns about: the body fill underneath is fully OPAQUE, so `source-over` of any
-  // partial alpha leaves the destination alpha at 1. Every speckle sits well inside the
-  // silhouette (|centre| <= 0.30 against a mean lobe radius of 0.40), so none of them
-  // can reach the antialiased edge where that would stop being true.
-  const SPECKLE_CORE = 0.45;
-  const SPECKLE_GROW = 1 / Math.sqrt(0.5 + 0.5 * SPECKLE_CORE * SPECKLE_CORE);
-  /** One soft disc, painted onto BOTH fields — `fill` on the value canvas, `alpha` on
-   *  the alpha canvas — with the identical ramp, so a speckle's value and its occlusion
-   *  fade together and no pixel ever gets one without the other. The ramp's own alpha
-   *  is what blends each field into whatever it already holds, so a speckle interpolates
-   *  from its own pair to the body's pair rather than stamping a disc edge. */
-  const dotOn = (fx: number, fy: number, fr: number, fill: string, alpha: number): void => {
-    const x = c + fx * size;
-    const y = c + fy * size;
-    const r = fr * size * SPECKLE_GROW;
-    const paint = (t: CanvasRenderingContext2D, rgb: [number, number, number]): void => {
-      const g = t.createRadialGradient(x, y, 0, x, y, r);
-      const s = (a: number): string => `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
-      g.addColorStop(0, s(1));
-      g.addColorStop(SPECKLE_CORE, s(1));
-      g.addColorStop(1, s(0));
-      t.fillStyle = g;
-      t.beginPath();
-      t.arc(x, y, r, 0, Math.PI * 2);
-      t.fill();
-    };
-    const m = /rgb\((\d+),(\d+),(\d+)\)/.exec(fill)!;
-    paint(ctx, [Number(m[1]), Number(m[2]), Number(m[3])]);
-    const av = Math.round(255 * alpha);
-    paint(actx, [av, av, av]);
-  };
-  //
-  // ⚠️ THE VALUE RANGE IS THE POINT, NOT THE DOTS, and round 1 of this change proved it
-  // by getting it wrong. A first pass replaced the bright rim with speckles at 214-160
-  // over a body of 92-48 and MEASURED FLATTER than what it replaced: internal L stdev
-  // 0.0895 +/- 0.0005 against the shipped 0.1036 +/- 0.0021 (n=2 vs n=4 on one held
-  // snapshot, 22 marks per arm). It killed the ring stack — the PNG is unambiguous — and
-  // paid for it in the exact adjective the critics used. The bright rim was carrying more
-  // of the mark's value range than its 3% of the mark's area suggested, because a stroke
-  // sits on the ANTIALIASED BOUNDARY and composites against the light floor. So the
-  // speckles run to FULL strength (255 = the material colour undiluted) and the pits to
-  // near-black, and the body sits between them.
-  const spin = variant * 1.7;
-  for (let i = 0; i < 7; i++) {
-    const a = spin + i * 2.399963;                 // golden angle — even, non-lattice
-    const r = 0.075 + 0.215 * Math.sqrt((i + 0.55) / 7);
-    // Radius runs 0.080 -> 0.050 across the seven, so a mark carries a few large
-    // pockets and several small ones rather than a lattice of equal dots.
-    //
-    // ⚠️ A STEEPER TAPER WAS MEASURED AND REJECTED. Running 0.085 -> 0.034 looks better
-    // described and reads with more variety, and it costs internal L stdev 0.1043 ->
-    // 0.0968 (n=2, spread 0.0000) against a shipped 0.1046 +/- 0.0026 (n=6) — a 3-sigma
-    // move on the ONE structural quantity this change exists to hold, because the small
-    // dots simply carry less bright area. Variety that is paid for in the value range is
-    // the wrong trade: "flat" is the critic word, "samey" is not.
-    //
-    // ⚠️ "FULL STRENGTH = the material colour undiluted" NOW MEANS THE HOT COLOUR, and
-    // that is the whole point of the swap described in `GROUND_MARK_BLEND`.
-    // `MARK_V_SPECKLE = 2.0` is the top of `markBodyTint`'s axis — `#f6a15e`, linear
-    // luma 0.4589 — where a speckle used to be the base pink undiluted, linear luma
-    // 0.2473. At `MARK_A_SPECKLE` the pile converges to `0.4589 / 0.28 = 1.64`, i.e. it
-    // CLIPS, and three overlapping speckles reach 255. A speckle stack of the base pink
-    // could not, at any depth: its converged colour is still a pink, and Rec.709 luma
-    // is 71% green.
-    const rad = 0.080 - 0.0050 * i;
-    // The 8-per-step taper is kept: it is what stops seven identical dots reading as a
-    // lattice, and it now runs down the SAME axis everything else on this texture uses.
-    const v = MARK_V_SPECKLE - 0.055 * i;
-    dotOn(Math.cos(a) * r, Math.sin(a) * r, rad, markBodyTint(colorHex, markVFor(colorHex, v)), MARK_A_SPECKLE);
-  }
-  // Dark pits, so the body is not uniform between the speckles and the dark half of the
-  // range is populated too — stdev is two-sided and the reference cloud has both.
-  //
-  // ⚠️ THEY CARRY THE WHOLE DARK HALF NOW. The body used to be the bottom of the
-  // histogram and is the middle of it; these are the bottom. HIGH alpha as well as low
-  // value (`MARK_A_PIT`), so a pit is genuinely a hole in the pile rather than a dimmer
-  // glow — and being INTERIOR, it stacks into texture instead of into a contour, which
-  // is the property four rim polarities in a row failed to have.
-  dotOn(-0.06 + 0.05 * variant, 0.20, 0.075, markBodyTint(colorHex, markVFor(colorHex, MARK_V_PIT)), MARK_A_PIT);
-  dotOn(0.20 - 0.04 * variant, -0.17, 0.055, markBodyTint(colorHex, markVFor(colorHex, MARK_V_PIT * 0.85)), MARK_A_PIT);
-  ctx.restore();
-  actx.restore();
-
-  // ── THE ALPHA PASS — one write, from two explicit populations ─────────────────
-  //
-  // ⚠️ IT IS A SEPARATE PASS ON PURPOSE, AND DRAWING THE RIM WITH `rgba(…, 0.78)`
-  // WOULD BE A BUG. Canvas 2D composites `source-over`, so an alpha-0.78 mark drawn
-  // over an alpha-0.78 body gives **0.78 + 0.78·0.22 = 0.95**, not 0.78 — every
-  // overdraw inside the texture would compound its own alpha and the body would end
-  // up a patchwork of opacities that no constant describes. So the value structure
-  // above is drawn fully OPAQUE, and alpha is written exactly once, here.
-  //
-  // ══ 🚨 THE SEPARATE RIM CANVAS IS GONE AND THE WORDING IS KEPT WITH THE REASON ══
-  //
-  // It existed because a stroke on the value canvas would also change the VALUE, and
-  // under `NormalBlending` the rim had to change ONLY the alpha to be self-cancelling.
-  // Under `GROUND_MARK_BLEND` that is exactly backwards: a rim that moves alpha alone
-  // moves the delivered value by `(A_rim − A_body)·below`, which depends on `below` and
-  // therefore draws a contour that is LOUDER over the floor than over a neighbour —
-  // fine — but a rim that moves BOTH, to `A = 1` and `V = V_body / A_body`, delivers
-  // `C·V_body/A_body` with no `below` term at all. That is the body's own converged
-  // value, so it vanishes into the interior of a pile and appears only where the pile
-  // ends. The rim now writes both fields, on the same two canvases as everything else.
-  //
-  // `stroke()` centres on the path and the clip discards the outer half, so this lands
-  // as a band of half its width just inside the silhouette — the same construction, and
-  // the same 0.055 width, the dark shoulder used. Nothing about the mark's FOOTPRINT
-  // moves; `TRAIL.radius` is still the hitbox and `GLAZE_FILL` still the mean radius.
-  // (No rim band is drawn — `MARK_A_RIM_REMOVED` has the rendered evidence and the
-  // algebra for why the fourth polarity was the one that stopped.)
-
-  // ── THE COMBINE — one write, from two explicit fields ────────────────────────
-  //
-  // ⚠️ THE RGB IS PREMULTIPLIED BY COVERAGE AND THAT IS NOT TIDINESS. With `src = ONE`
-  // the source colour is added WHOLE, unscaled by its own alpha — so at the silhouette's
-  // antialiased edge, where `cover` is 0.5, an unpremultiplied texel would deposit the
-  // mark's FULL colour while hiding only half the ground. The mark would end in a hard
-  // ring of its own colour one pixel outside where its alpha says it stops, which is the
-  // exact "hard-edged circles" complaint arriving by a new route. Scaling rgb by `cover`
-  // makes the pair fade together and the silhouette end where it says it does.
-  //
-  // ⚠️ It is premultiplied in sRGB, so the last texel of the edge is very slightly
-  // darker than a linear premultiply would leave it (0.5 in sRGB is 0.21 in linear).
-  // It errs SOFT, which is the safe direction here, and it is one texel of a 128-px
-  // texture drawn at ~120 screen px.
-  const img = ctx.getImageData(0, 0, size, size);
-  const d = img.data;
-  const a = actx.getImageData(0, 0, size, size).data;
-  for (let i = 0; i < d.length; i += 4) {
-    const cover = d[i + 3];
-    if (cover === 0) { d[i] = 0; d[i + 1] = 0; d[i + 2] = 0; continue; }
-    const f = cover / 255;
-    d[i] = Math.round(d[i]! * f);
-    d[i + 1] = Math.round(d[i + 1]! * f);
-    d[i + 2] = Math.round(d[i + 2]! * f);
-    // ⚠️ SCALED, NEVER ASSIGNED. `cover` is the silhouette's own ANTIALIASED coverage;
-    // writing a constant here would harden the lobe edge into a jagged one, and the
-    // edge being hard-but-clean is the half of "hard-edged circles" the art direction
-    // says to keep. Multiplying leaves the AA intact and applies the field on top of it.
-    d[i + 3] = Math.round(a[i]! * f);
-  }
-  ctx.putImageData(img, 0, 0);
-
-  const tex = new THREE.CanvasTexture(canvas);
-  // ⚠️ EXPLICIT, NOT INHERITED. Every value in `MARK_V_*` is a LINEAR-light scalar and
-  // the canvas holds sRGB bytes; which of those the GPU multiplies by depends entirely
-  // on this line, and three's default for a bare `CanvasTexture` is neither obvious nor
-  // stable across versions. Leaving it to a default is how a solved constant silently
-  // becomes a guessed one.
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.needsUpdate = true;
-  return tex;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // THE PROJECTILE LEGIBILITY SHELL — Uri: *"the tomato projectile is almost
 // invisible. let's rework all projectiles. they should be vivid and clear until
 // they explode."*
@@ -2849,7 +2074,7 @@ function buildGlazeMarkTexture(variant: number, colorHex: string): THREE.CanvasT
 //    opaque so the fog already covers it; the shell must inherit that, not undo it.
 //  * **The rim is DARK, not bright.** Pellet weapons put 3-5 shots in the air at once
 //    (Rice 5, Candy 3, Shards 3, Spray 3, Catch 3) with 14-40 degrees of spread, so
-//    their halos overlap — and `buildGlazeMarkTexture` above records, at length, that
+//    their halos overlap — and `buildGlazeMarkTexture` (removed by V1; `git show d1b2621:src/game/vfx.ts`) above records, at length, that
 //    a BRIGHT rim on overlapping marks stacks into concentric contour rings while a
 //    DARK one draws a single contour around the union. Same geometry, same answer.
 //
@@ -3030,7 +2255,7 @@ const PROJECTILE_HALO_RENDER_ORDER = 6;
  * The halo's alpha/value profile, as a radial ramp.
  *
  * RGB is a MULTIPLIER on the sprite's colour (the same technique
- * `buildGlazeMarkTexture` uses), which is what lets one texture carry both the bright
+ * `buildGlazeMarkTexture` (removed by V1; `git show d1b2621:src/game/vfx.ts`) uses), which is what lets one texture carry both the bright
  * body and the dark rim in the weapon's OWN hue family — the rim is a deep version of
  * the same colour, not a foreign ink line, so a projectile never stops looking like
  * its weapon.
@@ -3065,7 +2290,7 @@ function buildProjectileHaloTexture(): THREE.CanvasTexture {
   g.addColorStop(0.62, 'rgba(255,255,255,0.78)');
   g.addColorStop(0.82, 'rgba(255,255,255,0.90)');
   // The dark rim. Narrow (0.88 -> 1.00 of the radius, the outer half already fading)
-  // for the reason `buildGlazeMarkTexture` records at length: overlapping marks stack
+  // for the reason `buildGlazeMarkTexture` (removed by V1; `git show d1b2621:src/game/vfx.ts`) records at length: overlapping marks stack
   // a rim into concentric contours, and pellet weapons put FIVE of these in the air at
   // once (Rice 5, Candy/Shards/Spray/Catch 3). DARK rather than bright so that
   // stacking draws ONE contour around the union instead of one per pellet — measured
@@ -3449,8 +2674,6 @@ export class VfxLayer {
    * every frame and would drag a child along with them.
    */
   private readonly shellPool = new Map<number, THREE.Object3D>();
-  private readonly splatPool = new Map<number, THREE.Object3D>();
-  private readonly trailPool = new Map<number, THREE.Object3D>();
   /** One group per live medikit, keyed by the sim's kit id. See `MEDIKIT_Y`. */
   private readonly medikitPool = new Map<number, THREE.Object3D>();
   private readonly materialCache = new Map<string, THREE.Material>();
@@ -3542,12 +2765,6 @@ export class VfxLayer {
 
   // Shared geometry — every instance of a given kind reuses the same buffers.
   private readonly projectileGeo = new THREE.SphereGeometry(wu(10), 10, 8);
-  // Ground marks are QUADS now, not discs: `buildGlazeMarkTexture`'s alpha owns the
-  // silhouette, so the shape can be irregular and can vary per mark without a
-  // geometry per variant. Sized `2r / GLAZE_FILL` so the mean lobe radius still equals
-  // the sim's own damage radius (see `GLAZE_FILL`).
-  private readonly splatGeo = new THREE.PlaneGeometry(2 * wu(SPLAT_RADIUS) / GLAZE_FILL, 2 * wu(SPLAT_RADIUS) / GLAZE_FILL);
-  private readonly trailGeo = new THREE.PlaneGeometry(2 * wu(TRAIL.radius) / GLAZE_FILL, 2 * wu(TRAIL.radius) / GLAZE_FILL);
   // ── MEDIKIT — one geometry set and one material pair, shared by every live kit ──
   //
   // Module-shared rather than per-kit because `syncPool` builds an object on the way IN and
@@ -3566,28 +2783,6 @@ export class VfxLayer {
   // measured and REJECTED cel shading, and nothing here is fixed by desaturating.
   private readonly medikitBodyMat = toonMat({ color: '#FBFDFF', roughness: 0.42 });
   private readonly medikitCrossMat = toonMat({ color: '#FF2F45', roughness: 0.38, emissive: '#7A0A16', emissiveIntensity: 0.55 });
-  /**
-   * One texture per lobe silhouette PER MARK COLOUR.
-   *
-   * ⚠️ **KEPT: *"One texture per lobe silhouette, shared by every ground-mark
-   * material."* IT CANNOT BE SHARED ANY MORE**, and the reason is the swap
-   * `GROUND_MARK_BLEND` records: the texture now carries the mark's OWN hue as a
-   * multiplier against a hot material colour, so it is a function of the colour and not
-   * only of the silhouette. Built on demand and memoised by hex, exactly like
-   * `trailMats` and for the same reason — a two-fighter match allocates the two colours
-   * it uses (6 textures, 64 KB each) rather than all seven.
-   */
-  private readonly glazeTexByColor = new Map<string, THREE.CanvasTexture[]>();
-
-  private glazeTexFor(colorHex: string): THREE.CanvasTexture[] {
-    let t = this.glazeTexByColor.get(colorHex);
-    if (!t) {
-      t = Array.from({ length: GLAZE_VARIANTS }, (_, i) => buildGlazeMarkTexture(i, colorHex));
-      this.glazeTexByColor.set(colorHex, t);
-    }
-    return t;
-  }
-
   // ── Projectile legibility shell — see the block above `buildProjectileHaloTexture` ──
   private readonly haloTex = buildProjectileHaloTexture();
   /** One halo material per WEAPON COLOUR, not per projectile: a three-pellet volley
@@ -3598,125 +2793,26 @@ export class VfxLayer {
   private readonly shellBox = new THREE.Box3();
   private readonly shellSize = new THREE.Vector3();
 
-  // Splat/trail records don't carry a source colour (see `state.ts`), so these use one
-  // fixed tint each rather than trying to recover the weapon that made them.
-  //
-  // ⚠️ `noDepthWrite()` is LOAD-BEARING, not tidiness. `render/toon.ts`'s `flatMat`
-  // takes `transparent`/`opacity`/`doubleSide` and never touches `depthWrite`, so a
-  // `transparent: true` material built through it keeps three's default of `true` —
-  // the exact silent-occluder trap `docs/LESSONS.md` §1 records, which was found
-  // present on every transparent material in the character cast and had never been
-  // swept for here. These three were carrying it.
-  //
-  // What it cost: three sorts transparent objects by `renderOrder` first, and splats
-  // and trail marks are created by `syncPool` with the default renderOrder 0, so they
-  // draw BEFORE `contact_shadow` and `apron_grounding` (both renderOrder 1, both at
-  // 0.00-0.07 m). A depth-writing splat therefore punched a hole in the contact
-  // shadows and prop-grounding decals underneath it — and buried prop grounding is
-  // itself a bug this project already found and deliberately reversed a decision over
-  // (LESSONS §1 case 3, "63% of prop grounding buried").
-  //
-  // A material-level census could not catch it either: these meshes only exist while
-  // the sim holds live splats/trail marks, so a scene walk on a fresh match reports
-  // "0 transparent-and-depth-writing in the VFX layer" and is telling the truth about
-  // an empty pool.
-  //
-  // One material PER LOBE VARIANT, because `map` is per-material (`docs/LESSONS.md`
-  // §6: "`map` is per-material, not per-instance") — a single shared material could
-  // only ever draw one silhouette, which is the "row of identical circles" defect
-  // itself. Three variants x two roles plus three splat variants is nine materials,
-  // all built once here and disposed in `dispose()`.
-  private readonly splatMats = this.glazeTexFor(SPLAT_COLOR).map((t) => this.groundMarkMat(SPLAT_COLOR, t));
-  /**
-   * Trail materials PER SLOT, built on first use rather than up front.
-   *
-   * ⚠️ LAZY IS THE POINT, not an optimisation. Eagerly building `MAX_FIGHTERS x
-   * GLAZE_VARIANTS` = 18 materials would allocate 12 of them for fighters that do not
-   * exist in any shipped match, and this file's own comment above counts the materials it
-   * builds ("Three variants x two roles plus three splat variants is nine materials, all
-   * built once here and disposed in `dispose()`"). Built on demand, a two-fighter match
-   * allocates exactly the six it allocated before and the count in that sentence stays
-   * true. `dispose()` walks whatever exists.
-   */
-  private readonly trailMats: THREE.MeshBasicMaterial[][] = [];
+  // ── PERSISTENT GROUND MARKS — one union, one draw (see `src/vfx/groundMarks.ts`) ──
+  // The trail and the splats share ONE batch: `MIN` makes their overlap idempotent too, and
+  // the pile costs one draw call whatever its size (the old path was one per mark).
+  // Built here, before the pools, so its place in `this.group` is fixed and early — the
+  // same scene-graph-order argument `statusBySlot` below makes for its own visuals.
+  private readonly groundMarks = new GroundMarkBatch('vfx_ground_mark', TRAIL_Y, MARK_RIM_W, MARK_EDGE_K);
+  /** Body/rim colours per hue source, memoised: an OKLab solve is cheap but not free, and
+   *  it runs per mark per frame otherwise. */
+  private readonly markColors = new Map<string, { body: [number, number, number]; rim: [number, number, number] }>();
 
-  private trailMatsFor(slot: number): THREE.MeshBasicMaterial[] {
-    let mats = this.trailMats[slot];
-    if (!mats) {
-      // `?? TRAIL_COLOR[0]` rather than a throw: a mark whose owner is off the end of the
-      // palette should draw in a real colour, not crash a frame. Unreachable while
-      // `TRAIL_COLOR.length >= MAX_FIGHTERS`, which `np_nfighter.mjs` asserts.
-      const color = TRAIL_COLOR[slot] ?? TRAIL_COLOR[0];
-      mats = this.glazeTexFor(color).map((t) => this.groundMarkMat(color, t));
-      this.trailMats[slot] = mats;
+  /** The (linear) body and rim a mark keyed to `hex` draws in — `hex`'s hue at this file's
+   *  mark VALUES. Public for QA: a probe reads the colour a character's trail resolves to
+   *  through the same function the draw uses. */
+  markColorFor(hex: string): { body: [number, number, number]; rim: [number, number, number] } {
+    let c = this.markColors.get(hex);
+    if (!c) {
+      c = { body: linAtLC(hex, MARK_BODY_L, MARK_BODY_C), rim: linAtLC(hex, MARK_RIM_L, MARK_RIM_C) };
+      this.markColors.set(hex, c);
     }
-    return mats;
-  }
-
-  /**
-   * One persistent ground-mark material: dark, saturated, textured, alpha-shaped, and
-   * `depthWrite: false` (see the block above — that flag is load-bearing).
-   *
-   * `flatMat` has no `map` option and returns `MeshBasicMaterial`, so the texture is
-   * attached here. Being UNLIT is exactly why the mark needed a texture at all: an
-   * unlit flat fill has zero shading variation by construction, which is what the
-   * blind rounds read as "flat".
-   */
-  /**
-   * ⚠️ `opacity: 1` IS NOT "THE MARKS BECAME OPAQUE", AND READING IT THAT WAY WOULD
-   * UNDO THE FIX. `MeshBasicMaterial`'s delivered alpha is `map.a × material.opacity`,
-   * and `buildGlazeMarkTexture`'s alpha pass now carries `GROUND_MARK_OPACITY` in the
-   * map itself — 0.78 across the body, 1.0 in the rim band, which is what makes a pile
-   * of marks draw ONE contour instead of one per mark. Multiplying by 0.78 a second
-   * time here would take the body to 0.61 and flatten the rim back to 0.78, i.e. it
-   * would restore the ratio the fix exists to break. The constant did not change; it
-   * MOVED, and the header above it says so.
-   *
-   * 🚨 **AND THE COLOUR PASSED IN IS NO LONGER THE COLOUR DRAWN.** `markHotColor()`
-   * puts the hue-shifted high-luma neighbour on the material and the map multiplies it
-   * back down to `color` — see `GROUND_MARK_BLEND` for why the hue shift cannot live in
-   * the map (a multiplier can only take green AWAY, and Rec.709 luma is 71% green).
-   * `color` remains the mark's identity and is still what `TRAIL_COLOR` documents; it
-   * is just no longer the string on `mat.color`, which is what any tool selecting these
-   * meshes by material colour reads.
-   */
-  private groundMarkMat(color: string, map: THREE.Texture): THREE.MeshBasicMaterial {
-    const mat = noDepthWrite(flatMat(markHotColor(color), { transparent: true, opacity: 1 }));
-    // 🚨 **THIS EXISTS BECAUSE THE LINE ABOVE BREAKS A GATE IN A FILE THIS AGENT DOES
-    // NOT OWN, AND THE BREAK IS DECLARED RATHER THAN PAPERED OVER.**
-    // `tools/tmp/np_nfighter.mjs` asserts `trailMatsFor(i)[0].color.getHexString()`
-    // against `TRAIL_COLOR`'s first two hexes — deliberately through the SHIPPED
-    // accessor, because *"a palette that is long enough but wired to the wrong index
-    // would pass a test that read `TRAIL_COLOR` directly"*, which is exactly the right
-    // instinct. `mat.color` is now `markHotColor(color)`, so that row goes red on
-    // `#f6a15e` / `#f6c75b`. The row is testing the WIRING, not the hex, and this field
-    // keeps the wiring testable: `trailMatsFor(i)[0].userData.markColor` is still the
-    // slot's own palette entry, resolved through the same accessor. The remedy in
-    // `np_nfighter.mjs` is one identifier. It is NOT applied here — that file has
-    // another owner (`CLAUDE.md` rule 9), and a test edited by the agent whose change
-    // broke it is not a test.
-    mat.userData.markColor = color;
-    mat.map = map;
-    // ── GROUND_MARK_BLEND: `out = C·V + below·(1 − A)` ──────────────────────────
-    // `src = ONE` is the whole change: the source stops being scaled by its own alpha,
-    // so value and occlusion become independent and a pile ACCUMULATES light instead of
-    // converging to one flat value. The long block above `buildGlazeMarkTexture` has the
-    // arithmetic and the three measured faults it answers.
-    //
-    // ⚠️ `blendSrcAlpha`/`blendDstAlpha` are set EXPLICITLY rather than left null. Three
-    // falls back to `blendSrc`/`blendDst` for the alpha channel when they are null,
-    // which happens to be what is wanted here — but "happens to be" is how a default
-    // change turns a solved blend into a guessed one, and this file has that scar
-    // twice already (`depthWrite`, `colorSpace`).
-    mat.blending = THREE.CustomBlending;
-    mat.blendEquation = THREE.AddEquation;
-    mat.blendSrc = THREE.OneFactor;
-    mat.blendDst = THREE.OneMinusSrcAlphaFactor;
-    mat.blendEquationAlpha = THREE.AddEquation;
-    mat.blendSrcAlpha = THREE.OneFactor;
-    mat.blendDstAlpha = THREE.OneMinusSrcAlphaFactor;
-    mat.needsUpdate = true;
-    return mat;
+    return c;
   }
 
   // ── Ability VFX pools ──────────────────────────────────────────────────────
@@ -3746,7 +2842,7 @@ export class VfxLayer {
    * ONE STATUS TELEGRAPH PER SLOT — slow ring, frost tint, stun stars, ward band.
    *
    * ⚠️ **BUILT FOR `MIN_FIGHTERS` IN THE CONSTRUCTOR AND GROWN IN `sync()`**, which is a
-   * deliberately different lifetime from `trailMats` above and the reason is scene-graph
+   * deliberately different lifetime from the (since removed) lazily-built trail materials, and the reason is scene-graph
    * ORDER. Each `StatusVisual` adds six objects to `this.group`, and sibling order is what
    * three falls back on when its transparent sort finds a tie. The constructor adds the
    * particle, wedge and ring pools and then these; `sync()` adds the pooled projectile,
@@ -3793,6 +2889,8 @@ export class VfxLayer {
   constructor(scene: THREE.Scene) {
     this.group.name = 'vfx_layer';
     scene.add(this.group);
+    // First child: the ground-mark union draws under everything else this layer owns.
+    this.group.add(this.groundMarks.mesh);
 
     // Pre-built at the old two-seat sizes; `alloc*` grows each pool to `poolCaps`.
     for (let i = 0; i < PARTICLE_POOL_SIZE; i++) this.buildParticleSlot();
@@ -4241,31 +3339,6 @@ export class VfxLayer {
       },
     );
 
-    syncPool<Splat>(
-      this.splatPool,
-      this.group,
-      state.splats,
-      (s) => {
-        const mesh = new THREE.Mesh(this.splatGeo, this.splatMats[s.id % GLAZE_VARIANTS]);
-        // NAMED so an ablation can select these without knowing the material colour.
-        // `fx_own.mjs --trailHex` selects on `mat.color`, and `markHotColor` moved that
-        // string — the objects are the same, the value that names them is not. A name is
-        // the selector that does not rot when a colour decision changes.
-        mesh.name = 'vfx_ground_mark';
-        // `rotation.x` lays the quad flat (its normal goes to world +Y); `rotation.z`
-        // is then applied FIRST in the local frame under three's default intrinsic
-        // XYZ order, so it is an in-plane spin rather than a tip-over. `docs/LESSONS.md`
-        // §12 records the opposite composition (x then y) tipping a flat plane edge-on
-        // and out of this camera entirely.
-        mesh.rotation.set(-Math.PI / 2, 0, spinForId(s.id));
-        return mesh;
-      },
-      (obj, s) => {
-        const pos = groundPos(s.x, s.y);
-        obj.position.set(pos.x, SPLAT_Y, pos.z);
-      },
-    );
-
     // ── MEDIKITS ────────────────────────────────────────────────────────────
     //
     // Keyed on the sim's kit id like every other sim-owned pool, so a kit that is taken or
@@ -4331,27 +3404,39 @@ export class VfxLayer {
       },
     );
 
-    syncPool<TrailMark>(
-      this.trailPool,
-      this.group,
-      state.trailMarks,
-      (t) => {
-        const mesh = new THREE.Mesh(this.trailGeo, this.trailMatsFor(slotOf(t.ownerId, t.ownerRole))[t.id % GLAZE_VARIANTS]);
-        mesh.name = 'vfx_ground_mark';
-        mesh.rotation.set(-Math.PI / 2, 0, spinForId(t.id));
-        return mesh;
-      },
-      (obj, t) => {
-        const pos = groundPos(t.x, t.y);
-        // Donut's Sticky Trail: a slow glaze-like shimmer (gentle scale pulse) so a
-        // trail of marks reads as a distinct hazard rather than a static decal,
-        // matching the splatter/impact language used everywhere else in this layer.
-        const phase = (state.elapsed + t.id * 137) * 0.004;
-        const pulse = 1 + Math.sin(phase) * 0.08;
-        obj.position.set(pos.x, TRAIL_Y, pos.z);
-        obj.scale.setScalar(pulse);
-      },
-    );
+    // ── PERSISTENT GROUND MARKS — every live trail mark and splat, one union, one draw ──
+    // Radius is the sim's own damage radius x presence (grow in, shrink out), so the union
+    // the player sees is the area that hurts. Trail colour is the OWNER's signature hue
+    // (`src/vfx/palette.ts`); a splat has no owner and keeps the splatter family's.
+    this.groundMarks.begin();
+    const markRadius = (bornMs: number, expiresAt: number, radiusWU: number): number => {
+      const age = state.elapsed - bornMs;
+      const left = expiresAt - state.elapsed;
+      const grow = Math.min(1, Math.max(0, age / MARK_GROW_MS));
+      const shrink = Math.min(1, Math.max(0, left / MARK_SHRINK_MS));
+      // ease-out on both ends: a mark reaches most of its size fast and leaves gently.
+      return wu(radiusWU) * Math.sqrt(grow) * Math.sqrt(shrink);
+    };
+    for (const t of state.trailMarks) {
+      const owner = roster[slotOf(t.ownerId, t.ownerRole)];
+      const col = this.markColorFor(owner ? VFX_SIGNATURE[owner.characterId] : SPLAT_HUE_HEX);
+      const pos = groundPos(t.x, t.y);
+      this.groundMarks.push({
+        x: pos.x, z: pos.z, r: markRadius(t.expiresAt - TRAIL.durationMs, t.expiresAt, TRAIL.radius),
+        seed: (spinForId(t.id) / (Math.PI * 2)) % 1, body: col.body, rim: col.rim,
+      });
+    }
+    {
+      const col = this.markColorFor(SPLAT_HUE_HEX);
+      for (const sp of state.splats) {
+        const pos = groundPos(sp.x, sp.y);
+        this.groundMarks.push({
+          x: pos.x, z: pos.z, r: markRadius(sp.expiresAt - SPLAT_DURATION_MS, sp.expiresAt, SPLAT_RADIUS),
+          seed: (spinForId(sp.id) / (Math.PI * 2)) % 1, body: col.body, rim: col.rim,
+        });
+      }
+    }
+    this.groundMarks.end(state.elapsed / 1000);
 
     // ── Status telegraphs: slow (character tint + ground ring + puddle splash) /
     // stun (orbiting stars) ────────────────────────────────────────────────────
@@ -6484,10 +5569,13 @@ export class VfxLayer {
     // `shellPool` is listed here and not left to `syncPool` for the same reason the
     // other three are: `clear()` runs on a match restart, when `state.projectiles`
     // becomes empty without any pool ever being asked to sync against it again.
-    for (const pool of [this.projectilePool, this.shellPool, this.splatPool, this.trailPool, this.medikitPool]) {
+    for (const pool of [this.projectilePool, this.shellPool, this.medikitPool]) {
       for (const obj of pool.values()) this.group.remove(obj);
       pool.clear();
     }
+    // Ground marks are rebuilt from `state` on every `sync()`; an empty batch is the reset.
+    this.groundMarks.begin();
+    this.groundMarks.end(0);
     for (const p of this.particles) { p.active = false; p.sprite.visible = false; }
     for (const w of this.wedges) { w.active = false; w.mesh.visible = false; }
     for (const r of this.rings) { r.active = false; r.mesh.visible = false; }
@@ -6539,21 +5627,12 @@ export class VfxLayer {
     delete window.__vfxSpawnTest;
     if (window.__vfxLayer === this) delete window.__vfxLayer;
     this.projectileGeo.dispose();
-    this.splatGeo.dispose();
-    this.trailGeo.dispose();
     this.medikitBodyGeo.dispose();
     this.medikitArmXGeo.dispose();
     this.medikitArmZGeo.dispose();
     this.medikitBodyMat.dispose();
     this.medikitCrossMat.dispose();
-    this.splatMats.forEach((m) => m.dispose());
-    // `trailMats` is SPARSE by construction (built on first use, per slot), so a
-    // `for..of` over it would visit holes. `Object.values` skips them, which is exactly
-    // what is wanted and is why this line reads the same as it did over the record.
-    Object.values(this.trailMats).forEach((mats) => mats.forEach((m) => m.dispose()));
-    // Per COLOUR now, not one shared triple — see `glazeTexByColor`.
-    this.glazeTexByColor.forEach((ts) => ts.forEach((t) => t.dispose()));
-    this.glazeTexByColor.clear();
+    this.groundMarks.dispose();
     this.materialCache.forEach((m) => m.dispose());
     this.materialCache.clear();
 
@@ -6689,7 +5768,7 @@ export class VfxLayer {
    * at 2/3/6 fighters in the commit rather than assumed.
    *
    * `flatMat` is still imported and still used for the splat/trail ground marks, whose
-   * value structure is authored INTO their texture (`buildGlazeMarkTexture`) and would
+   * value structure is authored INTO their texture (`buildGlazeMarkTexture` (removed by V1; `git show d1b2621:src/game/vfx.ts`)) and would
    * be fought by a light term.
    */
   private materialFor(color: string): THREE.Material {
