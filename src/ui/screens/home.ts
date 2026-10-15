@@ -660,6 +660,7 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   function renderKit(): void {
     const def = CHARACTERS[ctx.profile.selected];
     if (kitIndex >= def.abilities.length) kitIndex = 0;
+    q('kit').dataset.n = String(def.abilities.length);
     q('kit').innerHTML = def.abilities.map((a, i) => `
       <button class="home-kit-tile${i === kitIndex ? ' is-on' : ''}" type="button" data-kit="${i}">
         <span class="home-kit-em">${emojiIcon(a.emoji)}</span>
@@ -672,18 +673,38 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
     // flank), so the caption is the only place the ability is named; everywhere else
     // '.home-kit-capname' is 'display: none' and the tile carries it.
     cap.innerHTML = picked
-      ? `<span class="home-kit-capname">${picked.name}</span><span>${picked.desc}</span>`
+      ? `<span class="home-kit-captext"><span class="home-kit-capname">${picked.name}</span>${picked.desc}</span>`
       : '';
-    // Point the caption at the tile it belongs to. Round 2's critic: "'Slows enemies
+    cap.scrollTop = 0;
+    markKitCapClip();
+    // Bind the caption to the tile it describes. Round 2's critic: "'Slows enemies
     // down' is centred under the whole 2x2 grid so it binds to no button in
-    // particular." A caption for a tap state has to say WHICH tap it is describing, and
-    // a caret under the selected column is the cheapest unambiguous way to say it.
+    // particular." A caption for a tap state has to say WHICH tap it is describing.
     //
-    positionKitCaret();
+    // 🔴 IT NOW SAYS IT BY NAME, AT EVERY VIEWPORT, AND THE CARET IS GONE. The answer
+    // used to be a diamond caret (`.home-kit-cap::before`, positioned by the function
+    // retired below) pointing up at the selected column. r0 (2026-10-15, 5 of 6 home
+    // critics, scored 852x393 frame): "a yellow diamond marker sits on top of the
+    // 'Tomato Toss' label". It did: the caret is painted OVER the caption's content and
+    // its lower half reached 4.7 px into the first line wherever the caption leads with
+    // the name — `tools/tmp/u1_clip.mjs` C3 measured the diamond's centre 0.5 px (L1)
+    // from the "Tomato Toss" line box. The name was already the binding on the
+    // landscape phone; the selected tile is already the GET colour; so the name is now
+    // stated everywhere and nothing is drawn over the text.
   }
 
-  /**
-   * Point the caption's caret at the selected tile.
+  /** Fade the caption's bottom edge only while it actually overflows (see the CSS note on
+   *  '.home-col > .home-kit-cap'). Needs layout, so it is also driven by an observer. */
+  function markKitCapClip(): void {
+    const cap = q<HTMLParagraphElement>('kitcap');
+    cap.classList.toggle('is-clipped', cap.scrollHeight - cap.clientHeight > 1);
+  }
+
+  /*
+   * `positionKitCaret` — RETIRED with the caret (see `renderKit`); its notes are kept as
+   * a record because `publishBars` below cites its zero-box rule.
+   *
+   * WAS: point the caption's caret at the selected tile.
    *
    * ⚠️ MEASURED off the tile, not inferred from the index. This used to be
    * `spansBoth ? '50%' : kitIndex % 2 === 0 ? '25%' : '75%'`, which hard-codes a
@@ -702,21 +723,6 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
    * from a post-mount frame and from `resize()`, and it writes NOTHING when the box is
    * still zero, so a call that is too early cannot overwrite a good value with a guess.
    */
-  function positionKitCaret(): void {
-    const kitEl = q<HTMLDivElement>('kit');
-    const tile = kitEl.children[kitIndex] as HTMLElement | undefined;
-    if (!tile) return;
-    const kr = kitEl.getBoundingClientRect();
-    const tr = tile.getBoundingClientRect();
-    if (kr.width <= 0 || tr.width <= 0) return;
-    // 'inset-inline-start' resolves the percentage from the RIGHT under RTL, while
-    // getBoundingClientRect is always physical, so the offset is mirrored there.
-    const centre = tr.left + tr.width / 2;
-    const frac = getComputedStyle(kitEl).direction === 'rtl'
-      ? (kr.right - centre) / kr.width
-      : (centre - kr.left) / kr.width;
-    q<HTMLParagraphElement>('kitcap').style.setProperty('--home-cap-x', `${(frac * 100).toFixed(1)}%`);
-  }
 
   /**
    * Publish the top bar's MEASURED bottom edge, and the bottom bar's measured top, so
@@ -895,8 +901,8 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   render();
   stage.attachTo(stageHost);
   // The first frame after `shell.ts:mount` has appended this root — the earliest moment
-  // the kit has a box. See `positionKitCaret`.
-  const caretFrame = requestAnimationFrame(() => { positionKitCaret(); publishBars(); });
+  // the bars have a box. (It also used to place the retired kit caret; see `renderKit`.)
+  const caretFrame = requestAnimationFrame(() => { publishBars(); });
 
   // A ResizeObserver and not just `resize()`, because the bar's height changes for
   // reasons a window resize never sees: the Rubik/Heebo swap re-measures every chip,
@@ -909,14 +915,19 @@ export function createHomeScreen(ctx: ScreenContext): Screen {
   const footEl = root.querySelector<HTMLElement>('.home-bottom');
   if (topbarEl) barObserver.observe(topbarEl);
   if (footEl) barObserver.observe(footEl);
+  // The caption's fade needs layout (the first render runs before mount) and changes with
+  // inset-only layout moves that fire no resize event — observed rather than polled.
+  const capObserver = new ResizeObserver(() => markKitCapClip());
+  capObserver.observe(q<HTMLParagraphElement>('kitcap'));
 
   return {
     root,
     update(dt) { stage.update(dt); },
-    resize() { stage.resize(); positionKitCaret(); publishBars(); },
+    resize() { stage.resize(); publishBars(); },
     dispose() {
       unsubscribe();
       barObserver.disconnect();
+      capObserver.disconnect();
       cancelAnimationFrame(caretFrame);
       root.removeEventListener('click', onClick);
       // Hand the shared stage back in the state every OTHER consumer expects. The room
@@ -1926,13 +1937,17 @@ const CSS = `
 /* The tap state. A FIXED minimum height, because selecting a tile must not reflow the
    panel — the Change button sits under this and '.home-col' clips rather than scrolls,
    so a growing caption would eat a control rather than push the page. */
+/* ⚠️ margin-top WAS 9px: the room the retired caret's upper half stood in (see the tail
+   note below). It is the grid's own gap now. And 'align-items' is SAFE centre, because
+   the caption may now scroll (below) and plain centring pushes an overflowing first line
+   above the scroll origin where it can never be reached. */
 .fa-home .home-kit-cap {
   position: relative;
-  margin: 9px 0 0;
+  margin: 5px 0 0;
   padding: 4px 8px;
   min-height: 2em;
   display: flex;
-  align-items: center;
+  align-items: safe center;
   justify-content: center;
   font-family: 'Heebo', sans-serif;
   font-weight: var(--ds-w-body);
@@ -1945,13 +1960,34 @@ const CSS = `
   border-radius: var(--ds-r-2);
   box-shadow: var(--ds-e2), var(--ds-bevel);
 }
+/* THE ONE CHILD OF '.home-col' ALLOWED TO SHRINK — an exception to the guard above
+   '.home-col > *', and a designed one. The caption had a minimum height and no maximum:
+   home shows the SELECTED fighter's descriptions, which run to 180 characters, so a
+   fighter like Water Bottle pushed the Change button out of the clipped column on short
+   screens for any player who picked it. As a scroll container its automatic minimum is
+   0, so it absorbs the overspend; it is never cut, because it fades ('.is-clipped', set
+   from 'renderKit' and a ResizeObserver only while it truly overflows) and scrolls. */
+.fa-home .home-col > .home-kit-cap { flex: 0 1 auto; overflow-y: auto; scrollbar-width: none; }
+.fa-home .home-kit-cap::-webkit-scrollbar { display: none; }
+.fa-home .home-kit-cap.is-clipped {
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent);
+}
+/* ONE paragraph, not two flex boxes: the name and the description used to be sibling flex
+   items, so a two-line caption laid out as two side-by-side COLUMNS ("Tomato Toss -" |
+   "Slows enemies / down") on the scored phone frame. */
+.fa-home .home-kit-captext { min-width: 0; }
 /* The selected ability's NAME, hidden by default because the tile beside it already
    carries it. It is turned on at exactly one breakpoint — the landscape phone, where
    the tiles go icon-only to fit (see the max-height block at the foot of this file) —
    so the caption is the only place the name exists there. Rendered as its own element
    rather than concatenated into the string, because the two states differ in LAYOUT,
    not in content, and a screen must not have to re-run 'renderKit' to change size. */
-.fa-home .home-kit-capname { display: none; font-weight: var(--ds-w-black); }
+/* 🔴 SHOWN AT EVERY VIEWPORT NOW — WAS 'display: none' here and 'inline' only in the
+   landscape-phone block. The name is what binds the caption to its tile since the caret
+   was retired (see 'renderKit'): r0's critics read the caret as "a diamond marker on top
+   of the 'Tomato Toss' label", and on the phone it was exactly that. */
+.fa-home .home-kit-capname { display: inline; font-weight: var(--ds-w-black); }
 /* NON-BREAKING SPACES, both sides. A plain space in 'content' collapses against the
    adjacent inline box and the first capture rendered "Tomato Toss -Slows enemies down"
    — the leading space survived and the trailing one did not. The dash is also what
@@ -1961,25 +1997,21 @@ const CSS = `
    octal escape and tsc refused the file (TS1487). Same family of trap as the backtick
    rule at the top of this file. */
 .fa-home .home-kit-capname::after { content: '\\00a0\\2013\\00a0'; font-weight: var(--ds-w-body); }
-/* The tail. '--home-cap-x' is written by 'renderKit()' from the selected index, so the
-   caption points at its own tile rather than at the grid in general. A rotated square
-   whose lower half lands ON the plate's ink border, which is what makes it read as a
-   tail growing out of the plate instead of as a diamond floating above it — the first
-   version left a gap and looked like a stray icon. */
-.fa-home .home-kit-cap::before {
-  content: '';
-  position: absolute;
-  top: -8px;
-  inset-inline-start: var(--home-cap-x, 50%);
-  width: 13px;
-  height: 13px;
-  margin-inline-start: -6.5px;
-  transform: rotate(45deg);
-  background: var(--mustard);
-  border-left: var(--ds-stroke-1) solid var(--ink);
-  border-top: var(--ds-stroke-1) solid var(--ink);
-  border-start-start-radius: var(--ds-r-1);
-}
+/* 🔴 THE TAIL IS RETIRED. WAS, verbatim: "The tail. '--home-cap-x' is written by
+   'renderKit()' from the selected index, so the caption points at its own tile rather than
+   at the grid in general. A rotated square whose lower half lands ON the plate's ink
+   border, which is what makes it read as a tail growing out of the plate instead of as a
+   diamond floating above it — the first version left a gap and looked like a stray icon."
+     .fa-home .home-kit-cap::before { content: ''; position: absolute; top: -8px;
+       inset-inline-start: var(--home-cap-x, 50%); width: 13px; height: 13px;
+       margin-inline-start: -6.5px; transform: rotate(45deg); background: var(--mustard); … }
+   Its lower half landing ON the plate is what put it on the TEXT: a positioned pseudo paints
+   over in-flow content, and its tip reached 4.7 px into the first line wherever the caption
+   leads with the name (the landscape phone, i.e. the scored frame). r0, 5 of 6 home critics:
+   "a yellow diamond marker sits on top of the 'Tomato Toss' label" — it read as the stray
+   icon this note had already feared. The caption now names its ability at every viewport
+   ('.home-kit-capname' above), which binds it to its tile without drawing over anything.
+   Measured: 'tools/tmp/u1_clip.mjs' C3. */
 /* WAS: '.fa-home .home-change { margin-top: 4px; width: 100%; }', and the 'width: 100%'
    is the whole 3.6x inversion in one declaration. A secondary control stretched to its
    panel is 0.91x the primary's area; the reference's is 0.25x. It now sizes to its own
@@ -2394,6 +2426,24 @@ const CSS = `
         makes to the panel rule and the record glyphs. */
   .fa-home .home-rec-val { font-size: var(--ds-t3); }
   .fa-home .home-level .fa-level-label:last-child { display: none; }
+  /* ── FIVE ABILITIES ON A SHORT SCREEN (Donut) ──────────────────────────────────
+     Measured with 'u1_clip' (Donut selected), and red on the base tree as well: at
+     852x480+notch the two-up kit WITH names stood three rows and 198 px tall, crushed the
+     caption to 22 px and pushed the Change button wholly out of the clipped column; at
+     852x393 the icon-only rows still overspent it by 25 px and cut Change by 4-7 px. So
+     for this count only — the scored four-ability frame keeps its layout — the tiles go
+     icon-only on the 3 + 2 grid (the caption names the pressed one at every viewport now),
+     the panel title goes (the stat cells and the tiles describe themselves), and the
+     caption may fall to one line before it scrolls behind its fade. */
+  .fa-home .home-kit[data-n="5"] {
+    grid-auto-flow: row;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+  .fa-home .home-kit[data-n="5"] .home-kit-tile { grid-column: span 2; padding: 4px 3px; gap: 0; }
+  .fa-home .home-kit[data-n="5"] .home-kit-tile:nth-child(n+4) { grid-column: span 3; }
+  .fa-home .home-kit[data-n="5"] .home-kit-name { display: none; }
+  .fa-home .home-fighter:has(.home-kit[data-n="5"]) > .fa-panel-title { display: none; }
+  .fa-home .home-kit[data-n="5"] + .home-kit-cap { min-height: 1.6em; }
 }
 
 /* ── Landscape phones ─────────────────────────────────────────────────────── */
@@ -2492,6 +2542,18 @@ const CSS = `
        close, and letting it span would make a three-ability fighter's last tile twice
        the width of the other two. */
     .fa-home .home-kit-tile:last-child:nth-child(odd) { grid-column: auto; }
+    /* ⚠️ BUT ONE ROW IS A FOUR-TILE ROW. 191 px is "4 tiles x 44px + 3 gaps x 5px" (the
+       note above), and Donut has FIVE abilities: 5 x 44 + 4 x 5 = 240 px in a ~200 px
+       flank, so the fifth tile was laid out past the panel's clipped edge — and pressing
+       it scrolled the whole overflow:hidden column sideways (focus scrolls a clipping
+       ancestor), throwing "Your fighter" 32 px out of its own panel. 'u1_clip' with Donut
+       selected at 852x393. Five go 3 + 2 on a six-track grid, both rows full. */
+    .fa-home .home-kit[data-n="5"] {
+      grid-auto-flow: row;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+    .fa-home .home-kit[data-n="5"] .home-kit-tile { grid-column: span 2; }
+    .fa-home .home-kit[data-n="5"] .home-kit-tile:nth-child(n+4) { grid-column: span 3; }
   }
   /* ⚠️ AND BELOW 191px THE STATS GO, NOT THE KIT — WHICH IS A REVERSAL, ON THIS FILE'S
      OWN STATED PRINCIPLE.
