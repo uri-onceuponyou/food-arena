@@ -88,8 +88,18 @@ export interface SeatRingStyle {
   enemy: number;
 }
 
+/**
+ * ⚠️ **WAS `spread: 1.5, fill: 0.42` — a ring that read as a SOLID DISC.** Round w2 of the blind
+ * critic (`docs/REVAMP.md` §8, 2026-10-15) scored this file's first version, and 6 of 24 notes
+ * named it unprompted: *"small, low-contrast blobs on oversized red and green discs"*,
+ * *"washed out against their bright filled discs"*, and one asked outright for *"thin rings (not
+ * solid discs)"*. 1.3 / 0.18 keeps the full-strength rim — the part that MARKS the seat — and
+ * drops the fill that was competing with a pale fighter; looked at on the canonical six-seat
+ * frame before committing. The cast's own palette (pastel → saturated mid-values) is the other
+ * half of "washed out", and it is not this file's.
+ */
 export const SEAT_RING_STYLE: Readonly<SeatRingStyle> = {
-  spread: 1.5, fill: 0.42, rim: 1, key: 0, local: SEAT_RING_LOCAL, enemy: SEAT_RING_ENEMY,
+  spread: 1.3, fill: 0.18, rim: 1, key: 0, local: SEAT_RING_LOCAL, enemy: SEAT_RING_ENEMY,
 };
 
 /** Texture radii, as a fraction of the outer radius. The rim is one band, kept whole. */
