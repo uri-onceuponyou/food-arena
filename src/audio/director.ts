@@ -73,8 +73,8 @@ import type { Fighter, GameEvent, MatchState, FighterId, FighterRole } from '../
 // `tools/audio-probe.mjs`, whose duck-typed states carry NO `fighters` array and whose
 // synthetic `hit-landed` events carry NO `targetId` and NO `attackerId`.
 import { fighterOf, fightersOf, LOCAL_SLOT, slotOf, weaponAttackerOf } from '../game/roster';
-import { proximityGain, SFX_FADE_WU, SFX_FULL_WU } from '../proximity';
-import { Priority, type AudioEngine } from './engine';
+import { proximityGain, SFX_FADE_WU, SFX_FULL_WU, SFX_INAUDIBLE_GAIN } from '../proximity';
+import { Priority, type AudioEngine, type PlayOptions } from './engine';
 import * as S from './sounds';
 import type { SoundFn, SynthCtx } from './synth';
 import { getWeaponSfx } from './weapons';
@@ -699,16 +699,41 @@ export class MatchAudio {
       case 'heal': {
         // See `HEAL_MIN_INTERVAL_MS`. A regen tick is throttled; a deliberate heal
         // (Hamburger's 25 HP Onion Ring) always plays.
+        //
+        // 🚨 PLACED FIRST, AND AN INAUDIBLE TICK NEITHER PLAYS NOR SPENDS THE THROTTLE (B6).
+        // This used to stamp `lastHealSoundAt` before asking where the heal was, and the
+        // throttle is ONE value for every seat — so at six seats a far fighter's silent regen
+        // (gain 0.000 at 1,500 wu) took the slot and the LOCAL player's own regen, 200 ms
+        // later, was suppressed: the review measured 351 audible regen ticks voiced against
+        // 354 suppressed by an inaudible one. Old order, kept because the rule it states is
+        // still the rule:
+        //
+        //   > `if (ev.amount <= REGEN_AMOUNT && state.elapsed - this.lastHealSoundAt < HEAL_MIN_INTERVAL_MS) break;`
+        //   > `this.lastHealSoundAt = state.elapsed;`
+        //   > `… this.engine.play(S.heal(), { ...this.place(f.x, f.y, state), key: 'heal' });`
+        //
+        // ⚠️ Still ONE throttle, not one per seat, deliberately: a per-seat throttle breaks
+        // the "consecutive voices never overlap" property above (a verifier measured 389 of
+        // 998 audible heal voices overlapping under it, against 7 here). That is a mix choice
+        // for the audio owner, not part of this defect.
+        const f = fighterOf(state, ev.fighterId, ev.fighterRole);
+        const at = this.place(f.x, f.y, state);
+        if (at.gain < SFX_INAUDIBLE_GAIN) break;
         if (ev.amount <= REGEN_AMOUNT && state.elapsed - this.lastHealSoundAt < HEAL_MIN_INTERVAL_MS) break;
         this.lastHealSoundAt = state.elapsed;
-        const f = fighterOf(state, ev.fighterId, ev.fighterRole);
-        this.engine.play(S.heal(), { ...this.place(f.x, f.y, state), key: 'heal' });
+        this.engine.play(S.heal(), { ...at, key: 'heal' });
         break;
       }
 
       case 'death': {
         const f = fighterOf(state, ev.fighterId, ev.fighterRole);
         const at = this.place(f.x, f.y, state);
+        // 🚨 THE CULL APPLIES TO EVERYBODY ELSE'S DEATH (B6): a far third-party death was a
+        // `Priority.Critical` voice at gain 0.000 — never evicted, never heard, holding one
+        // of the 20 slots for its whole length. YOUR death is `gain 1` below and is never
+        // culled, which is the identity rule this case already states.
+        const mine = slotOf(ev.fighterId, ev.fighterRole) === this.localSlot;
+        if (!mine && at.gain < SFX_INAUDIBLE_GAIN) break;
         this.engine.play(S.death(), {
           ...at,
           priority: Priority.Critical,
@@ -750,7 +775,7 @@ export class MatchAudio {
         // 'hit-target' is already voiced by the `hit-landed` that accompanies it, and
         // 'expired' is a projectile fading out at max range — neither wants a thud.
         if (ev.reason === 'hit-cover') {
-          this.engine.play(S.coverThud(), {
+          this.playPlaced(S.coverThud(), {
             ...this.place(ev.x, ev.y, state),
             priority: Priority.Ambient,
             key: 'cover',
@@ -779,7 +804,7 @@ export class MatchAudio {
       ? this.wrapWeaponHook(bespoke, weapon, fighter.characterId, weapon.damage)
       : genericCast(weapon);
 
-    this.engine.play(sound, {
+    this.playPlaced(sound, {
       ...this.place(fighter.x, fighter.y, state),
       key: `cast:${fighter.characterId}.${weaponKey}`,
     });
@@ -809,11 +834,11 @@ export class MatchAudio {
       return;
     }
     if (ev.source.kind === 'hazard') {
-      this.engine.play(S.hazardTick(), { ...place, priority: Priority.Ambient, key: 'hazard' });
+      this.playPlaced(S.hazardTick(), { ...place, priority: Priority.Ambient, key: 'hazard' });
       return;
     }
     if (ev.source.kind === 'trail') {
-      this.engine.play(S.trailTick(), { ...place, priority: Priority.Ambient, key: 'trail' });
+      this.playPlaced(S.trailTick(), { ...place, priority: Priority.Ambient, key: 'trail' });
       return;
     }
 
@@ -832,7 +857,7 @@ export class MatchAudio {
         ? this.wrapWeaponHook(bespoke, weapon, attacker.characterId, ev.amount)
         : S.impact(ev.amount);
 
-    this.engine.play(sound, {
+    this.playPlaced(sound, {
       ...place,
       key: `impact:${attacker.characterId}.${weaponKey}`,
     });
@@ -868,7 +893,7 @@ export class MatchAudio {
     // is the whole difference between "my stun bounced" and "I shrugged that off",
     // carried by the pan the hit already had, with no second sound to author.
     if (shrugged) {
-      this.engine.play(S.statusRefused(), { ...place, key: 'shrug', priority: Priority.Normal });
+      this.playPlaced(S.statusRefused(), { ...place, key: 'shrug', priority: Priority.Normal });
     }
   }
 
@@ -886,6 +911,32 @@ export class MatchAudio {
     damage: number,
   ): SoundFn {
     return (s: SynthCtx) => hook({ ...s, color: weapon.color, damage, weapon, characterId });
+  }
+
+  /**
+   * 🚨 A VOICE WITH A PLACE IN THE WORLD — OR NONE AT ALL, WHEN IT IS TOO FAR TO HEAR (B6).
+   *
+   * `proximity.ts:SFX_INAUDIBLE_GAIN` is documented as *"below this gain a voice is not
+   * scheduled at all … a voice at 0.004 that nobody can hear still costs a slot that a nearby
+   * hit wants"* — and no file in `src/` read it: `place()`'s gain went straight to
+   * `engine.play`, which admits any gain. Measured by the review on the REAL director over
+   * 30 six-seat matches: **4,124 of 9,466 voices (43.6%) were scheduled below the cull**
+   * (impact 1,900, cast 1,532, heal 326, cover 219, …), and 12 audible keyed voices were
+   * ducked or dropped by inaudible same-key ones. Two seats: 0 on every row — at two seats
+   * everything is near you, the same vacuity the shake and the hit-stop had.
+   *
+   * The cull is HERE rather than in `engine.ts` so the engine stays free of the proximity
+   * curve (it already does not import it), and it runs BEFORE `engine.play`, so a silent
+   * voice never touches the per-key retrigger table or the 20-voice budget.
+   *
+   * ⚠️ PLACED VOICES ONLY. The unplaced cues — countdown, match flow, the ring floor, fog,
+   * the giant slam, the local `hurt` layer, the ambience bed — are not at a distance and are
+   * never culled. `heal` and `death` apply the same test inline, because each has one more
+   * rule to state beside it (the throttle; your own death).
+   */
+  private playPlaced(sound: SoundFn, opts: PlayOptions & { gain: number }): void {
+    if (opts.gain < SFX_INAUDIBLE_GAIN) return;
+    this.engine.play(sound, opts);
   }
 
   /** Pan + distance gain for a world-unit position, relative to the listener. */
