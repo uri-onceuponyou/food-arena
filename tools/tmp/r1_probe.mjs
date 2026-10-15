@@ -106,16 +106,22 @@ const PAGE_PASSES = async (cfg) => {
   const hasLook = !!st.look;
   const look0 = hasLook ? { ...st.look } : null;
   const L = st.lighting;
-  // Zero shadow intensity AFTER the look has set it (applyLook runs inside render()).
+  // Zero shadow intensity AFTER the look has set it (applyLook runs inside render()), and put
+  // back exactly what the look had set once the frame is taken. Restoring explicitly matters
+  // since 4512aed+1: the look writes the lights only when it CHANGES, so a zero left behind
+  // would leak into the next variant whenever two variants share the same light settings.
   let forceNoShadow = false;
+  let lookShadowI = null;
   const origApply = L.applyLook ? L.applyLook.bind(L) : null;
-  if (origApply) L.applyLook = (l) => { origApply(l); if (forceNoShadow) L.key.shadow.intensity = 0; };
+  if (origApply) L.applyLook = (l) => { origApply(l); if (forceNoShadow) { lookShadowI = L.key.shadow.intensity; L.key.shadow.intensity = 0; } };
   const keyI0 = L.key.shadow.intensity;
   const render = () => {
     renderer.shadowMap.needsUpdate = true;
     if (!origApply) L.key.shadow.intensity = forceNoShadow ? 0 : keyI0;
     st.render(0);
-    return snap();
+    const img = snap();
+    if (origApply && forceNoShadow && lookShadowI !== null) { L.key.shadow.intensity = lookShadowI; lookShadowI = null; }
+    return img;
   };
   const ink0 = st.contour ? st.contour.color.clone() : null;
   const width0 = st.contour ? st.contour.width : null;
@@ -209,6 +215,24 @@ const PAGE_PASSES = async (cfg) => {
   setVariant(refV);
   const R = render();
   out.controls.RESTORE = diffN(A0, R);
+  // EXTERNAL OVERRIDE: what every pre-R1 probe does — mutate a light page-side, call
+  // stage.render(), read the frame. If the look re-writes the light inside render(), the
+  // mutation is silently undone and the frame does not move: gx_gap_cap's no-shadow pass
+  // (`shadow.intensity = 0` on every caster) would then hand gx_gap_roles an EMPTY shadow
+  // mask. Both must MOVE the frame. (Bypasses this probe's own applyLook wrapper.)
+  {
+    const wrapped = L.applyLook; if (origApply) L.applyLook = origApply;
+    const sI = L.key.shadow.intensity; L.key.shadow.intensity = 0;
+    renderer.shadowMap.needsUpdate = true; st.render(0);
+    out.controls.EXTERNAL_shadow0_px = diffN(A0, snap());
+    L.key.shadow.intensity = sI;
+    const fI = L.front.intensity; L.front.intensity = 0;
+    renderer.shadowMap.needsUpdate = true; st.render(0);
+    out.controls.EXTERNAL_front0_px = diffN(A0, snap());
+    L.front.intensity = fI;
+    if (origApply) L.applyLook = wrapped;
+    out.controls.EXTERNAL_restore = diffN(A0, render());
+  }
 
   // ── census of the top-level children + the reference variant's role passes ──
   const tops = scene.children.map((o, i) => {
@@ -388,7 +412,7 @@ async function shootScene(browser, sid) {
   writeFileSync(join(OUT, `${tag}.json`), JSON.stringify(meta, null, 1));
   const c = res.controls;
   const vs = Object.entries(res.variants).map(([k, r]) => `${k}: draws ${r.drawsShadow.calls}/${r.drawsCached.calls} vsRef ${r.vsRef}px null2 ${r.NULLsecond}`).join(' | ');
-  console.log(`   [${sid}] NULL ${c.NULL} RESTORE ${c.RESTORE}/${c.RESTORE_after_roles ?? '-'} MOVES ${c.MOVES_r1_vs_legacy ?? '-'} FIGHTER_ABL ${c.FIGHTER_ABL_px ?? '-'} hulls ${res.hulls.visibleToCamera}/${res.hulls.total} roles ${JSON.stringify(res.roles ?? null)} ${res.error ?? ''} ${res.normalError ?? ''}`);
+  console.log(`   [${sid}] NULL ${c.NULL} RESTORE ${c.RESTORE}/${c.RESTORE_after_roles ?? '-'} MOVES ${c.MOVES_r1_vs_legacy ?? "-"} EXT shadow0 ${c.EXTERNAL_shadow0_px} front0 ${c.EXTERNAL_front0_px} extRestore ${c.EXTERNAL_restore} FIGHTER_ABL ${c.FIGHTER_ABL_px ?? '-'} hulls ${res.hulls.visibleToCamera}/${res.hulls.total} roles ${JSON.stringify(res.roles ?? null)} ${res.error ?? ''} ${res.normalError ?? ''}`);
   console.log(`   [${sid}] ${vs}`);
   await context.close();
   return { sid, controls: c, errors: errors.length };

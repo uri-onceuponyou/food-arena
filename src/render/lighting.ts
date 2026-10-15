@@ -698,11 +698,34 @@ export function createLighting(opts?: {
   // zero tint — the identity `roles.ts` is built around. The compensation is computed from
   // the LIVE light, not the constant, so a probe that drives `front.color` or the world's
   // share page-side still leaves the cast where it was.
+  //
+  // 🚨 THE LIGHTS ARE WRITTEN ONLY WHEN THE LOOK CHANGES, NEVER EVERY FRAME. The first
+  // version set `front.intensity` and `key.shadow.intensity` on every render, and every
+  // instrument written before this split works by mutating a light page-side and calling
+  // `stage.render()` — `gx_gap_cap`'s no-shadow pass sets `shadow.intensity = 0` on each
+  // caster, the review's lever probes zero `front`. Those mutations were silently undone
+  // inside the render, so the "ablated" frame came back identical (0 px moved, measured by
+  // `tools/tmp/r1_probe.mjs`'s EXTERNAL control on 4512aed), which would have handed
+  // `gx_gap_roles` an EMPTY shadow mask and read as "no cast shadow anywhere". Now a light
+  // a probe has moved stays moved until the look itself changes.
+  //
+  // So in a world framing `front` IS the world's share, and characters are PINNED to
+  // `FRONT_FILL_CHARACTER`: their compensation is computed from the LIVE intensity. A probe
+  // that zeroes `front` in a match removes the world's fill and leaves the cast lit; to
+  // move the cast's own fill, use a portrait framing (no split) or `front.color`.
+  let appliedLights = '';
   const applyLook = (look: LightingLook): void => {
     const { split, shadow } = look;
-    front.intensity = split ? (look.frontWorld ?? FRONT_FILL_WORLD) : FRONT_FILL_CHARACTER;
-    key.shadow.intensity = shadow ? (look.shadowIntensity ?? WORLD_SHADOW_INTENSITY) : 1;
-    LOOK.charFillColor.value.copy(front.color).multiplyScalar(FRONT_FILL_CHARACTER - front.intensity);
+    const frontI = split ? (look.frontWorld ?? FRONT_FILL_WORLD) : FRONT_FILL_CHARACTER;
+    const shadowI = shadow ? (look.shadowIntensity ?? WORLD_SHADOW_INTENSITY) : 1;
+    const sig = `${frontI}|${shadowI}`;
+    if (sig !== appliedLights) {
+      front.intensity = frontI;
+      key.shadow.intensity = shadowI;
+      appliedLights = sig;
+    }
+    LOOK.charFillColor.value.copy(front.color)
+      .multiplyScalar(split ? FRONT_FILL_CHARACTER - front.intensity : 0);
     LOOK.charFillDir.value.copy(front.position).sub(front.target.position).normalize();
     LOOK.envShadeTint.value.copy(WORLD_SHADE_TINT).multiplyScalar(shadow ? (look.shadeTint ?? 1) : 0);
   };
