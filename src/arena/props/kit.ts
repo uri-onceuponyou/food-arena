@@ -495,7 +495,113 @@ export const KP = {
   leafA: srgb('#4CB97E'),
   leafB: srgb('#36A286'),
   terracotta: srgb('#A65C2E'),
+  /** A2b: the stove island's GLAZED TILE — the range top's own hue (#94C5FF, 210 deg) at a mid
+   * value and real saturation (HSV 0.60 / 0.84, luma 0.53 against the old top's 0.74), so the
+   * steel frame round it is the brighter thing and reads as the edge. (#67A2E6, luma 0.60, was
+   * tried first: the frame read barely a step above it.) */
+  tile: srgb('#5692D6'),
+  /** A2b: kitchen china and cloth — plates, the towel over a front edge. Below white on
+   * purpose: `arena-scan` put a cream towel (#EEE8DC) in a hub station's top-2 salience cells
+   * and the player's rank fell — "actors own the top of the range" (REVAMP §5 A2) */
+  china: srgb('#D8D0C2'),
+  cloth: srgb('#3E8F9A'),
 } as const;
+
+// ─────────────────────────────────────────────────────────────────────────────────────
+// WORK SURFACES — A2b (graphics campaign wave 4): a MATERIAL on a top, not a flat slab
+// ─────────────────────────────────────────────────────────────────────────────────────
+//
+// Round w3's crop critics, on the stove island's range top, 5 of 8: *"the big flat pale-blue
+// counter ... no surface detail, edge highlights or material variation"*, *"reads as greybox"*
+// (`shots/rv/w3/scores.json`). The countertop was ONE chamfered slab of one colour, and on a
+// colour whose blue channel is already 1.0 the KIT_EDGE chamfer (`val(top, 1.14)`) clips, so
+// its lit edge was barely a step. These fields put a material on the top and leave the slab
+// under them showing as the frame: a STEEL slab, whose own lit chamfer is the edge highlight
+// the critics asked for.
+
+/** Deterministic 0..1 hash of a grid cell — no `Math.random`: two builds are identical. */
+function cellHash(i: number, j: number): number {
+  let h = (i * 374761393 + j * 668265263) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+/**
+ * GLAZED TILES on a top at `y`: ~`size` m squares over the rectangle `r` (piece space), each a
+ * FLAT quad 6 mm proud of the slab under it, so the slab shows between them
+ * as a `gap`-wide grout line. Two triangles a tile — a chamfered tile would cost ~13x that and
+ * the per-piece budget is 2.5k. Tiles whose centre falls inside `hole` (the hob, which stands on
+ * them) are not emitted. Each tile's VALUE is jittered by ±`jitter` and its normal tipped up to
+ * ~1.1 deg by the same hash, so the glaze catches the key light tile by tile: a material, not a
+ * print. Returns the tile count.
+ */
+export function tileField(kg: KitGeo, r: { x0: number; x1: number; z0: number; z1: number }, y: number, size: number,
+  gap: number, tile: SRGB, finish: Finish, hole?: { w: number; d: number }, jitter = 0.05): number {
+  const w = r.x1 - r.x0, d = r.z1 - r.z0;
+  const nx = Math.max(1, Math.round(w / size)), nz = Math.max(1, Math.round(d / size));
+  const px = w / nx, pz = d / nz, hx = (px - gap) / 2, hz = (pz - gap) / 2, yy = y + 0.006;
+  const P: number[] = [], N: number[] = [], K: number[] = [];
+  let n = 0;
+  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+    const cx = r.x0 + px * (i + 0.5), cz = r.z0 + pz * (j + 0.5);
+    if (hole && Math.abs(cx) < hole.w / 2 && Math.abs(cz) < hole.d / 2) continue;
+    const h1 = cellHash(i, j), h2 = cellHash(j + 17, i + 5);
+    const c = val(tile, 1 + jitter * (h1 * 2 - 1));
+    const tx = (h2 - 0.5) * 0.04, tz = (h1 - 0.5) * 0.04, nl = Math.hypot(tx, 1, tz);
+    quadOriented(P, N, [cx - hx, yy, cz - hz], [cx - hx, yy, cz + hz], [cx + hx, yy, cz + hz], [cx + hx, yy, cz - hz],
+      [tx / nl, 1 / nl, tz / nl]);
+    for (let k = 0; k < 6; k++) K.push(c[0], c[1], c[2]);
+    n++;
+  }
+  if (n) {
+    const g = geoFrom(P, N);
+    g.setAttribute('kitColor', new THREE.Float32BufferAttribute(K, 3));
+    kg.add(g, {}, null, finish, -10, 0);
+  }
+  return n;
+}
+
+/**
+ * STAINLESS SHEETS on a top at `y`: the `w x d` rectangle split into `n` sheets along x with a
+ * `seam` between them (the slab under them shows as the seam), each sheet BRUSHED — its value
+ * ramps ±`sheen` across its width on its own four vertices, the ramp alternating sheet to sheet,
+ * which is how a run of steel panels catches one light. 2 triangles a sheet.
+ */
+export function steelSheets(kg: KitGeo, w: number, d: number, y: number, n: number, seam: number, steel: SRGB, sheen = 0.07): void {
+  const P: number[] = [], N: number[] = [], K: number[] = [];
+  const pw = w / n, yy = y + 0.006, up: V3 = [0, 1, 0];
+  for (let i = 0; i < n; i++) {
+    const xa = -w / 2 + pw * i + seam / 2, xb = -w / 2 + pw * (i + 1) - seam / 2;
+    const lo = val(steel, 1 - sheen), hi = val(steel, 1 + sheen);
+    const [ca, cb] = i % 2 ? [hi, lo] : [lo, hi];
+    const before = P.length;
+    quadOriented(P, N, [xa, yy, -d / 2], [xa, yy, d / 2], [xb, yy, d / 2], [xb, yy, -d / 2], up);
+    for (let v = before; v < P.length; v += 3) {
+      const c = P[v] < (xa + xb) / 2 ? ca : cb;
+      K.push(c[0], c[1], c[2]);
+    }
+  }
+  const g = geoFrom(P, N);
+  g.setAttribute('kitColor', new THREE.Float32BufferAttribute(K, 3));
+  kg.add(g, {}, null, 'gloss', -10, 0);
+}
+
+/** A folded TOWEL hung over a top's front edge at local `x`: a fold lying on the top and the
+ * fall down the front face (`frontZ` = the face's z), one cloth colour with a darker hem. */
+export function towel(kg: KitGeo, x: number, topY: number, frontZ: number, w: number, cloth: SRGB): void {
+  // T 18 mm and 2 mm off the face: the fall stays inside the CoverBox (the top is 0.99 of it)
+  const T = 0.018, lie = 0.32, fall = 0.42;
+  const cp = paint(cloth, val(cloth, 0.88), val(cloth, 1.05));
+  kg.add(chamferBox(w, T, lie, 0.008, { noVEdges: true }), { x, y: topY, z: frontZ - lie / 2 + 0.02 }, cp, 'matte', topY, 0.3);
+  kg.add(chamferBox(w, fall, T, 0.008, { noVEdges: true, skip: ['-z'] }), { x, y: topY - fall + 0.02, z: frontZ + T / 2 + 0.002 },
+    (p, nn) => (p.y < topY - fall * 0.72 ? val(cloth, 0.78) : cp(p, nn)), 'matte', 0, 0);
+}
+
+/** A stack of `n` PLATES standing on `y`. */
+export function plateStack(kg: KitGeo, x: number, y: number, z: number, r: number, n: number, china: SRGB, seg = 10): void {
+  const pp = paint(china, val(china, 0.9), val(china, 1.06));
+  for (let i = 0; i < n; i++) kg.add(chamferCyl(r * (1 - i * 0.015), 0.045, 0.02, seg), { x, y: y + i * 0.05, z }, pp, 'gloss', y, i ? 0.2 : 0.5);
+}
 
 /** The countertop's own bounds (0.99 of the footprint, minus its chamfer): a skirt's clip. */
 export const topClip = (wM: number, dM: number) => ({ x0: -wM * 0.495 + 0.06, x1: wM * 0.495 - 0.06, z0: -dM * 0.495 + 0.06, z1: dM * 0.495 - 0.06 });

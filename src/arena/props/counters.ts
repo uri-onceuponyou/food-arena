@@ -21,7 +21,7 @@ import { toonMat, roundedBox, cloneToon } from '../../render/toon';
 import { PALETTE } from '../../game/rules';
 import { CHARACTER_HEIGHT } from '../../units';
 import { puck, mesh, noOutline, addBacksplash, addTopRim, type Materials } from '../shared';
-import { KitGeo, KP, block, burner, chamferBox, chamferCyl, counterShell, flat, herbPot, paint, skirt, srgb, stockpot, topClip, val } from './kit';
+import { KitGeo, KP, block, burner, chamferBox, chamferCyl, counterShell, flat, herbPot, lump, paint, plateStack, skirt, srgb, steelSheets, stockpot, tileField, topClip, towel, val } from './kit';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COVER GRAMMAR
@@ -629,15 +629,25 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
   // side; every visible part still inside the CoverBox (countertop at 0.99, carcass at 0.95).
   const g = new THREE.Group();
   const kg = new KitGeo();
+  // ── A2b: THE TOP IS A MATERIAL NOW. Round w3's crop critics, 5 of 8, on exactly this piece:
+  // *"the big flat pale-blue counter ... no surface detail, edge highlights or material
+  // variation"*. The slab is STEEL (its lit chamfer is the edge highlight a pale top whose blue
+  // channel was already 1.0 could not carry); glazed tiles in the range top's own hue lie on it
+  // at a mid value, the steel showing as the frame and the grout; a towel over the front edge
+  // and (no pan rail) a stack of plates are the objects. Same footprint, same COUNTER_TOP_Y.
   const topY = counterShell(kg, wM, dM, {
-    topY: COUNTER_TOP_Y, topT: 0.16, top: KP.rangeTop, topFinish: 'gloss',
+    topY: COUNTER_TOP_Y, topT: 0.16, top: KP.steel, topFinish: 'gloss',
     plinthH: COVER_PLINTH_H, bodyFrac: COVER_BODY_FRAC, backsplashH: BACKSPLASH_H,
   });
   // the hob: a cast-iron plate in a steel frame, four burners, knobs on the front edge
   const hobW = wM * 0.56, hobD = dM * 0.6;
+  // tiles from the back wall's front face (counterShell: -0.38 dM) to the front, 0.18 m in from
+  // the slab's edge so a band of steel frames them; none under the hob frame
+  tileField(kg, { x0: -wM * 0.495 + 0.18, x1: wM * 0.495 - 0.18, z0: -dM * 0.38 + 0.04, z1: dM * 0.495 - 0.18 },
+    topY, 0.6, 0.05, KP.tile, 'gloss', { w: hobW + 0.18, d: hobD + 0.18 });
   kg.add(chamferBox(hobW + 0.18, 0.05, hobD + 0.18, 0.025), { y: topY }, paint(val(KP.steel, 0.96)), 'gloss', topY, 0.3);
   kg.add(chamferBox(hobW, 0.09, hobD, 0.03), { y: topY }, paint(KP.hob, val(KP.hob, 0.85), val(KP.hob, 1.45)), 'matte', topY, 0.3);
-  skirt(kg, { x: 0, z: 0 }, topY, (hobW + 0.18) / 2, (hobD + 0.18) / 2, 0.3, KP.rangeTop, 'gloss', 0.3, 0, topClip(wM, dM));
+  skirt(kg, { x: 0, z: 0 }, topY, (hobW + 0.18) / 2, (hobD + 0.18) / 2, 0.3, KP.steel, 'gloss', 0.3, 0, topClip(wM, dM));
   const hobTop = topY + 0.09;
   const bx = wM * 0.155, bz = dM * 0.155;
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) burner(kg, sx * bx, hobTop, sz * bz, 0.3);
@@ -649,8 +659,10 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
   stockpot(kg, -bx, hobTop + 0.05, -bz, 0.36, 0.62);
   kg.add(chamferCyl(0.3, 0.08, 0.03, 16), { x: bx, y: hobTop + 0.05, z: bz }, paint(val(KP.iron, 1.15), KP.iron, val(KP.iron, 1.7)), 'matte', hobTop, 0.4);
   kg.add(chamferBox(0.62, 0.05, 0.09, 0.02), { x: bx + 0.55, y: hobTop + 0.09, z: bz + 0.05, yaw: -0.15 }, paint(KP.iron), 'matte', 0, 0);
-  herbPot(kg, wM * 0.35, topY, dM * 0.26, 1.6);
-  skirt(kg, { x: wM * 0.35, z: dM * 0.26 }, topY, 0, 0, 0.12, KP.rangeTop, 'gloss', 0.35, 0.14, topClip(wM, dM));
+  // the herb pot stands on the tiles (its old contact skirt lay on the slab, under them now)
+  herbPot(kg, wM * 0.35, topY + 0.006, dM * 0.26, 1.6);
+  towel(kg, -wM * 0.33, topY + 0.006, dM * 0.495, 0.55, KP.cloth);
+  if (!opts?.panRack) plateStack(kg, wM * 0.36, topY + 0.006, -dM * 0.17, 0.27, 3, KP.china);
   if (opts?.panRack) {
     // a pot rail over the back half: two iron posts, a bar, three hanging pans
     const postH = 0.8, rz = -dM * 0.26;
@@ -718,10 +730,20 @@ export function buildServiceCounter(M: Materials, wM: number, dM: number, varian
   // oil and two baskets whose handles break the silhouette, the sink a basin and a faucet.
   const g = new THREE.Group();
   const kg = new KitGeo();
+  // ── A2b: a STAINLESS top — the same critique as the stove's (`buildStoveIsland`). A darker
+  // steel slab shows as the seams between three brushed sheets, and a rolled steel nosing
+  // along the front edge is the highlight; a dish rack (sink) or a stack of plates (fryer)
+  // stands beside the well.
   const topY = counterShell(kg, wM, dM, {
-    topY: COUNTER_TOP_Y, topT: 0.16, top: KP.serviceTop, topFinish: 'gloss',
+    topY: COUNTER_TOP_Y, topT: 0.16, top: val(KP.steel, 0.48), topFinish: 'gloss',
     plinthH: COVER_PLINTH_H, bodyFrac: COVER_BODY_FRAC, backsplashH: BACKSPLASH_H,
   });
+  // the sheets at a MID steel (0.66): at 0.94 the pass's top was the palest thing in the six-seat
+  // frame (top luma 0.795, OKLab C 0.063) — a new "flat pale block" where the critique began;
+  // at 0.78 `arena-scan`'s hub stations still ranked the player 6-13 places lower than base
+  steelSheets(kg, wM * 0.99 - 0.12, dM * 0.99 - 0.12, topY, 3, 0.05, val(KP.steel, 0.66));
+  kg.add(chamferCyl(0.05, wM * 0.99, 0.015, 8), { x: -wM * 0.495, y: topY - 0.045, z: dM * 0.495 - 0.045, rz: -Math.PI / 2 },
+    paint(val(KP.steel, 1.08)), 'gloss', 0, 0);
   const lipW = wM * 0.62, lipD = dM * 0.6;
   // a raised steel lip round the well (its inner faces read the depth)
   const lip = paint(val(KP.steel, 1.02), val(KP.steel, 0.86), val(KP.steel, 1.12));
@@ -730,7 +752,7 @@ export function buildServiceCounter(M: Materials, wM: number, dM: number, varian
     [lipW / 2 - LW / 2, 0, LW, lipD - LW * 2], [-lipW / 2 + LW / 2, 0, LW, lipD - LW * 2]] as const) {
     kg.add(chamferBox(w, LT, d, 0.03), { x, y: topY, z }, lip, 'gloss', topY, 0.3);
   }
-  skirt(kg, { x: 0, z: 0 }, topY, lipW / 2, lipD / 2, 0.25, KP.serviceTop, 'gloss', 0.28, 0, topClip(wM, dM));
+  skirt(kg, { x: 0, z: 0 }, topY + 0.006, lipW / 2, lipD / 2, 0.25, val(KP.steel, 0.66), 'gloss', 0.28, 0, topClip(wM, dM));
   const inW = lipW - LW * 2, inD = lipD - LW * 2;
   if (variant === 'fryer') {
     // the well: a deep amber oil surface just below the lip, two wire baskets half sunk in
@@ -755,6 +777,92 @@ export function buildServiceCounter(M: Materials, wM: number, dM: number, varian
     kg.add(chamferBox(0.07, 0.07, 0.4, 0.02), { x: 0, y: topY + LT + 0.42, z: fz + 0.17 }, paint(KP.steel), 'gloss', 0, 0);
     for (const sx of [-1, 1]) kg.add(chamferCyl(0.05, 0.08, 0.02, 8), { x: sx * 0.2, y: topY + LT, z: fz }, paint(KP.steel), 'gloss', topY + LT, 0.3);
   }
+  // A2b: the objects beside the well — washed plates standing in a rack (sink), a stack of
+  // plates waiting for the fryer's baskets (fryer). Both on the sheets, inside the footprint.
+  const ox = wM * 0.4, oy = topY + 0.006;
+  if (variant === 'sink') {
+    kg.add(chamferBox(0.62, 0.05, 0.46, 0.015), { x: ox, y: oy, z: 0.05 }, paint(val(KP.steel, 0.8)), 'gloss', oy, 0.4);
+    for (const dx of [-0.2, 0, 0.2]) {
+      kg.add(chamferCyl(0.22, 0.035, 0.012, 10), { x: ox + dx, y: oy + 0.05 + 0.22, z: 0.05, rz: Math.PI / 2 },
+        paint(KP.china, val(KP.china, 0.9), val(KP.china, 1.05)), 'gloss', 0, 0);
+    }
+  } else {
+    plateStack(kg, ox, oy, 0.05, 0.25, 3, KP.china);
+  }
   return kg.emit(g, M);
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────────────
+// A2b — THE HUB DISTRICT'S PIECES (graphics campaign wave 4, `docs/REVAMP.md` §5 A2)
+// ─────────────────────────────────────────────────────────────────────────────────────
+//
+// Round w3's arena critics, 16 of 16 notes on the two match frames: *"most of the frame is a
+// flat, empty pink floor"* — and both canonical frames are the hub, where rule 6 keeps the
+// r < 279 wu plaza clear and the 390 wu cardinal lanes beside it held nothing at all. The
+// density null (`fd76ef0`: more of the old boxes, +0.00) says the answer is composition, not
+// count: the district (`kitchen.ts`, `tools/tmp/a2b_district.mjs`) adds six pieces in three
+// mirror pairs, and these are the two builders it needed.
+
+/**
+ * THE PASS — the district's landmark: the service counter a kitchen hands its plates across,
+ * double-sided (no backsplash: both long faces are lane faces), stainless on top, under a
+ * heat-lamp gantry, three plated dishes waiting. It sits on the E-W axis between the hub's
+ * east (west) islands and splits that lane into two streets.
+ *
+ * The gantry is 1.25 m over the 2.415 m top, i.e. ~3.7 m, all of it inside the footprint: two
+ * posts at the ends and a bar, so at the 58 deg match camera it hides a thin line of floor, not
+ * a fighter.
+ */
+export function buildPassCounter(M: Materials, wM: number, dM: number): THREE.Group {
+  const g = new THREE.Group();
+  const kg = new KitGeo();
+  const topY = counterShell(kg, wM, dM, {
+    topY: COUNTER_TOP_Y, topT: 0.16, top: val(KP.steel, 0.48), topFinish: 'gloss',
+    plinthH: COVER_PLINTH_H, bodyFrac: COVER_BODY_FRAC, backsplashH: 0,
+  });
+  steelSheets(kg, wM * 0.99 - 0.12, dM * 0.99 - 0.12, topY, 4, 0.05, val(KP.steel, 0.66));
+  // rolled steel nosings on BOTH long edges: both are lane faces, both carry the highlight
+  for (const sz of [-1, 1]) {
+    kg.add(chamferCyl(0.05, wM * 0.99, 0.015, 8), { x: -wM * 0.495, y: topY - 0.045, z: sz * (dM * 0.495 - 0.045), rz: -Math.PI / 2 },
+      paint(val(KP.steel, 1.08)), 'gloss', 0, 0);
+  }
+  const y0 = topY + 0.006;
+  const steelP = paint(KP.steel, val(KP.steel, 0.86), val(KP.steel, 1.12));
+  const ironP = paint(KP.iron, val(KP.iron, 0.9), val(KP.iron, 1.5));
+  // the gantry: two posts, a bar, four lamp hoods each with a warm bulb under it
+  const postH = 1.25, px = wM * 0.5 - 0.35;
+  for (const sx of [-1, 1]) block(kg, sx * px, y0, 0, 0.12, postH, 0.12, 0.03, steelP, 'gloss', { bands: [], aoK: 0.5 });
+  kg.add(chamferBox(px * 2 + 0.12, 0.1, 0.16, 0.03), { x: 0, y: y0 + postH - 0.1, z: 0 }, steelP, 'gloss', 0, 0);
+  const LAMPS = 4;
+  for (let i = 0; i < LAMPS; i++) {
+    const lx = -px + (2 * px * (i + 0.5)) / LAMPS;
+    kg.add(chamferCyl(0.3, 0.24, 0.02, 10, { rTop: 0.12 }), { x: lx, y: y0 + postH - 0.36, z: 0 }, ironP, 'gloss', 0, 0);
+    kg.add(chamferCyl(0.1, 0.1, 0.03, 8), { x: lx, y: y0 + postH - 0.44, z: 0 }, flat(srgb('#FFE6B0')), 'gloss', 0, 0);
+  }
+  // three plated dishes under the lamps (food spent DARK: `shared.ts`'s warm-chroma rule)
+  const food = [srgb('#9A5A2E'), srgb('#6E8F3A'), srgb('#A0472E')];
+  for (let i = 0; i < 3; i++) {
+    const fx = -px * 0.66 + px * 0.66 * i, fz = (i % 2 ? 0.18 : -0.18);
+    kg.add(chamferCyl(0.3, 0.04, 0.015, 12), { x: fx, y: y0, z: fz }, paint(KP.china, val(KP.china, 0.9), val(KP.china, 1.05)), 'gloss', y0, 0.4);
+    kg.add(lump(0.17, 0.11, 0.15, 8, 5, 0.3), { x: fx, y: y0 + 0.04, z: fz, yaw: i }, (_p, n) => (n.y > 0.5 ? val(food[i], 1.12) : food[i]), 'matte', y0, 0.4);
+  }
+  return kg.emit(g, M);
+}
+
+/**
+ * A COUNTER RUN — the district's wall piece: a prep counter (butcher block, knife block, a
+ * cutting board) of ANY proportion. A footprint deeper than it is wide is built along its long
+ * axis and turned 90 deg INSIDE this group, so `addCover`'s contact ring and AO ramp (which
+ * take the footprint unrotated) still match the CoverBox; `yawDeg: 90` on the call site would
+ * not — `addCover` would turn the ring with the mesh.
+ */
+export function buildCounterRun(M: Materials, wM: number, dM: number): THREE.Group {
+  if (dM <= wM) return buildPrepCounter(M, wM, dM, { knifeBlock: true });
+  const g = new THREE.Group();
+  const inner = buildPrepCounter(M, dM, wM, { knifeBlock: true });
+  // +90 deg about y: local -Z (the back wall) -> world -X, local +Z (the lane face) -> world +X
+  inner.rotation.y = Math.PI / 2;
+  g.add(inner);
+  return g;
+}
