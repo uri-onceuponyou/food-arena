@@ -168,38 +168,146 @@ function defaults(): ProfileData {
   };
 }
 
-function load(): ProfileData {
+/**
+ * The stored blob: the string, `null` when there is none, `undefined` when storage cannot be
+ * READ at all (private-mode Safari throws on access; under Node there is no `localStorage`).
+ * Three answers, not two, because `PlayerProfile.refresh` must tell "nobody has written" from
+ * "I cannot look" — the second must never be mistaken for a reset.
+ */
+function readRaw(): string | null | undefined {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaults();
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-    const economy = deserializeEconomy(parsed.economy);
-    // Blobs written before the economy existed carried `coins` and `gems` at the top
-    // level. Anyone who has already played this build has one, and silently resetting
-    // their balance is trivially avoidable now and impossible to apologise for later.
-    if (parsed.economy === undefined) adoptLegacyBalance(economy, parsed);
-
-    return {
-      name: sanitizeName(parsed.name),
-      wins: Math.floor(num(parsed.wins, 0)),
-      losses: Math.floor(num(parsed.losses, 0)),
-      xp: Math.floor(num(parsed.xp, 0)),
-      selected: isCharacterId(parsed.selected) ? parsed.selected : CHARACTER_IDS[0],
-      economy,
-    };
+    return localStorage.getItem(STORAGE_KEY);
   } catch {
-    // Private-mode Safari throws on localStorage access. A menu must still boot.
+    return undefined;
+  }
+}
+
+/** A stored blob as profile data. THROWS on a blob that is not JSON — callers choose. */
+function parse(raw: string): ProfileData {
+  const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+  const economy = deserializeEconomy(parsed.economy);
+  // Blobs written before the economy existed carried `coins` and `gems` at the top
+  // level. Anyone who has already played this build has one, and silently resetting
+  // their balance is trivially avoidable now and impossible to apologise for later.
+  if (parsed.economy === undefined) adoptLegacyBalance(economy, parsed);
+
+  return {
+    name: sanitizeName(parsed.name),
+    wins: Math.floor(num(parsed.wins, 0)),
+    losses: Math.floor(num(parsed.losses, 0)),
+    xp: Math.floor(num(parsed.xp, 0)),
+    selected: isCharacterId(parsed.selected) ? parsed.selected : CHARACTER_IDS[0],
+    economy,
+  };
+}
+
+/** What the boot path reads. Never throws: a menu must still boot on any blob, or none. */
+function load(raw: string | null | undefined): ProfileData {
+  if (!raw) return defaults();
+  try {
+    return parse(raw);
+  } catch {
     return defaults();
   }
 }
 
+/**
+ * ── 🚨 TWO TABS USED TO ERASE EACH OTHER (META-08) ────────────────────────────
+ *
+ * This class read storage ONCE, in the constructor, and every `commit()` wrote its WHOLE
+ * in-memory snapshot back. So a second open tab of the game was a second snapshot, and the
+ * first write from whichever tab had loaded EARLIER silently reset storage to that tab's
+ * boot-time state plus its own change. Measured on `f65af2c` (`tools/tmp/b6_screens.mjs`
+ * §M8, two real tabs, the shipped UI): tab A claims the 30-trophy chest, tab B — open on
+ * Settings since before the claim — takes ONE keystroke in the name field, and storage reads
+ * `{ name: "TabB", claimed: [], chests: 0 }`. The claim is gone, A still shows it, and
+ * nothing says so. The same shape erased six-seat wins, level purchases, and resurrected
+ * progress wiped by Settings' "Reset progress" (`tools/tmp/b6_profile.mjs` N1–N10).
+ *
+ * ── The fix: every mutation starts from what storage holds NOW ──────────────────
+ * `refresh()` runs first in every mutator. Neither tab "wins": each change is applied to the
+ * freshest stored state, so changes from two tabs COMPOSE (A's claim and B's rename both
+ * survive, in either order), and two writes to the same field are last-ACTION-wins rather
+ * than last-SNAPSHOT-wins. A `storage` listener does the same for the tab that is NOT writing,
+ * so it stops displaying a claim or a chest that storage no longer holds.
+ *
+ * ⚠️ **THE TWO OBVIOUS VERSIONS ARE BOTH WRONG, and the guard rules below are why:**
+ *   * `this.data = load()` at the top of each mutator throws away constructor-injected data
+ *     (`nw_profile.mjs`'s 2,000-match oracle diverged at match 0 on it) and makes a
+ *     private-mode session — reads `null`, writes throw — FORGET ITS OWN MATCHES, because
+ *     every refresh would "adopt" the absent blob as defaults;
+ *   * re-reading and MERGING inside `commit()` turns a lost update into a DUPLICATION: a
+ *     chest claimed in one tab and opened in the other opens twice (the META-08 intent
+ *     verifier's F5). There is no merge here — the stored state is ADOPTED, then changed.
+ * So `refresh()` adopts storage only when it can be read and only when it differs from what
+ * THIS instance last read or wrote (so injected data and an unwritable private-mode storage
+ * are both left alone), keeps memory over an unparseable blob (the next commit repairs it),
+ * and takes a blob that has VANISHED as a reset.
+ *
+ * ⚠️ Residual, stated rather than hidden: the re-read and the write are two calls, so two
+ * tabs mutating inside the same few milliseconds can still lose one change. Closing that
+ * needs a lock (`navigator.locks`) around every mutator, which is async and would change
+ * every caller; a human acting in two tabs is seconds apart, not milliseconds.
+ */
 export class PlayerProfile {
   private data: ProfileData;
   private readonly listeners = new Set<() => void>();
+  /**
+   * The exact blob this instance last read or wrote — `null` when there was none. Storage
+   * that still equals it means nobody ELSE has written, which is the whole test `refresh`
+   * runs; it is also what keeps a private-mode session (reads `null`, writes throw) from
+   * mistaking its own unwritable storage for a reset: `null === null`, so nothing is adopted.
+   */
+  private seen: string | null;
 
   constructor(data?: Partial<ProfileData>) {
-    this.data = data ? { ...load(), ...data } : load();
+    const raw = readRaw();
+    this.seen = raw ?? null;
+    const loaded = load(raw);
+    this.data = data ? { ...loaded, ...data } : loaded;
+    // The OTHER tab's writes. Guarded: `nw_profile.mjs --selftest` builds this class under
+    // Node, where an unguarded `window` is a ReferenceError (measured by the META-08 intent
+    // verifier: the gate crashed). One profile per page (`main.ts`), so it is never removed.
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('storage', (ev: StorageEvent) => {
+        // `key === null` is `localStorage.clear()` — the same news as our key being removed.
+        if (ev.key !== null && ev.key !== STORAGE_KEY) return;
+        if (this.refresh()) this.notify();
+      });
+    }
+  }
+
+  /**
+   * Adopt what storage holds now, if somebody else changed it. Returns whether `data` moved.
+   * See the class header for why each early return is there; every one is a measured case.
+   */
+  private refresh(): boolean {
+    const raw = readRaw();
+    if (raw === undefined) return false; // cannot read: memory is the only copy there is
+    if (raw === this.seen) return false; // nobody has written since this instance did
+    if (!raw) {
+      // The blob this instance read or wrote is GONE: Settings' "Reset progress" in another
+      // tab, or site data cleared. That is a reset, and adopting it is what stops a stale tab
+      // resurrecting wiped progress with its next keystroke. (Never reached in private mode:
+      // there `seen` is `null` too and the line above has already returned.)
+      this.data = defaults();
+    } else {
+      try {
+        this.data = parse(raw);
+      } catch {
+        return false; // unparseable: keep memory, and the next commit writes a valid blob over it
+      }
+    }
+    this.seen = raw;
+    return true;
+  }
+
+  /** First line of every mutator: start from the freshest stored state, and re-render the
+   *  screens if it moved under them. Render-only subscribers, so a second notify from the
+   *  commit that follows is a repaint, never a second effect. */
+  private sync(): void {
+    if (this.refresh()) this.notify();
   }
 
   get name(): string { return this.data.name; }
@@ -242,6 +350,7 @@ export class PlayerProfile {
   // ── Mutations ─────────────────────────────────────────────────────────────
 
   select(id: CharacterId): void {
+    this.sync();
     if (this.data.selected === id) return;
     this.data.selected = id;
     this.commit();
@@ -257,6 +366,7 @@ export class PlayerProfile {
    * `localStorage` once per repeat or notify every listener for nothing.
    */
   setName(raw: string): string {
+    this.sync();
     const next = sanitizeName(raw);
     if (next === this.data.name) return next;
     this.data.name = next;
@@ -311,6 +421,7 @@ export class PlayerProfile {
    * among more than two finishers.
    */
   recordPlacement(place: number, seats: number): LastMatch {
+    this.sync();
     const paid = applyMatchPlacement(this.data.economy, place, seats);
     if (paid.won) this.data.wins++;
     else this.data.losses++;
@@ -345,6 +456,7 @@ export class PlayerProfile {
 
   /** Mark the last match's payout as already celebrated, so it shows once. */
   markLastMatchSeen(): void {
+    this.sync();
     const last = this.data.economy.lastMatch;
     if (!last || last.seen) return;
     last.seen = true;
@@ -353,6 +465,7 @@ export class PlayerProfile {
 
   /** Claim one trophy-road milestone by threshold. Null if it is not claimable. */
   claimMilestone(threshold: number): Reward | null {
+    this.sync();
     const reward = claimMilestone(this.data.economy, threshold);
     if (reward) this.commit();
     return reward;
@@ -360,6 +473,7 @@ export class PlayerProfile {
 
   /** Claim everything currently available, as one merged reward. */
   claimAllMilestones(): Reward {
+    this.sync();
     const reward = claimAll(this.data.economy);
     this.commit();
     return reward;
@@ -367,6 +481,7 @@ export class PlayerProfile {
 
   /** Open one held container. Null if the player holds none of that kind. */
   openContainer(kind: ContainerKind): ContainerResult | null {
+    this.sync();
     const result = openContainer(this.data.economy, kind);
     if (result) this.commit();
     return result;
@@ -374,6 +489,7 @@ export class PlayerProfile {
 
   /** Buy a box with EARNED currency. Never a real-money path — see `economy/store.ts`. */
   buyContainer(kind: ContainerKind, currency: 'coins' | 'gems'): boolean {
+    this.sync();
     const ok = buyContainer(this.data.economy, kind, currency);
     if (ok) this.commit();
     return ok;
@@ -410,6 +526,7 @@ export class PlayerProfile {
    * point at which a reload could observe a charged player without their level.
    */
   levelUp(id: CharacterId): { level: number; spent: LevelPrice } | null {
+    this.sync();
     const got = levelUp(this.data.economy, id);
     if (got) this.commit();
     return got;
@@ -423,17 +540,25 @@ export class PlayerProfile {
 
   private commit(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      const raw = JSON.stringify({
         name: this.data.name,
         wins: this.data.wins,
         losses: this.data.losses,
         xp: this.data.xp,
         selected: this.data.selected,
         economy: serializeEconomy(this.data.economy),
-      }));
+      });
+      localStorage.setItem(STORAGE_KEY, raw);
+      // Only once the write LANDED: a refused write (quota, private mode) leaves storage on
+      // the old blob, and `refresh` must keep reading that as "nobody else wrote".
+      this.seen = raw;
     } catch {
       // Non-fatal: the session still works, it just won't survive a reload.
     }
+    this.notify();
+  }
+
+  private notify(): void {
     for (const fn of this.listeners) fn();
   }
 }
