@@ -40,7 +40,7 @@ import {
 } from './rules.ts';
 import type { DamageSource, Fighter, GameEvent, MatchState, Medikit, Vec2 } from './state.ts';
 import {
-  actionsLocked, hasItem, isLivingOpponentOf, lastFighterStanding, livingFighterCount,
+  actionsLocked, aimedLivingOpponent, hasItem, isLivingOpponentOf, lastFighterStanding, livingFighterCount,
   nearestLivingOpponent, NO_FIGHTER, weaponsLocked,
 } from './state.ts';
 import { boxesOverlap, breakConcealment, displaceFighter, placeFighterAt } from './movement.ts';
@@ -1558,9 +1558,24 @@ function deliverWeapon(
   const origin: Vec2 = { x: attacker.x, y: attacker.y };
   const facing = attacker.facing;
 
+  // ── 🚨 A HUMAN'S SHOT IS FRAMED ON WHAT THEY AIMED AT (BH-04) ─────────────────
+  //
+  // Every projectile below used to be stamped with `target` — `nearestLivingOpponent` —
+  // and `sim.ts:stepProjectiles` steers homing shots at, and denominates the range budget
+  // in, that one fighter. For a BOT that is the aim (`ai.ts` faces the same nearest
+  // opponent on the same tick). For a HUMAN the aim is the input, and from three seats the
+  // nearest is often someone else: a homing shot curved into a bystander, and a straight
+  // shot was budgeted against a fighter running alongside it and reached past its range.
+  // `state.ts:aimedLivingOpponent` is the rule; bots keep `target` so every AI corpus is
+  // bit-identical, and at two seats the two answers are the same fighter by construction.
+  //
+  // ⚠️ WHO IT HITS IS NOT THIS. `sim.ts:projectileVictim` strikes whoever the shot flies
+  // into (§36); this only decides who it is CHASING and whose motion its budget refunds.
+  const frame = attacker.controller === 'human' ? (aimedLivingOpponent(state, attacker) ?? target) : target;
+
   if (w.comboParts) {
     for (const part of w.comboParts) {
-      spawnProjectile(state, attacker, target, w, part.angle, part.damage, part.color, part.emoji, origin, facing, events);
+      spawnProjectile(state, attacker, frame, w, part.angle, part.damage, part.color, part.emoji, origin, facing, events);
     }
     return true;
   }
@@ -1574,10 +1589,10 @@ function deliverWeapon(
       const offset = (i - (w.pellets - 1) / 2) * spread;
       const color = w.pelletColors ? w.pelletColors[i % w.pelletColors.length] : undefined;
       const emoji = w.pelletEmojis ? w.pelletEmojis[i % w.pelletEmojis.length] : undefined;
-      spawnProjectile(state, attacker, target, w, offset, dmg, color, emoji, origin, facing, events);
+      spawnProjectile(state, attacker, frame, w, offset, dmg, color, emoji, origin, facing, events);
     }
   } else {
-    spawnProjectile(state, attacker, target, w, 0, dmg, undefined, undefined, origin, facing, events);
+    spawnProjectile(state, attacker, frame, w, 0, dmg, undefined, undefined, origin, facing, events);
   }
   return true;
 }

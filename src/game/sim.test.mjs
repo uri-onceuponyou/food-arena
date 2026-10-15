@@ -9420,6 +9420,22 @@ console.log('\n36. A projectile hits whoever it strikes — body-blocking, at si
   // nobody in particular (facing east) while its NOMINAL target — `nearestLivingOpponent`
   // — stands to the north. Pre-fix the shot expires having damaged nobody, which is the
   // whole reason a six-seat brawl felt like six private duels.
+  //
+  // ⚠️ **RE-AUTHORED BY B3b (BH-04) — THE OLD PRECONDITION WAS THE BUG, SO IT IS KEPT HERE.**
+  // The shooter was a HUMAN facing east and the row read:
+  //
+  //   > `check('(c) the shot really is aimed NORTH at slot 3, and slot 3 really is the nearest
+  //   > (non-vacuity)', … st.projectiles.every((p) => p.targetId === st.fighters[3].id) …)`
+  //
+  // i.e. it asserted that a human's shot is framed on the NEAREST opponent rather than on what
+  // the human aimed at — which is BH-04 itself, so it went red under ANY aim rule (B3 said so
+  // before this was written). A human facing east with slot 2 on the line now frames slot 2
+  // (`state.ts:aimedLivingOpponent`, §46(b)), and a shot that hits its own frame is not a
+  // stray. The stray is still real for a BOT, whose frame is still its nearest — so the press
+  // is made as an AI seat (the controller is read at the press and nowhere else in this
+  // experiment) and handed back to `'human'` before the flight, so `flyOut`'s idle inputs keep
+  // every seat inert exactly as before. The 🔴 row below is unchanged, name and all
+  // (`tools/tmp/bb_block.mjs --knownbad` matches it by prefix).
   {
     const st = line('hotdog', MUSTARD_IDX);
     // Slot 3 to the north, nearest, so it becomes the aim; slot 2 due east, in the path.
@@ -9429,8 +9445,10 @@ console.log('\n36. A projectile hits whoever it strikes — body-blocking, at si
     st.fighters[2].x = arena.center.x + MUSTARD.range * 0.6;
     st.fighters[2].y = arena.center.y;
     const ev = [];
+    st.fighters[0].controller = 'ai';
     attemptAttack(st, st.fighters[0], MUSTARD_IDX, ev);
-    check('(c) the shot really is aimed NORTH at slot 3, and slot 3 really is the nearest (non-vacuity)',
+    st.fighters[0].controller = 'human';
+    check('(c) a BOT\'s shot really is framed NORTH on slot 3 — its nearest — while it flies EAST through slot 2 (non-vacuity)',
       st.projectiles.length > 0 && st.projectiles.every((p) => p.targetId === st.fighters[3].id)
       && Math.hypot(st.fighters[3].x - st.fighters[0].x, st.fighters[3].y - st.fighters[0].y)
          < Math.hypot(st.fighters[2].x - st.fighters[0].x, st.fighters[2].y - st.fighters[0].y),
@@ -12534,6 +12552,189 @@ console.log('\n46. Combat + items, the second half — why a press is refused, t
     check('(a) CONTROL: a refused press spends nothing and emits nothing; an accepted one stamps its cooldown',
       refused.every((c) => !c.spent) && fired.every((c) => c.spent),
       `${refused.filter((c) => c.spent).length} refused-but-spent, ${fired.filter((c) => !c.spent).length} fired-but-free`);
+  }
+
+  // ── (b) BH-04: A HUMAN'S SHOT IS FRAMED ON WHAT THEY AIMED AT, NOT ON THE NEAREST ──
+  //
+  // `combat.ts:deliverWeapon` stamped `nearestLivingOpponent` on every projectile, and
+  // `sim.ts:stepProjectiles` reads that `targetId` for two things — the homing steer and the
+  // range budget's frame (`rules.ts` AUTHORISED DEVIATION #12, "range means a SEPARATION").
+  // For a bot the nearest IS the aim (`ai.ts` faces it). For a human it is not: a homing shot
+  // aimed at one fighter curved into whoever stood nearest, and a straight shot was budgeted
+  // against a bystander running alongside it — reaching past its card range.
+  //
+  // 🚨 SIX SEATS. At two the only opponent is both the nearest and the aimed-at one, so the
+  // two rules are the same sentence and every two-seat row passes on the bug (`minSeats` 3).
+  //
+  // The rule (humans only): the opponent IN FRONT (`facing·v ≥ 0`) with the smallest
+  // perpendicular miss from the aim line; ties → nearer → lower slot; nobody in front →
+  // nearest. Bots keep nearest. Every distance is a fraction of the weapon's own `range`.
+  {
+    const N = MAX_FIGHTERS;
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const CX = arena.center.x, CY = arena.center.y;
+    const DT = 16.667;
+    const IDLE = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+    const EAST = { move: { x: 1, y: 0 }, selectedWeapon: 0, attack: false };
+    const kit = (c, k) => { const i = CHARACTERS[c].weapons.findIndex((w) => w.key === k); return [i, CHARACTERS[c].weapons[i]]; };
+    const [HATCH_I, HATCH] = kit('egg', 'Hatch');
+    const [LETTUCE_I, LETTUCE] = kit('hamburger', 'Lettuce');
+    /** Six seats: slot 0 shoots from the centre facing due east; slots 1-5 parked far
+     *  BEHIND it (west, off the business end) until a row places them. HP inflated so "who
+     *  was hit" is never confounded with "who died first" (§36's reason). */
+    const six = (shooter, ctl0 = 'human', others = 'hamburger') => {
+      const st = createMatch(arena, [
+        { characterId: shooter, spawn: { x: CX, y: CY }, controller: ctl0 },
+        ...Array.from({ length: N - 1 }, (_, i) => ({
+          characterId: Array.isArray(others) ? others[i] : others,
+          spawn: { x: CX - 900 - i * 150, y: CY + 700 }, controller: 'human',
+        })),
+      ]);
+      st.phase = 'playing';
+      for (const f of st.fighters) { f.hp = 1e7; f.maxHp = 1e7; }
+      st.fighters[0].facing = { x: 1, y: 0 };
+      return st;
+    };
+    const put = (f, x, y) => { f.x = x; f.y = y; };
+    /** Fly every live projectile out; `inputOf(slot)` drives the seats. */
+    const fly = (st, inputOf = () => IDLE, ticks = 600) => {
+      const hits = []; let end = null; let ground = 0;
+      for (let t = 0; t < ticks && st.projectiles.length > 0; t++) {
+        const evs = stepMatch(st, DT, st.fighters.map((_, i) => inputOf(i)));
+        for (const p of st.projectiles) ground = Math.max(ground, Math.hypot(p.x - CX, p.y - CY));
+        for (const e of evs) {
+          if (e.type === 'hit-landed' && e.source?.kind === 'weapon') hits.push(e.targetId);
+          if (e.type === 'projectile-destroyed' && end === null) end = e.reason;
+        }
+      }
+      return { hits, end, ground };
+    };
+    const along = (st, f) => (f.x - st.fighters[0].x) * st.fighters[0].facing.x + (f.y - st.fighters[0].y) * st.fighters[0].facing.y;
+    const dist = (st, f) => Math.hypot(f.x - st.fighters[0].x, f.y - st.fighters[0].y);
+
+    // (b1) HOMING: aimed due east at C on the line; B nearer, to the north-west (BEHIND).
+    {
+      const st = six('egg');
+      const [, B, C] = st.fighters;
+      put(C, CX + HATCH.range * 0.85, CY);
+      put(B, CX - HATCH.range * 0.5, CY - HATCH.range * 0.5);
+      const opp = st.fighters.slice(1).filter((f) => f.alive);
+      check('(b) NON-VACUITY: six seats, five living opponents; B is NEARER than the aimed-at C, and C sits on the aim line',
+        st.fighters.length === 6 && opp.length === 5 && dist(st, B) < dist(st, C) && C.y === CY && along(st, C) > 0 && HATCH.homing === true,
+        `B ${dist(st, B).toFixed(1)} wu, C ${dist(st, C).toFixed(1)} wu, homing ${HATCH.homing}`);
+      attemptAttack(st, st.fighters[0], HATCH_I, []);
+      const framed = st.projectiles.map((p) => p.targetId);
+      const r = fly(st);
+      check('(b) 🔴 a HOMING shot aimed at C is framed on C and strikes C — not the nearer B behind the shooter',
+        framed.length > 0 && framed.every((id) => id === C.id) && r.hits[0] === C.id,
+        `framed on [${framed}], first hit ${r.hits[0]} (C=${C.id}, B=${B.id}; pre-fix: framed on B, first hit B)`);
+    }
+
+    // (b2) A BYSTANDER ALONGSIDE: D in FRONT and nearer than C, but off the line by more than
+    // its own hit radius — the perpendicular-miss term, not the in-front filter, decides.
+    {
+      const st = six('egg');
+      const [, , C, D] = st.fighters;
+      put(C, CX + HATCH.range * 0.85, CY);
+      put(D, CX + HATCH.range * 0.45, CY - HATCH.range * 0.3);
+      check('(b) NON-VACUITY: D is IN FRONT, NEARER than C, and further off the line than its own hit radius',
+        along(st, D) > 0 && dist(st, D) < dist(st, C) && Math.abs(D.y - CY) > D.hitRadius,
+        `D along ${along(st, D).toFixed(1)}, D ${dist(st, D).toFixed(1)} vs C ${dist(st, C).toFixed(1)} wu, lateral ${Math.abs(D.y - CY).toFixed(1)} vs r ${D.hitRadius}`);
+      attemptAttack(st, st.fighters[0], HATCH_I, []);
+      const framed = st.projectiles.map((p) => p.targetId);
+      const r = fly(st);
+      check('(b) 🔴 a homing shot flies PAST a bystander alongside the line to the fighter on it',
+        framed.length > 0 && framed.every((id) => id === C.id) && r.hits[0] === C.id && !r.hits.includes(D.id),
+        `framed on [${framed}], hits [${r.hits.slice(0, 4)}] (C=${C.id}, D=${D.id}; pre-fix: curves into D)`);
+    }
+
+    // (b3) THE RANGE BUDGET: aimed at a STILL C beyond range + hit radius; B (nearest) runs
+    // east alongside the shot. Framed on B, B's motion is refunded and the shot reaches C.
+    {
+      const run = (bRuns) => {
+        const st = six('hamburger', 'human', ['sushi', 'soup', 'hamburger', 'hamburger', 'hamburger']);
+        const [, B, C] = st.fighters;
+        put(C, CX + LETTUCE.range * 1.57, CY);
+        put(B, CX, CY - LETTUCE.range * 0.71);
+        const pre = { bNearer: dist(st, B) < dist(st, C), cBeyond: dist(st, C) > LETTUCE.range + C.hitRadius };
+        attemptAttack(st, st.fighters[0], LETTUCE_I, []);
+        const framed = st.projectiles.map((p) => p.targetId);
+        return { ...fly(st, (i) => (bRuns && i === 1 ? EAST : IDLE)), framed, pre, C, B };
+      };
+      const still = run(false);
+      const runs = run(true);
+      check('(b) NON-VACUITY: B is nearer, C is beyond range + hit radius, and with B STANDING the shot expires short',
+        still.pre.bNearer && still.pre.cBeyond && still.end === 'expired' && still.hits.length === 0,
+        `end ${still.end}, hits [${still.hits}], ground ${still.ground.toFixed(1)} of range ${LETTUCE.range}`);
+      check('(b) 🔴 …and with B RUNNING alongside, the shot STILL expires short — a bystander\'s legs do not extend it',
+        runs.framed.length > 0 && runs.framed.every((id) => id === runs.C.id) && runs.end === 'expired' && runs.hits.length === 0
+        && runs.ground <= LETTUCE.range + 1e-6 + LETTUCE.speed * DT / 1000,
+        `framed on [${runs.framed}], end ${runs.end}, hits [${runs.hits}], ground ${runs.ground.toFixed(1)} vs range ${LETTUCE.range} (pre-fix: hit C at ~195)`);
+    }
+
+    // (b4) A FLEEING AIMED TARGET is charged in ITS frame — the separation the card promises.
+    // The nearest (B) stands still behind the shooter; framed on B the budget is plain ground
+    // and the fleeing C gets away; framed on C the shot closes the separation and lands.
+    {
+      const seats = ['hamburger', 'sushi', 'hamburger', 'hamburger', 'hamburger'];
+      const st = six('hamburger', 'human', seats);
+      const [, B, C] = st.fighters;
+      put(C, CX + LETTUCE.range * 0.9, CY);
+      put(B, CX - LETTUCE.range * 0.4, CY - LETTUCE.range * 0.4);
+      // C's real running speed, MEASURED on a scratch copy of the same seat, not assumed.
+      const probe = six('hamburger', 'human', seats);
+      const x0 = probe.fighters[2].x;
+      for (let t = 0; t < 30; t++) stepMatch(probe, DT, probe.fighters.map((_, i) => (i === 2 ? EAST : IDLE)));
+      const vC = (probe.fighters[2].x - x0) / (30 * DT / 1000);
+      const gap = dist(st, C) - C.hitRadius;
+      const groundNeeded = LETTUCE.speed * gap / (LETTUCE.speed - vC);
+      check('(b) NON-VACUITY: B is nearer and behind; C really runs, slower than the shot, and catching it needs MORE ground than the range',
+        dist(st, B) < dist(st, C) && along(st, B) < 0 && vC > 0 && vC < LETTUCE.speed && groundNeeded > LETTUCE.range && gap < LETTUCE.range,
+        `vC ${vC.toFixed(1)} wu/s, separation to close ${gap.toFixed(1)}, ground needed ${groundNeeded.toFixed(1)} vs range ${LETTUCE.range}`);
+      attemptAttack(st, st.fighters[0], LETTUCE_I, []);
+      const framed = st.projectiles.map((p) => p.targetId);
+      const r = fly(st, (i) => (i === 2 ? EAST : IDLE));
+      check('(b) 🔴 a fleeing AIMED target is budgeted in its own frame — the shot closes the separation and lands',
+        framed.length > 0 && framed.every((id) => id === C.id) && r.hits[0] === C.id,
+        `framed on [${framed}], end ${r.end}, hits [${r.hits}], ground ${r.ground.toFixed(1)} (pre-fix: framed on B, expired)`);
+    }
+
+    // (b5) THE TIE-BREAKS AND THE FALLBACK — read straight off `targetId` at the press. These
+    // agree with the old rule by construction (the nearer, then the lower slot, then nearest
+    // when nobody is in front), so they are CONTROLS: green on both trees, and red the day the
+    // aim rule grows a tie-break the two-seat sentence never needed.
+    {
+      const MUSTARD_I = CHARACTERS.hotdog.weapons.findIndex((w) => w.key === 'Mustard');
+      const R = CHARACTERS.hotdog.weapons[MUSTARD_I].range;
+      const frameOf = (setup, ctl0 = 'human') => {
+        const st = six('hotdog', ctl0);
+        setup(st);
+        attemptAttack(st, st.fighters[0], MUSTARD_I, []);
+        return st.projectiles.map((p) => p.targetId);
+      };
+      const sameLine = frameOf((st) => { put(st.fighters[2], CX + R * 0.9, CY); put(st.fighters[3], CX + R * 0.5, CY); });
+      const mirror = frameOf((st) => { put(st.fighters[2], CX + R * 0.6, CY + R * 0.2); put(st.fighters[3], CX + R * 0.6, CY - R * 0.2); });
+      const behind = frameOf((st) => { put(st.fighters[2], CX - R * 0.9, CY); put(st.fighters[3], CX - R * 0.4, CY + R * 0.1); });
+      check('(b) CONTROL: two on the aim line → the NEARER (slot 3, higher slot); a mirrored exact tie → the LOWER slot (2)',
+        sameLine.length > 0 && sameLine.every((id) => id === 3) && mirror.length > 0 && mirror.every((id) => id === 2),
+        `same line → [${sameLine}], mirrored tie → [${mirror}]`);
+      check('(b) CONTROL: nobody in front → the NEAREST, as before',
+        behind.length > 0 && behind.every((id) => id === 3), `→ [${behind}]`);
+      // BOTS KEEP NEAREST: (b2)'s geometry with an AI shooter frames the nearer bystander.
+      const bot = frameOf((st) => { put(st.fighters[2], CX + R * 0.85, CY); put(st.fighters[3], CX + R * 0.45, CY - R * 0.3); }, 'ai');
+      check('(b) CONTROL: a BOT\'s shot is still framed on its NEAREST opponent — the AI faces it, so for a bot the nearest IS the aim',
+        bot.length > 0 && bot.every((id) => id === 3), `→ [${bot}]`);
+      // TWO SEATS: the only opponent, wherever it stands — even directly behind the aim.
+      const st2 = createMatch(arena, [
+        { characterId: 'hotdog', spawn: { x: CX, y: CY }, controller: 'human' },
+        { characterId: 'hamburger', spawn: { x: CX - R * 0.6, y: CY }, controller: 'human' },
+      ]);
+      st2.phase = 'playing';
+      st2.fighters[0].facing = { x: 1, y: 0 };
+      attemptAttack(st2, st2.fighters[0], MUSTARD_I, []);
+      check('(b) CONTROL: at TWO seats the frame is the only opponent even when it stands behind the aim (identical by construction)',
+        st2.projectiles.length > 0 && st2.projectiles.every((p) => p.targetId === 1), `→ [${st2.projectiles.map((p) => p.targetId)}]`);
+    }
   }
 }
 
