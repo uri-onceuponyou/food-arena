@@ -285,6 +285,12 @@ function torsoBarrel(halfW: number, height: number, halfD: number, taper: number
  * so raising the cast height would have scaled five characters and left six behind.
  */
 const H = CHARACTER_HEIGHT * 1.0;
+/**
+ * C1b — how far the ring leans back, radians. > 32° is what makes a plane face a 58° camera
+ * from behind (see `ChibiRig.tiltIdentity`); 40° keeps the hole open from behind too (the
+ * ring's back is 8° past grazing) while the lobby's 20° camera sees the face 20° off-axis.
+ */
+const DONUT_TILT = THREE.MathUtils.degToRad(40);
 
 export class DonutCharacter extends BaseCharacter {
   private rig: ChibiRig;
@@ -695,6 +701,11 @@ export class DonutCharacter extends BaseCharacter {
     this.buildFace(R, ringR, tubeR);
     this.buildSilhouetteEvents(R);
 
+    // C1b: the ring tilted back (`rig.tiltIdentity`). A vertical ring seen from 58° above
+    // hides its own hole — 0/8 facings on the base tree, face 4/8 — and in the canonical 1v1
+    // frames the player donut read as an edge-on pill. Tilted past 32° the ring's face, hole
+    // and features face the match camera from every azimuth (`docs/REVAMP.md` §2.6).
+    this.rig.tiltIdentity(DONUT_TILT);
     // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
     // R1 role patch are built on the merged meshes.
     batchJoints(this, this.rig.joints);

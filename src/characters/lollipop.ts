@@ -1024,6 +1024,9 @@ export class LollipopCharacter extends BaseCharacter {
 
     this.buildSilhouetteEvents(R, discCenterY, discOuterR);
 
+    // C1b: the identity plane tilted back 38° (`rig.tiltIdentity`, which says why > 32°):
+    // the candy DISC is the identity plane, and edge-on from the side it was a stick (face 5/8 on the base tree).
+    this.rig.tiltIdentity(THREE.MathUtils.degToRad(38));
     // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
     // R1 role patch are built on the merged meshes.
     batchJoints(this, this.rig.joints);

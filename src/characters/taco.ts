@@ -1061,6 +1061,9 @@ export class TacoCharacter extends BaseCharacter {
 
     this.buildSilhouetteEvents();
 
+    // C1b: the identity plane tilted back 36° (`rig.tiltIdentity`, which says why > 32°):
+    // the face pad sits on the front shell wall; from above the camera saw the fillings and the shell's rim (face 5/8 on the base tree).
+    this.rig.tiltIdentity(THREE.MathUtils.degToRad(36));
     // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
     // R1 role patch are built on the merged meshes.
     batchJoints(this, this.rig.joints);

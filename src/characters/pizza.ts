@@ -1047,6 +1047,9 @@ export class PizzaCharacter extends BaseCharacter {
     this.buildAccessories(R, head);
     this.buildSilhouetteEvents(R);
 
+    // C1b: the identity plane tilted back 36° (`rig.tiltIdentity`, which says why > 32°):
+    // the slice is a flat wedge facing forward; from above it read as its crust edge (face 4/8 on the base tree).
+    this.rig.tiltIdentity(THREE.MathUtils.degToRad(36));
     // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
     // R1 role patch are built on the merged meshes.
     batchJoints(this, this.rig.joints);

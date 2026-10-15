@@ -2202,6 +2202,37 @@ export class ChibiRig {
     }
   }
 
+  /**
+   * C1b (`docs/REVAMP.md` §2.6, §5 C1) — TILT THE IDENTITY PLANE BACK, so it faces the 58°
+   * match camera from every facing instead of only from the front.
+   *
+   * The geometry, re-derived: a plane whose normal sits `t` above horizontal faces a camera
+   * at elevation 58° from azimuth 180° (directly behind) iff sin58·sin t > cos58·cos t,
+   * i.e. t > 32°. At `t` = 0 a face is visible from 3-5 of 8 facings and a vertical ring
+   * hides its own hole from all 8 (the donut: hole 0/8, face 4/8 on the base tree). The
+   * cost lands in the lobby (20°): the face looks UP by `t` − 20°.
+   *
+   * Everything the character has parented to `head` — the food mass, its dressings and the
+   * `face` joint — moves under one static `identity_tilt` group rotated `-angle` about x
+   * through `pivot` (head-local). The rig keeps animating `head` itself, so the tilt rides
+   * every turn, nod and breath; nothing re-derives a position, so no face can detach.
+   * Call once, after the head and face are built and before `batchJoints`.
+   */
+  tiltIdentity(angle: number, pivot: THREE.Vector3 = new THREE.Vector3()): THREE.Group {
+    const head = this.joints.head;
+    const g = new THREE.Group();
+    g.name = 'identity_tilt';
+    g.position.copy(pivot);
+    g.rotation.x = -angle;
+    for (const c of [...head.children]) {
+      head.remove(c);
+      c.position.sub(pivot);
+      g.add(c);
+    }
+    head.add(g);
+    return g;
+  }
+
   /** Set by `kitLimb`: the arm's material, so `fitShoulders`' bridge wears the arm's colour. */
   private kitArmMat: THREE.Material | null = null;
   /** The kit's derived sole material, one instance per rig so both shoes share it. */

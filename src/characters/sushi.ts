@@ -1081,6 +1081,9 @@ export class SushiCharacter extends BaseCharacter {
     this.buildAccessories(R, { yAt, zAt, hemAt });
     this.buildSilhouetteEvents(R);
 
+    // C1b: the identity plane tilted back 36° (`rig.tiltIdentity`, which says why > 32°):
+    // the face sits on the rice under the salmon cap, which hid it from every facing but the front (face 4/8 on the base tree).
+    this.rig.tiltIdentity(THREE.MathUtils.degToRad(36));
     // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
     // R1 role patch are built on the merged meshes.
     batchJoints(this, this.rig.joints);
