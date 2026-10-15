@@ -152,6 +152,14 @@ export abstract class BaseCharacter implements CharacterModel {
         this.state = 'death';
         break;
       default:
+        // A living state ends a death. `deathT` used to be set here and never cleared, so a
+        // fighter the sim brought back (Leftovers' revive) kept `dead01 >= 1` in every rig and
+        // was drawn as a corpse for the rest of the match — `tools/tmp/c1a_revive.mjs`, six
+        // seats: torso up-axis -0.009 on `58ef803` while `alive === true`. Safe to clear
+        // unconditionally because `match.ts` hands `play('run'|'idle')` ONLY to fighters whose
+        // sim state is alive (grep `if (roster[i]?.alive) m.play`), so a corpse never reaches
+        // this branch and stays down (the same test's CORPSE row).
+        this.deathT = -1;
         this.state = state;
     }
   }

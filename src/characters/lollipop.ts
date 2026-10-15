@@ -72,7 +72,14 @@ import { curl } from './appendages';
  * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
  * direction `docs/LESSONS.md` records as falsified four times in the other one.
  */
-const CANDY_WHITE = '#DED6C6';  // luma 0.993 -> 0.842
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: MINT-TEAL (~160°) on the disc; the swirl keeps its red/sun/teal bands.
+const CANDY_WHITE = '#48B990';  // luma 0.993 -> 0.842  // C1a: was #DED6C6
 // ── DISC_WHITE — CANDY_WHITE x 0.93, and it is a PROBE RESULT, not a taste choice ──
 // The candy disc's own ground. `sepscan --mode chars --ids lollipop` put `clipShare` at
 // **0.1233** after this pass's rebuild, against the six-plate Brawl Stars band of
@@ -93,9 +100,9 @@ const CANDY_WHITE = '#DED6C6';  // luma 0.993 -> 0.842
 // wrapper petals, twist cone), and the disc getting darker is a second win for the face —
 // `rules.ts` wants the #FFFFFF sclera to be the brightest value on the character, and the
 // thing it is drawn against just moved further away.
-const DISC_WHITE = '#CEC7B8';   // luma 0.842 -> 0.782
+const DISC_WHITE = '#17A069';   // luma 0.842 -> 0.782  // C1a: was #CEC7B8
 const CANDY_RED = '#E63946';
-const STICK = '#E2DBCC';       // matte paper stick (luma 0.969 -> 0.860)
+const STICK = '#B7A788';       // matte paper stick (luma 0.969 -> 0.860)  // C1a: was #E2DBCC
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0' — restrained trim accent only
 // ── The WRAPPER is the dark rung ─────────────────────────────────────────────
 // Measured (`tools/tmp/valuescan.mjs`): Lollipop's range already passed, but its P05
@@ -138,8 +145,8 @@ const SWIRL_RED = CANDY_RED;    // the disc's ribbon, both faces
 //   CANDY_RED    #E63946  luma ~0.48   kept as the identity anchor: a lollipop that is
 //                                      not red at all stops reading as this character
 // Two values on the disc becomes four, all but the anchor above the ground band.
-const CANDY_TEAL = '#3FD3B8';
-const CANDY_SUN = '#FFC53D';
+const CANDY_TEAL = '#10735F';  // C1a: was #3FD3B8
+const CANDY_SUN = '#E9AC06';  // C1a: was #FFC53D
 // ── The LEG family, and why the legs are red at all ─────────────────────────
 // Arms and legs on this character were the same geometry in the same two tones with
 // the same stripe rings, so she read as a four-legged thing on a stick. The pairs
@@ -165,7 +172,7 @@ const CANDY_RED_DEEP = '#A81E31';   // shin — one rung under CANDY_RED
 // the key light lands hardest, is about the worst shape to hand that budget to.
 // #DCEBE3 sits just BELOW CANDY_WHITE instead, and the separation is bought at the base
 // with the near-black cinch ring rather than at the top with luma.
-const CELLO = '#DCEBE3';
+const CELLO = '#89C0A9';  // C1a: was #DCEBE3
 const BOOT = '#0C0814';        // near-ink boots — grounds the pale/red palette
 // Limb-only frosted-teal family, a tint of Lollipop's own Cyber accent. A second
 // independent art-director pass named Lollipop, Egg and Burrito as all converging
@@ -173,10 +180,10 @@ const BOOT = '#0C0814';        // near-ink boots — grounds the pale/red palett
 // (that's the "hard sugar candy" read), but arms and legs shift to a cool teal so
 // the body carries real hue instead of reading as another pale mass, and it ties
 // directly to her own rarity accent rather than borrowing a hue from elsewhere.
-const LIMB_TEAL = '#8FE0C9';
+const LIMB_TEAL = '#1B9866';  // C1a: was #8FE0C9
 // PASS 3. Measured: the boot DELIVERS 0.37 despite a #0C0814 albedo (its own sole and
 // trim are pale), so darkening it further buys nothing — the SHIN moves instead.
-const LIMB_TEAL_DARK = '#7ACBB0';
+const LIMB_TEAL_DARK = '#197752';  // C1a: was #7ACBB0
 // The mouth's own value ladder. `rules.ts`'s face standard asks for an INTERIOR VALUE
 // STEP — "a lip line with a genuinely darker throat plane behind it, so it reads as an
 // OPENING rather than a painted curve". A solid opaque disc cannot be recessed into

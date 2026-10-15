@@ -221,15 +221,24 @@ const BUN_DARK = '#43220B';
  * gate wants — where lifting the bun moved it up and failed.
  */
 const LIMB_THIGH = '#8A5220';
-const LETTUCE = '#4E7A12';
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: ORANGE (~30°) on the crown bun, the largest mass seen from above.
+const BUN = '#D36A15';  // C1a: was `PALETTE.bun` (#E8A33D) — local, so the shared VFX/UI colour is not dragged along
+const CHEESE = '#E2A706';  // C1a: was `PALETTE.cheese` (#FFD873) — local, so the shared VFX/UI colour is not dragged along
+const LETTUCE = '#416C0F';  // C1a: was #4E7A12
 /** The frill's own lighter green. Was `PALETTE.lettuce` offset in HSL; pinned to the
  *  value that offset actually produced so deepening `LETTUCE` does not drag it down
  *  too — the frill is the light side of this character's green step. */
-const LETTUCE_FRILL = '#88C32F';
+const LETTUCE_FRILL = '#599C1E';  // C1a: was #88C32F
 /** Mitts. Were `PALETTE.bun`, i.e. EXACTLY the crown they are held in front of.
  *  A lighter toasted bun keeps the "toasted mitt" read and buys back the figure/ground
  *  the charred limbs above spend. */
-const MITT_BUN = '#F7CE86';
+const MITT_BUN = '#E68F1C';  // C1a: was #F7CE86
 
 /**
  * ── THE PICK'S THREE TONES. Uri: *"the pin stuck inside him."* ───────────────
@@ -795,11 +804,11 @@ export class HamburgerCharacter extends BaseCharacter {
     // Every layer gets its OWN roughness so the stack reads as different
     // SUBSTANCES — bread, meat, veg, dairy, tool — instead of one glossy
     // plastic shader repeated in different colours.
-    const bunMat = toonMat({ color: PALETTE.bun, ramp: RAMP_CHARACTER(), roughness: 0.85 }); // dry, matte-baked crust
+    const bunMat = toonMat({ color: BUN, ramp: RAMP_CHARACTER(), roughness: 0.85 }); // dry, matte-baked crust
     const bunDarkMat = toonMat({ color: BUN_DARK, ramp: RAMP_CHARACTER(), roughness: 0.85 });
     const pattyMat = toonMat({ color: PATTY, ramp: RAMP_CHARACTER(), roughness: 0.55 }); // seared, faintly greasy meat
     const pattyDarkMat = toonMat({ color: PATTY_DARK, ramp: RAMP_CHARACTER(), roughness: 0.55 });
-    const cheeseMat = glossyMat({ color: PALETTE.cheese, roughness: 0.35, rim: true }); // soft melt sheen
+    const cheeseMat = glossyMat({ color: CHEESE, roughness: 0.35, rim: true }); // soft melt sheen
     const tomatoMat = glossyMat({ color: PALETTE.tomato, roughness: 0.18, rim: true }); // wettest surface on the model
     const lettuceMatA = toonMat({ color: LETTUCE, ramp: RAMP_CHARACTER(), roughness: 0.6 }); // leafy, satin not shiny
     const lettuceMatB = toonMat({ color: LETTUCE_FRILL, ramp: RAMP_CHARACTER(), roughness: 0.6 });

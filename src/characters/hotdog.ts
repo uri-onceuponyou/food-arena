@@ -105,7 +105,16 @@ const GRILL_MARK = '#7A4A1E';   // toasted griddle stripes on the bun
 // reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
 // segment comes back UP, the lower segment holds the dark, and the boot takes its own
 // darkest tone instead of sharing the shin's.
-const LIMB_BUN = '#D89A68';        // upper arm / thigh — mid
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: RED (~8°) on the sausage.
+const SAUSAGE = '#D63D26';  // C1a: was `PALETTE.sausage` (#B23A2E) — local, so the shared VFX/UI colour is not dragged along
+const MUSTARD = '#FFC300';  // C1a: was `PALETTE.mustard` (#FFC93C) — local, so the shared VFX/UI colour is not dragged along
+const LIMB_BUN = '#D48035';        // upper arm / thigh — mid  // C1a: was #D89A68
 const LIMB_BUN_DARK = '#5A3418';   // forearm / shin — dark (PASS 3: up a step, the boot below was 0.069 away)
 const BOOT_CHAR = '#0A0501';       // boots — darker again
 /** A lighter bun than `PALETTE.bun` for THIS character's own mass — see above.
@@ -130,7 +139,7 @@ const BOOT_CHAR = '#0A0501';       // boots — darker again
  * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
  * direction `docs/LESSONS.md` records as falsified four times in the other one.
  */
-const BUN_LIGHT = '#EBDCB8';    // luma 0.951 -> 0.865
+const BUN_LIGHT = '#DE9536';    // luma 0.951 -> 0.865  // C1a: was #EBDCB8
 /**
  * The torso's bun-shade. Was `PALETTE.bun`; local now, and separated from the head's
  * own mass so `head|torso` stops measuring 0.026 across 128 px.
@@ -150,10 +159,10 @@ const BUN_LIGHT = '#EBDCB8';    // luma 0.951 -> 0.865
  * first place (8.87% of the character clipping above 0.94). This lobe is 7.6% of
  * the character and touches nothing else.
  */
-const BUN_SHADE = '#EBDDC2';    // luma 0.844 -> 0.871
+const BUN_SHADE = '#CA872F';    // luma 0.844 -> 0.871  // C1a: was #EBDDC2
 /** Mitts. Was `PALETTE.sausage`, i.e. exactly the head's sausage, so the hands had
  *  nowhere to separate to. A deeper cured red keeps the meat read and gains a step. */
-const MITT_SAUSAGE = '#C4432F';
+const MITT_SAUSAGE = '#C53E2A';  // C1a: was #C4432F
 
 // ── FACE VALUES, and these are the whole point of this pass ──────────────────
 // Measured, cast-wide: **0% of our eye pixels are above 0.85 luma against the
@@ -575,8 +584,8 @@ export class HotDogCharacter extends BaseCharacter {
 
       const bunMat = toonMat({ color: BUN_LIGHT, roughness: 0.85 });
       const bunShadeMat = toonMat({ color: BUN_SHADE, roughness: 0.85 });
-      const meatMat = glossyMat({ rim: true, color: PALETTE.sausage, roughness: 0.3 });
-      const seamMat = glossyMat({ rim: true, color: PALETTE.mustard, roughness: 0.15 });
+      const meatMat = glossyMat({ rim: true, color: SAUSAGE, roughness: 0.3 });
+      const seamMat = glossyMat({ rim: true, color: MUSTARD, roughness: 0.15 });
 
       const lobeR = size.w * 0.19;
       const lobeLen = size.h * 0.50;
@@ -795,8 +804,8 @@ export class HotDogCharacter extends BaseCharacter {
     // bread + meat + sauce, not one plastic shader repeated in different colours
     // (that was the single biggest criticism of an earlier character here). ───
     const bunMat = toonMat({ color: BUN_LIGHT, roughness: 0.85 }); // dry, matte-baked crust — see BUN_LIGHT
-    const sausageMat = glossyMat({ rim: true, color: PALETTE.sausage, roughness: 0.3 }); // taut, faintly greasy skin
-    const mustardMat = glossyMat({ rim: true, color: PALETTE.mustard, roughness: 0.15 }); // wettest surface on the model
+    const sausageMat = glossyMat({ rim: true, color: SAUSAGE, roughness: 0.3 }); // taut, faintly greasy skin
+    const mustardMat = glossyMat({ rim: true, color: MUSTARD, roughness: 0.15 }); // wettest surface on the model
     const ketchupMat = glossyMat({ rim: true, color: PALETTE.ketchup, roughness: 0.15 });
     const glowMat = toonMat({
       color: CYBER, roughness: 0.4, metalness: 0.3, emissive: CYBER, emissiveIntensity: 0.45,
@@ -1396,7 +1405,7 @@ export class HotDogCharacter extends BaseCharacter {
 
     const holsterMat = toonMat({ color: HOLSTER_LEATHER, roughness: 0.76 });
     const buckleMat = toonMat({ color: HOLSTER_BUCKLE, roughness: 0.32, metalness: 0.5 });
-    const bottleMat = glossyMat({ rim: true, color: PALETTE.mustard, roughness: 0.2 });
+    const bottleMat = glossyMat({ rim: true, color: MUSTARD, roughness: 0.2 });
 
     // The dressed split-bun torso (see the constructor's own `dressTorso` call)
     // is custom geometry, not the rig's default barrel. Measuring its REAL
@@ -1570,7 +1579,7 @@ export class HotDogCharacter extends BaseCharacter {
     // roughly zero — buying a silhouette read by deleting a value read. Mustard is this
     // character's own condiment language, is already on the torso as the zigzag, and is
     // a step AWAY from both the bun and the limb tan rather than into either.
-    const sleeveMat = glossyMat({ rim: true, color: PALETTE.mustard, roughness: 0.25 });
+    const sleeveMat = glossyMat({ rim: true, color: MUSTARD, roughness: 0.25 });
 
     this.rig.dressLimbs((part: LimbPart, size) => {
       switch (part) {

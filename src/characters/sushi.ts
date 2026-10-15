@@ -70,8 +70,15 @@ import { CHARACTER_HEIGHT } from '../units';
  * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
  * direction `docs/LESSONS.md` records as falsified four times in the other one.
  */
-const RICE = '#DCD3BD';        // sticky rice (luma 0.992 -> 0.829)
-const RICE_SHADE = '#CFC6AE';  // grain shading, a touch deeper (luma 0.926 -> 0.777)
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: SALMON (~18°) on the fish, over black nori and cream rice.
+const RICE = '#C4B285';        // sticky rice (luma 0.992 -> 0.829)  // C1a: was #DCD3BD
+const RICE_SHADE = '#AD9868';  // grain shading, a touch deeper (luma 0.926 -> 0.777)  // C1a: was #CFC6AE
 // Lifted off `PALETTE.nori`'s near-black #2B2B2B to a dark seaweed GREEN. Two
 // measured reasons: (1) at near-black the torso sat about six value stops below
 // the cream head and a blind critic read the character as "a floating head with a
@@ -98,7 +105,7 @@ const NORI_DEEP = '#070C09';   // the maki's own rim, one step darker than the w
 // the largest single colour area on the character (see the PROFILE rewrite below),
 // and the cast owns the warm half of the colour wheel unopposed since the arena was
 // re-keyed cool — a pale peach spends that position for nothing.
-const SALMON = '#E0722F';
+const SALMON = '#EE672C';  // C1a: was #E0722F
 /**
  * Salmon FAT — the pale marbling lines. Added because the fish's only marking used to
  * be three `SALMON_DARK` bars, which at the shipped head size read as scratches and
@@ -107,7 +114,7 @@ const SALMON = '#E0722F';
  * area on the character and it presented ONE value, so it contributed nothing to the
  * ladder.
  */
-const SALMON_FAT = '#F6C9A6';
+const SALMON_FAT = '#EBA075';  // C1a: was #F6C9A6
 /**
  * The limbs, and ONLY the limbs. This partly reverses a documented earlier decision
  * ("the limbs move from nori-charcoal to the fish's own saturated orange") and the
@@ -140,7 +147,7 @@ const LIMB_NORI = '#0C1410';
  * standard on the albedo step alone, and every other pair this tone touches
  * (`shoulderL|elbowL`, `hipL|kneeL`) moves the same way because the segment below it is
  * nori-dark in both chains. */
-const LIMB_SALMON_DEEP = '#A85028';
+const LIMB_SALMON_DEEP = '#C75C2F';  // C1a: was #A85028
 const SALMON_DARK = '#6A2208'; // fish striation lines — a real step under the flesh, not a tint
 const LIP = '#E8798F';         // puckered-lip coral
 const GOLD = RARITY_COLORS.Legendary; // #F4A300 — rarity accent, used sparingly

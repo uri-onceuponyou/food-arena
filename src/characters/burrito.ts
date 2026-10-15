@@ -117,8 +117,15 @@ import { aim, blade as peelBlade, localBounds, massAnchor } from './appendages';
 // TORTILLA_SHADE was '#E4CFA0', which is *lighter than TORTILLA in two channels* — a
 // "shade" that never shaded anything. #C99C5B is a real toast tone, luma 0.63 against
 // the wrap's 0.79, so the rim, the seam and the brow creases now carry a value step.
-const TORTILLA = '#E5C795';        // griddled flour wrap
-const TORTILLA_SHADE = '#C99C5B';  // genuine toast/shadow tone — brow creases, lower lip
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: GREEN at 58° — the filling seen from above is guacamole (`RICE` carries it) and the limbs are avocado; the tortilla stays a toasted tan (a green tortilla was tried and read as a pickle).
+const TORTILLA = '#C08A2D';        // griddled flour wrap  // C1a: was #E5C795
+const TORTILLA_SHADE = '#926725';  // genuine toast/shadow tone — brow creases, lower lip  // C1a: was #C99C5B
 // ── AND A SECOND, MUCH QUIETER STEP, BECAUSE ONE STEP WAS DOING TWO JOBS ─────
 // The first version of this pass used TORTILLA_SHADE for the rim, the fold seam AND the
 // scorch spots, and the render says that is one step too big for all three: the rim read
@@ -128,7 +135,7 @@ const TORTILLA_SHADE = '#C99C5B';  // genuine toast/shadow tone — brow creases
 // the wrap's 0.791: an 0.08 step, which is a griddle mark. TORTILLA_SHADE's 0.63 is an
 // 0.16 step, which is a stripe. The strong step is kept only where a FEATURE needs to be
 // read as a feature — the brow creases and the lower lip.
-const TORTILLA_TOAST = '#D9B075';  // scorch spots, the cut rim, the fold seam
+const TORTILLA_TOAST = '#AA6E28';  // scorch spots, the cut rim, the fold seam  // C1a: was #D9B075
 const WRAP_BAND = '#6A1C0C';       // paper wrapper band + hands — see THE DARK RUNG below
 // Foil. Warm-NEUTRAL silver rather than either extreme, and the value is the
 // load-bearing part: a first pass warmed this to #EFEBE0 to keep the character in
@@ -137,7 +144,7 @@ const WRAP_BAND = '#6A1C0C';       // paper wrapper band + hands — see THE DAR
 // This is ~22% darker than TORTILLA. The scene is deliberately high-key and the
 // contrast pass compresses the top end, so a gap that looks generous in the hex
 // arrives much smaller on screen — measured by rendering, not by reading the values.
-const FOIL = '#C4C0B5';
+const FOIL = '#A5AFB8';  // C1a: was #C4C0B5
 const BOOT = '#180E05';            // near-black toasted-tortilla boots, grounds the pale body
 // WAS '#E6D8BC' (itself down from `PALETTE.cream` #FFF3DE, luma 0.957 -> 0.850). With the
 // wrap darkened to a real tortilla the rice became the LIGHTEST large mass on the
@@ -146,7 +153,7 @@ const BOOT = '#180E05';            // near-black toasted-tortilla boots, grounds
 // luma 0.816 against the wrap's 0.791 — still lighter, as cooked rice is against a
 // griddled tortilla, but no longer a different material. The rest of that read is
 // COVERAGE, handled by the piece table below.
-const RICE = '#E3CFA4';
+const RICE = '#5E9222';  // C1a: was #E3CFA4
 // ── THE DARK RUNG ────────────────────────────────────────────────────────────
 // Measured against 18 Brawl Stars plates: their P05 is 0.097 and every one of the
 // eighteen puts 5% of the character below 0.18. Burrito's was 0.285, and 53.3% of its
@@ -190,8 +197,8 @@ const MOUTH_TONGUE = '#C4514F';    // the third value inside the mouth, so it is
 // boots — the wrap itself stays this pale tortilla tone (that's the food read for
 // the head/torso), but the arms and legs shift to a fresh guac-green so the body
 // no longer reads as another undifferentiated cream mass.
-const LIMB_AVOCADO = '#3E5A1C';
-const LIMB_AVOCADO_DARK = '#16220A';
+const LIMB_AVOCADO = '#395F18';  // C1a: was #3E5A1C
+const LIMB_AVOCADO_DARK = '#1E320D';  // C1a: was #16220A
 // ── The ARM's own rung, and it exists to make an arm not be a leg ────────────
 // Both limb pairs used to share `LIMB_AVOCADO` over `LIMB_AVOCADO_DARK`, so the
 // four chains were the same object four times (see `dressLimbs`). The fix is a
@@ -200,7 +207,7 @@ const LIMB_AVOCADO_DARK = '#16220A';
 // (boot), so one chain brightens toward its terminal and the other darkens.
 // Opposite directions survive shading in a way a single value gap does not — the
 // key can flatten a gap, it cannot reverse an order.
-const LIMB_AVOCADO_LIGHT = '#5E8430';  // upper arm — fresh guac, luma 0.462
+const LIMB_AVOCADO_LIGHT = '#538423';  // upper arm — fresh guac, luma 0.462  // C1a: was #5E8430
 
 type Spot = readonly [angleDeg: number, radiusFrac: number];
 

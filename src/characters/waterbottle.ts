@@ -6,10 +6,24 @@
  * file authors only the food mass on `rig.joints.head`, the face and a palette.
  *
  * This is the one genuinely transparent character in the cast, which makes it the
- * most dangerous to get wrong — see `render/toon.ts`'s `glossyMat` for the
- * `transmission` knob. Two decisions matter more than any other here:
+ * most dangerous to get wrong. Two decisions matter more than any other here:
  *
- *   1. The plastic shell keeps `transparent: false, opacity: 1` and lets
+ *   1. 🚨 REVERSED 2026-10-15 (graphics revamp C1a) — the shell is now ALPHA glass whose
+ *      opacity rises with Fresnel toward the silhouette (`fresnelGlass`), and carries
+ *      NO `transmission`. The old decision is kept below because its reasoning about
+ *      sort order still holds; what it never priced was the cost. A transmissive
+ *      material in view makes three re-render EVERY opaque mesh in the scene into a
+ *      transmission target each frame: six seats with this bottle on screen measured
+ *      1,575 draws against 999 with transmission off (`tools/tmp/gx_chars_draws.mjs`),
+ *      and 1,881 against 1,394 for the same ring with the egg in this seat on the phone
+ *      tier (`tools/perf.mjs --mode counts --device mobile`). It bought almost nothing
+ *      to look at — the audit's side-by-side (`gx_chars_glass.mjs`) found transmission
+ *      on and off nearly indistinguishable at both cameras. Alpha glass shows the
+ *      water, its fill line and the bubbles through the wall for one draw. The sort
+ *      order is handled by `renderOrder` (bubbles and drops first, glass last), and the
+ *      shell carries no ink hull (see where it is built).
+ *
+ *      The old decision 1, verbatim: The plastic shell keeps `transparent: false, opacity: 1` and lets
  *      `transmission` alone do the see-through work. Mixing alpha-blended
  *      transparency with transmission on the same surface is what produces the
  *      "wrong sort order" failure the brief warns about — alpha blending doesn't
@@ -95,10 +109,17 @@ import { CHARACTER_HEIGHT } from '../units';
 // Hue and saturation are held: `WATER` goes 0.816 -> 0.792 HSL saturation while its
 // luma goes 0.409 -> 0.522, so this spends nothing from the colour budget
 // `arena-scan` guards (`docs/LESSONS.md` §7).
-const PLASTIC = '#BDEDFA';
-const WATER = '#4FB0E8';            // richer, saturated liquid fill
-const WATER_DEEP = '#3A87BE';       // shaded underside tone, and the fill-line ring
-const CAP = '#3E6EA3';              // matte navy — still the darkest area, no longer near-black
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: BLUE (~212°) on the glass shell and the water.
+const PLASTIC = '#65B5F2';  // C1a: was #BDEDFA
+const WATER = '#388AE9';            // richer, saturated liquid fill  // C1a: was #4FB0E8
+const WATER_DEEP = '#2D67B4';       // shaded underside tone, and the fill-line ring  // C1a: was #3A87BE
+const CAP = '#3C64B3';              // matte navy — still the darkest area, no longer near-black  // C1a: was #3E6EA3
 // Held DOWN deliberately while the rest of the family came up. Lifting every blue
 // by the same amount would have bought figure/ground by compressing this character's
 // own internal value ladder, which is the cast's next known defect — measured, the
@@ -122,6 +143,35 @@ const CAP_DARK = '#0E1F35';
 const LABEL = '#F0562A';            // wraparound sports label — saturated warm orange
 const LABEL_PALE = '#FFF6EC';       // the label's own wave stripe, and the smile
 const LABEL_TRIM = '#B8371A';       // trim rings on the label
+
+// ── Glass ────────────────────────────────────────────────────────────────────
+// The shell's opacity looking straight through the wall, and at the silhouette.
+const GLASS_FACE_ALPHA = 0.42;
+const GLASS_EDGE_ALPHA = 0.94;
+
+/**
+ * Alpha that rises with Fresnel: a glass wall seen face-on is mostly see-through; seen at
+ * a grazing angle it is mostly reflection, which is what draws a bottle's outline in glass.
+ * Chained AFTER whatever `onBeforeCompile` the material already carries (`glossyMat`'s
+ * rim), with its own program-cache key so it can never be handed another material's
+ * program (`roles.ts`' PROGRAM CACHE note). If three ever moves the hook, the shell
+ * degrades to plain `GLASS_FACE_ALPHA` glass and says so, rather than throwing mid-build.
+ */
+function fresnelGlass(m: THREE.MeshPhysicalMaterial): void {
+  const prev = m.onBeforeCompile;
+  const prevKey = m.customProgramCacheKey.bind(m);
+  m.onBeforeCompile = (shader, renderer) => {
+    prev.call(m, shader, renderer);
+    const hook = '#include <opaque_fragment>';
+    if (!shader.fragmentShader.includes(hook)) {
+      console.warn('[waterbottle] three moved <opaque_fragment>: the shell is flat glass');
+      return;
+    }
+    shader.fragmentShader = shader.fragmentShader.replace(hook,
+      `diffuseColor.a = mix(diffuseColor.a, ${GLASS_EDGE_ALPHA.toFixed(3)}, pow(1.0 - saturate(dot(geometryNormal, geometryViewDir)), 2.0));\n${hook}`);
+  };
+  m.customProgramCacheKey = () => `${prevKey()}|waterbottle-fresnel-glass`;
+}
 
 // ── Costume layer ────────────────────────────────────────────────────────────
 //
@@ -692,7 +742,10 @@ export class WaterBottleCharacter extends BaseCharacter {
     };
 
     // ── Materials ────────────────────────────────────────────────────────────
-    const shellMat = glossyMat({ rim: true, color: PLASTIC, roughness: 0.12, transmission: 0.6 });
+    // ~~`transmission: 0.6`~~ — see the file header, decision 1 (reversed): alpha glass
+    // that thickens toward the silhouette, for the price of the one draw it always cost.
+    const shellMat = glossyMat({ rim: true, color: PLASTIC, roughness: 0.12, transparent: true, opacity: GLASS_FACE_ALPHA });
+    fresnelGlass(shellMat);
     const capMat = toonMat({ color: CAP, roughness: 0.4 }); // matte — the eye's resting place
     const capRidgeMat = toonMat({ color: CAP_DARK, roughness: 0.4 });
     const labelMat = toonMat({ color: LABEL, roughness: 0.55 });
@@ -706,6 +759,13 @@ export class WaterBottleCharacter extends BaseCharacter {
     shell.name = 'waterbottle_shell';
     shell.castShadow = true;
     shell.receiveShadow = true;
+    // No ink hull on a see-through wall: an inverted hull is visible only where the
+    // surface in front of it hides it, so behind glass its whole dark far side would show
+    // through the empty shoulder in the lobby. (The match draws no hulls — `contour.ts`.)
+    shell.userData.noOutline = true;
+    // Glass draws AFTER the bubbles and drops inside it (renderOrder 0), so they read
+    // through the wall instead of failing the depth test behind it.
+    shell.renderOrder = 1;
     head.add(shell);
 
     // ── Cap ──────────────────────────────────────────────────────────────────

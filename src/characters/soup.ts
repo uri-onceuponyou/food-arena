@@ -77,12 +77,19 @@ import { CHARACTER_HEIGHT } from '../units';
 // pixels. So the sclera is paid for by taking the BOWL DOWN, not by adding white.
 // -13% (0.830 -> 0.722) with the chroma left in; per `docs/LESSONS.md` scaling a warm
 // off-white down RAISES its chroma, which is the direction this frame needs.
-const CERAMIC = '#C6B79A';      // glazed bowl exterior, luma 0.722
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: GOLD (~45°) on the broth, in a BLUE glazed bowl that carries the front view.
+const CERAMIC = '#3E95BA';      // glazed bowl exterior, luma 0.722  // C1a: was #C6B79A
 // WAS `#E2D8C4`, luma 0.863 — i.e. the "interior shadow" constant was LIGHTER than
 // the surface it was supposed to shade, and `dressLimbs` used it for the LEGS, which
 // made the legs the brightest large mass on the model. Both were contributing to the
 // 16.23% clip. Now genuinely a shade (0.612), used for the bowl's interior wall.
-const CERAMIC_SHADE = '#A99B80'; // interior shadow / underside, luma 0.612
+const CERAMIC_SHADE = '#35718A'; // interior shadow / underside, luma 0.612  // C1a: was #A99B80
 // ── The dark rung ────────────────────────────────────────────────────────────
 // `tools/tmp/valuescan.mjs --mode ref`: every one of eighteen Brawl Stars plates puts
 // 5% of the character below luma 0.18. Not one of ours did. Soup's own part structure
@@ -126,8 +133,8 @@ const RIM_TRIM = '#3A1009';      // takeout-bowl band, near-black rust — Soup'
 // -> 0.0803** when the pale rig torso was replaced by the pot stand: a boundary that
 // used to be the model's strongest became one of its three weakest, because the
 // stand's top-facing dome and the bowl's under-curve landed in the same value band.
-const GLAZE_GREY = '#78726B';    // pot stand / body mass, luma 0.452
-const SLEEVE_GREY = '#ABA49B';   // upper arms — grey stoneware sleeves, luma 0.647
+const GLAZE_GREY = '#527C99';    // pot stand / body mass, luma 0.452  // C1a: was #78726B
+const SLEEVE_GREY = '#7999AF';   // upper arms — grey stoneware sleeves, luma 0.647  // C1a: was #ABA49B
 // `shoulderL|elbowL` measured `dLcontact` **0.0612** with one sleeve tone for the
 // whole arm — the two halves of a limb drawn in one colour fuse at the elbow, which
 // is the same fusion that made the arm read as detached from the torso, one joint
@@ -143,8 +150,8 @@ const SLEEVE_GREY = '#ABA49B';   // upper arms — grey stoneware sleeves, luma 
 // still 0.048 ABOVE `LEG_STONE` (0.408) rather than darker than it: the arm/leg
 // separation this pass is for is carried by thickness, by the warm cream mitt and by
 // the ladder's DIRECTION, and a forearm darker than a thigh would invert that.
-const CUFF_GREY = '#7C7369';     // forearms — the darker rolled cuff, luma 0.456
-const LEG_STONE = '#6E675F';     // legs — darker stoneware posts, luma 0.408
+const CUFF_GREY = '#55768D';     // forearms — the darker rolled cuff, luma 0.456  // C1a: was #7C7369
+const LEG_STONE = '#4D6A80';     // legs — darker stoneware posts, luma 0.408  // C1a: was #6E675F
 // ── WARMED, and it is the frame's scarce budget rather than a preference ─────
 // WAS '#CFC1A6' (HSL 39, 25%, 73%). This character is the cast's most achromatic:
 // every large mass on it is a grey or a near-neutral cream and the only chroma in
@@ -155,7 +162,7 @@ const LEG_STONE = '#6E675F';     // legs — darker stoneware posts, luma 0.408
 // degrees** — so the mitts stay "cream cloth" (`rules.ts`'s spec) and stop being
 // grey. It also widens the arm/leg split: the mitt is now the only warm thing on
 // the limbs, and the boots below stay near-black stoneware.
-const MITT_CREAM = '#E0BC8A';    // hands — warm cream cloth mitts, luma 0.756
+const MITT_CREAM = '#D5983B';    // hands — warm cream cloth mitts, luma 0.756  // C1a: was #E0BC8A
 // ── THE BROTH IS YELLOW NOW, AND THE OLD VALUE WAS ORANGE BY MEASUREMENT ─────
 // Uri, playing the deployed build: *"Soup — add noodles or something in the liquid,
 // make the liquid more yellow than brown."*
@@ -181,7 +188,7 @@ const MITT_CREAM = '#E0BC8A';    // hands — warm cream cloth mitts, luma 0.756
 // `PALETTE.broth` have DIVERGED deliberately. `soup.Splash` and `soup.Dump` still
 // carry `color: '#E8792A'` in `rules.ts` — the splash projectile and the dump cone
 // are still the old orange. Reported rather than changed.
-const BROTH = '#CC9F0D';         // hue 46.0, HSL(46, 88%, 43%), luma 0.620
+const BROTH = '#8A8107';         // hue 46.0, HSL(46, 88%, 43%), luma 0.620  // C1a: was #CC9F0D
 // The pair is a VALUE STEP, not two independent colours — moving one without the
 // other flattens the bowl. The shipped pair `#E8792A`/`#B85A16` was **0.133 of
 // luma** apart, so the new dark holds exactly that step at the new hue: luma
@@ -190,7 +197,7 @@ const BROTH = '#CC9F0D';         // hue 46.0, HSL(46, 88%, 43%), luma 0.620
 // ⚠️ AND UNTIL THIS COMMIT THAT STEP HAD NEVER BEEN RENDERED ONCE — see the depth
 // ring in `buildBrothSolids`, which measured 0 delivered pixels at all three shipped
 // stations.
-const BROTH_DARK = '#A07D0A';    // hue 46.0, luma 0.487 — exactly 0.133 under BROTH
+const BROTH_DARK = '#6A6107';    // hue 46.0, luma 0.487 — exactly 0.133 under BROTH  // C1a: was #A07D0A
 const STEAM = PALETTE.steam;     // #C9C9C9
 // ── The solids, and the pale one is a MEASURED hazard rather than a taste call ───
 // Soup's own second weapon is `Noodle Toss`, `rules.ts` colour **`#FFE9A8`** — HSL
@@ -208,7 +215,7 @@ const STEAM = PALETTE.steam;     // #C9C9C9
 // `NOODLE_TOP` is HSL lightness **0.620**, i.e. **0.209 below** the projectile —
 // fifty times the separation of the documented collision — and it is still a
 // legible +0.110 of luma over the new broth.
-const NOODLE_TOP = '#DDB95F';    // hue 42.9, HSL L 0.620, luma 0.730 — the strand you see
+const NOODLE_TOP = '#F0C843';    // hue 42.9, HSL L 0.620, luma 0.730 — the strand you see  // C1a: was #DDB95F
 const NOODLE_WET = '#7A5510';    // hue 39.1, HSL L 0.271, luma 0.345 — a strand under the surface
 // Green and orange are here for HUE RANGE, not for garnish realism, and there is a
 // figure/ground reason. `docs/STATE.md` / `DECISIONS §73`: all 11 colour rails now
@@ -233,7 +240,7 @@ const CARROT = '#D9601C';        // hue 21.6, luma 0.458
 // the broad up-facing surface a projectile crosses. They are still in the pale band
 // above, and if a projectile-legibility pass ever lands on this character they are
 // the residual.
-const NOODLE = '#F2D98A';
+const NOODLE = '#F6D44B';  // C1a: was #F2D98A
 const NOODLE_DARK = '#D9B85E';
 const WOOD = '#8A5A34';          // ladle handle
 
@@ -252,7 +259,7 @@ const BOOT_STONE = '#160F0B';
 // it was the second-brightest large area on the model. It is now a curved apron
 // PANEL that follows the pot stand's own lathe profile (see `buildApron`), at a
 // value that sits between the stand and the bowl instead of above both.
-const BIB = '#BCB29B';       // apron cloth, luma 0.700
+const BIB = '#B99E47';       // apron cloth, luma 0.700  // C1a: was #BCB29B
 const SLING = '#6B4226';     // leather sling strap
 const SLING_DARK = '#4A2E1A';
 
