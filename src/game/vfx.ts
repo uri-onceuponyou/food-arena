@@ -2995,6 +2995,23 @@ export class VfxLayer {
     return c;
   }
 
+  /** The hex a fighter's ground marks are keyed to: its character's signature (`palette.ts`),
+   *  or the splatter family's when the mark has no owner. The trail draw in `sync` and QA
+   *  (`tools/tmp/np_nfighter.mjs`'s palette block) both go through HERE, so the probe reads the
+   *  shipped lookup rather than a copy of it. */
+  markHexFor(owner: Fighter | undefined): string {
+    return owner ? VFX_SIGNATURE[owner.characterId] : SPLAT_HUE_HEX;
+  }
+
+  /** QA: the mark hex of the fighter in roster slot `i` as of the last `sync`, or `null` for an
+   *  empty slot. Read by `np_nfighter` — since V1 the trail is keyed to the CHARACTER, not the
+   *  seat, so there is no per-slot material left to read. */
+  markHexForSlot(i: number): string | null {
+    const f = this.qaRoster[i];
+    return f ? this.markHexFor(f) : null;
+  }
+  private qaRoster: readonly Fighter[] = [];
+
   // ── Ability VFX pools ──────────────────────────────────────────────────────
   private readonly glowTex = buildRadialGlowTexture();
   private readonly coreTex = buildCoreSpikeTexture();
@@ -3289,6 +3306,7 @@ export class VfxLayer {
 
   sync(state: MatchState): void {
     const roster = fightersOf(state);
+    this.qaRoster = roster;
     // 🚨 BEFORE ANY POOL. See `statusBySlot`: growth has to happen at a fixed point in
     // the frame or a new seat's telegraph lands in a different place in the scene graph
     // depending on which tick it first appeared on.
@@ -3632,7 +3650,7 @@ export class VfxLayer {
     };
     for (const t of state.trailMarks) {
       const owner = roster[slotOf(t.ownerId, t.ownerRole)];
-      const col = this.markColorFor(owner ? VFX_SIGNATURE[owner.characterId] : SPLAT_HUE_HEX);
+      const col = this.markColorFor(this.markHexFor(owner));
       const pos = groundPos(t.x, t.y);
       this.groundMarks.push({
         x: pos.x, z: pos.z, r: markRadius(t.expiresAt - TRAIL.durationMs, t.expiresAt, TRAIL.radius),

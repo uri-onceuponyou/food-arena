@@ -21,9 +21,12 @@
  *      `__vfxDebugScreen.slots[i]`. They must agree, per slot, to within a pixel budget.
  *   3. **THE HP TEXT PER SLOT MATCHES THAT SLOT'S FIGHTER** — the single cheapest way to
  *      catch a HUD that pooled its DOM but kept writing every fighter into slot 1.
- *   4. **DISTINCT TRAIL MATERIALS PER SLOT** — `vfx.ts:TRAIL_COLOR` became a list indexed
- *      by slot; entries 2..5 are unmeasured (`DECISIONS §49e`) but they must at least
- *      EXIST and be distinct, or four of six fighters draw a black trail.
+ *   4. **EVERY SEAT RESOLVES A REAL TRAIL COLOUR** — ~~`vfx.ts:TRAIL_COLOR` became a list
+ *      indexed by slot; entries 2..5 are unmeasured (`DECISIONS §49e`) but they must at least
+ *      EXIST and be distinct, or four of six fighters draw a black trail.~~ Since V1
+ *      (`1af4327`) the colour is the OWNER's character signature (`src/vfx/palette.ts`), read
+ *      through `layer.markHexForSlot(i)` — the same `markHexFor` the draw calls. Distinct here
+ *      because the roster is six different characters; two Donuts share one by design.
  *   5. 🚨 **THE KNOWN-BAD: TWO SLOTS' DATA SWAPPED.** The same roster is loaded twice with
  *      slots 1 and 2 exchanged, and the frame, the nameplate order and the per-slot
  *      positions must all MOVE. Without it, every assertion above is satisfied by a
@@ -345,28 +348,24 @@ try {
     await page.goto(`${BASE}/?fighters=${encodeURIComponent(rosterParam(6))}&fogRadius=900&pointerLock=0`,
       { waitUntil: 'networkidle' });
     await page.waitForFunction(() => window.__gameReady === true, null, { timeout: 90000 });
+    // ⚠️ REBUILT 2026-10-15 (orchestrator, after V1 `1af4327`). This block read
+    //    `layer.trailMatsFor(i)[0].userData.markColor` — one trail MATERIAL per SEAT, from the
+    //    slot palette `TRAIL_COLOR` (`DECISIONS §49e`). V1 replaced it: every ground mark is one
+    //    instanced union keyed to its OWNER's character signature (`src/vfx/palette.ts`), so
+    //    `trailMatsFor` no longer exists and this probe would have THROWN. The question the
+    //    block exists for is unchanged — no seat may resolve a missing (black) trail colour —
+    //    and it is now asked through `layer.markHexForSlot(i)`, which calls the SAME
+    //    `markHexFor` the draw calls. Two Donuts now share a colour by design (§91u).
+    await page.waitForFunction(() => typeof window.__vfxLayer?.markHexForSlot === 'function'
+      && window.__vfxLayer.markHexForSlot(5) !== null, null, { timeout: 30000 }).catch(() => { /* the rows below show it */ });
     const out = await page.evaluate(() => {
       const layer = window.__vfxLayer;
-      // Force every slot's material to exist, through the SHIPPED accessor rather than by
-      // reading the constant — a palette that is long enough but wired to the wrong index
-      // would pass a test that read `TRAIL_COLOR` directly.
       const cols = [];
       for (let i = 0; i < 6; i++) {
-        const mat = layer.trailMatsFor(i)[0];
-        // 🚨 `mat.color` IS NO LONGER THE SLOT'S PALETTE ENTRY, and this row went red on
-        // `#f6a15e` / `#f6c75b` when 31f481c landed. `markHotColor()` puts a hue-shifted
-        // high-luma neighbour on `mat.color` and the texture multiplies it back down to the
-        // base pink — a multiply map can only take green AWAY, and Rec.709 luma is 71%
-        // green, so a pink mark cannot be hot at any depth. `userData.markColor` is the
-        // palette entry, published by `vfx.ts`'s `groundMarkMat` for exactly this row.
-        //
-        // ⚠️ NO `??` FALLBACK TO `mat.color`, DELIBERATELY. A fallback would make this row
-        // pass again the moment the field disappeared — the same shape as the HUD probe
-        // that did `querySelector('.hud') ?? document.body` and reported the coverage of
-        // the whole page under the name "HUD covers x%". A missing accessor must be
+        // ⚠️ NO FALLBACK, DELIBERATELY (the old block's rule, kept): a missing accessor must be
         // VISIBLE, so it becomes a value that cannot match any hex.
-        const mc = mat.userData.markColor;
-        cols.push(typeof mc === 'string' ? mc.toLowerCase() : `MISSING-userData.markColor-slot${i}`);
+        const hx = typeof layer?.markHexForSlot === 'function' ? layer.markHexForSlot(i) : undefined;
+        cols.push(typeof hx === 'string' ? hx.toLowerCase() : `MISSING-markHexForSlot-slot${i}`);
       }
       return cols;
     });
@@ -374,15 +373,23 @@ try {
     return out;
   })();
   console.log(`   ${JSON.stringify(palette)}`);
-  check('six slots resolve to six trail materials', palette.length === 6);
-  check('every slot\'s trail colour is DISTINCT', new Set(palette).size === 6, JSON.stringify(palette));
+  check('six slots resolve to six trail colours', palette.length === 6);
+  check('every slot\'s trail colour is DISTINCT (six different characters)', new Set(palette).size === 6, JSON.stringify(palette));
   // The set is asserted PRESENT before it is asserted CORRECT — a palette of six
   // `MISSING-…` sentinels would otherwise satisfy "six slots" and "all distinct".
-  check('every slot publishes userData.markColor (the accessor, not the tint)',
+  check('every slot publishes markHexForSlot (the shipped lookup, not a copy)',
     palette.every((c) => c.startsWith('#')) && palette.length === 6,
     JSON.stringify(palette.filter((c) => !c.startsWith('#'))));
-  check('slots 0 and 1 keep the two MEASURED hexes', palette[0] === '#f5475e' && palette[1] === '#f5c147',
-    JSON.stringify(palette.slice(0, 2)));
+  // ⚠️ WAS: 'slots 0 and 1 keep the two MEASURED hexes' (#f5475e / #f5c147, the retired SLOT
+  //    palette). The colour now follows the CHARACTER, so the row checks that against the
+  //    source of truth read independently from `palette.ts`'s text.
+  const SIG = (() => {
+    const src = readFileSync(resolve(ROOT, 'src/vfx/palette.ts'), 'utf8');
+    const m = /\bhamburger:\s*'(#[0-9A-Fa-f]{6})'/.exec(src);
+    return m ? m[1].toLowerCase() : 'UNREADABLE';
+  })();
+  check('slot colour follows the CHARACTER: slot 0 (hamburger) resolves to palette.ts\'s hamburger signature',
+    palette[0] === SIG, `${palette[0]} vs ${SIG}`);
 
   // ── 5: THE KNOWN-BAD ──────────────────────────────────────────────────────
   console.log('── known-bad: slots 1 and 2 swapped ────────────────────');
