@@ -395,8 +395,19 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   // ⚠️ It backs out of the confirm FIRST. Escape is the universal "undo that", and a
   // binding that jumped straight from an open confirm back into the match would leave
   // the player unable to cancel with the key they cancel everything else with.
+  //
+  // 🚨 BUT NOT ONCE THE MATCH IS DECIDED (META-06 / ML-6). It toggled pause in every phase,
+  // so Escape on the result card opened "Paused / Resume / Change Fighter / Quit", and Quit's
+  // confirm told the player the match paid "no trophies, coins or XP" directly above the card
+  // showing what it had just paid — and with mouse capture on, Resume re-captured the pointer
+  // over a card whose buttons need a free cursor. The pause CHIP already hides on
+  // `.is-ended` because *"once it IS decided, pause means nothing"*; the key now reads the
+  // SAME signal, so pointer and keyboard agree. Nothing is mapped in its place: the whistle
+  // itself releases the mouse, so a reflexive Escape there must not throw the player off a
+  // card they have not read yet.
   const onKey = (ev: KeyboardEvent): void => {
     if (ev.key !== PAUSE_KEY) return;
+    if (root.classList.contains('is-ended')) return;
     ev.preventDefault();
     if (pendingExit !== null) { closeConfirm(); return; }
     setPaused(!session.paused);

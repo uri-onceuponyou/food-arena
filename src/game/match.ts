@@ -326,8 +326,15 @@ export interface MatchDebug {
  *
  * ⚠️ PLAIN DATA, NOT LIVE `Fighter` OBJECTS. `GameSessionOptions.onPhase`'s own comment
  * promises the screen layer reacts *"WITHOUT polling `MatchState` from outside"*, and the
- * sim keeps mutating for one more tick after `phase` flips (`sim.ts`'s projectile loop
- * reproduces the prototype's extra tick deliberately). Four fields, built once per match.
+ * sim keeps mutating after `phase` flips. Four fields, built once per match.
+ *
+ * ⚠️ THAT SENTENCE USED TO SAY *"the sim keeps mutating for one more tick after `phase` flips
+ * (`sim.ts`'s projectile loop reproduces the prototype's extra tick deliberately)"*, and "one
+ * more tick" was never true of this loop: it steps the sim every frame under the result card,
+ * and `sim.ts` steps projectiles in every phase, so a shot in the air flew its whole range —
+ * up to 683 ms past the whistle at two seats, killing the declared winner in 5 of 110 all-AI
+ * matches (BH-01 / ML-1 / B5). Since `retireShotsAfterWhistle` the sim still mutates after the
+ * flip (the clock, the ground effects) but no shot resolves after the ending tick.
  */
 export interface MatchOutcome {
   /** How many seats this match had — `profile.recordPlacement`'s second argument. */
@@ -755,11 +762,16 @@ export class GameSession {
    * ⚠️ **CACHED RATHER THAN RECOMPUTED PER FRAME, AND THAT IS CORRECTNESS BEFORE IT IS
    * COST.** The result card stays up until the player presses something, so a per-frame
    * `outcome()` would re-rank on every one of those frames — off a `MatchState` the sim is
-   * still stepping for one more tick (`sim.ts`'s projectile loop deliberately reproduces
-   * the prototype's extra tick), and off an `eliminated` list that can still grow if a
-   * projectile already in the air lands after the whistle. The card and the payout would
-   * then be able to disagree with each other. Computed once, at the transition, is also
-   * the only reading under which `onPhase` and `HudFrameInfo.place` are the same answer.
+   * still stepping. The card and the payout would then be able to disagree with each other.
+   * Computed once, at the transition, is also the only reading under which `onPhase` and
+   * `HudFrameInfo.place` are the same answer.
+   *
+   * ⚠️ This used to add *"for one more tick (`sim.ts`'s projectile loop deliberately
+   * reproduces the prototype's extra tick), and off an `eliminated` list that can still grow
+   * if a projectile already in the air lands after the whistle"*. The second half was the
+   * real behaviour and the first was not — shots kept landing for their whole flight, not one
+   * tick. `retireShotsAfterWhistle` closed that, so `eliminated` can no longer grow after the
+   * ending tick; the cache stays, because the reasoning above does not depend on it.
    *
    * Null in every phase but `'ended'`, which is what clears it on restart.
    */
@@ -822,6 +834,11 @@ export class GameSession {
    * Bounded by construction — every entry is deleted on `projectile-destroyed`, which
    * `sim.ts` guarantees for every projectile it ever creates (hit / cover / expiry are
    * the only three exits, and all three route through `removeProjectile`).
+   *
+   * ⚠️ AND A FOURTH EXIT NOW, OUTSIDE THE SIM: `retireShotsAfterWhistle` empties
+   * `state.projectiles` on the first tick after a match is decided and deletes those entries
+   * here itself, since no `projectile-destroyed` is emitted for them. The sentence above is
+   * still true of the SIM; it is no longer the whole list.
    */
   private readonly projectileOrigins = new Map<number, { color: string; x: number; y: number }>();
 
@@ -2132,6 +2149,48 @@ export class GameSession {
   }
 
   /**
+   * 🚨 THE SHOTS IN THE AIR AT THE WHISTLE DO NOT LAND AFTER IT.
+   *
+   * `sim.ts` steps projectiles in every phase, deliberately (it reproduces the prototype), and
+   * this loop keeps calling `stepMatch` under the result card — so every shot already in flight
+   * flew its WHOLE remaining range and resolved: Egg's latched Hatch! pecks too. Measured by
+   * three independent finders (BH-01, ML-1, B5): at two seats **the declared winner was hit
+   * after the whistle in 38/110 all-AI matches and KILLED in 5/110**, up to 683 ms (~41 ticks)
+   * later; in the browser the local seat died under its own VICTORY card — death animation,
+   * burst, kick, hit-stop and the death sting at full gain. Payout was never affected
+   * (`endedOutcome` is cached at the transition); the picture and the sound were.
+   *
+   * ⚠️ **AT THE START OF A TICK THAT BEGINS DECIDED, NOT INSIDE THE ENDING TICK.** The tick
+   * that ends the match resolves completely — its own shots included — because that is
+   * `DECISIONS §84`'s parked same-tick question and not this fix's to answer. Every tick after
+   * it begins with nothing in the air. In shipped play the phase only ever flips inside
+   * `stepMatch`, so this runs on the very next frame; asked here rather than in `notifyPhase`
+   * so it also holds when something else decides a match between frames (every QA plant in
+   * `tools/tmp` does exactly that).
+   *
+   * ⚠️ **WHY HERE AND NOT IN THE SIM.** The sim-side gate (no victim resolution on a tick that
+   * begins `'ended'`) is the cleaner rule and was measured bit-identical through the end tick —
+   * and it turns `sim.test.mjs` §20(b) red (896 -> 895), because that row's `delivered()`
+   * fixture and `tools/tmp/press_value.mjs` PARK a state with `phase = 'ended'` and rely on
+   * shots still landing. That is `sim.ts`'s owner's trade to make; this is the presentation
+   * side's, and it leaves every Node instrument and the 110-cell corpus bit-identical by
+   * construction (none of them constructs a `GameSession`).
+   *
+   * ⚠️ The session is now a second WRITER of one sim field, which this file otherwise never
+   * is. It is confined to this one method, to a decided match, and to the one array whose
+   * entries cannot change any outcome after `endedOutcome` was cached. Shots vanish rather
+   * than fizzle — `vfx.ts:syncPool` drops their meshes on the next `sync`, the same as a shot
+   * that expires at range, and `audio/director.ts` voices nothing for an expiry either.
+   */
+  private retireShotsAfterWhistle(): void {
+    const shots = this.state.projectiles;
+    if (shots.length === 0) return;
+    // `projectileOrigins`' fourth exit — see its field comment.
+    for (const p of shots) this.projectileOrigins.delete(p.id);
+    shots.length = 0;
+  }
+
+  /**
    * 🚨 PUT A BANKED PAYOUT ON THE RESULT CARD. The screen layer's one-way edge IN.
    *
    * `DECISIONS §64` defect 3: `bb00d66` made a 3rd-of-6 finish pay **+9 trophies, 44
@@ -2338,6 +2397,8 @@ export class GameSession {
     const prev = roster.map((f) => ({ x: f.x, y: f.y }));
 
     const input = this.buildInput();
+    // A tick that BEGINS with the match decided resolves no shot. See `retireShotsAfterWhistle`.
+    if (this.state.phase === 'ended') this.retireShotsAfterWhistle();
     const events = stepMatch(this.state, stepDtMs, input);
     this.handleEvents(events);
     // Second consumer of the same tick's events (the first being `handleEvents`
