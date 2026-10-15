@@ -151,6 +151,10 @@ const SPRINKLE_L = CH * 0.042; // 0.088 m long -> ~0.15 m end to end
  */
 const HALO_R = CH * 0.375; // 0.79 m radius -> 1.58 m across, at hit height
 const SHOCK_R = CH * 0.40; // 0.84 m radius -> 1.68 m across, on the floor
+/** V1b — the contact ring the impact debris launches from (x impact scale): `taco.ts`'s
+ *  `CH * 0.24`, i.e. about a fighter's half-width at hit height, so the arcs and sprinkles
+ *  are born at the victim's edge instead of inside it. */
+const IMPACT_RING = CH * 0.24; // 0.50 m
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope geometry/material singletons. Only the cheap Object3D/Mesh WRAPPER
@@ -351,6 +355,9 @@ function spawnRing(
   mat.color.set(color);
   mat.opacity = startOpacity;
   const ring = new THREE.Mesh(opts.band ? bandRingGeo : thinRingGeo, mat);
+  // NAMED for the diagnostics (`tools/tmp/v1b_cover.mjs` splits body cover by it): a hoop
+  // at hit height and a hoop on the floor are different jobs.
+  ring.name = y > GROUND_Y + 0.1 ? 'fx:donut.hoop' : 'fx:donut.floorHoop';
   ring.renderOrder = opts.renderOrder ?? 9;
   ring.position.set(x, y, z);
   ring.rotation.y = Math.random() * TWO_PI; // flat XZ geometry: yaw alone, never a tipped plane
@@ -380,6 +387,7 @@ function spawnSprinkle(
   mat.color.set(SPRINKLES[(Math.random() * SPRINKLES.length) | 0]);
   mat.opacity = 1;                       // SET, never read — see `spawnRing`.
   const mesh = new THREE.Mesh(sprinkleGeo, mat);
+  mesh.name = 'fx:donut.sprinkle';
   mesh.renderOrder = 9;
   mesh.position.set(ox, oy, oz);
   mesh.scale.setScalar(scale);
@@ -408,6 +416,7 @@ function spawnArc(
   ang: number, speed: number, scale: number, life: number,
 ): void {
   const group = new THREE.Group();
+  group.name = 'fx:donut.arc';
   const backMat = nextArcMat();
   backMat.color.set(GLAZE_DEEP);
   backMat.opacity = 1;
@@ -591,26 +600,41 @@ export const donutWeaponVfx: CharacterWeaponVfxMap = {
       // fragment is ~13 px on screen and its curvature — the entire reason it is an
       // arc and not a chip — is undetectable. Biased along `ctx.direction`, the
       // attacker→hit vector, so fragments carry through the way real debris does.
+      //
+      // ⚠️ V1b: "thrown hard enough to clear the body" was true of where they END. They
+      // STARTED at the hit position — which is the VICTIM's centre (`combat.ts` emits
+      // `hit-landed` at `target.x/y`) — so every fragment spent its first frames on the
+      // fighter: in the canonical Donut-v-Taco fight the arcs were 7–8% of every
+      // effect-covered body pixel (`tools/tmp/v1b_cover.mjs --plan duel`, element
+      // `fx:donut.arc`). Now launched from the CONTACT RING, `IMPACT_RING` out along their
+      // own flight line — the same fix `taco.ts` made for its debris ("launched from the
+      // contact RING, not from dead centre"). Count, speed, size and life unchanged.
+      const R0 = IMPACT_RING * s;
       for (let i = 0; i < 3; i++) {
         const ang = (i / 3) * TWO_PI + Math.random() * 0.9;
         spawnArc(
-          ctx, ctx.position, ctx.color,
+          ctx, new THREE.Vector3(x + Math.cos(ang) * R0, y, z + Math.sin(ang) * R0), ctx.color,
           ang, (2.3 + Math.random() * 1.5) * s,
           (1.05 + Math.random() * 0.5) * s, 0.36 + Math.random() * 0.12,
         );
       }
 
       // 4. The sprinkles.
-      for (let i = 0; i < 8; i++) {
+      // ⚠️ V1b: 8 -> 5 per pellet, from the contact ring, life x0.8. A Candy volley is three
+      // pellets landing together, so this was 24 pieces of six-colour confetti per volley,
+      // born inside the victim and living half a second; "confetti" sitting on the bodies is
+      // in 5 of 8 w5 cast notes. Five per pellet is still fifteen per volley — the "loudest
+      // DONUT signal" stays loud, it stops being born on the fighter it hit.
+      for (let i = 0; i < 5; i++) {
         const ang = Math.random() * TWO_PI;
         const out = (2.2 + Math.random() * 1.8) * s;
         spawnSprinkle(
           ctx,
-          x, y, z,
+          x + Math.cos(ang) * R0, y, z + Math.sin(ang) * R0,
           Math.cos(ang) * out + ctx.direction.x * 0.9,
           2.5 + Math.random() * 1.6,
           Math.sin(ang) * out + ctx.direction.z * 0.9,
-          0.4 + Math.random() * 0.14,
+          (0.4 + Math.random() * 0.14) * 0.8,
           1.1 + Math.random() * 0.6,
         );
       }

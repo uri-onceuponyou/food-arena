@@ -314,6 +314,17 @@ const MEDIKIT_WARN_MS = MEDIKIT.popMs * 3;
 const IMPACT_HEIGHT = 1.15;
 const CAST_HEIGHT = 1.25;
 /**
+ * V1b — ROOM AROUND THE FIGHTER. The cast muzzle's distance in front of the caster, and how far
+ * its flash swells (x `castMuzzle`'s role scale). It used to share the bespoke cast's 0.7 m
+ * origin and swell 0.75 -> 1.3 m, so its tail reached back across the caster's own body: in the
+ * canonical Donut-v-Taco fight it was 19% of every effect-covered body pixel
+ * (`tools/tmp/v1b_cover.mjs --plan duel`). 1.05 m puts the swollen edge (0.53 m radius) at the
+ * caster's ~0.5 m half-width; the frame-1 size, the colour and the full opacity — the parts
+ * that make a cast read — are untouched.
+ */
+const MUZZLE_OFF_M = 1.05;
+const MUZZLE_END_SCALE = 1.05;
+/**
  * Linear scale of the SUBORDINATE impact burst anchor — the one that sits under a
  * bespoke `impact()` hook. `impactAnchor`'s header carries the whole derivation.
  *
@@ -1461,7 +1472,13 @@ const UNION_CORE_OPACITY = 1.0;
  * sprite sitting on the victim for the whole dwell, which is the *"effect that hides
  * the thing it is giving feedback about"* this file already has a scar from.
  */
-const UNION_CORE_LIFE_S = 0.34;
+// ⚠️ V1b: WAS 0.34, AND THE PARAGRAPH ABOVE ALREADY SAID WHY IT SHOULD NOT BE. "A core is a
+// POP, not a dwell", benchmarked against burst()'s 0.16–0.24 s flash — and then shipped half
+// again as long. With `depthTest: false` over the victim it was 8.5% of every effect-covered
+// body pixel in the canonical Donut-v-Taco fight and 10% at six seats
+// (`tools/tmp/v1b_cover.mjs`, family `unionCores`). 0.22 s is inside the flash's own range;
+// the peak — size, whiteness, full opacity, the spike profile — is untouched.
+const UNION_CORE_LIFE_S = 0.22;
 /** `(1 - t)^this` — slightly faster than linear. */
 const UNION_CORE_FADE = 1.1;
 /**
@@ -3429,7 +3446,7 @@ export class VfxLayer {
             damage: p.damage,
             weapon: p.weapon,
             characterId: owner.characterId,
-            spawnTransient: (obj, life, onUpdate) => this.spawnTransientObject(obj, life, onUpdate),
+            spawnTransient: (obj, life, onUpdate) => { obj.userData.vfxSrc = `${owner.characterId}.${p.weapon.key}.projectile`; this.spawnTransientObject(obj, life, onUpdate); },
           };
           const obj = bespoke.projectile(ctx);
           // A bespoke projectile is created by `syncPool`, not by `spawnTransient`, so
@@ -3517,7 +3534,7 @@ export class VfxLayer {
             damage: p.damage,
             weapon: p.weapon,
             characterId: owner.characterId,
-            spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
+            spawnTransient: (o, life, onUpdate) => { o.userData.vfxSrc = `${owner.characterId}.${p.weapon.key}.trail`; this.spawnTransientObject(o, life, onUpdate); },
             object: obj,
             dt: frameDtSeconds,
           };
@@ -3935,7 +3952,13 @@ export class VfxLayer {
   /** `ctx.spawnTransient` for every `WeaponVfx` hook (see `vfx/weapons/types.ts`):
    * adds `object` to the VFX layer and removes it again after `lifetimeSeconds`,
    * calling `onUpdate(progress, elapsedSeconds)` once per `updateEffects` tick in
-   * between so an author can fade/scale/move it over its life. */
+   * between so an author can fade/scale/move it over its life.
+   *
+   * QA: each of the five hook sites that build a `ctx` stamps
+   * `object.userData.vfxSrc = '<character>.<weapon key>.<hook>'` before calling this
+   * (V1b) — `tools/tmp/v1b_cover.mjs` attributes body cover to a weapon hook by it, so
+   * "the bespoke effects cover the fighters" can name WHICH weapon file. Nothing in the
+   * game reads it. */
   private spawnTransientObject(
     object: THREE.Object3D,
     lifetimeSeconds: number,
@@ -4402,7 +4425,7 @@ export class VfxLayer {
       // Everything the hook spawns is TAGGED WITH THE CASTER, so `cancelCastTelegraph`
       // tears the bespoke half down with the generic half. Without this an interrupted
       // cast would keep its gathering beats animating over a corpse.
-      spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate, fighterId),
+      spawnTransient: (o, life, onUpdate) => { o.userData.vfxSrc = `${characterId}.${weapon.key}.telegraph`; this.spawnTransientObject(o, life, onUpdate, fighterId); },
     };
     bespokeTelegraph(ctx);
   }
@@ -4544,7 +4567,9 @@ export class VfxLayer {
     const color = weapon.color;
 
     const bespoke = getWeaponVfx(characterId, weapon.key)?.cast;
-    this.castMuzzle(origin.x + fx * offM, origin.z + fy * offM, color, bespoke ? 'subordinate' : 'primary');
+    // The MUZZLE sits further out than the bespoke cast's origin (`offM`) — V1b, see
+    // `MUZZLE_OFF_M`. The bespoke `ctx.position` below is unchanged.
+    this.castMuzzle(origin.x + fx * MUZZLE_OFF_M, origin.z + fy * MUZZLE_OFF_M, color, bespoke ? 'subordinate' : 'primary');
     if (!bespoke) return;
 
     const ctx: WeaponVfxCtx = {
@@ -4555,7 +4580,7 @@ export class VfxLayer {
       damage: weapon.damage,
       weapon,
       characterId,
-      spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
+      spawnTransient: (o, life, onUpdate) => { o.userData.vfxSrc = `${characterId}.${weapon.key}.cast`; this.spawnTransientObject(o, life, onUpdate); },
     };
     bespoke(ctx);
   }
@@ -4622,13 +4647,19 @@ export class VfxLayer {
   private castMuzzle(xM: number, zM: number, color: string, role: 'primary' | 'subordinate'): void {
     const k = role === 'primary' ? 1 : 0.75;
     const p = this.allocParticle();
+    p.sprite.userData.vfxKind = 'muzzle'; // QA: v1b_cover attributes body cover by it
     p.active = true;
     p.life = 0;
     p.maxLife = role === 'primary' ? 0.16 : 0.13;
     p.sprite.visible = true;
     p.sprite.position.set(xM, CAST_HEIGHT, zM);
     p.vx = 0; p.vy = 0; p.vz = 0; p.gravity = 0;
-    p.startScale = 0.75 * k; p.endScale = 1.3 * k;
+    // V1b: the start (the pop, the cast READ) is unchanged; the swell is not — 1.3k -> 1.05k.
+    // The swell is the half that landed on the caster: with the old 0.7 m offset a 1.3 m
+    // sprite reached back to 0.05 m from the caster's own centre, and the muzzle was the
+    // second-largest thing on any body in the canonical fight (19% of covered body pixels,
+    // `tools/tmp/v1b_cover.mjs --plan duel`, `particles:muzzle`). See `MUZZLE_OFF_M`.
+    p.startScale = 0.75 * k; p.endScale = MUZZLE_END_SCALE * k;
     // Full opacity in both roles. The anchor is made subordinate by SIZE, not by
     // dimming: rule 1 of the colour contract above requires every transient to clear
     // the cast's luma 0.302 by >= 0.15 upward, and a half-opacity additive sprite over
@@ -4819,7 +4850,7 @@ export class VfxLayer {
         damage: amount,
         weapon: source.weapon,
         characterId: source.characterId,
-        spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
+        spawnTransient: (o, life, onUpdate) => { o.userData.vfxSrc = `${source.characterId}.${source.weapon.key}.impact`; this.spawnTransientObject(o, life, onUpdate); },
       };
       // UNION SHADE — every lobe this hook spawns becomes a member of ONE mass, and
       // the core/edge/falloff treatment is applied to that mass rather than to each
@@ -5214,6 +5245,7 @@ export class VfxLayer {
     const count = 7;
     for (let i = 0; i < count; i++) {
       const p = this.allocParticle();
+      p.sprite.userData.vfxKind = 'heal'; // QA: v1b_cover attributes body cover by it
       const ang = (i / count) * Math.PI * 2 + Math.random() * 0.5;
       // Outside the body's visible half-width (~0.55 m) from the first frame, so no
       // particle ever has to survive being composited over the character.
@@ -5284,6 +5316,7 @@ export class VfxLayer {
     const count = 5;
     for (let i = 0; i < count; i++) {
       const p = this.allocParticle();
+      p.sprite.userData.vfxKind = 'puddle'; // QA: v1b_cover attributes body cover by it
       const ang = (i / count) * Math.PI * 2 + Math.random() * 1.0;
       // Rim of the fighter's own footprint. `CHARACTER_RADIUS` is the sim's collision
       // radius (1.05 m); 0.6 of it clears the visible silhouette without throwing the
@@ -5373,6 +5406,7 @@ export class VfxLayer {
     // The contact pop. Small — 0.85 m against the generic impact flash's 0.5-1.15x
     // sizeFactor (1.4-3.2 m for a real hit) — and short.
     const flash = this.allocParticle();
+    flash.sprite.userData.vfxKind = 'scuffFlash'; // QA: v1b_cover attributes body cover by it
     flash.active = true; flash.life = 0; flash.maxLife = 0.12;
     flash.sprite.visible = true;
     flash.sprite.position.set(origin.x, PROJECTILE_HEIGHT, origin.z);
@@ -5401,6 +5435,7 @@ export class VfxLayer {
       const ax = bx * c - bz * s;
       const az = bx * s + bz * c;
       const p = this.allocParticle();
+      p.sprite.userData.vfxKind = 'scuff'; // QA: v1b_cover attributes body cover by it
       p.mat.map = this.streakTex;
       p.mat.rotation = Math.atan2(az, ax);
       p.aspect = 0.22;
@@ -5496,6 +5531,7 @@ export class VfxLayer {
       this.spawnStarPop(origin, IMPACT_HEIGHT * 1.5, color, 5.2, 0.38);
 
       const flash = this.allocParticle();
+      flash.sprite.userData.vfxKind = 'slamFlash'; // QA: v1b_cover attributes body cover by it
       flash.active = true; flash.life = 0; flash.maxLife = 0.3;
       flash.sprite.visible = true;
       flash.sprite.position.set(origin.x, IMPACT_HEIGHT * 1.5, origin.z);
@@ -5572,6 +5608,7 @@ export class VfxLayer {
 
     if (!opts?.skipFlash) {
       const flash = this.allocParticle();
+      flash.sprite.userData.vfxKind = 'impactFlash'; // QA: v1b_cover attributes body cover by it
       flash.active = true; flash.life = 0; flash.maxLife = (0.16 + sizeFactor * 0.04) * life;
       flash.sprite.visible = true;
       flash.sprite.position.set(origin.x, IMPACT_HEIGHT, origin.z);
@@ -5804,6 +5841,9 @@ export class VfxLayer {
     slot.mat.map = this.glowTex;
     slot.mat.rotation = 0;
     slot.aspect = 1;
+    // QA only: the caller says what it is using the slot for (`v1b_cover.mjs`); a slot reused
+    // by a caller that does not say must not keep the last one's word.
+    slot.sprite.userData.vfxKind = undefined;
     return slot;
   }
 
@@ -5826,6 +5866,12 @@ export class VfxLayer {
   /** Radiating hit-spark rays out of an impact point — thin bright streaks at random
    * angles, reusing one texture via per-sprite `SpriteMaterial.rotation`. This is
    * what separates a "concentrated hit" from a generic puff of particles. */
+  // ⚠️ V1b TRIED RADIATING THESE FROM A RING AT THE BODY'S EDGE AND REVERTED IT, MEASURED:
+  // body cover from `particles:streak` went UP, 0.008 -> 0.014 of all body pixels
+  // (`tools/tmp/v1b_cover.mjs --plan duel`). The particle sprites are DEPTH-TESTED, so a ray
+  // centred on the victim at hit height is mostly hidden INSIDE the fighter — the body's own
+  // front surface occludes the bright middle — and moving it out to the edge put it in
+  // front of the body instead. The centred burst stays.
   private spawnStreaks(origin: { x: number; z: number }, height: number, color: string, count: number, length: number, life: number): void {
     for (let i = 0; i < count; i++) {
       const p = this.allocParticle();
