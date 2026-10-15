@@ -259,7 +259,9 @@ states) · `home_metrics.mjs` (WCAG contrast for every text run **against the pi
 behind it** — the only way an inherited opacity or a WebGL backdrop counts) · `hudshare.mjs`
 (prices what the DOM HUD contributes to a "canvas-only" capture) · `charprobe.mjs` (per-joint
 delivered-vs-possible pixels; **the instrument that found nine characters' limbs buried inside
-their own bodies**) · `potvis.mjs` (silhouette visibility by two-clear-colour matte) ·
+their own bodies** — ⚠️ **NOT ON MAIN** (checked 2026-10-15): it exists only in the unmerged WIP
+commit `b3dda69`, *"six agents' unfinished work… DO NOT MERGE UNVERIFIED"*; `limbcheck` is the
+per-joint instrument that is) · `potvis.mjs` (silhouette visibility by two-clear-colour matte) ·
 `simlayer_{probe,clock_sweep,ab}.mjs` (sim A/B with `rules.ts` held constant, so a logic change
 and a constant change are never measured together)
 
