@@ -48,6 +48,7 @@ import type {
 // The presentation-side seat rules, stated once for all four consumers of the event
 // stream — see `roster.ts` for why every resolver has a legacy-role fallback.
 import { fighterOf, fightersOf, slotOf } from './roster';
+import { MAX_FIGHTERS } from './state';
 import { SPLAT_RADIUS, TRAIL, REACH, MEDIKIT } from './rules';
 // The sim's own predicate for "may this status be applied yet", exported by
 // `combat.ts` specifically so this layer can render the shrug-off window without
@@ -3305,6 +3306,29 @@ const PARTICLE_POOL_SIZE = 96;
 // both to be live at once.
 const WEDGE_POOL_SIZE = 10;
 const RING_POOL_SIZE = 16;
+/**
+ * ── 🚨 THE THREE SIZES ABOVE ARE NOW WHAT IS *PRE-BUILT*, NOT WHAT EXISTS ─────────
+ *
+ * They were sized for TWO fighters — every comment above them reasons about "a single
+ * big hit" — and a fixed pool answers a full pool by STEALING the slot closest to death,
+ * i.e. by cutting a live effect short. That cannot show at two seats and it is the
+ * dominant defect class here (`docs/AGENT-BRIEF.md` §4b). Measured on `d1b2621` at six
+ * seats with `tools/tmp/v1_vfx_pools.mjs` (a steal = the slot alloc RETURNED was live),
+ * the two six-seat rings of `gx_vfx_pools`'s audit: see the commit for the numbers.
+ *
+ * So each pool now has a PER-FIGHTER budget and a cap of that budget times
+ * `MAX_FIGHTERS`, and GROWS on demand up to the cap — the pre-built size is unchanged,
+ * so a 1v1 builds exactly the objects it always did and pays nothing for six seats it
+ * does not have (every slot is a scene-graph child that `updateMatrixWorld` visits each
+ * frame whether it is visible or not, which is why the six-seat size is not simply
+ * pre-built). Steals still exist, AT THE CAP, so a pathological pile-up degrades the
+ * way it always did instead of allocating without bound.
+ *
+ * Per-fighter budgets: particles 48 and rings 8 are the old two-seat sizes halved; the
+ * wedge pool (melee arcs AND every impact's star decal) was 5 per fighter and the audit
+ * saw it steal on 45–54% of six-seat allocations, so it gets 8. Union cores keep 6.
+ */
+const POOL_PER_FIGHTER = { particles: 48, wedges: 8, rings: 8, unionCores: 6 } as const;
 
 /**
  * How long a cast telegraph keeps drawing PAST its `castMs`, in seconds.
@@ -3770,25 +3794,8 @@ export class VfxLayer {
     this.group.name = 'vfx_layer';
     scene.add(this.group);
 
-    for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
-      const mat = new THREE.SpriteMaterial({
-        map: this.glowTex,
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const sprite = new THREE.Sprite(mat);
-      sprite.visible = false;
-      sprite.renderOrder = 10;
-      this.group.add(sprite);
-      this.particles.push({
-        sprite, mat, active: false, life: 0, maxLife: 1,
-        vx: 0, vy: 0, vz: 0, gravity: 0,
-        startScale: 1, endScale: 1, startOpacity: 1, endOpacity: 0, fadeEase: 1, aspect: 1,
-      });
-    }
+    // Pre-built at the old two-seat sizes; `alloc*` grows each pool to `poolCaps`.
+    for (let i = 0; i < PARTICLE_POOL_SIZE; i++) this.buildParticleSlot();
 
     // UNION SHADE cores. Same `glowTex` and the same additive blend as the particle
     // pool's flash — this is deliberately the effect `burst()` already draws for a
@@ -3797,62 +3804,10 @@ export class VfxLayer {
     //
     // `renderOrder` 9, one BELOW the particles: the core is what the debris is lit
     // against, so shards and streaks have to composite over it, not under it.
-    for (let i = 0; i < UNION_CORE_POOL_SIZE; i++) {
-      const mat = new THREE.SpriteMaterial({
-        // `coreTex`, NOT `glowTex` — see `buildCoreSpikeTexture`. The comment below
-        // still says "same `glowTex`" about the PARTICLE pool's flash, which is true of
-        // that pool and is no longer true here.
-        map: this.coreTex,
-        color: 0xffffff,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-        // 🚨 `depthTest: false`, AND IT IS THE DIFFERENCE BETWEEN THIS ELEMENT
-        // EXISTING AND NOT. The core is drawn at `IMPACT_HEIGHT` on the point that was
-        // hit — i.e. INSIDE the victim — so with depth testing on, the victim's own
-        // body rejects it and the "hot centre" delivers ZERO pixels. Measured: with the
-        // alpha term ablated to 0 so only the core was live, every column of
-        // `impact.egg.Shards` came back BIT-IDENTICAL to the tree without it — 1275 /
-        // 3.2% / 40.73 / 7.746 / 0.769 / 1.303. A perfectly plausible sprite,
-        // configured, allocated, counted by `FX_UNION_STATS.cores`, and invisible.
-        // `CLAUDE.md` rule 4, and this file already carries two measurements of the
-        // same class ("shipped 37 px | depthTest off 179 px", "44 px | 620 px").
-        depthTest: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const sprite = new THREE.Sprite(mat);
-      sprite.name = 'vfx_union_core';
-      sprite.visible = false;
-      sprite.renderOrder = 9;
-      this.group.add(sprite);
-      this.unionCores.push({ sprite, mat, busy: false });
-    }
+    for (let i = 0; i < UNION_CORE_POOL_SIZE; i++) this.buildUnionCoreSlot();
 
-    for (let i = 0; i < WEDGE_POOL_SIZE; i++) {
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, map: this.wedgeGradientTex, transparent: true, opacity: 0,
-        side: THREE.DoubleSide, depthWrite: false,
-      });
-      const mesh = new THREE.Mesh(buildWedgeGeometry(0.01, 10), mat);
-      mesh.visible = false;
-      mesh.renderOrder = 5;
-      this.group.add(mesh);
-      this.wedges.push({ mesh, mat, active: false, life: 0, maxLife: 1, startOpacity: 0.6 });
-    }
-
-    for (let i = 0; i < RING_POOL_SIZE; i++) {
-      const mat = new THREE.MeshBasicMaterial({
-        color: 0xffffff, transparent: true, opacity: 0,
-        side: THREE.DoubleSide, depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      });
-      const mesh = new THREE.Mesh(this.ringUnitGeo, mat);
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.visible = false;
-      mesh.renderOrder = 6;
-      this.group.add(mesh);
-      this.rings.push({ mesh, mat, active: false, life: 0, maxLife: 1, startScale: 0.1, targetScale: 1, startOpacity: 0.9 });
-    }
+    for (let i = 0; i < WEDGE_POOL_SIZE; i++) this.buildWedgeSlot();
+    for (let i = 0; i < RING_POOL_SIZE; i++) this.buildRingSlot();
 
     const buildStatusVisual = (): StatusVisual => {
       // Dark base band first (wider on both sides), bright frost band on top of it.
@@ -4661,7 +4616,8 @@ export class VfxLayer {
     if (!scope) return;
     FX_UNION_STATS.scopes++;
     if (scope.members.length < UNION_MIN_MEMBERS) { FX_UNION_STATS.inert++; return; }
-    const core = this.unionCores.find((c) => !c.busy) ?? null;
+    const core = this.unionCores.find((c) => !c.busy)
+      ?? (this.unionCores.length < this.poolCaps.unionCores ? this.buildUnionCoreSlot() : null);
     if (core) {
       core.busy = true;
       core.sprite.visible = true;
@@ -6336,11 +6292,111 @@ export class VfxLayer {
    * something other than a plain glow dot (see `spawnStarPop`/`spawnStreaks`) set
    * `mat.map`/`mat.rotation` themselves right after allocating.
    */
+  /**
+   * The most each transient pool may grow to: `POOL_PER_FIGHTER` x `MAX_FIGHTERS`, never
+   * below what is pre-built. Public and read-only for the QA probe
+   * (`tools/tmp/v1_vfx_pools.mjs` forces exhaustion AT the cap, where a steal is the
+   * designed behaviour, and must see exactly the overflow as steals).
+   */
+  readonly poolCaps = {
+    particles: Math.max(PARTICLE_POOL_SIZE, POOL_PER_FIGHTER.particles * MAX_FIGHTERS),
+    wedges: Math.max(WEDGE_POOL_SIZE, POOL_PER_FIGHTER.wedges * MAX_FIGHTERS),
+    rings: Math.max(RING_POOL_SIZE, POOL_PER_FIGHTER.rings * MAX_FIGHTERS),
+    unionCores: Math.max(UNION_CORE_POOL_SIZE, POOL_PER_FIGHTER.unionCores * MAX_FIGHTERS),
+  } as const;
+
+  private buildParticleSlot(): ParticleSlot {
+    const mat = new THREE.SpriteMaterial({
+      map: this.glowTex,
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.visible = false;
+    sprite.renderOrder = 10;
+    this.group.add(sprite);
+    const slot: ParticleSlot = {
+      sprite, mat, active: false, life: 0, maxLife: 1,
+      vx: 0, vy: 0, vz: 0, gravity: 0,
+      startScale: 1, endScale: 1, startOpacity: 1, endOpacity: 0, fadeEase: 1, aspect: 1,
+    };
+    this.particles.push(slot);
+    return slot;
+  }
+
+  private buildUnionCoreSlot(): UnionCoreSlot {
+    const mat = new THREE.SpriteMaterial({
+      // `coreTex`, NOT `glowTex` — see `buildCoreSpikeTexture`. The comment below
+      // still says "same `glowTex`" about the PARTICLE pool's flash, which is true of
+      // that pool and is no longer true here.
+      map: this.coreTex,
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      // 🚨 `depthTest: false`, AND IT IS THE DIFFERENCE BETWEEN THIS ELEMENT
+      // EXISTING AND NOT. The core is drawn at `IMPACT_HEIGHT` on the point that was
+      // hit — i.e. INSIDE the victim — so with depth testing on, the victim's own
+      // body rejects it and the "hot centre" delivers ZERO pixels. Measured: with the
+      // alpha term ablated to 0 so only the core was live, every column of
+      // `impact.egg.Shards` came back BIT-IDENTICAL to the tree without it — 1275 /
+      // 3.2% / 40.73 / 7.746 / 0.769 / 1.303. A perfectly plausible sprite,
+      // configured, allocated, counted by `FX_UNION_STATS.cores`, and invisible.
+      // `CLAUDE.md` rule 4, and this file already carries two measurements of the
+      // same class ("shipped 37 px | depthTest off 179 px", "44 px | 620 px").
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const sprite = new THREE.Sprite(mat);
+    sprite.name = 'vfx_union_core';
+    sprite.visible = false;
+    sprite.renderOrder = 9;
+    this.group.add(sprite);
+    const slot: UnionCoreSlot = { sprite, mat, busy: false };
+    this.unionCores.push(slot);
+    return slot;
+  }
+
+  private buildWedgeSlot(): WedgeSlot {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, map: this.wedgeGradientTex, transparent: true, opacity: 0,
+      side: THREE.DoubleSide, depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(buildWedgeGeometry(0.01, 10), mat);
+    mesh.visible = false;
+    mesh.renderOrder = 5;
+    this.group.add(mesh);
+    const slot: WedgeSlot = { mesh, mat, active: false, life: 0, maxLife: 1, startOpacity: 0.6 };
+    this.wedges.push(slot);
+    return slot;
+  }
+
+  private buildRingSlot(): RingSlot {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff, transparent: true, opacity: 0,
+      side: THREE.DoubleSide, depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    const mesh = new THREE.Mesh(this.ringUnitGeo, mat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.visible = false;
+    mesh.renderOrder = 6;
+    this.group.add(mesh);
+    const slot: RingSlot = { mesh, mat, active: false, life: 0, maxLife: 1, startScale: 0.1, targetScale: 1, startOpacity: 0.9 };
+    this.rings.push(slot);
+    return slot;
+  }
+
   private allocParticle(): ParticleSlot {
     let best: ParticleSlot | null = null;
     for (const p of this.particles) {
       if (!p.active) { best = p; break; }
     }
+    // GROW before stealing — see `POOL_PER_FIGHTER`.
+    if (!best && this.particles.length < this.poolCaps.particles) best = this.buildParticleSlot();
     if (!best) {
       let bestRatio = -Infinity;
       for (const p of this.particles) {
@@ -6397,6 +6453,7 @@ export class VfxLayer {
   private allocWedge(): WedgeSlot {
     let slot: WedgeSlot | undefined;
     for (const w of this.wedges) if (!w.active) { slot = w; break; }
+    if (!slot && this.wedges.length < this.poolCaps.wedges) slot = this.buildWedgeSlot();
     if (!slot) slot = this.wedges.reduce((a, b) => (a.life / a.maxLife >= b.life / b.maxLife ? a : b));
     if (slot.mat.map !== this.wedgeGradientTex) {
       slot.mat.map = this.wedgeGradientTex;
@@ -6417,6 +6474,7 @@ export class VfxLayer {
 
   private allocRing(): RingSlot {
     for (const r of this.rings) if (!r.active) return r;
+    if (this.rings.length < this.poolCaps.rings) return this.buildRingSlot();
     return this.rings.reduce((a, b) => (a.life / a.maxLife >= b.life / b.maxLife ? a : b));
   }
 
