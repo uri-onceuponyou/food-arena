@@ -248,7 +248,9 @@ export const createKitchenArena: ArenaFactory = () => {
   // ── Floor ────────────────────────────────────────────────────────────────────
   root.add(buildFloor(M));
 
-  // ── Apron — everything OUTSIDE the 1400x1000 playfield ───────────────────────
+  // ── Apron — everything OUTSIDE the ARENA_W x ARENA_H playfield ──────────────────
+  // (A1: this heading said "the 1400x1000 playfield" — the 1x map, stale since
+  // `6631446` took the arena to x4; flagged by the 2026-10-15 arena audit, DT.)
   // Added to `root`, deliberately NOT to `propsGroup`: `propsGroup` is the set that
   // gets `outlineGroup()` below, i.e. the arena's reserved "this collides" ink line,
   // and no part of the apron collides with anything. It registers no CoverBox, has no
