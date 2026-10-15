@@ -2237,6 +2237,10 @@ export class GameSession {
           // interrupt from the victim's side — its own `state.ts` note says it "must die
           // exactly as a stun kills one" — so it takes the stun read, not `'resolved'`, which
           // would make an interrupted cast vanish as if it had landed.
+          // ⚠️ AND A FOURTH since B4 (`2ef3126`, BH-10): `'displaced'` — Disposal throws a
+          // fighter mid-wind-up and the sim now cancels the cast before the relocation (the
+          // slam used to land up to the arena's width from its telegraph). It is an interrupt
+          // too, so it takes the same stun read through the branch below; nothing changes here.
           this.vfx.cancelCastTelegraph(ev.fighterId, ev.reason === 'death' ? 'death' : 'stun');
           break;
         default:
