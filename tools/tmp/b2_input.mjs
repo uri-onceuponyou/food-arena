@@ -182,6 +182,23 @@ const centre = (page, sel) => page.evaluate((s) => {
 const sheetOpen = (page) => page.evaluate(() => document.querySelector('.match-sheet')?.classList.contains('is-open') ?? false);
 const plock = (page) => page.evaluate(() => ({ ...(window.__plockDebug ?? {}) }));
 const DUEL = 'player=hamburger&enemy=donut';
+/** Decide a 1v1 for the local seat: the sim's own `combat.applyDamage` on the live state, its
+ *  events through `window.__feelEvent` (= `GameSession.handleEvents`) — `b1_match`'s method. */
+async function endMatch(page) {
+  await hookState(page);
+  await page.evaluate(async () => {
+    const combat = await import('/src/game/combat.ts');
+    const rules = await import('/src/game/rules.ts');
+    const st = window.__b2State;
+    const w = rules.CHARACTERS[st.fighters[0].characterId].weapons[0];
+    const evs = [];
+    combat.applyDamage(st, st.fighters[1], 9999, null, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: 0 }, evs);
+    for (const ev of evs) window.__feelEvent(ev);
+  });
+  await wait(page, () => window.__matchDebug?.phase === 'ended');
+  await frames(page, 2);
+}
+
 
 try {
   // ── §F2 SUB-FRAME PRESSES ─────────────────────────────────────────────────────
@@ -307,8 +324,44 @@ try {
         await frames(page, 1);
         const open2 = await sheetOpen(page);
         row('F3', 'CONTROL: keyboard focus on the chip + Enter opens the sheet, Enter again closes it', open1 && !open2, { open1, open2 });
+        // ...and once the match is running again, the keyboard is the GAME's: the chip a
+        // keyboard player Tabbed to must not be re-pressed by the next (unbound) Space.
+        await page.keyboard.press('Space');
+        await frames(page, 2);
+        const kSpace = { open: await sheetOpen(page), paused: (await dbg(page)).paused,
+          focus: await page.evaluate(() => document.activeElement?.className || document.activeElement?.tagName) };
+        row('F3', 'BUG: after a keyboard resume, Space does NOT re-press the chip', !kSpace.open && !kSpace.paused, kSpace);
         row('F3', 'page errors (keyboard)', errors.length === 0, errors);
       } catch (e) { row('F3', 'keyboard section completed', false, String(e).split('\n')[0]); }
+      await ctx.close();
+    }
+    {
+      // The result card's Play Again (hud.ts builds it; GameSession.restart answers it).
+      const { ctx, page, errors } = await open();
+      try {
+        await boot(page, `screen=match&${DUEL}&pointerLock=0&fogRadius=900`);
+        await endMatch(page);
+        await page.evaluate(() => {
+          window.__b2again = 0;
+          document.addEventListener('click', (e) => { if (e.target.closest?.('[data-el="gameover-btn"]')) window.__b2again++; }, true);
+        });
+        await page.waitForTimeout(800); // the card's entry animation
+        const btn = await centre(page, '[data-el="gameover-btn"]');
+        await page.mouse.click(btn.x, btn.y);
+        await frames(page, 2);
+        const a0 = { clicks: await page.evaluate(() => window.__b2again), phase: (await dbg(page)).phase,
+          focus: await page.evaluate(() => document.activeElement?.dataset?.el || document.activeElement?.tagName) };
+        await page.keyboard.press('Space');
+        await frames(page, 2);
+        const a1 = { clicks: await page.evaluate(() => window.__b2again), phase: (await dbg(page)).phase };
+        row('F3', 'NON-VACUITY: a MOUSE click on Play Again restarted the match', a0.clicks === 1 && a0.phase !== 'ended', a0);
+        // ⚠️ NOT A BUG ON 8586f00, AND LABELLED SO: this arm was written expecting the result
+        // card's button to keep focus the way the pause chip does, and it went GREEN on the
+        // base — the card hides on restart and Chromium moves focus to BODY with it. Kept as a
+        // GUARD for the F3 fix, which must not start handing that focus back.
+        row('F3', 'GUARD (green on 8586f00 too): Space after Play Again does NOT press it a second time', a1.clicks === 1, { before: a0, after: a1 });
+        row('F3', 'page errors (play again)', errors.length === 0, errors);
+      } catch (e) { row('F3', 'play-again section completed', false, String(e).split('\n')[0]); }
       await ctx.close();
     }
     {
@@ -551,20 +604,6 @@ try {
 
   // ── §PL POINTER LOCK AFTER THE WHISTLE ────────────────────────────────────────
   if (SECTIONS.includes('PL')) {
-    const endMatch = async (page) => {
-      await hookState(page);
-      await page.evaluate(async () => {
-        const combat = await import('/src/game/combat.ts');
-        const rules = await import('/src/game/rules.ts');
-        const st = window.__b2State;
-        const w = rules.CHARACTERS[st.fighters[0].characterId].weapons[0];
-        const evs = [];
-        combat.applyDamage(st, st.fighters[1], 9999, null, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: 0 }, evs);
-        for (const ev of evs) window.__feelEvent(ev);
-      });
-      await wait(page, () => window.__matchDebug?.phase === 'ended');
-      await frames(page, 2);
-    };
     {
       const { ctx, page, errors } = await open();
       try {

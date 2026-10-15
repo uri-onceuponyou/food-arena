@@ -457,7 +457,28 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     if (on) session.pause(); else session.resume();
     sheet.classList.toggle('is-open', on);
     setChip(on);
+    // Back in the fight, the GAME owns the keyboard (F3): a control of this screen that kept
+    // focus would be re-pressed by the next Space or Enter. Covers the keyboard player who
+    // Tabbed to the chip; a mouse click never gives it focus at all (see the chip's mousedown).
+    const focused = document.activeElement;
+    if (!on && focused instanceof HTMLElement && root.contains(focused)) focused.blur();
   }
+
+  /**
+   * ── A MOUSE CLICK ON THE CHIP TAKES NO FOCUS (F3) ───────────────────────────
+   *
+   * 🚨 **SPACE AND ENTER RE-PRESSED IT.** Chromium focuses a `<button>` on mousedown and nothing
+   * in a match moved focus away again, so after a click on the chip (sheet open) and Escape
+   * (sheet closed), the next Space — unbound in the game — or Enter pressed the still-focused
+   * chip and paused the match. Measured by `tools/tmp/b2_input.mjs` §F3 on `8586f00`: chip
+   * clicks 1 -> 2 and the sheet open again, for both keys.
+   *
+   * `preventDefault` on MOUSEDOWN is the narrow cure: it stops the focus a pointer would give
+   * and nothing else — the click still fires, and a keyboard player can still Tab here and
+   * toggle with Enter (a `blur()` in the click handler, the first idea, took that away). The
+   * same rule is on `pointerLock.ts`'s chips and buttons.
+   */
+  pauseBtn.addEventListener('mousedown', (ev) => ev.preventDefault());
 
   /**
    * ── THE CHIP AND ESCAPE TOGGLE THE SHEET, NOT THE SESSION (F6) ──────────────

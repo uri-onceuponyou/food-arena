@@ -365,6 +365,18 @@ export function createPointerLock(opts: PointerLockOptions): PointerLockControll
     window.addEventListener('blur', onBlur);
     if (simulated) window.addEventListener('keydown', onSimEscape, true);
 
+    // ── A MOUSE CLICK ON ANY OF THESE TAKES NO FOCUS (F3) ─────────────────────
+    // Chromium focuses a button on mousedown and nothing here moved focus away, so after a
+    // click on "⛶ Fullscreen" the next Space — unbound in the game — pressed it again and
+    // left fullscreen (`tools/tmp/b2_input.mjs` §F3 on `8586f00`: clicks 1 -> 2).
+    // `preventDefault` on MOUSEDOWN withholds only that focus: the click, its transient
+    // activation (which `requestPointerLock` and `requestFullscreen` both need) and Tab-then-
+    // Enter for a keyboard player are all untouched. Delegated, so a button added later is
+    // covered without remembering to be. `matchScreen.ts`'s pause chip carries the same rule.
+    root.addEventListener('mousedown', (e) => {
+      if ((e.target as Element | null)?.closest?.('button')) e.preventDefault();
+    });
+
     q('capture').addEventListener('click', (e) => { e.stopPropagation(); requestFromGesture(); });
     q('resume').addEventListener('click', (e) => { e.stopPropagation(); requestFromGesture(); });
     // Clicking the frozen frame anywhere resumes — the largest possible target for the
