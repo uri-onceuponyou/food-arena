@@ -13292,18 +13292,26 @@ console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up
     const W = CHARACTERS.egg.weapons[HATCH];
     const run = (n, { flee = true, blocker = false } = {}) => {
       // Egg faces east at (1000, 1000); the aimed fighter is 100 wu east. With `blocker` a third
-      // fighter stands IN the line at 60 wu, and is the one struck, latched, and running.
+      // fighter STEPS INTO the line at 60 wu once the shot is in the air, and is the one struck,
+      // latched, and running — so the body struck is NOT the one the shot was framed on.
+      // ⚠️ It used to STAND in the line from the start, and then a human's shot is framed on IT
+      // (BH-04's aimed-opponent rule picks the nearest body on the aim line), aimed === struck,
+      // and the latch's re-anchor on the struck body was never exercised: `b4_knownbad`'s
+      // `chick-anchored-on-aim` arm deleted it and this row stayed green. Measured, then moved.
       const seats = [{ char: 'egg', x: 1000, y: 1000, facing: { x: 1, y: 0 } }, { char: 'sushi', x: 1100, y: 1000 }];
-      if (blocker) seats.push({ char: 'hamburger', x: 1060, y: 1000 });
+      if (blocker) seats.push({ char: 'hamburger', x: 1060, y: 1090 });
       while (seats.length < n) seats.push({ char: 'pizza', x: 2400, y: 250 + seats.length * 250 });
       const st = seatMatch(arena, seats);
       const latched = blocker ? 2 : 1;
       const hits = [];
+      let framedOn = null;
       for (let tick = 0; tick < 240 && hits.length < W.peckHits; tick++) {
         const ins = idle(st);
         if (tick === 0) ins[0] = { ...NEUTRAL, aim: { x: 1, y: 0 }, selectedWeapon: HATCH, attack: true };
+        if (blocker && tick === 1) { st.fighters[2].x = 1060; st.fighters[2].y = 1000; }
         if (hits.length > 0 && flee) ins[latched] = { ...NEUTRAL, move: blocker ? { x: 0, y: -1 } : { x: 1, y: 0 } };
         const evs = stepMatch(st, DT, ins);
+        if (tick === 0) framedOn = st.projectiles.find((q) => q.weapon.key === 'Hatch')?.targetId ?? null;
         for (const e of evs) {
           if (e.type !== 'hit-landed' || e.source.kind !== 'weapon' || e.source.weaponKey !== 'Hatch') continue;
           const p = st.projectiles.find((q) => q.weapon.key === 'Hatch');
@@ -13312,17 +13320,17 @@ console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up
           hits.push({ target: e.targetId, vx: e.x, vy: e.y, dx: cx - e.x, dy: cy - e.y, amount: e.amount, tick });
         }
       }
-      return { hits, latched, radius: st.fighters[latched].hitRadius };
+      return { hits, latched, framedOn, radius: st.fighters[latched].hitRadius };
     };
     const still = run(2, { flee: false }), flee2 = run(2), flee6 = run(6), block6 = run(6, { blocker: true });
     const ran = (r) => Math.hypot(r.hits[r.hits.length - 1].vx - r.hits[0].vx, r.hits[r.hits.length - 1].vy - r.hits[0].vy);
     const onBody = (r) => r.hits.every((h) => Math.hypot(h.dx, h.dy) < r.radius);
     const heldOffset = (r) => r.hits.every((h) => Math.hypot(h.dx - r.hits[0].dx, h.dy - r.hits[0].dy) < 1e-6);
     const fmtHits = (r) => r.hits.map((h) => Math.hypot(h.dx, h.dy).toFixed(1)).join('/');
-    check('(d) NON-VACUITY: every arm struck and pecked its full count, and every fleeing victim really moved',
+    check('(d) NON-VACUITY: every arm struck and pecked its full count, every fleeing victim really moved, and the blocker was NOT the body the shot was framed on',
       [still, flee2, flee6, block6].every((r) => r.hits.length === W.peckHits && r.hits.every((h) => h.target === r.latched))
-      && ran(flee2) > 60 && ran(flee6) > 60 && ran(block6) > 60 && ran(still) === 0,
-      `peck counts ${[still, flee2, flee6, block6].map((r) => r.hits.length).join('/')}, ran ${[flee2, flee6, block6].map((r) => ran(r).toFixed(1)).join('/')}`);
+      && ran(flee2) > 60 && ran(flee6) > 60 && ran(block6) > 60 && ran(still) === 0 && block6.framedOn === 1,
+      `peck counts ${[still, flee2, flee6, block6].map((r) => r.hits.length).join('/')}, ran ${[flee2, flee6, block6].map((r) => ran(r).toFixed(1)).join('/')}, blocker arm framed on slot ${block6.framedOn}`);
     check('(d) 🔴 two seats, a fleeing victim: at every peck the chick is still ON it — inside its hit radius',
       onBody(flee2), `chick-to-victim at each hit: ${fmtHits(flee2)} (radius ${flee2.radius})`);
     check('(d) 🔴 …at the very offset it struck from — never snapped into the body',
