@@ -156,6 +156,17 @@ export interface Screen {
   update?(dtSeconds: number): void;
   /** Optional resize hook. Called on `window.resize` while mounted. */
   resize?(): void;
+  /**
+   * Optional: the browser / Android Back button was pressed while this screen is mounted.
+   * Return `true` to KEEP the screen — the shell then puts its history entry back — and
+   * false (or leave it undefined) to let Back navigate as it always has.
+   *
+   * It exists for one screen: a LIVE match, where Back opens the pause sheet instead of
+   * abandoning the match (`DECISIONS §31`, ML-4). A screen that returns true must give the
+   * player a visible way out in the same moment — a hook that swallows Back and shows
+   * nothing is a trap, which is also why a THROW here is treated as false by the shell.
+   */
+  onBack?(): boolean;
   dispose(): void;
 }
 

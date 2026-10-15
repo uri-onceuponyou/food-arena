@@ -33,7 +33,9 @@
  *     twice is a splash you are trapped in" — `types.ts`), so pushing it would make
  *     Back from home land on a splash that immediately auto-continues to home again.
  *   * Everything else PUSHES, so Back and the Android hardware back button move the
- *     player one screen out, including out of a match.
+ *     player one screen out, ~~including out of a match~~ — except out of a LIVE match,
+ *     where Back opens the pause sheet (`DECISIONS §31`; `onPopState`, ML-4). After the
+ *     whistle it leaves as before.
  *
  * ── ...and what "resume" means for a MATCH, which is a decision ─────────────
  * A match is the one route that cannot be restored. It is a live simulation with no
@@ -774,8 +776,34 @@ export function createShell(opts: ShellOptions): Shell {
       ?? { name: 'home' };
     if (sameRoute(route, currentRoute)) return;
     if (swapping) { queuedPop = route; return; }
+    // ── 🚨 BACK DURING A LIVE MATCH OPENS THE PAUSE SHEET (ML-4, `DECISIONS §31`) ──
+    //
+    // Uri answered §19 with *"Pause menu is fine"* and §31 records it as SETTLED — *"Back
+    // during a live match opens the pause sheet; it no longer abandons the match silently"* —
+    // but nothing in `src/` ever did it: this handler tore the match down like any other
+    // screen. Measured on `f65af2c` (`tools/tmp/b6_screens.mjs` §ML4): Back mid-duel and
+    // Back mid-six-seat-match both left for the previous screen, no sheet, no confirm, the
+    // match gone and nothing banked. A decision recorded as done is not a decision shipped.
+    //
+    // The browser has ALREADY moved the address bar, so keeping the screen means putting
+    // its entry back — a push, which also drops the entry Back just left, so the stack is the
+    // same length it was. The SCREEN decides (`Screen.onBack`), because only it knows whether
+    // there is anything to abandon: after the whistle the match returns false and Back
+    // leaves exactly as it always did.
+    if (screenKeepsBack()) { writeHistory(currentRoute, 'push'); return; }
     go(route, 'none');
   };
+
+  /** Ask the mounted screen whether Back is its own. Never throws: a hook that breaks must
+   *  not trap the player on a screen, so a throw means "navigate as usual". */
+  function screenKeepsBack(): boolean {
+    try {
+      return current?.onBack?.() === true;
+    } catch (err) {
+      report(`screen "${currentRoute.name}" onBack() threw`, err);
+      return false;
+    }
+  }
 
   function drainQueuedPop(): void {
     const route = queuedPop;

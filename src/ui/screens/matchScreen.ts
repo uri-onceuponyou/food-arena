@@ -552,13 +552,26 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   // SAME signal, so pointer and keyboard agree. Nothing is mapped in its place: the whistle
   // itself releases the mouse, so a reflexive Escape there must not throw the player off a
   // card they have not read yet.
-  const onKey = (ev: KeyboardEvent): void => {
-    if (ev.key !== PAUSE_KEY) return;
-    if (root.classList.contains('is-ended')) return;
-    ev.preventDefault();
-    if (pendingExit !== null) { closeConfirm(); return; }
+  //
+  // ── 🚨 AND BROWSER / ANDROID BACK IS THE SAME ACTION (ML-4, `DECISIONS §31`) ──
+  // Uri's answer to §19 was *"Pause menu is fine"*, recorded in §31 as settled — yet Back
+  // still tore a live match down with no sheet and no confirm (measured on `f65af2c`,
+  // `tools/tmp/b6_screens.mjs` §ML4: Back mid-match landed on the previous screen, the
+  // session gone). `backOut` is the ONE body both bindings run, so the key a desktop player
+  // cancels with and the button a phone player cancels with cannot drift apart: with the
+  // match live it backs out of an open confirm first, otherwise toggles the sheet; once the
+  // match is DECIDED it returns false and lets the key — or the Back — through, so Back on
+  // the result card still leaves, exactly as before. The shell asks via `Screen.onBack`.
+  function backOut(): boolean {
+    if (root.classList.contains('is-ended')) return false;
+    if (pendingExit !== null) { closeConfirm(); return true; }
     // The sheet, not the session — see `sheetIsOpen` (F6).
     setPaused(!sheetIsOpen());
+    return true;
+  }
+  const onKey = (ev: KeyboardEvent): void => {
+    if (ev.key !== PAUSE_KEY) return;
+    if (backOut()) ev.preventDefault();
   };
   window.addEventListener('keydown', onKey);
 
@@ -573,6 +586,7 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   return {
     root,
     resize() { session.resize(); },
+    onBack: backOut,
     dispose() {
       window.removeEventListener('keydown', onKey);
       // The arming timer outlives the screen otherwise. It only touches a detached
