@@ -251,11 +251,19 @@ try {
     s = await waitScreen('characters');
     eq(s.screen, 'characters', 'Forward returns to the roster');
 
-    // Out of a match, Back is the same exit the pause sheet offers.
+    // ⚠️ REVERSED by ML-4 (DECISIONS §31). WAS: "Out of a match, Back is the same exit the
+    // pause sheet offers" + eq(screen, 'characters', 'Back out of a match returns to the
+    // screen that started it') — the behaviour Uri answered §19 AGAINST ("Pause menu is fine").
+    // Back during a LIVE match now opens the pause sheet and keeps the match; after the
+    // whistle Back still leaves (tools/tmp/b6_screens.mjs §ML4 L4 holds that half).
     await nav({ name: 'match', player: 'pizza', enemy: 'egg' });
     await page.goBack({ waitUntil: 'domcontentloaded', timeout: 60_000 }).catch(() => {});
-    s = await waitScreen('characters');
-    eq(s.screen, 'characters', 'Back out of a match returns to the screen that started it');
+    await page.waitForTimeout(2500);
+    s = await look();
+    const sheetOpen = await page.evaluate(() => !!document.querySelector('.match-sheet')?.classList.contains('is-open'));
+    ok(s.screen === 'match' && sheetOpen && s.param.screen === 'match',
+      'Back during a LIVE match opens the pause sheet and keeps the match (DECISIONS §31)',
+      `screen ${s.screen} · sheet ${sheetOpen} · url screen=${s.param.screen}`);
 
     // The title card is boot-only ("a splash you can reach twice is a splash you are
     // trapped in" — types.ts). Its auto-continue must REPLACE, not push, or Back from

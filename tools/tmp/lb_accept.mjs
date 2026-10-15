@@ -493,9 +493,13 @@ async function auditModel(page) {
   await page.click('[data-el="start"]');
   await page.waitForFunction('window.__screen === "match"', null, { timeout: 120_000 });
   const before = await page.evaluate(() => window.__shell.route());
-  await page.goBack();
+  // ⚠️ ML-4 (DECISIONS §31): Back during a LIVE match now opens the pause sheet, so the round
+  // trip leaves through the shell and comes BACK into the match entry — the same parseRoute
+  // path off history.state that the Android button exercises. WAS: goBack() from the live
+  // match -> wait for the lobby -> goForward().
+  await page.evaluate(() => window.__shell.navigate({ name: 'lobby' }));
   await page.waitForFunction('window.__screen === "lobby"', null, { timeout: 60_000 });
-  await page.goForward();
+  await page.goBack();
   await page.waitForFunction('window.__screen === "match"', null, { timeout: 120_000 });
   const after = await page.evaluate(() => window.__shell.route());
   ok('M5a. back + forward preserves `seats` (this was RED before the shell fix)',
@@ -514,6 +518,10 @@ async function auditModel(page) {
   // KNOWN-BAD for the parse path: `history.state` outlives the build that wrote it, so
   // an out-of-range `seats` must be REFUSED rather than passed through.
   const BAD = MAX_FIGHTERS + 90;
+  // ⚠️ Injected from HOME, not from the live match: a popstate while a live match is mounted
+  // opens its pause sheet by design now (ML-4), so the injected route would never mount.
+  await page.evaluate(() => window.__shell.navigate({ name: 'home' }));
+  await page.waitForFunction('window.__screen === "home"', null, { timeout: 60_000 });
   await page.evaluate((bad) => {
     const st = { fa: 1, route: { name: 'match', player: 'hamburger', enemy: 'sushi', seats: bad } };
     history.replaceState(st, '', location.href);
