@@ -411,7 +411,12 @@ export const LIMB_KIT = {
  * read of a character standing on the ground. Capped here, in the rig, so all eleven
  * inherit it from one number; the width comes back from chunkier legs and shoes instead.
  */
-export const PLANTED_SPLAY_MAX = 0.14;
+// ⚠️ WAS 0.14, and that read as planted in the lobby and cost the MATCH its legs: at 58°
+// the mass above the hips projects over legs that stand under it. `limbmatch` (58°, four
+// facings) on taco, donut, egg, lollipop, hamburger, hotdog — groups delivering ZERO px:
+// base 48, at 0.14 59, at 0.24 53. With chunky kit legs 0.24 reads as a sturdy A-stance
+// rather than a spider (the spider was thin bead legs at 0.32-0.46), so 0.24 it is.
+export const PLANTED_SPLAY_MAX = 0.24;
 
 /** Attachment points `dressLimbs` can replace. */
 export type LimbPart =
