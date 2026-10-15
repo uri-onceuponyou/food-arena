@@ -47,7 +47,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
-import { ChibiRig, type LimbPart } from './rig';
+import { ChibiRig, type LimbPart, batchJoints } from './rig';
 import { bodyType, withoutNeck } from './bodies';
 import { aim, localBounds, massAnchor, rod } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
@@ -1081,6 +1081,12 @@ export class SushiCharacter extends BaseCharacter {
     this.buildAccessories(R, { yAt, zAt, hemAt });
     this.buildSilhouetteEvents(R);
 
+    // C1b: the identity plane tilted back 36° (`rig.tiltIdentity`, which says why > 32°):
+    // the face sits on the rice under the salmon cap, which hid it from every facing but the front (face 4/8 on the base tree).
+    this.rig.tiltIdentity(THREE.MathUtils.degToRad(36));
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
@@ -1840,65 +1846,14 @@ export class SushiCharacter extends BaseCharacter {
     const goldMat = toonMat({ color: GOLD, roughness: 0.3, metalness: 0.35 });
     const riceMat = toonMat({ color: RICE, roughness: 0.6 });
 
-    this.rig.dressLimbs((part: LimbPart, size) => {
-      switch (part) {
-        case 'upperArmL':
-        case 'upperArmR':
-          // 1.10/0.82 -> 1.02/0.90. A 34% taper over a segment this short is a
-          // MEGAPHONE, not an arm — it is the shape that made the shoulders read as
-          // funnels in the lobby render, and it also widened the joint ball's own
-          // footprint at the torso, which is the seam that measures worst here.
-          // ── 🚨 1.02/0.90 -> 0.88/0.78, BECAUSE THE ARM AND THE LEG WERE THE SAME ──
-          // `upperArm` and `thigh` shared `upperLimbMat` AND were 1.02 against 1.05 —
-          // three percent apart. `forearm` and `shin` shared `noriLimbMat` and were
-          // 0.80 against 0.88. So an arm and a leg were the same mass in the same two
-          // materials, and the character read as four legs under a rice dome.
-          //
-          // The split is PROPORTION ONLY, and that is forced rather than chosen: this
-          // file's value ladder is the most expensively-bought in the cast (see the
-          // rim table above — `torso|shoulderL` was knowingly spent to buy
-          // `shoulderL|elbowL` and `hipL|kneeL`), and sushi's `minDL` is 0.079 with
-          // one pair already under 0.10. Moving any limb albedo to separate the pairs
-          // would spend a seam that has already been paid for once. Arms go to 0.88
-          // and legs to 1.16 — 32% apart in multiplier and 0.1257 m against 0.1559 m
-          // in metres — which is a difference at 250 px and 3% was not.
-          return taperedLimb(size.len, size.radius * 0.88, size.radius * 0.78, upperLimbMat, 12, 0.10);
-        case 'forearmL':
-        case 'forearmR':
-          // ── AND THE ELBOW HAD A STEP IN IT, WHICH IS ITS OWN BEAD ─────────────
-          // The rig hands the forearm a smaller base radius (`armRadius * 0.92`), so
-          // equal-looking multipliers are NOT equal diameters: 0.80 * 0.1314 = 0.1051
-          // against an upper arm ending at 0.90 * 0.1428 = 0.1285 — the forearm was
-          // **18% narrower than the arm it hangs off**, a visible shoulder-of-mutton
-          // step at the elbow. Matched in metres instead: 0.848 * 0.1314 = 0.1114
-          // against 0.78 * 0.1428 = 0.1114.
-          return taperedLimb(size.len, size.radius * 0.848, size.radius * 0.60, noriLimbMat);
-        case 'handL':
-        case 'handR': {
-          // Rice-ball fists: white against the orange forearm, so the hands read as
-          // separate shapes at gameplay distance instead of merging into the limb.
-          const side = part === 'handL' ? 1 : -1;
-          return buildRiceFist(size.radius, side, riceMat, noriAccentMat, goldMat);
-        }
-        case 'thighL':
-        case 'thighR':
-          // The heavier pair — see the note on `upperArm`. `capBotFrac` 0.10 because
-          // this end is the KNEE and is covered by the shin.
-          return taperedLimb(size.len, size.radius * 1.16, size.radius * 1.00, upperLimbMat, 12, 0.10);
-        case 'shinL':
-        case 'shinR':
-          // Continuity in metres, as at the elbow: 1.111 * 0.1210 = 0.1344 against
-          // the thigh's 1.00 * 0.1344 = 0.1344.
-          return taperedLimb(size.len, size.radius * 1.111, size.radius * 0.86, noriLimbMat);
-        case 'footL':
-        case 'footR':
-          // Lacquered nori boots with a rice-pale sole — the dark value moves to
-          // the base of the figure, which is where it grounds rather than muddies.
-          return buildLacqueredBoot(size.len, noriAccentMat, riceMat, goldMat);
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`): one material per limb (no two-tone bead at
+    // the elbow or knee), a mitten attached over the wrist, a shoe seated on the floor. WAS:
+    // salmon upper segments over nori-black lower ones with a gold ring at every joint (the
+    // bead-stack the r0 critics named), rice-ball fists with a ribbon and stud. Rice mittens and
+    // rice shoes now.
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: upperLimbMat, leg: upperLimbMat, hand: riceMat, shoe: riceMat,
+    }));
 
     // ── 🔴 THE SHOULDER BRIDGE IS THE ROLL, NOT THE ARM ──────────────────────
     // `ChibiRig.fitShoulders()` (de4bb11) builds a deltoid per side in `palette.limb`
@@ -1940,7 +1895,9 @@ export class SushiCharacter extends BaseCharacter {
         .filter((b): b is THREE.Mesh => b !== null);
       const orphan = bridges.length ? bridges[0].material : null;
       for (const bridge of bridges) bridge.material = noriAccentMat;
-      if (orphan && !Array.isArray(orphan)) orphan.dispose();
+      // C1b: the bridge's material is now the kit's ARM material (`fitShoulders` reuses it),
+      // which the arms still wear — dispose it only if it is not that one.
+      if (orphan && !Array.isArray(orphan) && orphan !== upperLimbMat) orphan.dispose();
     }
   }
 

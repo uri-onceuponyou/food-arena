@@ -54,7 +54,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
-import { ChibiRig, taperedSegment } from './rig';
+import { ChibiRig, taperedSegment, batchJoints } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, blade as leafBlade, localBounds, massAnchor } from './appendages';
@@ -733,55 +733,41 @@ export class TacoCharacter extends BaseCharacter {
     // Sizes come DOWN across the board. The old blobs at 0.185R were the largest
     // objects in the fold; crumbled mince is small, and smallness is half of what
     // makes a pile of anything read as chopped rather than as whole fruit.
-    const crumbGeo = new THREE.IcosahedronGeometry(R * 0.128, 0);
-    const meatSpots: Array<[number, number, number, THREE.Material]> = [
-      // ⚠️ The dark/mid SPLIT is a value-gate decision, not a taste one, and it was
-      // measured both ways. Cutting `meatDarkMat` from 6 of 12 to 4 (because the
-      // rendered fold looked like charcoal at the old 0.185R sphere size) moved the
-      // shipped-capture p05 from 0.15 to 0.17 against a **max of 0.180** — the
-      // fillings ARE part of this character's dark 5%, not just the limbs. 6 dark
-      // crumbs at 0.128R read very differently from 6 dark spheres at 0.185R, which
-      // is what actually caused the charcoal look: the fix was the SIZE and the
-      // FACETING, not the count.
-      [-0.66, 0.86, 0.22, meatMat], [-0.44, 0.88, 0.06, meatDarkMat], [-0.24, 0.85, 0.30, meatMat],
-      [-0.06, 0.90, 0.12, meatDarkMat], [0.12, 0.86, 0.30, meatMat], [0.30, 0.89, 0.08, meatDarkMat],
-      [0.48, 0.85, 0.26, meatMat], [0.66, 0.87, 0.12, meatMat], [-0.54, 0.83, 0.34, meatDarkMat],
-      [0.02, 0.83, 0.02, meatDarkMat], [0.38, 0.83, 0.36, meatDarkMat], [-0.14, 0.92, 0.20, meatMat],
-    ];
-    for (let i = 0; i < meatSpots.length; i++) {
-      const [fx, fy, fz, mat] = meatSpots[i];
-      const blob = new THREE.Mesh(crumbGeo, mat);
-      blob.name = 'taco_meat';
-      // Deterministic per-index variation — a shared geometry with a different
-      // non-uniform scale and a different roll on every instance is what stops a
-      // dozen identical solids reading as a texture (the critic note that killed
-      // the first filling pass: "a row of near-identical brown spheres").
-      const j = (i * 2.399963) % 1;
-      blob.scale.set(0.78 + j * 0.66, 0.62 + ((i * 7) % 5) * 0.11, 0.80 + j * 0.34);
-      blob.rotation.set(j * 2.6, i * 1.31, ((i * 5) % 7) * 0.44);
-      blob.position.set(fx * halfWTop, fy * troughLen, fz * R);
-      blob.castShadow = true;
-      blob.receiveShadow = true;
-      troughPivot.add(blob);
-      this.fillings.push(blob);
-      this.fillingBaseRotZ.push(blob.rotation.z);
+    // C1b — FEWER, BIGGER MASSES. WAS: 32 filling bits (12 icosahedron meat crumbs, 6 tomato
+    // cubes, 9 lettuce shreds, 5 onion slivers), each its own mesh and each jiggled on its own.
+    // From the 58° camera that is a confetti of specks on the shell's rim — eight of eight w1/w2
+    // cast critics wrote "a jumble of overlapping shapes with no clear head, body or
+    // silhouette", the taco above all — and it was 64 draws (main + shadow) on one character.
+    // Now ONE lumpy meat mound fills the trough, three tomato chunks and four lettuce leaves
+    // break its top edge: the same food, read as one mass with accents. The jiggle is kept —
+    // every piece is still in `fillings` and still wobbles about its own z.
+    const moundGeo = new THREE.IcosahedronGeometry(1, 3);
+    {
+      const pos = moundGeo.getAttribute('position') as THREE.BufferAttribute;
+      const v = new THREE.Vector3();
+      for (let k = 0; k < pos.count; k++) {
+        v.fromBufferAttribute(pos, k);
+        // deterministic lumps: three incommensurate ripples, ±9% of the radius
+        const n = Math.sin(v.x * 7.1 + v.z * 3.3) * 0.05 + Math.sin(v.y * 9.7 - v.x * 4.1) * 0.025 + Math.sin(v.z * 11.3 + 1.7) * 0.015;
+        v.multiplyScalar(1 + n);
+        pos.setXYZ(k, v.x, v.y, v.z);
+      }
+      moundGeo.computeVertexNormals();
     }
+    const mound = new THREE.Mesh(moundGeo, meatMat);
+    mound.name = 'taco_meat';
+    mound.scale.set(halfWTop * 0.86, R * 0.22, R * 0.40);
+    mound.position.set(0, 0.86 * troughLen, 0.16 * R);
+    mound.castShadow = true;
+    mound.receiveShadow = true;
+    troughPivot.add(mound);
+    this.fillings.push(mound);
+    this.fillingBaseRotZ.push(mound.rotation.z);
 
-    // ── Vary the size, or a filling row is just a row ────────────────────────
-    // A critic on the previous build called the toppings "a row of
-    // near-identical brown spheres that read as generic lumps". Correct: every
-    // meat blob was one radius and every tomato one cube, so the fold read as a
-    // texture rather than as ingredients. One dominant tomato wedge now anchors
-    // the row and the rest step down from it.
-    const tomatoSpots: Array<[number, number, number, number]> = [
-      [-0.62, 0.96, 0.20, 1.55], [-0.26, 0.98, 0.06, 0.85], [0.12, 0.97, 0.26, 1.0],
-      [0.46, 0.99, 0.08, 0.8], [0.70, 0.94, 0.20, 1.15], [-0.44, 0.94, 0.00, 0.75],
-    ];
-    for (const [fx, fy, fz, scale] of tomatoSpots) {
-      const s = R * 0.155 * scale;
-      // Flattened, not a cube: a diced tomato is a CUT SLAB with a thickness, and a
-      // true cube at this size is the one solid that still reads as a bead.
-      const bit = new THREE.Mesh(new THREE.BoxGeometry(s, s * 0.58, s * 0.92), tomatoMat);
+    const tomatoSpots: Array<[number, number, number]> = [[-0.50, 0.97, 0.24], [0.08, 1.00, 0.30], [0.56, 0.96, 0.20]];
+    for (const [fx, fy, fz] of tomatoSpots) {
+      const sz = R * 0.22;
+      const bit = new THREE.Mesh(roundedBox(sz, sz * 0.62, sz * 0.92, sz * 0.16, 2), tomatoMat);
       bit.name = 'taco_tomato';
       bit.position.set(fx * halfWTop, fy * troughLen, fz * R);
       bit.rotation.set(0.3, 0.5, 0.2 + fx);
@@ -792,73 +778,20 @@ export class TacoCharacter extends BaseCharacter {
       this.fillingBaseRotZ.push(bit.rotation.z);
     }
 
-    // Lettuce is the only filling that clears the crimp, so it is the one that
-    // states "this shell is FULL" in silhouette. Kept to the top band.
-    // `burst` shreds stand nearly UPRIGHT and reach past the horns; the rest lie
-    // across the fold. Two spiky green bursts breaking the outline is what makes
-    // the crown of this silhouette specific instead of a flat lumpy line.
-    //
-    // ── AND THEY NOW CARRY THE HEIGHT THE SIDE SPRIGS USED TO ──────────────────
-    // MEASURED, and it is why there are three bursts instead of two and why they
-    // are longer: taking the up-aim off the two side sprigs (see
-    // `buildSilhouetteEvents` — they were reading as ears) cost this character
-    // **13 px of rendered height at the shipped facing, 152 -> 139**, because the
-    // taller sprig was the top of the silhouette. That is a real loss of presence
-    // and it must not be paid for by putting a pointed mass back at the side. The
-    // crown of the fold — near CENTRE, where nothing can be mistaken for an ear —
-    // is the correct place to spend it, and it is also what the food does: a
-    // taco's filling stands out of the TOP.
-    const lettuceSpots: Array<[number, number, number, number, boolean]> = [
-      [-0.72, 1.02, 0.12, 0.3, false], [-0.42, 1.13, 0.24, -0.30, true], [-0.10, 1.04, 0.04, 0.25, false],
-      [0.20, 1.15, 0.22, -0.34, true], [0.52, 1.04, 0.06, 0.2, false], [0.74, 1.00, 0.16, -0.25, false],
-      [-0.56, 1.00, 0.28, 0.1, false], [0.36, 0.99, -0.04, -0.1, false],
-      [-0.06, 1.11, 0.30, 0.18, true],
+    const lettuceSpots: Array<[number, number, number, number]> = [
+      [-0.62, 1.06, 0.12, 0.35], [-0.20, 1.12, 0.26, -0.25], [0.24, 1.10, 0.06, 0.28], [0.64, 1.04, 0.20, -0.32],
     ];
-    for (let i = 0; i < lettuceSpots.length; i++) {
-      const [fx, fy, fz, tilt2, burst] = lettuceSpots[i];
-      // A flat RIBBON, not a capsule. Shredded lettuce is a thin cut strip; a
-      // rounded rod of the same length and colour is a green bean, which is the
-      // other half of Uri's "looks like fruit" — the palette was never the problem.
-      const shred = new THREE.Mesh(
-        // Narrower than the first ribbon pass: at 0.090R wide by 0.52R long the
-        // bursts rendered as flat green BARS across the crown. A shred is thin.
-        roundedBox(R * (burst ? 0.072 : 0.058), R * (burst ? 0.48 : 0.30), R * 0.018, R * 0.009, 2),
-        i % 2 === 0 ? lettuceMatA : lettuceMatB
-      );
-      shred.name = 'taco_lettuce';
-      shred.position.set(fx * halfWTop, fy * troughLen, fz * R);
-      // Bursts stand up but are RAKED, not vertical — three dead-upright green
-      // strips read as candles on a cake rather than as leaves. Raked HARDER than
-      // before (0.55 -> 0.40) now that they are the tallest thing on the character:
-      // a vertical spike at the crown is the "crown" silhouette this file spent two
-      // rounds getting rid of, and a rake keeps the same height at a shallower angle.
-      shred.rotation.set(burst ? 0.40 : Math.PI / 2 + tilt2 * 0.6, 0, tilt2 + (burst ? tilt2 * 2.2 : 0));
-      shred.castShadow = true;
-      shred.receiveShadow = true;
-      troughPivot.add(shred);
-      this.fillings.push(shred);
-      this.fillingBaseRotZ.push(shred.rotation.z);
-    }
-
-    // A few onion slivers tucked among the meat — ties visually to the Onion Bomb
-    // ability's projectile colour, and the only cool-leaning hue in the fold.
-    // ⚠️ These were TORUS ARCS — purple rings — and a purple ring is a grape. Same
-    // colour, same place, but built as the thin flat slivers a diced red onion
-    // actually is. The hue is untouched; it still ties to the Onion Bomb.
-    const onionSpots: Array<[number, number, number, number]> = [
-      [-0.22, 0.94, 0.30, 0.4], [0.36, 0.96, 0.30, -0.8], [0.06, 0.90, 0.34, 1.1],
-      [-0.50, 0.92, 0.16, -0.3], [0.58, 0.92, 0.34, 0.9],
-    ];
-    for (const [fx, fy, fz, roll] of onionSpots) {
-      const sliver = new THREE.Mesh(roundedBox(R * 0.135, R * 0.052, R * 0.022, R * 0.011, 2), onionMat);
-      sliver.name = 'taco_onion';
-      sliver.position.set(fx * halfWTop, fy * troughLen, fz * R);
-      sliver.rotation.set(0.4, 0.7 + roll, fx);
-      sliver.castShadow = true;
-      sliver.receiveShadow = true;
-      troughPivot.add(sliver);
-      this.fillings.push(sliver);
-      this.fillingBaseRotZ.push(sliver.rotation.z);
+    for (let k = 0; k < lettuceSpots.length; k++) {
+      const [fx, fy, fz, lean] = lettuceSpots[k];
+      const leaf = new THREE.Mesh(roundedBox(R * 0.20, R * 0.42, R * 0.03, R * 0.015, 2), k % 2 === 0 ? lettuceMatA : lettuceMatB);
+      leaf.name = 'taco_lettuce';
+      leaf.position.set(fx * halfWTop, fy * troughLen, fz * R);
+      leaf.rotation.set(0.42, 0, lean);
+      leaf.castShadow = true;
+      leaf.receiveShadow = true;
+      troughPivot.add(leaf);
+      this.fillings.push(leaf);
+      this.fillingBaseRotZ.push(leaf.rotation.z);
     }
 
     // ── Face: ON THE SHELL, not beside it ────────────────────────────────────
@@ -1065,79 +998,12 @@ export class TacoCharacter extends BaseCharacter {
       mesh.receiveShadow = true;
       group.add(mesh);
 
-      // ── Costume: serape sash + chili charm ────────────────────────────────
-      // A second independent art-director pass named the total absence of any
-      // worn costume/accessory layer as the cast's single biggest remaining gap.
-      // A striped serape sash slung diagonally across the shell — the classic
-      // Mexican-blanket read — breaks the torso's trapezoid silhouette with a
-      // hard diagonal line the shape itself doesn't have, and the chili charm
-      // dangling off its low end is the small worn detail underneath it.
-      const sashColors = [SERAPE_PALE, '#F5EAD6', '#2E8C86', SERAPE_PALE, '#F5EAD6', '#2E8C86', SERAPE_PALE]
-        .map((c) => toonMat({ color: c, roughness: 0.72 }));
-      // Endpoints pulled in from 0.85/0.68 and lifted off the hip line: with the
-      // band's own width added perpendicular to its run, the old anchors put both
-      // ends outside the torso silhouette and the low end down among the thighs,
-      // so the sash read as a separate object slung over the character rather
-      // than as cloth lying on it.
-      const sashA = new THREE.Vector3(-halfWTopT * 0.66, size.h * 0.90, thicknessT * 0.56);
-      const sashB = new THREE.Vector3(halfWTopT * 0.52, size.h * 0.16, thicknessT * 0.56);
-      const sashDir = sashB.clone().sub(sashA);
-      const sashLen = sashDir.length();
-      sashDir.normalize();
-      // Narrowed from 0.30w. At that width the seven-stripe band was wider than
-      // the torso is deep and ran the full diagonal of the body, so the serape
-      // — an accessory — was the single largest block of colour on the
-      // character and covered the shell fold it is supposed to decorate. A sash
-      // reads as a sash because it is NARROW against what it crosses.
-      const sashWidth = size.w * 0.19;
-      const sashQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), sashDir);
-      const segCount = 7;
-      const segLen = (sashLen / segCount) * 1.18; // slight overlap so segments read as one continuous band
-      for (let i = 0; i < segCount; i++) {
-        const t = (i + 0.5) / segCount;
-        const center = sashA.clone().lerp(sashB, t);
-        const seg = new THREE.Mesh(
-          roundedBox(sashWidth, segLen, thicknessT * 0.14, sashWidth * 0.1, 2),
-          sashColors[i % sashColors.length]
-        );
-        seg.name = 'taco_serape_stripe';
-        seg.position.copy(center);
-        seg.quaternion.copy(sashQuat);
-        seg.castShadow = true;
-        seg.receiveShadow = true;
-        group.add(seg);
-      }
-      // Fringe tassels along the sash's low end.
-      for (let i = 0; i < 5; i++) {
-        const t = (i - 2) / 4;
-        const base = sashB.clone().add(new THREE.Vector3(t * sashWidth * 0.85, 0, 0).applyQuaternion(sashQuat));
-        const tassel = new THREE.Mesh(new THREE.ConeGeometry(sashWidth * 0.055, sashWidth * 0.42, 6), sashColors[i % sashColors.length]);
-        tassel.name = 'taco_serape_tassel';
-        tassel.position.copy(base).addScaledVector(sashDir, sashWidth * 0.24);
-        tassel.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), sashDir.clone().negate());
-        tassel.castShadow = true;
-        group.add(tassel);
-      }
-      // Chili charm — hangs off the sash's low point on a thin cord.
-      const chiliStemMat = toonMat({ color: '#5E8C3B', roughness: 0.6 });
-      const chiliMat = toonMat({ color: '#D93A2B', roughness: 0.48 });
-      const chiliAnchor = sashB.clone().addScaledVector(sashDir, sashWidth * 0.5);
-      const chiliString = new THREE.Mesh(new THREE.CapsuleGeometry(sashWidth * 0.025, size.h * 0.1, 4, 6), chiliStemMat);
-      chiliString.name = 'taco_chili_string';
-      chiliString.position.copy(chiliAnchor).add(new THREE.Vector3(0, -size.h * 0.06, 0));
-      group.add(chiliString);
-      const chiliBody = new THREE.Mesh(new THREE.SphereGeometry(sashWidth * 0.22, 10, 8), chiliMat);
-      chiliBody.name = 'taco_chili';
-      chiliBody.scale.set(0.6, 1.4, 0.6);
-      chiliBody.position.copy(chiliAnchor).add(new THREE.Vector3(0, -size.h * 0.15, 0));
-      chiliBody.castShadow = true;
-      chiliBody.receiveShadow = true;
-      group.add(chiliBody);
-      const chiliStem = new THREE.Mesh(new THREE.ConeGeometry(sashWidth * 0.06, sashWidth * 0.2, 6), chiliStemMat);
-      chiliStem.name = 'taco_chili_stem';
-      chiliStem.position.copy(chiliBody.position).add(new THREE.Vector3(0, sashWidth * 0.3, 0));
-      chiliStem.castShadow = true;
-      group.add(chiliStem);
+      // C1b — the serape sash is GONE: seven stripe segments in seven materials, five
+      // tassels and a chili charm on a cord, slung diagonally across the shell fold. It was
+      // added for a "worn costume layer" and it became the body's loudest shape — a striped
+      // diagonal crossing the torso, read at 58° as one more overlapping object in the
+      // "jumble of shapes with no clear head, body or silhouette" (8/8 w1/w2 cast critics).
+      // The torso is one mass again; the identity lives in the head's shell and filling.
 
       return group;
     });
@@ -1183,118 +1049,24 @@ export class TacoCharacter extends BaseCharacter {
     // projectile's colour on the character, and a BAND AT THE WRIST is an
     // arm-exclusive feature — a leg has no wrist — so it pays for itself twice.
     const cuffMat = glossyMat({ rim: true, color: ONION, roughness: 0.32 });
-    this.rig.dressLimbs((part, size) => {
-      switch (part) {
-        case 'upperArmL': case 'upperArmR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.72, size.radius * 0.58, 8, { rise: size.len * 0.30 }), limbShellMat);
-          m.scale.z = 0.72;
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'thighL': case 'thighR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.06, size.radius * 0.86, 8, { rise: size.len * 0.30 }), limbShellMat);
-          m.scale.z = 0.72;
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'forearmL': case 'forearmR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.58, size.radius * 0.46, 8, { rise: size.len * 0.22 }), limbShellDarkMat);
-          m.scale.z = 0.72;
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'shinL': case 'shinR': {
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.86, size.radius * 0.70, 8, { rise: size.len * 0.22 }), limbShellDarkMat);
-          m.scale.z = 0.72;
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'handL': case 'handR': {
-          // ── THE PURPLE ICOSAHEDRA READ AS GEMS, NOT AS FISTS ─────────────────
-          // `IcosahedronGeometry(radius * 0.92, 0)` is a twenty-faced solid with hard
-          // edges, in a saturated violet, hung off a near-black forearm at hip
-          // height. At the lobby camera that is a jewel on a stick — two of them,
-          // mirrored, which is also why they read as a PAIR of props rather than as
-          // hands. The old comment defended the colour ("breaks from the cast's
-          // repeated cream/white mitt"); the colour was never the problem, the
-          // FACETED SOLID was, and a hand is the one place on a character where the
-          // reference is unanimous: big, soft, one silhouette, with a thumb.
-          const g = new THREE.Group();
-          // Sized off the FOREARM it terminates, not off `handRadius`, for the same
-          // reason `soup.ts` records: `handRadius` is an independent rig constant and
-          // a hand wider than its own arm is long is an occluder, not a hand.
-          // ⚠️ NOT `size.radius`. `dressLimbs` hands the hand slot `m.handRadius`,
-          // an independent rig constant (0.095H = 0.1995 m here) that has nothing to
-          // do with the arm it terminates — sizing off it is how the old icosahedron
-          // ended up 0.367 m across, wider than the whole forearm is long.
-          // ⚠️ This line used to RE-TYPE the derivation as `armRadius * 0.92 * 0.46`.
-          // Identical arithmetic, and that is exactly the trap: `0.92` is the rig's
-          // number, not this file's, and a copy of it here goes stale silently the day
-          // the rig changes it. `metrics.forearmRadius` is the SAME value `limbSlots()`
-          // builds the forearm at, published so there is nothing left to re-type.
-          const tipR = this.rig.metrics.forearmRadius * 0.46;
-          const mitt = new THREE.Mesh(new THREE.SphereGeometry(tipR * 1.62, 16, 12), mittMat);
-          mitt.position.y = -tipR * 1.25;
-          mitt.scale.set(1, 0.94, 0.82);
-          mitt.name = `${part}_mesh`;
-          mitt.castShadow = true;
-          mitt.receiveShadow = true;
-          g.add(mitt);
-          // Thumb — a stub off the inner-forward quadrant. It is the smallest element
-          // here and it is the one that makes the mass NAMEABLE: a rounded blob is a
-          // ball, a rounded blob with a thumb is a hand, at any resolution.
-          const sx = part === 'handL' ? 1 : -1;
-          const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(tipR * 0.46, tipR * 0.72, 4, 8), mittMat);
-          thumb.position.set(sx * tipR * 1.15, -tipR * 0.62, tipR * 0.52);
-          thumb.rotation.set(0.35, 0, sx * 0.85);
-          thumb.castShadow = true;
-          g.add(thumb);
-          // Wrist cuff — arm-exclusive, and it also hides the join between the dark
-          // forearm and the pale mitt so the value jump reads as a garment edge.
-          const cuff = new THREE.Mesh(new THREE.TorusGeometry(tipR * 1.06, tipR * 0.26, 8, 16), cuffMat);
-          cuff.rotation.x = Math.PI / 2;
-          cuff.scale.z = 0.82;
-          cuff.castShadow = true;
-          g.add(cuff);
-          return g;
-        }
-        case 'footL': case 'footR': {
-          // Was a `radius*2.2 x len*0.85 x radius*2.6` slab hung at -len*0.5:
-          // 0.45 m across and 0.54 m deep on a 2.1 m character, with its
-          // underside 0.21 m BELOW y=0. Two separate defects in one mesh — it
-          // read as a house brick rather than a foot, and it broke the "feet at
-          // y=0" convention harder than anything else in this cohort (which also
-          // inflated every measured height for this character by that 0.21 m).
-          const foot = new THREE.Mesh(
-            roundedBox(size.radius * 1.85, size.len * 0.55, size.radius * 2.15, size.radius * 0.30, 3),
-            bootMat
-          );
-          // Seated on the floor via `size.groundY` (the joint-local y of the world
-          // ground, new on `LimbSize`) rather than by eye. `types.ts` convention #1
-          // is "feet at y=0" and the whole cast was 0.08-0.25 m under it; `Math.min`
-          // keeps the authored droop as the floor for the value so this can only ever
-          // raise a foot, never sink one.
-          foot.position.set(0, Math.max(size.groundY + size.len * 0.275, -size.len * 0.26), size.radius * 0.5);
-          foot.name = `${part}_mesh`;
-          foot.castShadow = true;
-          foot.receiveShadow = true;
-          return foot;
-        }
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`). WAS: limbs flattened to 72% depth in two
+    // shell tones (the forearm and shin a near-black `LIMB_SHELL_DARK`), an icosahedron-era
+    // masa ball with a capsule thumb and a lilac onion CUFF ring at every wrist, and a
+    // rounded-box boot — the "jumble of overlapping shapes" eight of eight w1/w2 cast critics
+    // named first on this character: five materials and a ring per limb, none of them the
+    // food. Now one shell tone per limb, a masa mitten and a charred-corn shoe.
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: limbShellMat, leg: limbShellMat, hand: mittMat, shoe: bootMat,
+    }));
 
     this.buildSilhouetteEvents();
 
+    // C1b: the identity plane tilted back 36° (`rig.tiltIdentity`, which says why > 32°):
+    // the face pad sits on the front shell wall; from above the camera saw the fillings and the shell's rim (face 5/8 on the base tree).
+    this.rig.tiltIdentity(THREE.MathUtils.degToRad(36));
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();

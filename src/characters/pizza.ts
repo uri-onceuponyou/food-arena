@@ -42,7 +42,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
-import { ChibiRig, type LimbPart } from './rig';
+import { ChibiRig, type LimbPart, batchJoints } from './rig';
 import { bodyType, withoutNeck } from './bodies';
 import { curl, knob, localBounds, massAnchor } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
@@ -1047,6 +1047,12 @@ export class PizzaCharacter extends BaseCharacter {
     this.buildAccessories(R, head);
     this.buildSilhouetteEvents(R);
 
+    // C1b: the identity plane tilted back 36° (`rig.tiltIdentity`, which says why > 32°):
+    // the slice is a flat wedge facing forward; from above it read as its crust edge (face 4/8 on the base tree).
+    this.rig.tiltIdentity(THREE.MathUtils.degToRad(36));
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
@@ -1581,116 +1587,13 @@ export class PizzaCharacter extends BaseCharacter {
     const charMat = toonMat({ color: CRUST_CHAR, roughness: 0.75 });
     const bootMat = toonMat({ color: BOOT_CRUST, roughness: 0.72 });
 
-    this.rig.dressLimbs((part: LimbPart, size) => {
-      switch (part) {
-        // The shoulder flare was 1.32x radius on a segment only ~1.9 radii LONG,
-        // so the upper arm came out wider than it was tall and read as a flipper
-        // rather than as the top of a limb. Flare pulled back to 1.10 so the
-        // taper still reads without the segment going square.
-        //
-        // ── 🚨 1.10 -> 1.50, AND THE FLIPPER IT WAS PULLED BACK FROM WAS THE FLAT
-        //    TOP CAP, NOT THE WIDTH ────────────────────────────────────────────────
-        // The old `capTopH` was `len * 0.16` regardless of `rTop`, so ANY wide top
-        // rendered as a plate — which is what "flipper" was describing. With the cap
-        // height now scaled by `rTop` and budgeted by `rise` (see `taperedLimb`), a
-        // 1.50 flare is a rounded shoulder ball instead, and it is what closes the
-        // gap this character has carried since the file was written: the probe
-        // (`tools/tmp/cc_probe.mjs`) puts `upperArmL` **0.228 m clear of the body**
-        // at idle with `riseTo --` — the dough barrel is never that wide at any
-        // height above, so rise alone cannot reach it and the flare has to.
-        // ⚠️ This file already RECORDS the run-cycle half of the same defect
-        // ("the left arm breaks off into its own 9,032 px connected component during
-        // the stride"), and 0.26H -> 0.235H was the partial fix. This is the rest.
-        //
-        // ── ARMS AND LEGS WERE THE SAME OBJECT ────────────────────────────────────
-        // Both pairs called this helper with `doughMat` over `doughDarkMat` at radii
-        // within 0.06 of a radius (arm 1.10/0.90 -> 0.90/0.62, leg 1.14/0.94 ->
-        // 0.94/0.76). Four identical dark-brown chains. Now: the arm tapers hard from
-        // a wide shoulder to a THIN forearm, the leg stays thick all the way down,
-        // and only the arm carries a crust cuff.
-        // ❌ A `CRUST_RIM` SHOULDER CUFF WAS BUILT, RENDERED AND REVERTED HERE.
-        // It was a second `taperedLimb` of length `0.30 * bone` at 1.58 radii, meant
-        // to be the arm's third value rung. At that length the helper's own cap
-        // clamps leave a mesh 0.38 m ACROSS and 0.14 m TALL — rendered
-        // (`shots/cc/after3/pizza_p20.png`) it is a bright orange LAMPSHADE hanging in
-        // mid-air at each shoulder, more prominent than the arm it was decorating and
-        // no more attached than before. The lesson is `taperedLimb`'s, not the cuff's:
-        // **a segment shorter than its own radius cannot be a segment**, which is the
-        // same arithmetic `donut.ts` records for `len < rTop + rBot`.
-        // The arm/leg separation is carried by the shaft instead (1.16/0.80 against
-        // the thigh's 1.34/1.14 on a bigger radius), and the ATTACHMENT is carried by
-        // the torso's own dough shoulder — see `dressTorso`.
-        case 'upperArmL':
-        case 'upperArmR':
-          return taperedLimb(size.len, size.radius * 1.16, size.radius * 0.80, doughMat, 16, size.len * 0.26);
-        case 'forearmL':
-        case 'forearmR':
-          return taperedLimb(size.len, size.radius * 0.80, size.radius * 0.56, doughDarkMat, 14, size.len * 0.12);
-        case 'handL':
-        case 'handR': {
-          const side = part === 'handL' ? 1 : -1;
-          const mitt = buildDoughMitt(size.radius, side, pepMat);
-          const badge = new THREE.Mesh(
-            new THREE.CylinderGeometry(size.radius * 0.22, size.radius * 0.22, size.radius * 0.08, 12),
-            doughDarkMat
-          );
-          badge.name = 'mitt_badge';
-          badge.rotation.x = Math.PI / 2;
-          badge.position.set(0, size.radius * 0.18, size.radius * 0.98);
-          badge.castShadow = true;
-          mitt.add(badge);
-          return mitt;
-        }
-        case 'thighL':
-        case 'thighR':
-          // `rise` 0.30 of the bone. The probe puts `thighR` already INSIDE the body
-          // (gap -0.118) and `thighL` 0.017 clear with `riseTo` only 0.14 m up — so
-          // unlike the arms, the legs are a rise problem and not a width problem, and
-          // this is the mass the dough seat above was built to spread over.
-          return taperedLimb(size.len, size.radius * 1.34, size.radius * 1.14, doughMat, 16, size.len * 0.30);
-        case 'shinL':
-        case 'shinR':
-          return taperedLimb(size.len, size.radius * 1.14, size.radius * 0.90, doughDarkMat, 16, size.len * 0.12);
-        case 'footL':
-        case 'footR':
-          // ── 🔴 `kneeL|footL` dL 0.0001 OVER 33 CONTACTS — 8.1 pp OF A 16.7% FAIL ──
-          // WAS `buildCrustBoot(size.len, charMat, doughDarkMat)`: upper `CRUST_CHAR`
-          // (the darkest tone in the file) under a shin already at `LIMB_CHAR`, with
-          // the SOLE in the shin's own tone. So the boot's two rungs were "blacker
-          // than the shin" and "exactly the shin", and its whole-part median landed
-          // 0.0001 from the shin's. Rendered at the LOBBY camera the shin and the
-          // boot are one black mass with no ankle in it.
-          // Now: light crust upper, `CRUST_CHAR` SOLE PLATE. The roles are swapped,
-          // not removed — the character keeps its darkest tone (and therefore its
-          // `p05` dark anchor) on the sole, where a boot's dark actually belongs.
-          // MEASURED, `valuescan --mode chars --ids pizza`, paired under `headserve
-          // --ref 576d7fe` with this file as the only `--overlay`:
-          //
-          //   key                       before    after     gate
-          //   kneeL|footL dLcontact     0.0906 -> 0.2730    the STEERING number; the
-          //                                                 8-bit floor is 0.0039
-          //   kneeL|footL dL            0.0001 -> 0.4945    over 33 -> 35 contacts
-          //   footL p50                 0.0983 -> 0.5966    kneeL p50 0.0982 -> 0.1021
-          //   footL p10                 0.0690 -> 0.0588    the SOLE is now the
-          //                                                 darkest pixel on the model
-          //   weakBoundaryPct           16.67  -> 8.54      <= 15   🔴 FAIL -> PASS
-          //   steps@10                  6      -> 7         >= 6, reference MEDIAN 7
-          //   p05                       0.0946 -> 0.1115    <= 0.180
-          //   range                     0.8137 -> 0.7969    >= 0.636
-          //   figure/ground dL          0.3012 -> 0.3190
-          // ⚠️ `weakBoundaryPct` is NOT what this was steered on — it is a cliff and it
-          // produced a false FAIL and a false PASS in one run. It is quoted because it
-          // is the gate's verdict key, not because it drove the choice.
-          // 🚨 AND +1.1 pp OF THE 16.7 WAS A DENOMINATOR ARTEFACT, NOT A DEFECT: the
-          // neck migration (`a44d36d`) deleted two HEALTHY pairs (`neck|torso` dL 0.386
-          // over 18 contacts, `head|neck` 0.548 over 28), so contacts went 436 -> 408
-          // with the numerator unchanged. No pair's dL moved more than 0.0013. It was
-          // already 15.6 before the neck went; this pair was always the whole of it.
-          return buildCrustBoot(size.len, bootMat, charMat);
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`): one material per limb (no two-tone bead at
+    // the elbow or knee), a mitten attached over the wrist, a shoe seated on the floor. WAS:
+    // dough upper segments over a charred `LIMB_CHAR` forearm and shin, striped pepperoni
+    // mitts with a badge and a separate thumb, and a crust boot with a char sole and a cuff.
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: doughMat, leg: doughMat, hand: pepMat, shoe: bootMat,
+    }));
   }
 
   /**

@@ -36,7 +36,8 @@
  */
 
 import * as THREE from 'three';
-import { toonMat, roundedBox } from '../render/toon';
+import { toonMat, roundedBox, cloneToon, mergeStaticMeshes, MERGE_SKIP } from '../render/toon';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CHARACTER_HEIGHT } from '../units';
 
 /**
@@ -243,6 +244,179 @@ export function taperedSegment(
   geo.computeVertexNormals();
   return geo;
 }
+
+/**
+ * C1b (`docs/REVAMP.md` §5 C1) — a limb segment as a SPHERE-SWEPT CONE: a sphere of
+ * radius `r0` centred ON the joint origin, a sphere of radius `r1` centred on the next
+ * joint `len` below it, and the cone tangent to both.
+ *
+ * ── Why this replaces `taperedSegment` for the cast's limbs ─────────────────────
+ * Every home critic in r0 (6/6) wrote some form of *"thin, stiff stick limbs"* and
+ * *"ball joints"*, and the reason is geometric: `taperedSegment`'s caps are bounded by the
+ * BONE (`len * 0.30 / 0.42`), so its ends are flattened domes that do not sit on the joint,
+ * and the next segment's cap — of a DIFFERENT radius on most characters, and a different
+ * colour on eight — meets it as a visible bead. Here both segments that share a joint carry
+ * the SAME sphere at that joint (same centre, same radius), so the elbow and the knee are
+ * seamless at every bend angle: there is nothing at the joint to read as a ball, because
+ * the joint IS the limb's own surface. Pass equal radii at a shared joint, in METRES.
+ *
+ * Profile wound bottom-to-top (see `taperedSegment`'s note on why order matters), and the
+ * normals are `LatheGeometry`'s own analytic ones — no `computeVertexNormals`, which would
+ * open a shading seam down the lathe's duplicated first column.
+ */
+export function limbCapsule(
+  len: number, r0: number, r1: number, radialSegments = 16, capSegs = 7,
+  o: { openTop?: boolean; topCapY?: number } = {},
+): THREE.BufferGeometry {
+  // Latitude of the tangent circle on each sphere: sin(a) = (r1 - r0) / len, negative when
+  // the limb narrows downward (the flank then faces slightly DOWN).
+  const a0 = Math.asin(THREE.MathUtils.clamp((r1 - r0) / Math.max(1e-6, len), -0.95, 0.95));
+  const pts: THREE.Vector2[] = [];
+  for (let i = 0; i <= capSegs; i++) {
+    const a = -Math.PI / 2 + (a0 + Math.PI / 2) * (i / capSegs);
+    pts.push(new THREE.Vector2(Math.cos(a) * r1, -len + Math.sin(a) * r1));
+  }
+  // two flank stations so the straight run carries interpolated normals, not one long quad
+  for (const t of [1 / 3, 2 / 3]) {
+    pts.push(new THREE.Vector2(
+      THREE.MathUtils.lerp(Math.cos(a0) * r1, Math.cos(a0) * r0, t),
+      THREE.MathUtils.lerp(-len + Math.sin(a0) * r1, Math.sin(a0) * r0, t),
+    ));
+  }
+  if (o.openTop) {
+    // `openTop`: the PARENT segment owns the joint sphere. This segment's flank ends on the
+    // tangent circle — which lies ON that sphere, at any bend angle, because the joint
+    // rotates about the sphere's own centre — and is closed by a flat disk there, entirely
+    // inside the parent's ball. Two coincident spheres at one joint are invisible to the eye
+    // (one material) but not to `limbcheck`, which charged the shared sphere to whichever
+    // segment lost each pixel's depth test, and so read a seamless elbow as a buried one.
+    const top = new THREE.Vector2(Math.cos(a0) * r0, Math.sin(a0) * r0);
+    pts.push(top.clone(), new THREE.Vector2(top.x * 0.5, top.y), new THREE.Vector2(1e-4, top.y));
+  } else {
+    // `topCapY` < 1 squashes the top dome vertically (a hip under a pelvis: the dome above
+    // the joint is buried in the body on every character, so it is pure footprint loss).
+    const ky = o.topCapY ?? 1;
+    for (let i = 0; i <= capSegs; i++) {
+      const a = a0 + (Math.PI / 2 - a0) * (i / capSegs);
+      const y = Math.sin(a) * r0;
+      pts.push(new THREE.Vector2(Math.cos(a) * r0, y > 0 ? y * ky : y));
+    }
+  }
+  // the poles: an exact 0 radius makes LatheGeometry emit degenerate normals there
+  pts[0].x = Math.max(pts[0].x, 1e-4);
+  pts[pts.length - 1].x = Math.max(pts[pts.length - 1].x, 1e-4);
+  return new THREE.LatheGeometry(pts, radialSegments);
+}
+
+/**
+ * C1b — the kit's MITTEN: one geometry, palm + thumb, hanging below the wrist joint (the
+ * hand joint's origin), its top swallowing the forearm's wrist sphere so it cannot read as
+ * detached. `inner` is +1 for the LEFT hand (whose body side is +x) and -1 for the right.
+ * The thumb sits on the FRONT of the palm (+z), angled down and in — at the lobby camera it
+ * is what turns a ball into a hand; at 58° it breaks the round outline.
+ */
+export function mittenGeometry(inner: number, rM: number): THREE.BufferGeometry {
+  const palm = new THREE.SphereGeometry(rM, 20, 14);
+  palm.scale(0.82, 1.0, 0.94);
+  palm.translate(inner * 0.04 * rM, -1.02 * rM, 0.04 * rM);
+  const thumb = limbCapsule(0.40 * rM, 0.36 * rM, 0.31 * rM, 12, 5);
+  const dir = new THREE.Vector3(inner * 0.42, -0.42, 0.80).normalize();
+  thumb.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir));
+  thumb.translate(inner * 0.30 * rM, -0.74 * rM, 0.40 * rM);
+  const merged = mergeGeometries([palm, thumb]);
+  palm.dispose(); thumb.dispose();
+  if (!merged) throw new Error('[rig] mittenGeometry: merge refused');
+  return merged;
+}
+
+/**
+ * C1b — the kit's SHOE upper: a low toe box forward of the ankle and a taller heel collar
+ * behind it, one geometry. `groundY` is the foot joint's local floor; the collar's top is
+ * `groundY + Hs`, above the ankle joint. The sole is a separate, darker mesh (`kitLimb`).
+ */
+export function shoeUpperGeometry(L: number, W: number, Hs: number, groundY: number, sole = false): THREE.BufferGeometry {
+  // `sole`: the SAME two lobes, 6% wider and longer and squashed to the bottom fifth — so the
+  // sole's outline is the shoe's own outline with a rim, not a rectangle under a bean (a
+  // `roundedBox` sole read as a skateboard deck in the close-up, and its corner was the 3-8
+  // px `limbcheck` counted as a detached island on four characters).
+  const kx = sole ? 1.06 : 1, kz = sole ? 1.05 : 1;
+  const toe = new THREE.SphereGeometry(1, 20, 12);
+  const heel = new THREE.SphereGeometry(1, 20, 12);
+  if (sole) {
+    toe.scale(W * 0.50 * kx, Hs * 0.13, L * 0.38 * kz);
+    toe.translate(0, groundY + Hs * 0.11, L * 0.20);
+    heel.scale(W * 0.46 * kx, Hs * 0.13, L * 0.30 * kz);
+    heel.translate(0, groundY + Hs * 0.11, -L * 0.08);
+  } else {
+    toe.scale(W * 0.50, Hs * 0.46, L * 0.38);
+    toe.translate(0, groundY + Hs * 0.40, L * 0.20);
+    heel.scale(W * 0.46, Hs * 0.55, L * 0.30);
+    heel.translate(0, groundY + Hs * 0.45, -L * 0.08);
+  }
+  const merged = mergeGeometries([toe, heel]);
+  toe.dispose(); heel.dispose();
+  if (!merged) throw new Error('[rig] shoeUpperGeometry: merge refused');
+  return merged;
+}
+
+/**
+ * C1b — the materials a character hands the shared limb system (`ChibiRig.kitLimb`).
+ *
+ * ONE material per limb, upper and lower segment alike: "joints in the limb's own colour"
+ * is the brief, and on eight of eleven characters the forearm and shin were a second, darker
+ * material whose top cap met the upper segment's bottom cap as a two-tone bead.
+ */
+export interface LimbKit {
+  /** Upper arm AND forearm. */
+  arm: THREE.Material;
+  /** Thigh AND shin. */
+  leg: THREE.Material;
+  /** The mitten (palm + thumb are one mesh). */
+  hand: THREE.Material;
+  /** The shoe's upper. */
+  shoe: THREE.Material;
+  /** The shoe's sole. Defaults to `shoe`. */
+  sole?: THREE.Material;
+  /** Per-character chunk multipliers on the cast-wide kit sizes (default 1). */
+  armScale?: number;
+  legScale?: number;
+  handScale?: number;
+  shoeScale?: number;
+}
+
+/**
+ * C1b — the kit's cast-wide size rules, as fractions of the character's HEIGHT or of the
+ * limb's own radius. One table, so a successor tunes the whole cast in one place.
+ *
+ * `ARM_MIN_F` / `LEG_MIN_F` floor the two lanky archetypes (`armRadiusF` 0.040), whose
+ * arms measured 8% of height across — the "stick limbs" — while every other ratio is
+ * relative to the archetype's own radius so a stout body stays stouter than a lanky one.
+ */
+export const LIMB_KIT = {
+  ARM_MIN_F: 0.056,
+  LEG_MIN_F: 0.058,
+  SHOULDER: 0.94, ELBOW: 0.80, WRIST: 0.70,     // × arm radius
+  HIP: 1.00, KNEE: 0.86, ANKLE: 0.78,           // × leg radius
+  MITT: 1.45,                                   // mitten radius × wrist radius
+  SHOE_LEN: 3.6, SHOE_W: 2.3, SHOE_TOP: 0.10,  // × ankle radius (TOP = collar above the ankle joint)
+  /** Toe-out of each shoe about its own vertical, radians — a planted stance stands toes-out. */
+  TOE_OUT: 0.20,
+} as const;
+
+/**
+ * C1b — the PLANTED STANCE. Every character had `splay` 0.32-0.46 rad: each leg 18-26°
+ * off vertical, knees bowed outward by the rig's `-sp * 0.25`, feet a stance-width and a
+ * half apart — what all six r0 home critics called a *"spider"* stance. It was added for
+ * silhouette width at 58° (`RigStance.splay`'s note) and it bought that width with the
+ * read of a character standing on the ground. Capped here, in the rig, so all eleven
+ * inherit it from one number; the width comes back from chunkier legs and shoes instead.
+ */
+// ⚠️ WAS 0.14, and that read as planted in the lobby and cost the MATCH its legs: at 58°
+// the mass above the hips projects over legs that stand under it. `limbmatch` (58°, four
+// facings) on taco, donut, egg, lollipop, hamburger, hotdog — groups delivering ZERO px:
+// base 48, at 0.14 59, at 0.24 53. With chunky kit legs 0.24 reads as a sturdy A-stance
+// rather than a spider (the spider was thin bead legs at 0.32-0.46), so 0.24 it is.
+export const PLANTED_SPLAY_MAX = 0.24;
 
 /** Attachment points `dressLimbs` can replace. */
 export type LimbPart =
@@ -739,7 +913,9 @@ export class ChibiRig {
       headTurn: st.headTurn ?? -0.13,
       hipSway: st.hipSway ?? 0.035,
       lean: st.lean ?? 0,
-      splay: st.splay ?? 0,
+      // C1b: capped — see `PLANTED_SPLAY_MAX`. A character's own value above the cap is
+      // the spider stance the r0 critics named; below it, it is still honoured.
+      splay: Math.min(st.splay ?? 0, PLANTED_SPLAY_MAX),
     };
     const pr = opts.proportions ?? {};
     const height = pr.height ?? CHARACTER_HEIGHT;
@@ -1946,7 +2122,9 @@ export class ChibiRig {
     if (!body.length) return;
 
     const rough = this.palette.limbRoughness ?? 0.62;
-    const mat = toonMat({ color: this.palette.limb, roughness: rough });
+    // C1b: the bridge wears the kit's arm material when there is one, so the deltoid is the
+    // arm's own colour (and the same instance, which the per-joint batch can share).
+    const mat = this.kitArmMat ?? toonMat({ color: this.palette.limb, roughness: rough });
     const rc = new THREE.Raycaster();
     const from = new THREE.Vector3();
     const dir = new THREE.Vector3();
@@ -2027,6 +2205,121 @@ export class ChibiRig {
       torso.add(bridge);
       this.shoulderBridge[side] = bridge;
     }
+  }
+
+  /**
+   * C1b (`docs/REVAMP.md` §2.6, §5 C1) — TILT THE IDENTITY PLANE BACK, so it faces the 58°
+   * match camera from every facing instead of only from the front.
+   *
+   * The geometry, re-derived: a plane whose normal sits `t` above horizontal faces a camera
+   * at elevation 58° from azimuth 180° (directly behind) iff sin58·sin t > cos58·cos t,
+   * i.e. t > 32°. At `t` = 0 a face is visible from 3-5 of 8 facings and a vertical ring
+   * hides its own hole from all 8 (the donut: hole 0/8, face 4/8 on the base tree). The
+   * cost lands in the lobby (20°): the face looks UP by `t` − 20°.
+   *
+   * Everything the character has parented to `head` — the food mass, its dressings and the
+   * `face` joint — moves under one static `identity_tilt` group rotated `-angle` about x
+   * through `pivot` (head-local). The rig keeps animating `head` itself, so the tilt rides
+   * every turn, nod and breath; nothing re-derives a position, so no face can detach.
+   * Call once, after the head and face are built and before `batchJoints`.
+   */
+  tiltIdentity(angle: number, pivot: THREE.Vector3 = new THREE.Vector3(), only?: THREE.Object3D[]): THREE.Group {
+    const head = this.joints.head;
+    const g = new THREE.Group();
+    g.name = 'identity_tilt';
+    g.position.copy(pivot);
+    g.rotation.x = -angle;
+    // `only`: tilt just these children of `head` (plus `face`, when it hangs off `head`) and
+    // leave the rest where they stand — for a head that also carries part of the BODY.
+    // Lollipop: its stick, plug and wrapper ride the head joint, and tilting them with the
+    // disc swung the stick out in front of the character like a bazooka (c1b_sheet, 20°/45).
+    const movers = only ? [...new Set([...only, this.joints.face])].filter((o) => o.parent === head) : [...head.children];
+    for (const c of movers) {
+      head.remove(c);
+      c.position.sub(pivot);
+      g.add(c);
+    }
+    head.add(g);
+    return g;
+  }
+
+  /** Set by `kitLimb`: the arm's material, so `fitShoulders`' bridge wears the arm's colour. */
+  private kitArmMat: THREE.Material | null = null;
+  /** The kit's derived sole material, one instance per rig so both shoes share it. */
+  private kitSoleMat: THREE.Material | null = null;
+
+  /**
+   * C1b (`docs/REVAMP.md` §5 C1) — THE CAST'S ONE LIMB SYSTEM. A character's `dressLimbs`
+   * callback returns `rig.kitLimb(part, size, kit)` for every slot it does not have a
+   * SPECIFIC reason to author, and every character inherits a fix made here.
+   *
+   * What it builds, and the r0 critic sentence each part answers (6/6 home critics):
+   *   arms, legs  `limbCapsule` chains — chunky, tapered shoulder→elbow→wrist and
+   *               hip→knee→ankle, the two segments of a limb sharing ONE sphere at the
+   *               shared joint and ONE material: no ball joints, no two-tone beads
+   *               (*"thin, stiff stick limbs"*, *"spider-like legs"*).
+   *   hands       a MITTEN — palm plus a thumb, one mesh — whose top swallows the wrist
+   *               sphere, so it is attached to the arm by construction (*"its hands float
+   *               detached"*, *"plain blobby hands"*).
+   *   feet        a SHOE — a toe box and a heel collar over a darker sole, seated on the
+   *               floor through `size.groundY`, its collar above the ankle joint so the
+   *               shin enters it (*"puck boots"*).
+   * Sizes are `LIMB_KIT`'s, in METRES off the rig's own metrics — never per-character
+   * multipliers on `size.radius`, which is how the cast reached eleven different limbs.
+   */
+  kitLimb(part: LimbPart, size: LimbSize, kit: LimbKit): THREE.Object3D {
+    const m = this.metrics;
+    const K = LIMB_KIT;
+    const armR = Math.max(m.upperArmRadius, m.height * K.ARM_MIN_F) * (kit.armScale ?? 1);
+    const legR = Math.max(m.thighRadius, m.height * K.LEG_MIN_F) * (kit.legScale ?? 1);
+    const rS = armR * K.SHOULDER, rE = armR * K.ELBOW, rW = armR * K.WRIST;
+    const rH = legR * K.HIP, rK = legR * K.KNEE, rA = legR * K.ANKLE;
+    const mesh = (geo: THREE.BufferGeometry, mat: THREE.Material): THREE.Mesh => {
+      const x = new THREE.Mesh(geo, mat);
+      x.name = `${part}_mesh`;
+      x.castShadow = true;
+      x.receiveShadow = true;
+      return x;
+    };
+    switch (part) {
+      case 'upperArmL': case 'upperArmR':
+        this.kitArmMat = kit.arm;
+        return mesh(limbCapsule(m.upperArmLength, rS, rE), kit.arm);
+      case 'forearmL': case 'forearmR':
+        return mesh(limbCapsule(m.forearmLength, rE, rW, 16, 7, { openTop: true }), kit.arm);
+      case 'thighL': case 'thighR':
+        return mesh(limbCapsule(m.thighLength, rH, rK, 16, 7, { topCapY: 0.45 }), kit.leg);
+      case 'shinL': case 'shinR':
+        return mesh(limbCapsule(m.shinLength, rK, rA, 16, 7, { openTop: true }), kit.leg);
+      case 'handL': case 'handR':
+        return mesh(mittenGeometry(part === 'handL' ? 1 : -1, rW * K.MITT * (kit.handScale ?? 1)), kit.hand);
+      case 'footL': case 'footR': {
+        const s = kit.shoeScale ?? 1;
+        const L = rA * K.SHOE_LEN * s, W = rA * K.SHOE_W * s;
+        // Shoe height: floor (joint-local `groundY`, negative) up to a collar ABOVE the
+        // ankle joint, so the shin's ankle sphere sits inside the shoe, never on it.
+        const Hs = rA * K.SHOE_TOP - size.groundY;
+        const g = new THREE.Group();
+        g.name = `${part}_shoe`;
+        const upper = mesh(shoeUpperGeometry(L, W, Hs, size.groundY), kit.shoe);
+        const sole = mesh(shoeUpperGeometry(L, W, Hs, size.groundY, true), kit.sole ?? this.soleFor(kit.shoe));
+        sole.name = `${part}_sole`;
+        g.add(upper, sole);
+        return g;
+      }
+    }
+  }
+
+  /** The shoe colour at 45% value, ramp and rim kept (`cloneToon` re-applies the rim patch). */
+  private soleFor(shoe: THREE.Material): THREE.Material {
+    if (!this.kitSoleMat) {
+      const s = cloneToon(shoe);
+      const c = (s as THREE.Material & { color?: THREE.Color }).color;
+      if (c) c.multiplyScalar(0.45);
+      s.name = 'kit_sole';
+      this.kitSoleMat = s;
+    }
+    return this.kitSoleMat;
   }
 
   /**
@@ -2188,8 +2481,9 @@ export class ChibiRig {
     j.hipR.rotation.set(-0.02, 0, -0.04 + sp);
     j.kneeL.rotation.set(0.10, 0, -sp * 0.25);
     j.kneeR.rotation.set(0.05, 0, sp * 0.25);
-    j.footL.rotation.set(0, 0, sp * 1.25);
-    j.footR.rotation.set(0, 0, -sp * 1.25);
+    // C1b: toes out (`LIMB_KIT.TOE_OUT`) — a planted stance, not two feet parallel on rails.
+    j.footL.rotation.set(0, -LIMB_KIT.TOE_OUT, sp * 1.25);
+    j.footR.rotation.set(0, LIMB_KIT.TOE_OUT, -sp * 1.25);
     // Weight shift + counter-rotation through the spine.
     j.hips.rotation.set(0, 0, s.hipSway);
     j.torso.rotation.z = -0.05;
@@ -2652,4 +2946,95 @@ export class ChibiRig {
 
     j.body.scale.set(sqX, sqY, sqX);
   }
+}
+
+/**
+ * C1b (`docs/REVAMP.md` §5 C1 "per-joint batching") — collapse each rig joint's STATIC
+ * meshes into one mesh per material, in that joint's own space, so the joint still moves
+ * them and every per-joint instrument (`limbcheck`, `limbmatch`, `gx_chars_yaw`) still
+ * isolates the same subtrees it did. Call it at the end of `build()`, immediately before
+ * `outlineCharacter(this.root)`, so the hulls and the R1 role patch are built on the merged
+ * meshes rather than on parts that no longer exist.
+ *
+ * ── Why per joint, and what that costs ────────────────────────────────────────
+ * §2.8: a six-seat phone frame was ~1,570 draws and each fighter ~143 of them; a draw is
+ * paid once in the main pass and again in the shadow pass for every caster. Per-material
+ * merging inside a joint is the largest cut that changes NO pixel: the merged mesh is handed
+ * the very material instance its sources shared (`mergeStaticMeshes` never clones one — a
+ * clone drops `onBeforeCompile`, which cost this project the rim on 54 sites), so the ramp,
+ * the rim, the C1a palette and the hit flash (`collectFlashTargets` runs after) are those of
+ * the sources exactly.
+ * ⚠️ **It cannot reach "≤25 draws per fighter" on its own, and that is arithmetic, not
+ * effort:** a fighter has 16-19 joints that carry geometry and every one is at least one main
+ * draw plus one shadow draw, so the floor of ANY per-joint scheme is ~32. Below that needs
+ * draws that span joints (a skinned mesh), which the per-joint instruments cannot see into —
+ * routed to P1 (`docs/REVAMP.md` §5) rather than done here.
+ *
+ * ── What is NEVER merged ──────────────────────────────────────────────────────
+ *  · anything the character HOLDS a reference to (an own field of `owner`, or an element of
+ *    an array / Map / Set / plain record in one), with its whole subtree — that is how every
+ *    animated part in the cast is driven (taco's fillings, burrito's toppings, soup's broth
+ *    and steam, the bottle's water and bubbles: `tools/tmp/c1b_census.mjs` found no other);
+ *    a merged mesh is frozen where it stood, so a held part stays a part;
+ *  · the `face` joint — eyes, brows and mouths are what the face/brow/eye diagnostics find
+ *    BY NAME (`AGENT-BRIEF` §3: an unnamed mesh is invisible to every one of them);
+ *  · transparent materials (a merged transparent mesh sorts as one object), hidden meshes,
+ *    meshes with children, and an existing `mergeSkip` subtree (`toon.ts`'s own rules);
+ *  · across the outline flag: `__no_outline` parts merge only with each other and the result
+ *    keeps the flag, so `outlineGroup` skips exactly what it skipped before.
+ */
+export function batchJoints(owner: object, joints: RigJoints): { before: number; after: number } {
+  const jointSet = new Set<THREE.Object3D>(Object.values(joints));
+  const isObj = (v: unknown): v is THREE.Object3D => !!v && (v as THREE.Object3D).isObject3D === true;
+  const containsJoint = (o: THREE.Object3D): boolean => {
+    let hit = false;
+    o.traverse((x) => { if (jointSet.has(x)) hit = true; });
+    return hit;
+  };
+  const held = new Set<THREE.Object3D>();
+  const take = (v: unknown, depth: number): void => {
+    if (isObj(v)) { if (!containsJoint(v)) held.add(v); return; }
+    if (depth <= 0 || !v || typeof v !== 'object') return;
+    if (Array.isArray(v)) { for (const x of v) take(x, depth - 1); return; }
+    if (v instanceof Map) { for (const x of v.values()) take(x, depth - 1); return; }
+    if (v instanceof Set) { for (const x of v) take(x, depth - 1); return; }
+    if (Object.getPrototypeOf(v) === Object.prototype) for (const x of Object.values(v)) take(x, depth - 1);
+  };
+  for (const k of Object.keys(owner)) take((owner as Record<string, unknown>)[k], 2);
+
+  const count = (): number => {
+    let n = 0;
+    joints.root.traverse((o) => { if ((o as THREE.Mesh).isMesh && !o.name.endsWith('__outline')) n++; });
+    return n;
+  };
+  const before = count();
+  const noOutline = (o: THREE.Object3D): boolean => !!o.userData?.noOutline || o.name.endsWith('__no_outline');
+  const transparent = (o: THREE.Object3D): boolean => {
+    const ms = (o as THREE.Mesh).material;
+    return (Array.isArray(ms) ? ms : [ms]).some((m) => !!m && m.transparent);
+  };
+  // Flags this function sets, so it removes exactly those and leaves a character's own.
+  const set: THREE.Object3D[] = [];
+  const flag = (o: THREE.Object3D): void => { if (!o.userData[MERGE_SKIP]) { o.userData[MERGE_SKIP] = true; set.push(o); } };
+  const unflagAll = (): void => { for (const o of set.splice(0)) delete o.userData[MERGE_SKIP]; };
+
+  for (const j of jointSet) {
+    if (j === joints.face) continue;
+    for (const pass of ['outlined', 'noOutline'] as const) {
+      for (const o of held) flag(o);
+      for (const k of jointSet) if (k !== j) flag(k);
+      j.traverse((o) => {
+        if (!(o as THREE.Mesh).isMesh || o === j) return;
+        if (transparent(o) || (pass === 'outlined') === noOutline(o)) flag(o);
+      });
+      const label = `batch:${j.name}`;
+      const had = new Set(j.children);
+      mergeStaticMeshes(j, label);
+      unflagAll();
+      if (pass === 'noOutline') {
+        for (const c of j.children) if (!had.has(c) && c.name.startsWith(`${label}:`)) c.userData.noOutline = true;
+      }
+    }
+  }
+  return { before, after: count() };
 }

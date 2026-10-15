@@ -75,7 +75,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter } from '../render/toon';
-import { ChibiRig, taperedSegment } from './rig';
+import { ChibiRig, taperedSegment, batchJoints } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, blade as peelBlade, localBounds, massAnchor } from './appendages';
@@ -123,7 +123,7 @@ import { aim, blade as peelBlade, localBounds, massAnchor } from './appendages';
 // quoted in the older comments around them describe the OLD values. The measurements (median
 // luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
 // (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
-// Signature hue: GREEN at 58° — the filling seen from above is guacamole (`RICE` carries it) and the limbs are avocado; the tortilla stays a toasted tan (a green tortilla was tried and read as a pickle).
+// Signature hue: GREEN at 58° — the filling seen from above is guacamole (`GUAC` carries it) and the limbs are avocado; the tortilla stays a toasted tan (a green tortilla was tried and read as a pickle).
 const TORTILLA = '#C08A2D';        // griddled flour wrap  // C1a: was #E5C795
 const TORTILLA_SHADE = '#926725';  // genuine toast/shadow tone — brow creases, lower lip  // C1a: was #C99C5B
 // ── AND A SECOND, MUCH QUIETER STEP, BECAUSE ONE STEP WAS DOING TWO JOBS ─────
@@ -153,7 +153,9 @@ const BOOT = '#180E05';            // near-black toasted-tortilla boots, grounds
 // luma 0.816 against the wrap's 0.791 — still lighter, as cooked rice is against a
 // griddled tortilla, but no longer a different material. The rest of that read is
 // COVERAGE, handled by the piece table below.
-const RICE = '#5E9222';  // C1a: was #E3CFA4
+// C1b: `GUAC` was `RICE` — renamed at C1a's request: C1a made it the guacamole green that
+// carries the burrito's signature hue from above, so "rice" had gone misleading.
+const GUAC = '#5E9222';  // C1a: was #E3CFA4
 // ── THE DARK RUNG ────────────────────────────────────────────────────────────
 // Measured against 18 Brawl Stars plates: their P05 is 0.097 and every one of the
 // eighteen puts 5% of the character below 0.18. Burrito's was 0.285, and 53.3% of its
@@ -583,7 +585,7 @@ export class BurritoCharacter extends BaseCharacter {
       // A dome cap (theta 0..~0.48π from the +Y pole) rather than a full sphere —
       // just the top bulge, like donut's proud-glaze trick.
       new THREE.SphereGeometry(domeR, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.48),
-      toonMat({ color: RICE, roughness: 0.62 })
+      toonMat({ color: GUAC, roughness: 0.62 })
     );
     mound.name = 'burrito_rice';
     mound.position.y = domeCenterY;
@@ -916,147 +918,21 @@ export class BurritoCharacter extends BaseCharacter {
     const mittMatLimb = toonMat({ color: FOIL, roughness: 0.62, metalness: 0.0 });
     const bandMatLimb = toonMat({ color: WRAP_BAND, roughness: 0.72 });
     const bootMatLimb = toonMat({ color: BOOT, roughness: 0.75 });
-    this.rig.dressLimbs((part, size) => {
-      switch (part) {
-        case 'upperArmL': case 'upperArmR': {
-          // `rise` = 0.30 of the bone. The upper arm's mesh now starts 0.097 m ABOVE
-          // its own shoulder pivot, inside the wrap, so it has no contour of its own
-          // until it emerges — the same fix `fb9d9da` used on hamburger, and the
-          // other half of the detached-arm repair whose first half is the shoulder
-          // swell in `dressTorso`.
-          const m = new THREE.Mesh(
-            taperedSegment(size.len, size.radius * 0.94, size.radius * 0.82, 12, { rise: size.len * 0.30 }),
-            limbLightMat,
-          );
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'thighL': case 'thighR': {
-          const g = new THREE.Group();
-          const m = new THREE.Mesh(
-            taperedSegment(size.len, size.radius * 1.14, size.radius * 1.00, 12, { rise: size.len * 0.30 }),
-            limbWrapMat,
-          );
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          g.add(m);
-          // The rolled-tortilla seam stays on the LEG only. On the arm it was a third
-          // parallel line beside two other verticals and read as a slit.
-          const seam = new THREE.Mesh(new THREE.BoxGeometry(size.radius * 0.13, size.len * 0.78, size.radius * 0.05), seamMat);
-          seam.position.set(0, -size.len * 0.52, size.radius * 1.06);
-          seam.userData.noOutline = true;
-          g.add(seam);
-          return g;
-        }
-        case 'forearmL': case 'forearmR': {
-          // Top radius is the upper arm's bottom radius EXACTLY (0.94 * 0.82 of
-          // `armRadius` = 0.89 * 0.92 of it), so the elbow is a continuation and not
-          // a step. Two constant-radius tubes at different constants cannot meet —
-          // `soup.ts` records the same finding on its own arm chain.
-          const m = new THREE.Mesh(
-            taperedSegment(size.len, size.radius * 0.89, size.radius * 0.76, 12, { rise: size.len * 0.16 }),
-            limbWrapMat,
-          );
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'shinL': case 'shinR': {
-          // Same continuity rule at the knee: `metrics.shinRadius * 1.11` is the
-          // thigh's own bottom radius to within 0.1%. (`shinRadius` is the published
-          // `legRadius * 0.9`; read the metric rather than re-typing the product.)
-          const m = new THREE.Mesh(
-            taperedSegment(size.len, size.radius * 1.11, size.radius * 0.95, 12, { rise: size.len * 0.16 }),
-            limbWrapShadeMat,
-          );
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'handL': case 'handR': {
-          // ── THE TWISTED-FOIL CONE WAS A CLAW ────────────────────────────────
-          // A cone tapering to a point, hung off the end of a limb, is a talon at any
-          // size — and mirrored on a four-limbed silhouette it is the single element
-          // that pushed this figure from "character" to "insect". The wrapper-twist
-          // idea survives as the mitt's own twisted tip; the MASS becomes a hand.
-          const g = new THREE.Group();
-          // ⚠️ Sized off the FOREARM, not off `handRadius`. `dressLimbs` hands this
-          // slot the rig's independent `handRadius` constant; on LANKY that is
-          // 0.123 m, 2.1x the forearm's own tip.
-          // ⚠️ This line used to RE-TYPE the derivation as `armRadius * 0.92 * 0.76`.
-          // Identical arithmetic, and that is exactly the trap: `0.92` is the rig's
-          // number, not this file's, and this same file already proved what a re-typed
-          // derived constant costs — its `R = 0.20H` (see the head note above) ignored
-          // that `rig.ts` subtracts the neck gap before halving, was 17.5% out, and
-          // FOUR ROUNDS of shoulder tuning inherited it. `metrics.forearmRadius` is the
-          // SAME value `limbSlots()` builds the forearm at, published so there is
-          // nothing left to re-type.
-          const tipR = this.rig.metrics.forearmRadius * 0.76;
-          const mitt = new THREE.Mesh(new THREE.SphereGeometry(tipR * 1.70, 16, 12), mittMatLimb);
-          mitt.position.y = -tipR * 1.30;
-          mitt.scale.set(1, 0.96, 0.86);
-          mitt.name = `${part}_mesh`;
-          mitt.castShadow = true;
-          mitt.receiveShadow = true;
-          g.add(mitt);
-          // The twist: a short blunt nub off the mitt's underside, which is the
-          // wrapper end this file has always wanted and is far too small to be an
-          // appendage on its own.
-          const twist = new THREE.Mesh(new THREE.ConeGeometry(tipR * 0.52, tipR * 0.72, 8), mittMatLimb);
-          twist.position.y = -tipR * 2.55;
-          twist.rotation.z = Math.PI;
-          twist.castShadow = true;
-          g.add(twist);
-          // Thumb — the element that makes the mass NAMEABLE at 20 px.
-          const sx = part === 'handL' ? 1 : -1;
-          const thumb = new THREE.Mesh(new THREE.CapsuleGeometry(tipR * 0.52, tipR * 0.86, 4, 8), mittMatLimb);
-          thumb.position.set(sx * tipR * 1.42, -tipR * 0.74, tipR * 0.42);
-          thumb.rotation.set(0.22, 0, sx * 1.02);
-          thumb.castShadow = true;
-          g.add(thumb);
-          // The paper band, moved here from the elbow. At the wrist it is a glove
-          // cuff; at the elbow it was a bead separator.
-          // Slimmer than the elbow band it replaces (tube 0.24 -> 0.15 of the tip) and
-          // pushed UP against the forearm: a cuff is an EDGE, and at 0.24 it was a
-          // ring the same order as the mitt, which is the collar half of the bell.
-          const cuff = new THREE.Mesh(new THREE.TorusGeometry(tipR * 1.02, tipR * 0.15, 8, 18), bandMatLimb);
-          cuff.position.y = tipR * 0.16;
-          cuff.rotation.x = Math.PI / 2;
-          cuff.castShadow = true;
-          g.add(cuff);
-          return g;
-        }
-        case 'footL': case 'footR': {
-          const g = new THREE.Group();
-          const stub = new THREE.Mesh(
-            new THREE.CylinderGeometry(size.radius * 1.1, size.radius * 1.02, size.len * 0.75, 16, 1, false),
-            bootMatLimb
-          );
-          stub.position.set(0, -size.len * 0.42, size.radius * 0.3);
-          stub.rotation.x = Math.PI * 0.06;
-          stub.name = `${part}_mesh`;
-          stub.castShadow = true;
-          stub.receiveShadow = true;
-          g.add(stub);
-          const ring = new THREE.Mesh(new THREE.TorusGeometry(size.radius * 1.06, size.radius * 0.1, 6, 16), foilMatLimb);
-          ring.rotation.x = Math.PI / 2;
-          ring.position.set(0, -size.len * 0.1, size.radius * 0.3);
-          ring.castShadow = true;
-          g.add(ring);
-          return g;
-        }
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`): one material per limb (no two-tone bead at
+    // the elbow or knee), a mitten attached over the wrist, a shoe seated on the floor. WAS:
+    // three avocado tones per limb, a foil ball with a twist, a thumb and a band cuff, and a
+    // cylinder stub boot ringed in foil. Hands and shoes are now both foil — one wrap, top to toe.
+    // The LIGHT avocado, not `LIMB_AVOCADO`: the kit's chunkier limbs in the dark tone took the
+    // burrito's lobby median luma 0.462 -> 0.445, under C1a's 0.45 floor (c1a_probe).
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: limbLightMat, leg: limbLightMat, hand: mittMatLimb, shoe: mittMatLimb,
+    }));
 
     this.buildSpill(R);
 
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();

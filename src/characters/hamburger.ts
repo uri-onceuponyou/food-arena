@@ -57,7 +57,7 @@ import type { AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox, RAMP_CHARACTER } from '../render/toon';
-import { ChibiRig, taperedSegment } from './rig';
+import { ChibiRig, batchJoints } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, blade as leafBlade, localBounds, massAnchor, rod } from './appendages';
@@ -1741,184 +1741,21 @@ export class HamburgerCharacter extends BaseCharacter {
     // actually matches the "toasted bun" description; sesame seeds (added on the
     // mesh below, same technique as the crown's) are what finish selling the shape.
     const mittMat = toonMat({ color: MITT_BUN, roughness: 0.68 });
-    const mittSeedMat = toonMat({ color: PALETTE.cream, roughness: 0.75 });
     const limbMat = toonMat({ color: LIMB_TOAST, ramp: RAMP_CHARACTER(), roughness: 0.85 });
-    const limbDarkMat = toonMat({ color: LIMB_TOAST_DARK, ramp: RAMP_CHARACTER(), roughness: 0.85 });
     // See `LIMB_THIGH`: the thigh no longer shares the upper arm's material.
     const thighMat = toonMat({ color: LIMB_THIGH, ramp: RAMP_CHARACTER(), roughness: 0.85 });
-    this.rig.dressLimbs((part, size) => {
-      switch (part) {
-        // ── The two TOP segments differ only in how far they reach UP ────────────
-        // 10 radial segments -> 20. A blind critic judging the home screen at 1:1
-        // named "faceted shoulder normals", and on this character specifically
-        // that is arithmetic: STOUT has the thickest limbs in the cast
-        // (`armRadius` 0.174m, so this segment is 0.21m across), and 10 segments
-        // put a 36-degree crease every 65px at menu size. The rest of the cast
-        // gets away with 10 because their limbs are half the width. Costs ~8
-        // meshes x ~120 extra triangles against a 295k-triangle match.
-        case 'upperArmL': case 'upperArmR': {
-          // `rise` 0.32 of the bone, up into the bun seam the arm emerges from. See
-          // the SEAM block above: this character's whole arm placement exists to make
-          // the arm come out from BETWEEN the bun layers, and a segment whose apex
-          // stops dead at the shoulder pivot draws its own closed silhouette right
-          // there and undoes it.
-          // ── 🚨 1.2/0.84 WAS THE THIGH'S NUMBER TOO, CHARACTER-FOR-CHARACTER ──────
-          // Until this round `upperArm` and `thigh` were the SAME call with the SAME
-          // material, and `forearm` and `shin` were literally the same `case` block.
-          // Four identical orange-over-brown chains; a viewer at the lobby camera
-          // cannot say which pair is which, and the honest read of
-          // `shots/cc/before/hamburger_p20.png` is a four-legged animal whose front
-          // pair happens to end in bun mitts. STOUT makes it worse by archetype:
-          // `armRadiusF` 0.085 against `legRadiusF` 0.074, so **the arms were fatter
-          // than the legs**, which no animal is.
-          // ⚠️ 1.28 WAS TRIED FIRST AND RENDERED AS A MUSHROOM CAP. A top/bottom ratio
-          // of 1.78 on a bone this short is not a taper, it is a dome on a stalk:
-          // `shots/cc/after3/hamburger_p20.png` shows both upper arms as wide orange
-          // caps with a dark rim and a thin brown stem under them. 1.08/0.70 (ratio
-          // 1.54, the same as the old 1.2/0.84's 1.43 within a hair) keeps the arm a
-          // limb. **The arm/leg separation is carried by the SHAFT, not the shoulder**
-          // — the arm's widest point is 1.08 * 0.1785 = 0.193 m and its elbow is
-          // 0.118 m, against a thigh at 0.208 m and a shin at 0.154 m, so the leg is
-          // 30% thicker where both pairs are simply columns and the eye compares them.
-          const geo = taperedSegment(size.len, size.radius * 1.08, size.radius * 0.70, 20, { rise: size.len * 0.32 });
-          const m = new THREE.Mesh(geo, limbMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'thighL': case 'thighR': {
-          // ── 🔴 URI'S §37 REJECT #1, AND THE PELVIS WAS NEVER THE ANSWER ─────────
-          // *"It seems like the legs are disconnected from the body."* `fc4d9ad` gave
-          // the rig a pelvis mass for this and the render at the lobby camera is
-          // unchanged, with the pelvis measured at **0.08% of the silhouette**. The
-          // reason is geometric and complete: `rig.ts:1147` sizes the pelvis
-          // `(stanceWidth * 0.58 + legRadius * 0.55) * 2` = 0.74 m wide and seats it
-          // ABOVE the hip line — and hamburger's dressed torso is the BOTTOM BUN,
-          // `bunR = size.w * 0.53` ~ 0.56 m radius, i.e. **1.11 m wide**, whose own
-          // base sits at `size.h * 0.02` above that same hip line. The pelvis is
-          // enclosed by the bun on every axis. It is not failing to help; it is
-          // `docs/LESSONS.md` §1 for the twenty-first time — it is there, and it is
-          // invisible, and it always would have been on this character.
-          //
-          // What the lobby render actually shows (`shots/cx/before/hamburger.png`,
-          // zoomed at `shots/cx/zoom/hamburger-hip.png`) is a **flat-bottomed drum
-          // with a bright red hem across it and two ball-chains hanging outside its
-          // left and right edges**. The body's lowest contour is a horizontal line,
-          // each leg is a separate closed outline butted against it, and background
-          // shows between them. "Detached" is a CONTOUR failure, not a fill failure,
-          // which is why a mass that delivered pixels moved the read by nothing.
-          //
-          // `rise` 0.34 of the bone puts the thigh's top cap 0.09 m INSIDE the bun.
-          // The thigh has no contour of its own until it emerges from under the
-          // overhang, so the leg reads as coming out of the body rather than as
-          // standing next to it. This is the same lever donut used from the other
-          // side (an attachment mass added to the body); here the body mass already
-          // exists and overhangs the hip by 0.06 m, so the cheaper half of the pair
-          // is to reach the leg up into it.
-          // 1.2/0.84 -> 1.34/1.10. The thigh keeps its width all the way to the knee
-          // instead of tapering like the arm above; see the upper-arm case for the
-          // arm/leg separation this is one half of.
-          const geo = taperedSegment(size.len, size.radius * 1.34, size.radius * 1.10, 20, { rise: size.len * 0.34 });
-          const m = new THREE.Mesh(geo, thighMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        // ⚠️ These two were ONE `case` block sharing one set of radii — the strongest
-        // possible statement that a forearm and a shin are the same object, made in
-        // the code rather than only in the render. Split, and the numbers now differ:
-        // the forearm is the slimmest segment on the character and the shin is nearly
-        // as thick as the thigh above it.
-        case 'forearmL': case 'forearmR': {
-          // A small `rise` here too, for the same reason one segment up: the elbow and
-          // knee are the two joints where the previous fix left a double taper meeting
-          // at a point (donut's recorded "waist"), and 0.12 of the bone is enough for
-          // the lower segment's shoulder to sit inside the upper one's skirt without
-          // widening either.
-          const geo = taperedSegment(size.len, size.radius * 0.72, size.radius * 0.54, 20, { rise: size.len * 0.12 });
-          const m = new THREE.Mesh(geo, limbDarkMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'shinL': case 'shinR': {
-          const geo = taperedSegment(size.len, size.radius * 1.10, size.radius * 0.88, 20, { rise: size.len * 0.12 });
-          const m = new THREE.Mesh(geo, limbDarkMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'handL': case 'handR': {
-          // The bun crown's own mushroom-cap profile (narrow cuff, bulging
-          // "knuckle", rounded tip) doubles perfectly as a mitt shape — flip it
-          // so the narrow end sits at the wrist and the bulge/tip hang down.
-          // Rotating a wrapper GROUP (rather than the mesh alone, as before)
-          // means a handful of sesame seeds can be placed in the same unflipped
-          // local frame `crownSurface` expects and still end up correctly
-          // oriented after the flip — without seeds, bun colour alone still read
-          // as a plain blob at gameplay distance, indistinguishable from the
-          // forearm above it.
-          //
-          // A 180°-about-X flip negates both Y and Z, so a seed placed at the
-          // crown's own theta=0 (its FRONT, +Z) ends up facing -Z — away from
-          // the camera — after the flip: round 1 of this fix placed seeds at
-          // the crown's seed thetas verbatim and every one of them vanished
-          // onto the mitt's hidden back face. `cos(theta) < 0` is what lands
-          // camera-side post-flip, so every spot here is chosen near theta=π.
-          const mittSize: CrownSize = { baseR: size.radius * 1.05, h: size.len * 0.86 };
-          const g = new THREE.Group();
-          const bun = new THREE.Mesh(bunDome(mittSize.baseR, mittSize.h, 14), mittMat);
-          bun.name = `${part}_mesh`;
-          bun.castShadow = true;
-          bun.receiveShadow = true;
-          g.add(bun);
-          const mittSeedSpots: Array<[number, number]> = [
-            [Math.PI, 0.30], [Math.PI - 0.5, 0.20], [Math.PI + 0.5, 0.20],
-            [Math.PI - 1.0, 0.32], [Math.PI + 1.0, 0.32],
-          ];
-          for (const [theta, hf] of mittSeedSpots) {
-            const { pos, normal } = crownSurface(mittSize, theta, hf);
-            const seed = new THREE.Mesh(seedGeo, mittSeedMat);
-            seed.name = 'mitt_seed';
-            seed.position.copy(pos).addScaledVector(normal, 0.006);
-            seed.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-            seed.scale.set(0.016, 0.03, 0.007);
-            seed.castShadow = true;
-            g.add(seed);
-          }
-          g.rotation.x = Math.PI;
-          return g;
-        }
-        case 'footL': case 'footR': {
-          const g = new THREE.Group();
-          const footR = size.radius * 1.55;
-          const footH = size.len * 0.62;
-          const foot = new THREE.Mesh(roundedPuck(footR, footH, footR * 0.32, 16), pattyDarkMat);
-          // Seated on the floor via `size.groundY` (the joint-local y of the world
-          // ground, new on `LimbSize`) rather than by eye. `types.ts` convention #1
-          // is "feet at y=0" and the whole cast was 0.08-0.25 m under it; `Math.min`
-          // keeps the authored droop as the floor for the value so this can only ever
-          // raise a foot, never sink one.
-          foot.position.set(0, Math.max(size.groundY, -footH), footR * 0.32);
-          foot.name = `${part}_mesh`;
-          foot.castShadow = true;
-          foot.receiveShadow = true;
-          g.add(foot);
-          // Grill-mark echo — ties the foot back to the patty it's shaped after.
-          const mark = new THREE.Mesh(new THREE.BoxGeometry(footR * 1.7, footR * 0.1, footR * 0.1), pattyMat);
-          mark.position.set(0, -footH * 0.55, footR * 0.68);
-          mark.userData.noOutline = true;
-          g.add(mark);
-          return g;
-        }
-        default:
-          return null;
-      }
-    });
+    // ── Limbs: the shared kit (C1b, `rig.kitLimb`) ─────────────────────────────
+    // WAS: bespoke `taperedSegment` limbs in three materials (toast upper arm, a near-black
+    // `LIMB_TOAST_DARK` forearm and shin, a separate `LIMB_THIGH` thigh), a bun-dome mitt
+    // with five sesame seeds, and a dark patty PUCK for a foot. All six r0 home critics
+    // described exactly that body — "thin, stiff stick limbs", "spider-like brown legs",
+    // "hands float detached", "plain blobby hands" — so the food language moved off the
+    // limbs and onto the kit's construction: toast arms, thigh-tone legs (one material per
+    // limb, so no two-tone bead at the elbow or knee), and a bun-gold mitten and SHOE — the
+    // old `PATTY_DARK` puck was luma ~0.03 standing on a dark floor, i.e. no foot at all.
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: limbMat, leg: thighMat, hand: mittMat, shoe: mittMat,
+    }));
 
     // ── 🔴 THE SHOULDER BRIDGE IS THE PATTY, NOT THE ARM ──────────────────────
     // `ChibiRig.fitShoulders()` (de4bb11) builds a deltoid per side in `palette.limb`
@@ -1999,7 +1836,9 @@ export class HamburgerCharacter extends BaseCharacter {
         .filter((b): b is THREE.Mesh => b !== null);
       const orphan = bridges.length ? bridges[0].material : null;
       for (const bridge of bridges) bridge.material = pattyMat;
-      if (orphan && !Array.isArray(orphan)) orphan.dispose();
+      // C1b: the bridge's material is now the kit's ARM material (`fitShoulders` reuses it),
+      // which the arms still wear — dispose it only if it is not that one.
+      if (orphan && !Array.isArray(orphan) && orphan !== limbMat) orphan.dispose();
     }
 
     // ── Spatula prop — gripped in the right fist ────────────────────────────
@@ -2188,6 +2027,9 @@ export class HamburgerCharacter extends BaseCharacter {
 
     // Outline: a whisper, per render/toon.ts — the reference bar carries almost
     // no ink line.
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();

@@ -30,7 +30,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
-import { ChibiRig, taperedSegment } from './rig';
+import { ChibiRig, taperedSegment, batchJoints } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 // `./appendages` is deliberately NOT imported any more. It supplied `aim`/`blade`/
@@ -1142,134 +1142,19 @@ export class EggCharacter extends BaseCharacter {
     // to zero width there — every segment tapered to a point at both ends and
     // `outlineGroup` traced the pinch. Interior cap fractions unpinch it at no cost
     // to any boundary. Keep the steps; unpinch the joint.
-    this.rig.dressLimbs((part, size) => {
-      switch (part) {
-        case 'upperArmL': case 'upperArmR': {
-          // `capBotFrac` 0.05 — this end abuts the forearm at the same radius and is
-          // never visible; see `taperedSegment`'s interior/exterior cap note.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.86, size.radius * 0.70, 12, { capTopFrac: 0.30, capBotFrac: 0.05 }), limbShellMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'forearmL': case 'forearmR': {
-          // Radii are continuous across the elbow in METRES: 0.70 * 0.1253 = 0.0877
-          // against 0.761 * 0.1152 = 0.0877. The rig gives the forearm a smaller base
-          // radius, so equal multipliers would step the outline. That radius is
-          // published as `metrics.forearmRadius` — read it, never re-type `* 0.92`.
-          const g = new THREE.Group();
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 0.761, size.radius * 0.60, 12, { capTopFrac: 0.05, capBotFrac: 0.30 }), limbShellShadowMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          g.add(m);
-          // The cuff. `noOutline` deliberately: an ink hull around a ring this small
-          // at this on-screen size is most of the ring, and it would read as a black
-          // bracelet rather than as the end of a sleeve.
-          const cuff = new THREE.Mesh(
-            new THREE.TorusGeometry(size.radius * 0.62, size.radius * 0.13, 6, 14), limbShellShadowMat
-          );
-          cuff.rotation.x = Math.PI / 2;
-          cuff.position.y = -size.len * 0.90;
-          cuff.userData.noOutline = true;
-          cuff.castShadow = true;
-          g.add(cuff);
-          return g;
-        }
-        case 'thighL': case 'thighR': {
-          // 1.06 against the arm's 0.86 — and on the RIG's own radii, which run the
-          // wrong way for this character (`armRadius` 0.1253 > `legRadius` 0.1172),
-          // so 1.06 * 0.1172 = 0.1242 against 0.86 * 0.1253 = 0.1078: the leg ends up
-          // 15% fatter in metres from a 23% gap in multipliers. The multiplier is not
-          // the cue; the metre is.
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.06, size.radius * 0.90, 12, { capTopFrac: 0.30, capBotFrac: 0.05 }), limbShellMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          return m;
-        }
-        case 'shinL': case 'shinR': {
-          // 0.90 * 0.1172 = 0.1055 against 1.0 * 0.1055 = 0.1055.
-          const g = new THREE.Group();
-          const m = new THREE.Mesh(taperedSegment(size.len, size.radius * 1.0, size.radius * 0.80, 12, { capTopFrac: 0.05, capBotFrac: 0.34 }), limbShellShadowMat);
-          m.name = `${part}_mesh`;
-          m.castShadow = true;
-          m.receiveShadow = true;
-          g.add(m);
-          g.add(shellTrim(size.radius * 1.02, size.radius * 0.115, -size.len * 0.07));
-          return g;
-        }
-        case 'handL': case 'handR': {
-          // 0.50 -> 0.60 of the hand radius. The forearm now ENDS at 0.50 of its own
-          // radius, and a bulb the same width as the wrist it grows from is not a
-          // terminal — it is more limb. It has to be visibly wider to close the arm.
-          const drop = new THREE.Mesh(new THREE.SphereGeometry(size.radius * 0.6, 14, 12), yolkHandMat);
-          drop.position.y = -size.radius * 0.62;
-          drop.scale.set(1, 1.5, 1);
-          drop.name = `${part}_mesh`;
-          drop.castShadow = true;
-          drop.receiveShadow = true;
-          return drop;
-        }
-        case 'footL': case 'footR': {
-          // A flattened, rounded chip rather than a cone — a cone tip reads as a
-          // sharp spike once the run cycle's own foot rotation combines with a
-          // static tilt (verified against a render: it looked like she was
-          // standing on a dagger mid-stride). Same "broken shell fragment" idea,
-          // safe under animation.
-          const chip = new THREE.Mesh(
-            roundedBox(size.radius * 1.7, size.len * 0.5, size.radius * 1.15, size.radius * 0.3, 3),
-            crackFootMat
-          );
-          // Seated on the floor via `size.groundY` (the joint-local y of the world
-          // ground, new on `LimbSize`) rather than by eye. `types.ts` convention #1
-          // is "feet at y=0" and the whole cast was 0.08-0.25 m under it; `Math.min`
-          // keeps the authored droop as the floor for the value so this can only ever
-          // raise a foot, never sink one.
-          chip.position.set(0, Math.max(size.groundY + size.len * 0.25, -size.len * 0.36), size.radius * 0.25);
-          chip.rotation.y = Math.PI / 5;
-          chip.name = `${part}_mesh`;
-          // ── THE BOOT SHAFT: cue 1 of the arm/leg split ────────────────────────
-          // A chip lying flat on the floor is a foot, but at the lobby camera it is
-          // 12 px of a 1000 px figure and it disappears under the leg above it — so
-          // it was doing none of the work of distinguishing a leg from an arm. The
-          // shaft climbs BACK UP over the ankle, wider than the shin it sleeves, in
-          // the same crack tone: the leg now ends in a mass instead of a dot.
-          //
-          // ⚠️ It is parented to the FOOT joint, not the shin, so it swings with the
-          // ankle in the run cycle and cannot shear off the leg mid-stride — the
-          // failure mode the chip's own comment above records for a cone tip.
-          // ⚠️ And it changes no albedo: it is `crackFootMat`, the tone that was
-          // already here. `kneeL|footL` is measured shin-against-foot and both sides
-          // of that pair are untouched; what changes is the AREA the foot side
-          // occupies, which is the term that was too small to survive at 111 px.
-          const g = new THREE.Group();
-          g.add(chip);
-          const shaft = new THREE.Mesh(
-            taperedSegment(size.len * 0.46, size.radius * 1.06, size.radius * 1.28, 12, { capTopFrac: 0.14, capBotFrac: 0.30 }),
-            crackFootMat
-          );
-          // Hangs from the ANKLE (y = 0 in this joint's frame) down over the boot, so
-          // its top is buried in the shin and its bottom meets the chip. `taperedSegment`
-          // spans y in [-len, 0], so no offset is needed and none should be added: an
-          // offset here is what lifts a boot off its own foot when the pose changes.
-          shaft.name = `${part}_shaft`;
-          shaft.castShadow = true;
-          shaft.receiveShadow = true;
-          g.add(shaft);
-          g.add(shellTrim(size.radius * 1.14, size.radius * 0.105, -size.len * 0.07));
-          chip.castShadow = true;
-          chip.receiveShadow = true;
-          return g;
-        }
-        default:
-          return null;
-      }
-    });
+    // C1b — the shared limb kit (`rig.kitLimb`): one material per limb (no two-tone bead at
+    // the elbow or knee), a mitten attached over the wrist, a shoe seated on the floor. WAS:
+    // two lilac-shell tones per limb, a yolk ball hand and a dark crack-shell boot with a shaft.
+    // Hands and shoes now share the glossy yolk, the brightest accent on the character.
+    this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
+      arm: limbShellMat, leg: limbShellMat, hand: yolkHandMat, shoe: yolkHandMat,
+    }));
 
     this.buildFace(R);
 
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
