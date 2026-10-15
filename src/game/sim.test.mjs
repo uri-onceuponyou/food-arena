@@ -13388,6 +13388,7 @@ console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up
     check(`(e) 🔴 the FOG ticks once per FOG_TICK_MS (${FOG_TICK_MS}) at 60 Hz, 30 fps, 144 Hz and a 45 ms hitch`, onRate(rows.fog), fmtSweep(rows.fog));
     check(`(e) 🔴 the POT ticks once per POT.tickMs (${POT.tickMs}) at every frame time`, onRate(rows.pot), fmtSweep(rows.pot));
     check(`(e) 🔴 REGEN ticks once per REGEN_TICK_MS (${REGEN_TICK_MS}) at every frame time`, onRate(rows.regen), fmtSweep(rows.regen));
+    check(`(e) 🔴 the Sticky Trail drops once per TRAIL.dropIntervalMs (${TRAIL.dropIntervalMs}) at every frame time`, onRate(rows.trail), fmtSweep(rows.trail));
     // The corpus frame. 16.667 is a hair above 1000/60, so 18 / 15 / 12 frames reach 300 / 250 /
     // 200 and the three hazard timers fire on their nominal frames on BOTH trees — which is what
     // keeps every balance number measured at 16.667 valid for them. The trail is not among them:

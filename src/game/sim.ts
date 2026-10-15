@@ -1285,10 +1285,21 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   const def = CHARACTERS[fighter.characterId];
 
   // Sticky Trail: drop a mark while moving.
+  //
+  // ⚠️ (move B3, part 2) THE DROP CARRIES ITS OVERSHOOT, as the fog, the pot and regen below do
+  // and for their reason — but this one MOVES THE CORPUS, and that is why it is its own commit.
+  // 160 ms is not a whole number of 16.667 frames (9.6), so the reset-to-zero clock dropped a mark
+  // every 10 frames — 166.67 ms — in the Node corpus AND in a 60/120/144 Hz browser alike: every
+  // Donut balance number was measured at 6.0 marks a second against a declared 6.25. Carrying
+  // the remainder delivers the declared 160 at every frame time (`sim.test.mjs` §47(e)).
+  // 🔴 PARKED FOR URI: if 6.0 a second is the density he wants, the answer is the constant —
+  // `rules.ts:TRAIL.dropIntervalMs = 1000 / 6` restores it to the frame — not a clock that quietly
+  // rounds 160 up, by 4% at 60 Hz and by 12.5% at a 45 ms hitch.
+  // The `else` reset below stays: a Donut that stops has stopped laying track.
   if (def.hasTrail && attemptedMove) {
     fighter.trailDropTimer += dt;
     if (fighter.trailDropTimer >= TRAIL.dropIntervalMs) {
-      fighter.trailDropTimer = 0;
+      fighter.trailDropTimer = (fighter.trailDropTimer - TRAIL.dropIntervalMs) % TRAIL.dropIntervalMs;
       const mark: TrailMark = {
         id: state.nextId++,
         ownerId: fighter.id,
@@ -1377,6 +1388,8 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   // in this function reset to 0 and therefore run slow — 61 frames to a "second" at 60 Hz, so a
   // 1 dps cloud reset that way would deal 0.984 dps — and that is an open defect on those timers
   // (`docs/REVAMP.md` §5 B4), not a precedent to copy into a new one.
+  // (B4, 2026-10-15: CLOSED. The fog, the pot and regen carry theirs since `2cf23cf`, the trail
+  // drop since the commit after it — `sim.test.mjs` §47(e).)
   //
   // ⚠️ LEAVING THE CLOUD RESETS THAT PAIR'S CLOCK, the pot's rule (`hazardTimers` below): a
   // second means a second spent inside. A cell is written only for a WEARER's cloud — first on
