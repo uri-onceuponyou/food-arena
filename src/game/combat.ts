@@ -861,6 +861,9 @@ function reviveThoseKilledBy(state: MatchState, killer: Fighter, events: GameEve
     f.fogTimer = 0;
     f.regenTimer = 0;
     f.hazardTimers.length = 0;
+    // Blue Cheese's per-cloud clocks on THIS fighter (it is the victim's accumulator): a revived
+    // fighter is not part-way through a second it spent standing in a cloud as a corpse.
+    f.item.auraTimers.length = 0;
     // The regen delay starts now rather than from whenever the body last took a hit, so
     // coming back does not immediately tick health up out of a corpse's stale timestamp.
     f.lastDamagedAt = state.elapsed;

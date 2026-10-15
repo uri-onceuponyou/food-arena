@@ -1728,10 +1728,18 @@ export type GameEvent =
    * like, which is the contract every other member of this union already has.
    *
    * 🚨 **DAMAGE IS NOT HERE.** Blue Cheese's tick and Shiitake's reflection are ordinary
-   * `hit-landed` events carrying `DamageSource { kind: 'item' }`, so every consumer that
-   * already draws a hit — the damage number, the flash, the shake, the audio — works on
-   * them with no change. A second damage channel would be a second answer to "how much did
-   * that cost", and `DECISIONS §13` is the record of what that costs.
+   * `hit-landed` events carrying `DamageSource { kind: 'weapon', itemId }` (`combat.ts:
+   * itemDamageSource`), so every consumer that already draws a hit — the damage number, the
+   * flash, the shake, the audio — works on them with no change. A second damage channel would
+   * be a second answer to "how much did that cost", and `DECISIONS §13` is the record of what
+   * that costs.
+   *
+   * ⚠️ IT SAID `DamageSource { kind: 'item' }` — the FIRST design, which broke `tsc` in
+   * `audio/director.ts` and was replaced by the optional `itemId` (see `DamageSource`). And
+   * "works with no change" is true of the PLUMBING, not of the LOOK: a consumer that keys on
+   * `kind: 'weapon'` treats a cloud tick as a weapon hit — burst, shake, hit-stop — once a
+   * second, while `ITEMS.blue_cheese.look` says the cloud "must NOT be loud". The quiet path
+   * keys on `source.itemId === 'blue_cheese'` and is the presentation owners' (BH-07).
    */
   /**
    * AN ITEM WAS ACTIVATED. Emitted at the PRESS, for actives only, once the press has

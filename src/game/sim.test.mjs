@@ -53,7 +53,11 @@ import { castThreat, itemWorthIt, offensiveReach, pickItem, pressValue, stepAI }
 // sim's own: `combat.ts:itemUsable`'s header says it is exported *precisely* so the HUD, the
 // loadout screen and the AI share ONE answer, and that "a copy of this rule anywhere else is
 // a button that lies". §43 is the third reader, so it asks the same function.
-import { applyDamage, attemptAttack, isOnOwnTrail, itemUsable, resolveDueCast, statusReadyAt } from './combat.ts';
+// §42(e) imports `ITEM_AURA_TICK_MS` — the cadence the cloud ticks at — rather than typing 1000,
+// because the row's claim is the RELATIONSHIP (one tick per that constant), not the number.
+import {
+  applyDamage, attemptAttack, isOnOwnTrail, ITEM_AURA_TICK_MS, itemUsable, resolveDueCast, statusReadyAt,
+} from './combat.ts';
 // Section 26 tests CONCEALMENT. The predicates are imported rather than re-derived for
 // the same reason `pressValue` and `statusReadyAt` are: the section's entire claim is that
 // ONE rule is read by four call sites, and a copy of the AABB test here would pass forever
@@ -11469,6 +11473,18 @@ console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the r
         rev.length === 1 && approx(rev[0].hp, corpseWorth(LEVEL_MAX), 1e-9),
         `item-revived.hp ${rev[0]?.hp} vs ${corpseWorth(LEVEL_MAX)} (L15) / ${corpseWorth(LEVEL_MIN)} (L1)`);
     }
+    // `reviveThoseKilledBy` clears "every lock and every accumulator", and since BH-07 the
+    // fighter carries one more: Blue Cheese's per-cloud clocks (`item.auraTimers`, the VICTIM's).
+    // A partial second banked as a corpse must not cut the first tick after it stands up.
+    {
+      const st = seats(4, { items: [['leftovers']] });
+      st.fighters[0].item.auraTimers[3] = 900;   // 0.9 s into slot 3's cloud when it went down
+      kill(st, 0, 1);
+      const evs = kill(st, 1, 2);
+      check('(c) a revived fighter\'s accumulators are cleared — Blue Cheese\'s per-cloud clocks included',
+        ofType(evs, 'item-revived').length === 1 && st.fighters[0].item.auraTimers.length === 0,
+        `auraTimers [${st.fighters[0].item.auraTimers.join(',')}]`);
+    }
   }
 
   // ── (d) 🔴 AN ITEM ID IS AN *OWN* KEY OF THE REGISTRY — META-09 ────────────────
@@ -11509,6 +11525,182 @@ console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the r
       Object.keys(ITEMS).every((id) => !throws(() => createMatch(ITEM_ARENA, [
         { characterId: 'hamburger', items: [id] }, { characterId: 'donut' },
       ]))));
+  }
+
+  // ── (e) 🔴 BLUE CHEESE HAS A CLOUD — BH-07 / ML-5 / META-04 ──────────────────────
+  //
+  // Offered in the picker, the boxes and the road; its HUD plate said AUTO; `combat.ts` routed
+  // it to *"`sim.ts:applyWorldTick`'s aura block"* — and there was no aura block. `sim.ts`
+  // imported `ITEM_AURA_TICK_MS`, `itemDamageSource` and `hasItem` and called none of them, so
+  // every match with it equipped was bit-identical to one without (`bh_meta_items`: 110/110
+  // duels, 12/12 six-seat rosters). The contract it now meets is the one the code already
+  // stated: `ITEM_TUNING.blue_cheese` (`dps` per second inside `radius`), one tick per
+  // `ITEM_AURA_TICK_MS`, through `itemDamageSource` so the hit is off the level ladder, feeds
+  // no Tenderiser streak and is never reflected, accumulated per (victim, owner) pair in the
+  // VICTIM's `item.auraTimers`.
+  //
+  // Six seats, every one human and idle, so nobody moves and the cloud is the only thing that
+  // can hurt anybody: the wearer at the centre, three opponents inside the 84 wu radius and two
+  // outside it — one of them 2 wu past the edge.
+  {
+    const C = { x: 1400, y: 1000 };
+    const R = ITEM_TUNING.blue_cheese.radius;
+    const SPOTS = [C, { x: C.x + 30, y: C.y }, { x: C.x - 60, y: C.y }, { x: C.x, y: C.y - (R - 1) },
+      { x: C.x, y: C.y + R + 2 }, { x: C.x + 400, y: C.y }];
+    const INSIDE = [1, 2, 3];
+    const OUTSIDE = [4, 5];
+    const board = (items, opts = {}) => seats(MAX_FIGHTERS, { spawns: SPOTS, items, ...opts });
+    /** Step `ms` of play; returns every Blue Cheese hit-landed, with the tick it landed on. */
+    const run = (st, ms) => {
+      const hits = [];
+      const all = [];
+      for (let i = 0; i < Math.round(ms / DT); i++) {
+        const evs = stepMatch(st, DT, idle(st));
+        for (const e of ofType(evs, 'hit-landed')) {
+          all.push(e);
+          if (e.source.kind === 'weapon' && e.source.itemId === 'blue_cheese') hits.push({ ...e, at: st.elapsed });
+        }
+      }
+      return { hits, all };
+    };
+    const on = (hits, id) => hits.filter((h) => h.targetId === id);
+    {
+      const st = board([['blue_cheese']]);
+      const d = (i) => Math.hypot(st.fighters[i].x - C.x, st.fighters[i].y - C.y);
+      check('(e) NON-VACUITY: slot 0 wears it, it is a passive (no button), three opponents stand INSIDE the radius and two OUTSIDE',
+        st.fighters[0].item.equipped[0] === 'blue_cheese' && ITEMS.blue_cheese.kind === 'passive'
+        && INSIDE.every((i) => d(i) < R) && OUTSIDE.every((i) => d(i) > R) && R > 0 && ITEM_TUNING.blue_cheese.dps > 0,
+        `radius ${R}; separations ${st.fighters.slice(1).map((f) => `${f.id}:${d(f.id).toFixed(0)}`).join(' ')}`);
+      const SECONDS = 10;
+      const { hits, all } = run(st, SECONDS * 1000);
+      const counts = INSIDE.map((i) => on(hits, i).length);
+      check(`(e) 🔴 EVERY opponent inside the cloud is hurt about once a second — ${SECONDS} s gives ${SECONDS - 1}–${SECONDS} ticks each`,
+        counts.every((c) => c >= SECONDS - 1 && c <= SECONDS),
+        `ticks per inside victim [${counts.join(', ')}] (4dbf937: [0, 0, 0])`);
+      check('(e) 🔴 …each tick is exactly `dps`, is item damage (itemId blue_cheese) and names the WEARER as its attacker',
+        hits.length > 0 && hits.every((h) => h.amount === ITEM_TUNING.blue_cheese.dps && h.effect === null
+          && h.source.attackerId === 0 && h.source.weaponKey === 'blue_cheese'),
+        `${hits.length} ticks, amounts {${[...new Set(hits.map((h) => h.amount))].join(',')}}`);
+      // `combat.ts:ITEM_AURA_TICK_MS`'s doc cited this row for a year: "§42 asserts the
+      // relationship (one tick per second, `dps` damage per tick) rather than the number".
+      const gaps = on(hits, 1).slice(1).map((h, k) => h.at - on(hits, 1)[k].at);
+      check('(e) 🔴 …ONE TICK PER `ITEM_AURA_TICK_MS` — consecutive ticks on one victim are a second apart, to within a frame',
+        gaps.length >= SECONDS - 2 && gaps.every((g) => Math.abs(g - ITEM_AURA_TICK_MS) <= DT + 1e-9),
+        `gaps [${gaps.map((g) => g.toFixed(1)).join(', ')}] vs ${ITEM_AURA_TICK_MS}`);
+      check('(e) opponents OUTSIDE the cloud — one of them 2 wu past its edge — take nothing',
+        OUTSIDE.every((i) => on(all, i).length === 0 && st.fighters[i].hp === st.fighters[i].maxHp),
+        OUTSIDE.map((i) => `${i}: ${on(all, i).length} hits`).join(', '));
+      check('(e) …and the wearer takes nothing from its own cloud',
+        on(all, 0).length === 0, `${on(all, 0).length} hits on the wearer`);
+    }
+    {
+      // `dps` means PER SECOND on average, not "about". A timer reset to 0 on each tick (the older
+      // timers' shape) fires every 61 frames at 60 Hz — 0.984 dps — and that drift is invisible to
+      // the 10 s rows above (9 ticks satisfies 9–10, and 1016.7 ms is within a frame of 1000). It
+      // is a whole tick short by 120 s: 118 against 119–120. The victim is given a pool the cloud
+      // cannot empty, so the count is the cadence and nothing else.
+      const st = board([['blue_cheese']]);
+      st.fighters[1].hp = st.fighters[1].maxHp = 1e6;
+      const LONG = 120;
+      const n = on(run(st, LONG * 1000).hits, 1).length;
+      check(`(e) 🔴 …and it HOLDS: ${LONG} s inside the cloud is ${LONG - 1}–${LONG} ticks, not the ${LONG - 2} a reset-to-zero clock delivers`,
+        n >= LONG - 1 && n <= LONG, `${n} ticks in ${LONG} s`);
+    }
+    {
+      const st = board(undefined);
+      const { all } = run(st, 5000);
+      check('(e) CONTROL: the same board with NO item hurts nobody — so the ticks above are the cloud',
+        all.length === 0 && st.fighters.every((f) => f.hp === f.maxHp), `${all.length} hits`);
+    }
+    {
+      const st = board([['blue_cheese']], { level: LEVEL_MAX });
+      const { hits } = run(st, 3000);
+      check(`(e) 🔴 at L${LEVEL_MAX} a tick is STILL \`dps\` — item damage is off the character ladder (damageMul ${st.fighters[0].damageMul.toFixed(2)})`,
+        hits.length > 0 && st.fighters[0].damageMul > 1 && hits.every((h) => h.amount === ITEM_TUNING.blue_cheese.dps),
+        `${hits.length} ticks, amounts {${[...new Set(hits.map((h) => h.amount))].join(',')}}`);
+    }
+    {
+      // Slot 1 sits inside slot 0's cloud AND slot 2's: two clouds, two clocks, two ticks a second.
+      const st = seats(3, { spawns: [C, { x: C.x + 40, y: C.y }, { x: C.x + 80, y: C.y }], items: [['blue_cheese'], undefined, ['blue_cheese']] });
+      const { hits } = run(st, 5000);
+      const fromA = on(hits, 1).filter((h) => h.source.attackerId === 0).length;
+      const fromB = on(hits, 1).filter((h) => h.source.attackerId === 2).length;
+      check('(e) TWO clouds on one victim tick independently — each owner\'s clock is its own (the per-pair accumulator)',
+        fromA >= 4 && fromA <= 5 && fromB >= 4 && fromB <= 5,
+        `from slot 0: ${fromA}, from slot 2: ${fromB} in 5 s`);
+    }
+    {
+      // Stepping out of the cloud resets that pair's clock — the hazard's rule, applied to the
+      // hazard the wearer carries. Inside 0.9 s, out one frame, repeated: never a whole second in.
+      const st = board([['blue_cheese']]);
+      const v = st.fighters[1];
+      const hits = [];
+      for (let lap = 0; lap < 6; lap++) {
+        v.x = C.x + 30;
+        hits.push(...run(st, 900).hits.filter((h) => h.targetId === 1));
+        v.x = C.x + R + 20;
+        hits.push(...run(st, DT).hits.filter((h) => h.targetId === 1));
+      }
+      check('(e) stepping OUT resets the pair\'s clock: six 0.9 s visits, one frame outside between them, never a tick',
+        hits.length === 0 && v.item.auraTimers[0] !== undefined, `${hits.length} ticks, timer cell ${v.item.auraTimers[0]}`);
+    }
+    {
+      // 🔴 PARKED FOR URI — NOT A BUG, A CONSEQUENCE, PINNED SO IT IS SEEN. Every tick goes through
+      // `applyDamage`, which stamps `lastDamagedAt`; the tick (1000 ms) is shorter than
+      // `REGEN_DELAY_MS`, so a hurt fighter standing in the cloud never regenerates. Denied regen
+      // is worth several times the cloud's own damage. If the cloud should hurt WITHOUT denying
+      // regen, this row flips and the change is one clause in `applyDamage`.
+      const inCloud = board([['blue_cheese']]);
+      const clear = board(undefined);
+      for (const st of [inCloud, clear]) st.fighters[1].hp = st.fighters[1].maxHp / 2;
+      run(inCloud, 12000);
+      run(clear, 12000);
+      const a = inCloud.fighters[1], b = clear.fighters[1];
+      check('(e) PARKED FOR URI: a hurt fighter standing in the cloud does NOT regenerate — the tick resets the regen delay',
+        a.hp < a.maxHp / 2 && b.hp > b.maxHp / 2 && REGEN_DELAY_MS > ITEM_AURA_TICK_MS,
+        `12 s from half HP: in the cloud ${a.hp.toFixed(1)}, out of it ${b.hp.toFixed(1)} (of ${a.maxHp})`);
+    }
+    {
+      const st = board([['blue_cheese']]);
+      const before = run(st, 1500).hits;
+      applyDamage(st, st.fighters[0], 1e6, null, weaponSource(st, 5), []);
+      const after = run(st, 3000).hits;
+      // `before > 0` is the non-vacuity: with no cloud at all, "nobody is hurt after" is free.
+      check('(e) the cloud is the LIVING wearer\'s: it was ticking, and once the wearer is down nobody inside it is hurt',
+        before.length > 0 && !st.fighters[0].alive && after.length === 0,
+        `${before.length} ticks before the wearer died, ${after.length} after`);
+    }
+  }
+
+  // ── (f) THE ITEM DAMAGE SOURCE — two rows `combat.ts` and `state.ts` cited before they existed ──
+  //
+  // `itemDamageSource` puts the ITEM ID in `weaponKey`, so every consumer that looks a weapon up
+  // by key misses and falls back. Two claims ride on that and both were cited as "§42": *"§42
+  // asserts no item id can collide with a weapon key"*, and — at `applyDamage`'s displacement
+  // guard — *"§42 asserts the namespaces are disjoint AND this line refuses"*. The second is the
+  // one that matters: relying on a lookup MISS is relying on two id namespaces never colliding.
+  {
+    const weaponKeys = new Set(CHARACTER_IDS.flatMap((c) => CHARACTERS[c].weapons.map((w) => w.key)));
+    const ids = Object.keys(ITEMS);
+    check('(f) the two namespaces are DISJOINT — no item id is a weapon key (both sets non-empty)',
+      weaponKeys.size > 0 && ids.length > 0 && ids.every((id) => !weaponKeys.has(id)),
+      `${ids.length} item ids vs ${weaponKeys.size} weapon keys; collisions [${ids.filter((id) => weaponKeys.has(id)).join(',')}]`);
+    // An ITEM-sourced hit carrying a REAL lure weapon's key must still displace nobody: the
+    // guard is `!isItemDamage`, stated, not the miss. Same press with `itemId` absent is the
+    // CONTROL that the key really would have lured.
+    const SEAWEED = CHARACTERS.sushi.weapons.find((w) => w.key === 'Seaweed');
+    const lureWith = (itemId) => {
+      const st = seats(3, { chars: ['sushi', 'hamburger', 'hamburger'],
+        spawns: [{ x: 1000, y: 1000 }, { x: 1100, y: 1000 }, { x: 1100 + SEAWEED.lure / 2, y: 1000 }] });
+      applyDamage(st, st.fighters[1], 1, null, {
+        kind: 'weapon', weaponKey: SEAWEED.key, weaponName: SEAWEED.name, attackerId: 0, ...(itemId ? { itemId } : {}),
+      }, []);
+      return st.fighters[2].push.remaining;
+    };
+    check('(f) CONTROL: that weapon key, as a WEAPON hit, really lures the bystander (non-vacuity)',
+      (SEAWEED.lure ?? 0) > 0 && lureWith(undefined) > 0, `owed ${lureWith(undefined)}`);
+    check('(f) 🔴 …and the SAME key on an ITEM hit displaces nobody — `!isItemDamage` refuses, not the lookup\'s miss',
+      lureWith('blue_cheese') === 0, `owed ${lureWith('blue_cheese')}`);
   }
 }
 
@@ -11552,9 +11744,11 @@ console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the r
 //   tenderiser 662 stack hits · leftovers 22 resurrections · **blue_cheese 0 of everything.**
 //
 // 🔴 Blue Cheese's zero is NOT an AI finding and this section must not be read as one: the
-// aura it is supposed to tick is missing from `sim.ts` entirely (`32438b4` reported it and
-// it is still open). `itemWorthIt` returns `false` for it CORRECTLY — it is a passive with
-// no button. (e) pins that, and pins that the pin is about the button and not the effect.
+// aura it is supposed to tick was missing from `sim.ts` entirely (`32438b4` reported it; the
+// B3 sweep landed it on 2026-10-15 — BH-07, §42(e)). `itemWorthIt` returns `false` for it
+// CORRECTLY — it is a passive with no button. (e) pins that, and since the aura landed its
+// last row asserts the other half: a bot wearing it hurts the opponent in its cloud with no
+// press. ⚠️ The census above predates the aura; its `blue_cheese 0 of everything` is stale.
 // ─────────────────────────────────────────────────────────────────────────────
 {
   const ITEM_ARENA = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
@@ -11830,19 +12024,43 @@ console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the r
     check('(e) …and the SIM refuses the slot too, so the AI branch is unreachable rather than merely false',
       passiveEquipped.fighters[0].item.equipped[0] === 'blue_cheese'
       && !itemUsable(passiveEquipped, passiveEquipped.fighters[0], 0));
-    // 🔴 THIS ROW IS ABOUT THE BUTTON AND NOT ABOUT THE EFFECT, STATED SO NOBODY READS IT AS
-    // A CLEAN BILL OF HEALTH. `32438b4` reported Blue Cheese as a NO-OP — `combat.ts` routes
-    // it to "`sim.ts:applyWorldTick`'s aura block" and there is no aura block; `sim.ts`
-    // imports `ITEM_AURA_TICK_MS`, `itemDamageSource` and `hasItem` and calls none of them.
-    // `ub2_itemuse` re-measured it at `e5631cd`: 66 seats wearing it, 0 damage, 0 hits.
-    // `noUnusedLocals: false` means three dead imports are not even a warning, so the
-    // ABSENCE is asserted here — this row goes red the day somebody implements the aura,
-    // which is the correct time for a test that says "this is missing" to demand attention.
-    const simSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'sim.ts'), 'utf8');
-    const auraCalls = (stripComments(simSrc).match(/ITEM_AURA_TICK_MS/g) ?? []).length;
-    check('(e) 🔴 OPEN DEFECT, PINNED: Blue Cheese\'s aura is imported by `sim.ts` and called NOWHERE — 1 mention is the import alone',
-      auraCalls === 1,
-      `${auraCalls} live mentions of ITEM_AURA_TICK_MS in sim.ts — >1 means the aura landed and this row should be REWRITTEN, not deleted`);
+    // ⚠️ THIS ROW WAS A PINNED OPEN DEFECT, AND IT WENT RED EXACTLY WHEN IT SAID IT WOULD — the
+    // B3 sweep landed the aura (BH-07, 2026-10-15). Rewritten, not deleted, as it asked. It read:
+    //
+    //   > *"🔴 THIS ROW IS ABOUT THE BUTTON AND NOT ABOUT THE EFFECT, STATED SO NOBODY READS IT
+    //   > AS A CLEAN BILL OF HEALTH. `32438b4` reported Blue Cheese as a NO-OP — `combat.ts`
+    //   > routes it to "`sim.ts:applyWorldTick`'s aura block" and there is no aura block;
+    //   > `sim.ts` imports `ITEM_AURA_TICK_MS`, `itemDamageSource` and `hasItem` and calls none
+    //   > of them. `ub2_itemuse` re-measured it at `e5631cd`: 66 seats wearing it, 0 damage,
+    //   > 0 hits. `noUnusedLocals: false` means three dead imports are not even a warning, so
+    //   > the ABSENCE is asserted here — this row goes red the day somebody implements the
+    //   > aura, which is the correct time for a test that says "this is missing" to demand
+    //   > attention."*
+    //
+    //   with the row `(e) 🔴 OPEN DEFECT, PINNED: … 1 mention is the import alone`, asserting
+    //   `ITEM_AURA_TICK_MS` appeared exactly once in `sim.ts` with comments stripped.
+    //
+    // What replaces it is BEHAVIOURAL, and it is this section's own claim turned the right way
+    // up: a passive needs no button, so a BOT wearing it hurts an opponent standing in the cloud
+    // while pressing nothing at all. The rule itself — radius, cadence, item damage — is §42(e).
+    // Deep pools on both, so five seconds of melee is five seconds of contact rather than a kill.
+    {
+      const st = itemMatch([{ items: ['blue_cheese'], x: 1000, y: 1000 }, { x: 1040, y: 1000 }, { x: 1600, y: 1000 }]);
+      for (const f of st.fighters.slice(0, 2)) { f.hp = 1e6; f.maxHp = 1e6; }
+      const idleAll = st.fighters.map(() => ({ move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false }));
+      let ticks = 0;
+      let pressed = 0;
+      for (let i = 0; i < 300; i++) {
+        for (const e of stepMatch(st, 1000 / 60, idleAll)) {
+          if (e.type === 'hit-landed' && e.source.kind === 'weapon' && e.source.itemId === 'blue_cheese'
+            && e.source.attackerId === 0 && e.targetId === 1) ticks++;
+          if (e.type === 'item-used' && e.fighterId === 0) pressed++;
+        }
+      }
+      check('(e) 🔴 a BOT wearing Blue Cheese hurts the opponent in its cloud with NO PRESS — the passive needs no button (was: 0 hits, pinned)',
+        ticks >= 3 && pressed === 0 && st.fighters[0].controller === 'ai',
+        `${ticks} cloud ticks on slot 1 in 5 s, ${pressed} presses by the wearer`);
+    }
   }
 
   // ── (f) 🔴 ONE CONSTANT, TWO FILES, ASSERTED AGAINST THE SOURCE TEXT ──────
