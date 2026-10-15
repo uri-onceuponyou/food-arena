@@ -13239,6 +13239,122 @@ console.log('\n48. The bot at two, three and six seats — sudden death, what it
         `${stale} stale of ${pairs} pair-ticks (${nonTarget} about a non-target)${example ? ` · e.g. ${example}` : ''}`);
     }
   }
+
+  // ── (d) AI-B4: A HIDDEN NEAREST OPPONENT LOCKED THE BOT OUT OF RETURNING FIRE ───────────
+  //
+  // `stepAI` picks its target with `nearestLivingOpponent` on TRUE positions and gates the shot
+  // on that one target's visibility. So with the nearest opponent concealed more than 84 wu
+  // away, the bot shot NOBODY — including a farther, visible opponent standing inside its own
+  // reach and shooting it. At two seats the only opponent is the target (`minSeats` 3).
+  //
+  // The scene is set directly, at the instant it matters: the bot stands where it lost the
+  // hider (its belief IS its own feet), the hider sits 112 wu deep in a shipped-size 130 wu
+  // plate, and a visible shooter opens fire from 126 wu — farther than the hider, inside the
+  // bot's reach. Nothing here depends on how the bot would SEARCH the patch: the question is
+  // only whether the shooter gets shot back while the hider stays hidden.
+  {
+    const PLATE = { x: 1400, y: 600, w: 130, h: 130, kind: 'plate_stack' };
+    const PLATE2 = { x: 900, y: 600, w: 130, h: 130, kind: 'plate_stack' };
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000, concealment: [PLATE, PLATE2] });
+    const BOT = 'hamburger';
+    const SHOOTER = 'taco';
+    const FILLING = CHARACTERS[SHOOTER].weapons.findIndex((w) => w.key === 'Filling');
+    const A0 = { x: PLATE.x, y: PLATE.y + PLATE.h / 2 + 3 };   // just outside the plate's south edge
+    const C0 = { x: PLATE.x, y: A0.y - 112 };                    // 112 wu deep: hidden, and the NEAREST
+    // `extra` seats join the scene as they are, in slot order after A, C and B.
+    const scene = (withB, extra = []) => {
+      const seats = [
+        // Facing NORTH, at the plate it lost the hider in — so a facing that ends up on the shooter
+        // (east) or on E (east) was turned there by the bot, not inherited from a spawn default.
+        { characterId: BOT, controller: 'ai', maxHp: 1e5, spawn: A0, facing: { x: 0, y: -1 } },
+        { characterId: 'pizza', controller: 'human', maxHp: 1e5, spawn: C0 },
+      ];
+      if (withB) seats.push({ characterId: SHOOTER, controller: 'human', maxHp: 1e5, spawn: { x: A0.x + 126, y: A0.y } });
+      seats.push(...extra);
+      const st = seat48(arena, seats);
+      st.phase = 'playing';
+      const [A, C] = st.fighters;
+      const cell = st.sightings[sightingIndex(A.id, C.id, st.fighters.length)];
+      cell.x = A.x; cell.y = A.y; cell.at = 0;   // it lost the hider exactly here
+      const pre = { nearest: nearestLivingOpponent(st, A) === C, hidden: !isVisibleFrom(A.x, A.y, C.x, C.y, st.arena, st, C) };
+      return { st, A, C, pre };
+    };
+    // B aims at A and holds the trigger on Filling (128 wu, reaches A at 126).
+    const shoot = (B, A) => ({ move: { x: 0, y: 0 }, aim: { x: A.x - B.x, y: A.y - B.y }, selectedWeapon: FILLING, attack: true });
+    const fmtD = (r) => `nearest hidden ${r.pre.nearest && r.pre.hidden}; A presses ${r.aPress}; A dealt B ${r.aOnB.toFixed(1)}`
+      + `, others ${r.aOnOthers.toFixed(1)}; B dealt A ${r.bOnA.toFixed(1)}; A faced B on ${r.facingB}/${r.ticks} ticks`;
+    const watch = (extra) => {
+      const { st, A, pre } = scene(true, extra);
+      const B = st.fighters[2];
+      // The scene's geometry, read BEFORE the first tick: the bot moves once it has a target.
+      const d0 = st.fighters.map((f) => Math.hypot(f.x - A.x, f.y - A.y));
+      const vis0 = st.fighters.map((f) => f === A || isVisibleFrom(A.x, A.y, f.x, f.y, st.arena, st, f));
+      const r = { pre, d0, vis0, aPress: 0, aOnB: 0, aOnOthers: 0, bOnA: 0, facingB: 0, ticks: 0, st, A, B };
+      for (let k = 0; k < 120; k++) {
+        const inputs = st.fighters.map(() => null);
+        inputs[2] = shoot(B, A);
+        for (const e of stepMatch(st, DT48, inputs)) {
+          if (isPress48(e, A)) r.aPress++;
+          if (e.type !== 'hit-landed' || e.source?.kind !== 'weapon') continue;
+          if (e.source.attackerId === A.id) { if (e.targetId === B.id) r.aOnB += e.amount; else r.aOnOthers += e.amount; }
+          if (e.source.attackerId === B.id && e.targetId === A.id) r.bOnA += e.amount;
+        }
+        const bx = B.x - A.x;
+        const by = B.y - A.y;
+        r.ticks++;
+        if ((A.facing.x * bx + A.facing.y * by) / Math.hypot(bx, by) > 0.99) r.facingB++;
+      }
+      return r;
+    };
+
+    // THREE SEATS.
+    const three = watch([]);
+    check('(d) NON-VACUITY: three seats — the bot\'s NEAREST opponent is hidden from it, and the shooter lands hits on it',
+      three.pre.nearest && three.pre.hidden && three.bOnA > 0, fmtD(three));
+    check('(d) 🔴 three seats: the bot shoots back at the visible opponent shooting it from inside its reach — within 2 s',
+      three.aOnB > 0, fmtD(three));
+
+    // SIX SEATS. Two more visible opponents — D inside the bot's reach but farther than B, E
+    // visible and OUT of reach — and F hidden in a second plate, farther than the hider. The
+    // rule is the NEAREST VISIBLE opponent INSIDE REACH: B, and nobody else.
+    const reach = offensiveReach(BOT);
+    const six = watch([
+      { characterId: 'egg', controller: 'human', maxHp: 1e5, spawn: { x: A0.x - (reach - 4), y: A0.y } },   // D
+      { characterId: 'soup', controller: 'human', maxHp: 1e5, spawn: { x: A0.x, y: A0.y + 400 } },          // E
+      { characterId: 'donut', controller: 'human', maxHp: 1e5, spawn: { x: PLATE2.x, y: PLATE2.y } },       // F
+    ]);
+    {
+      // Slots: 0 A, 1 C (the hidden nearest), 2 B (the shooter), 3 D, 4 E, 5 F.
+      const [, dC, dB, dD, dE, dF] = six.d0;
+      const [, vC, vB, vD, vE, vF] = six.vis0;
+      const geo = dC < dB && dB < dD && dD <= reach && dE > reach && dF > dC && !vC && vB && vD && vE && !vF;
+      check('(d) NON-VACUITY: six seats — a hidden nearest, the shooter, a farther in-reach D, an out-of-reach E, a hidden F',
+        geo && six.pre.nearest && six.pre.hidden && six.bOnA > 0,
+        `geometry ${geo} (C ${dC.toFixed(0)}, B ${dB.toFixed(0)}, D ${dD.toFixed(0)}, E ${dE.toFixed(0)}, F ${dF.toFixed(0)}, reach ${reach.toFixed(0)}); ${fmtD(six)}`);
+    }
+    check('(d) 🔴 six seats: the bot turns on the NEAREST visible opponent inside its reach — the shooter, and only it',
+      six.aOnB > 0 && six.facingB > six.ticks / 2 && six.aOnOthers === 0, fmtD(six));
+
+    // CONTROL — THE OVER-FIX. A visible opponent OUTSIDE the bot's reach must not pull it off a
+    // hidden nearest one: "prefer whoever I can see" is a different targeting rule (the finder
+    // measured it changing 24 of 66 six-seat winners), not this fix.
+    {
+      const { st, A, pre } = scene(false, [{ characterId: 'soup', controller: 'human', maxHp: 1e5, spawn: { x: A0.x + 300, y: A0.y } }]);
+      const E = st.fighters[2];
+      const d0 = Math.hypot(E.x - A.x, E.y - A.y);
+      let facingE = 0;
+      for (let k = 0; k < 60; k++) {
+        stepMatch(st, DT48, [null, null, null]);
+        const ex = E.x - A.x;
+        const ey = E.y - A.y;
+        if ((A.facing.x * ex + A.facing.y * ey) / Math.hypot(ex, ey) > 0.99) facingE++;
+      }
+      const d1 = Math.hypot(E.x - A.x, E.y - A.y);
+      check('(d) CONTROL: a visible opponent OUT of reach does not pull the bot off its hidden nearest one',
+        pre.nearest && pre.hidden && facingE === 0 && d1 >= d0 - 1,
+        `facing E on ${facingE}/60 ticks; |A-E| ${d0.toFixed(1)} -> ${d1.toFixed(1)}`);
+    }
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

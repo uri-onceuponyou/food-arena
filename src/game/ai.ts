@@ -1484,7 +1484,11 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
   // fighting is not a perception question (you know who hit you), WHERE they are is. Making
   // the choice belief-based would let a fighter forget an opponent exists by walking behind
   // a plate, which is a design change, not a generalisation.
-  const target = nearestLivingOpponent(state, self);
+  //
+  // ⚠️ `let`, NOT `const`, SINCE AI-B4 — and the reassignment is ONE line in the perception block
+  // below, under one condition: the nearest opponent is HIDDEN and a VISIBLE one stands inside
+  // this fighter's reach. Read that block before adding a second.
+  let target = nearestLivingOpponent(state, self);
   if (self.hp <= 0 || target === null) return false;
 
   const now = state.elapsed;
@@ -1577,8 +1581,12 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
   // in this file (`sim.test.mjs` §26(m) counts them — two in `src/game/`, this and
   // `sim.ts:stepProjectiles`). The query is pure, so asking it in slot order changes nothing.
   let visible = false;
+  // The nearest VISIBLE opponent inside this fighter's reach, other than the target (AI-B4, below).
+  let inReach: Fighter | null = null;
   {
     const n = state.fighters.length;
+    const reach = offensiveReach(self.characterId);
+    let inReachD = Infinity;
     for (const other of state.fighters) {
       if (!isLivingOpponentOf(other, self)) continue;
       const seen = isVisibleFrom(self.x, self.y, other.x, other.y, state.arena, state, other);
@@ -1589,7 +1597,38 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
       cell.x = other.x;
       cell.y = other.y;
       cell.at = now;
+      // Strict `<`, in slot order: ties go to the lower slot, as `nearestLivingOpponent`'s do.
+      const d = Math.hypot(other.x - self.x, other.y - self.y);
+      if (d <= reach && d < inReachD) { inReach = other; inReachD = d; }
     }
+  }
+  // ── 🚨 A HIDDEN NEAREST OPPONENT NO LONGER LOCKS THIS FIGHTER OUT OF FIGHTING (AI-B4) ──────
+  //
+  // The target is chosen on TRUE positions (the block above `perception` says why, and that is
+  // unchanged) and every shot below is gated on the target's VISIBILITY. Together they meant a
+  // bot whose nearest opponent was concealed more than 84 wu away shot NOBODY — including a
+  // farther, VISIBLE opponent inside its own reach that was shooting it. At two seats the only
+  // opponent is the target and this cannot happen; at three it is a bot standing at the edge of
+  // a plate taking hits. Measured on `a53d8b0` (`sim.test.mjs` §48(d)): 0 presses in 2 s while
+  // the shooter landed 24 damage, at three seats and at six.
+  //
+  // THE NARROW RULE, AND ONLY IT: switch when the nearest is hidden AND a visible opponent is
+  // inside `offensiveReach` — i.e. when this fighter could shoot somebody RIGHT NOW and the
+  // old rule had it shoot nobody. Otherwise the target is exactly what it was. ⚠️ NOT "prefer
+  // whoever is visible": that is a different targeting rule — it walks a bot off a hidden
+  // nearest opponent toward anyone it can see across the map — and the finder measured it
+  // changing 24 of 66 six-seat winners. §48(d)'s over-fix CONTROL pins the difference.
+  //
+  // ⚠️ THE SHOT IS STILL RESOLVED BY `combat.ts`, AND THAT IS WHY THIS IS SAFE. A swing hits
+  // every opponent in its arc (§35) and a projectile strikes whoever it touches (§36), so
+  // aiming at `inReach` lands on `inReach`. What a bot's projectile is still FRAMED on is
+  // `nearestLivingOpponent` (`combat.ts:deliverWeapon`'s `frame`, kept for bots by B3b so the
+  // AI corpora stay bit-identical): here that is the hidden fighter, so the shot does not home
+  // (`sim.ts:stepProjectiles` re-aims only at a VISIBLE frame) and its range budget is charged
+  // in a still frame — path length, never longer than the card. Recorded, not hidden.
+  if (!visible && inReach !== null) {
+    target = inReach;
+    visible = true;
   }
   // THIS OBSERVER'S ROW, THIS TARGET'S COLUMN. One cell of `MatchState.sightings`, mutated
   // in place — the belief belongs to the pair, not to the match, which is why the single

@@ -42,6 +42,10 @@ const B_BELIEF = '(b) 🔴 three seats: the belief about an opponent the bot nev
 const B_FIND = '(b) 🔴 three seats: …so when its fight ends it finds the hider';
 const B_SIX = '(b) 🔴 six seats: every bot\'s belief about every opponent it can see';
 const B_CONTROL = ['(b) NON-VACUITY: the hider walked in the bot\'s sight', '(b) CONTROL: two seats — the hider was the target all along'];
+const D_THREE = '(d) 🔴 three seats: the bot shoots back';
+const D_SIX = '(d) 🔴 six seats: the bot turns on the NEAREST visible opponent';
+const D_NONVAC = ['(d) NON-VACUITY: three seats', '(d) NON-VACUITY: six seats'];
+const D_OVERFIX = '(d) CONTROL: a visible opponent OUT of reach';
 
 export const ARMS = [
   // ── AI-B1 ──────────────────────────────────────────────────────────────────────
@@ -81,6 +85,34 @@ export const ARMS = [
     repl: '      if (other === target) { visible = seen; continue; }',
     mustFail: [B_BELIEF],
     mustPass: [B_SIX, ...B_CONTROL],
+  },
+  // ── AI-B4 ──────────────────────────────────────────────────────────────────────
+  {
+    name: 'hidden-lock',
+    bug: 'AI-B4 — the target stays the hidden nearest; a visible shooter in reach is never shot back (the shipped bug)',
+    file: 'game/ai.ts',
+    find: '  if (!visible && inReach !== null) {\n    target = inReach;',
+    repl: '  if (false) {\n    target = inReach;',
+    mustFail: [D_THREE, D_SIX],
+    mustPass: [...D_NONVAC, D_OVERFIX],
+  },
+  {
+    name: 'prefer-visible',
+    bug: 'AI-B4 over-fix — any visible opponent, at any distance, replaces a hidden nearest one',
+    file: 'game/ai.ts',
+    find: '      if (d <= reach && d < inReachD) { inReach = other; inReachD = d; }',
+    repl: '      if (d < inReachD) { inReach = other; inReachD = d; }',
+    mustFail: [D_OVERFIX],
+    mustPass: [D_THREE, D_SIX, ...D_NONVAC],
+  },
+  {
+    name: 'farthest-in-reach',
+    bug: 'AI-B4 wrong pick — the FARTHEST visible opponent in reach, not the nearest',
+    file: 'game/ai.ts',
+    find: '      if (d <= reach && d < inReachD) { inReach = other; inReachD = d; }',
+    repl: '      if (d <= reach && (inReach === null || d > inReachD)) { inReach = other; inReachD = d; }',
+    mustFail: [D_SIX],
+    mustPass: [D_THREE, ...D_NONVAC, D_OVERFIX],
   },
 ];
 
