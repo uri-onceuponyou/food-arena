@@ -53,7 +53,11 @@ import { castThreat, itemWorthIt, offensiveReach, pickItem, pressValue, stepAI }
 // sim's own: `combat.ts:itemUsable`'s header says it is exported *precisely* so the HUD, the
 // loadout screen and the AI share ONE answer, and that "a copy of this rule anywhere else is
 // a button that lies". §43 is the third reader, so it asks the same function.
-import { applyDamage, attemptAttack, isOnOwnTrail, itemUsable, resolveDueCast, statusReadyAt } from './combat.ts';
+// §42(e) imports `ITEM_AURA_TICK_MS` — the cadence the cloud ticks at — rather than typing 1000,
+// because the row's claim is the RELATIONSHIP (one tick per that constant), not the number.
+import {
+  applyDamage, attemptAttack, isOnOwnTrail, ITEM_AURA_TICK_MS, itemUsable, resolveDueCast, statusReadyAt,
+} from './combat.ts';
 // Section 26 tests CONCEALMENT. The predicates are imported rather than re-derived for
 // the same reason `pressValue` and `statusReadyAt` are: the section's entire claim is that
 // ONE rule is read by four call sites, and a copy of the AABB test here would pass forever
@@ -7637,7 +7641,9 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
   // The rule itself is a balance decision, measured on 880 real matches
   // (`tools/tmp/cst_interrupt.mjs`): "any damage cancels" leaves 24.8% of ultimates alive
   // at a 900 ms wind-up — three in four dying on a 3.5 s cooldown — against 84.1% for
-  // stun-only, a 59.3 pp gap against a ±2.86 pp floor. `DECISIONS §74(a)`.
+  // stun-only, a 59.3 pp gap against a ±2.86 pp floor. ⚠️ This cited `DECISIONS §74(a)`, which
+  // does not exist — §74 is the phone / six-seat-lobby answer; the stun-only decision was
+  // never written into that file (see `combat.ts`'s TERMINATOR 2 note; reported 2026-10-15).
   {
     const openCast = (state) => {
       const evs = [];
@@ -11215,6 +11221,497 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 42. LOADOUT ITEMS — THE BEHAVIOUR (§41 is the contract, §43 the bot, §44 the press)
+//
+// 🚨 THIS SECTION WAS CITED BEFORE IT EXISTED. `combat.ts` named "§42" at seven sites in the
+// present tense — *"§42 asserts…"*, *"§42 plants exactly that…"* — and `state.ts` and
+// `movement.ts` once each, for rows nobody had written; §43's header recorded the gap and left
+// it to "the sim track". The B3 bug sweep (`docs/REVAMP.md` §5, 2026-10-15) is the sim track,
+// and it opens the section with the rows its bugs needed. **Every 🔴 row below went RED on
+// `4dbf937` before the fix it guards landed**, and the commit that landed each fix carries the
+// failing value — a guard that has not failed on its bug is not a guard.
+//
+// Every seat is HUMAN unless a row says otherwise, so an idle input keeps the board still and
+// "who was hit" is never confounded with what a bot chose to do that tick.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the revive, the loadout gate)');
+{
+  const DT = 1000 / 60;
+  const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  const ITEM_ARENA = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+  /** `n` HUMAN seats on clear floor, 300 wu apart on one row, PLAYING. `opts.items[i]` / `opts.levels[i]` per seat. */
+  const seats = (n, opts = {}) => {
+    const st = createMatch(ITEM_ARENA, Array.from({ length: n }, (_, i) => ({
+      characterId: opts.chars?.[i] ?? 'hamburger',
+      controller: 'human',
+      spawn: opts.spawns?.[i] ?? { x: 400 + i * 300, y: 600 },
+      ...(opts.items?.[i] ? { items: opts.items[i] } : {}),
+      ...(opts.levels ? { level: opts.levels[i] } : opts.level !== undefined ? { level: opts.level } : {}),
+    })));
+    st.phase = 'playing';
+    return st;
+  };
+  const idle = (st) => st.fighters.map(() => NEUTRAL);
+  const pressItem = (st, seat, slot) => {
+    const ins = idle(st);
+    ins[seat] = { ...NEUTRAL, useItem: slot };
+    return ins;
+  };
+  /** A real weapon source from `attackerId`'s own kit — the shape all three weapon sites build. */
+  const weaponSource = (st, attackerId, wi = 0) => {
+    const w = CHARACTERS[st.fighters[attackerId].characterId].weapons[wi];
+    return { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId };
+  };
+  const ofType = (evs, type) => evs.filter((e) => e.type === type);
+
+  // ── (a) 🔴 AN APPLIED STUN KILLS AN *ITEM* WIND-UP — BH-06 ──────────────────
+  //
+  // `state.ts:ItemCast` promised it from the item system's first commit: the record shares
+  // *"cancellation on the two terminators that kill a weapon cast (an applied stun, and
+  // death)"*, and `item-cancelled.reason` carries `'stun'`. Nothing emitted it —
+  // `cancelItemCast` had a `'death'` and a `'sleep'` call site and no `'stun'` one — so a
+  // stunned Shiitake wearer finished its 2.5 s wind-up on schedule, often WHILE STILL STUNNED,
+  // and the counterplay `ITEMS.shiitake.look` names (*"that is what makes it counterable"*) did
+  // not exist. Driven at BOTH seat counts: the terminator does not care, but a fix that only
+  // worked for the duel's slot 1 is a shape this file has paid for before.
+  for (const n of [MIN_FIGHTERS, MAX_FIGHTERS]) {
+    const windUp = () => {
+      const st = seats(n, { items: [['shiitake']] });
+      const evs = stepMatch(st, DT, pressItem(st, 0, 0));
+      return { st, wearer: st.fighters[0], used: ofType(evs, 'item-used') };
+    };
+    const { st, wearer, used } = windUp();
+    check(`(a) N=${n} NON-VACUITY: a real press opened a Shiitake WIND-UP — the record the stun has to kill`,
+      wearer.itemCast !== null && used.length === 1 && used[0].windupMs === ITEM_TUNING.shiitake.windupMs,
+      `itemCast ${JSON.stringify(wearer.itemCast)}, item-used ${JSON.stringify(used)}`);
+    const evs = [];
+    applyDamage(st, wearer, 1, 'stun', weaponSource(st, 1), evs);
+    const cancels = ofType(evs, 'item-cancelled');
+    check(`(a) N=${n} NON-VACUITY: the stun was APPLIED, not refused — the wearer is stunned`,
+      wearer.status.stunnedUntil > st.elapsed, `stunnedUntil ${wearer.status.stunnedUntil} vs elapsed ${st.elapsed}`);
+    check(`(a) N=${n} 🔴 an applied stun CANCELS the item wind-up: one item-cancelled{stun}, the record cleared`,
+      wearer.itemCast === null && cancels.length === 1 && cancels[0].reason === 'stun'
+      && cancels[0].itemId === 'shiitake' && cancels[0].fighterId === 0,
+      `itemCast ${JSON.stringify(wearer.itemCast)}, cancels ${JSON.stringify(cancels)}`);
+    const later = [];
+    for (let i = 0; i < Math.ceil(ITEM_TUNING.shiitake.windupMs / DT) + 5; i++) later.push(...stepMatch(st, DT, idle(st)));
+    check(`(a) N=${n} 🔴 …so it never goes off: no item-resolved, no shield, past the whole wind-up`,
+      ofType(later, 'item-resolved').length === 0 && wearer.item.shieldUntil === -Infinity,
+      `item-resolved ×${ofType(later, 'item-resolved').length}, shieldUntil ${wearer.item.shieldUntil}`);
+    // CONTROL: the identical wind-up with nobody touching it resolves on schedule, so the
+    // silence above is the stun and not a wind-up that never resolves anyway.
+    const ctl = windUp();
+    const ctlEvs = [];
+    for (let i = 0; i < Math.ceil(ITEM_TUNING.shiitake.windupMs / DT) + 5; i++) ctlEvs.push(...stepMatch(ctl.st, DT, idle(ctl.st)));
+    check(`(a) N=${n} CONTROL: the same wind-up, unstunned, resolves and raises the shield`,
+      ofType(ctlEvs, 'item-resolved').length === 1 && ctl.wearer.item.shieldUntil > ctl.st.elapsed,
+      `item-resolved ×${ofType(ctlEvs, 'item-resolved').length}, shieldUntil ${ctl.wearer.item.shieldUntil}`);
+  }
+  // A GRACE-REFUSED stun is not a stun — §33(g)'s rule for the weapon cast, and the cancel has
+  // to sit INSIDE `applyDamage`'s `statusReadyAt` guard for it to hold. Placed beside the
+  // `hit-landed` event instead, it would cancel on stuns that never happened, and nothing
+  // downstream could tell: both versions emit the same `item-cancelled`.
+  {
+    const st = seats(MIN_FIGHTERS, { items: [['shiitake']] });
+    stepMatch(st, DT, pressItem(st, 0, 0));
+    const wearer = st.fighters[0];
+    wearer.status.stunnedUntil = st.elapsed - 1;   // expired 1 ms ago: inside the grace window
+    const refusedAt = st.elapsed < statusReadyAt(wearer, 'stun');
+    const evs = [];
+    applyDamage(st, wearer, 1, 'stun', weaponSource(st, 1), evs);
+    check('(a) NON-VACUITY: the planted stun really is inside the grace window, so the sim REFUSES it',
+      refusedAt && wearer.status.stunnedUntil === st.elapsed - 1,
+      `readyAt ${statusReadyAt(wearer, 'stun')} vs elapsed ${st.elapsed}`);
+    check('(a) 🔴 a GRACE-REFUSED stun leaves the item wind-up OPEN — the cancel follows the stun, not the hit',
+      wearer.itemCast !== null && ofType(evs, 'item-cancelled').length === 0,
+      `itemCast ${JSON.stringify(wearer.itemCast)}, cancels ${ofType(evs, 'item-cancelled').length}`);
+  }
+  // A blow that both stuns and kills cancels with 'stun' — `applyDamage` writes the status
+  // before it tests for death — and the death terminator then finds nothing left to cancel.
+  // The same ordering `cast-cancelled`'s doc states for the weapon twin.
+  {
+    const st = seats(MAX_FIGHTERS, { items: [['shiitake']] });
+    stepMatch(st, DT, pressItem(st, 0, 0));
+    const wearer = st.fighters[0];
+    const evs = [];
+    applyDamage(st, wearer, wearer.hp + 50, 'stun', weaponSource(st, 1), evs);
+    const cancels = ofType(evs, 'item-cancelled');
+    check('(a) 🔴 a blow that STUNS AND KILLS reports the wind-up once, as \'stun\' — death finds it already gone',
+      !wearer.alive && cancels.length === 1 && cancels[0].reason === 'stun',
+      `alive ${wearer.alive}, cancels ${JSON.stringify(cancels.map((c) => c.reason))}`);
+  }
+
+  // ── (b) 🔴 THE MIRROR RETURNS WHAT THE WEARER *LOST*, NOT WHAT WAS SWUNG — BH-05 ──
+  //
+  // `combat.ts`'s own contract: the reflection is *"applied to `dealt`, the number the victim
+  // ACTUALLY lost, so the mirror cannot disagree with the health bar it is mirroring"*. On a
+  // killing blow those are different numbers — `dealt` is fixed before the HP clamp — so a
+  // 12-damage swing into a 3-HP wearer reflected 12, and an attacker could die for finishing
+  // somebody. Built at THREE seats because that is where the overkill DECIDES something: at
+  // two, the wearer's death has already declared the attacker the winner before the
+  // reflection lands, so the duel can show the extra damage but never a changed result.
+  {
+    const raiseShield = (n) => {
+      const st = seats(n, { items: [['shiitake']] });
+      const evs = stepMatch(st, DT, pressItem(st, 0, 0));
+      for (let i = 0; i < Math.ceil(ITEM_TUNING.shiitake.windupMs / DT) + 2; i++) evs.push(...stepMatch(st, DT, idle(st)));
+      return { st, evs };
+    };
+    const BLOW = CHARACTERS.hamburger.weapons.find((w) => w.key === 'Smash');
+    const smash = (st, target) => {
+      const evs = [];
+      applyDamage(st, target, BLOW.damage, BLOW.effect,
+        { kind: 'weapon', weaponKey: BLOW.key, weaponName: BLOW.name, attackerId: 1 }, evs);
+      return evs;
+    };
+    const reflectedOn = (evs, id) => ofType(evs, 'hit-landed').filter((e) => e.targetId === id && e.source.itemId === 'shiitake');
+    {
+      const { st, evs: up } = raiseShield(3);
+      const [wearer, attacker] = st.fighters;
+      wearer.hp = 3;
+      attacker.hp = 10;
+      check('(b) NON-VACUITY: the shield is UP off a real press, the wearer has 3 HP and the blow is bigger than that',
+        ofType(up, 'item-resolved').length === 1 && st.elapsed < wearer.item.shieldUntil
+        && attacker.damageMul === 1 && BLOW.damage > wearer.hp && st.fighters.length === 3,
+        `resolved ×${ofType(up, 'item-resolved').length}, shieldUntil ${wearer.item.shieldUntil}, blow ${BLOW.damage} vs hp ${wearer.hp}`);
+      const evs = smash(st, wearer);
+      const back = reflectedOn(evs, attacker.id);
+      check('(b) 🔴 a 12-damage blow into a 3-HP wearer reflects 3 — the HP the wearer LOST — not the 12 it swung',
+        back.length === 1 && back[0].amount === 3 && attacker.hp === 7,
+        `reflected ${JSON.stringify(back.map((e) => e.amount))}, attacker hp 10 -> ${attacker.hp}`);
+      check('(b) 🔴 …so at N=3 the attacker SURVIVES its own finishing blow and the match goes on',
+        !wearer.alive && attacker.alive && st.phase === 'playing' && st.winnerId === null,
+        `wearer alive ${wearer.alive}, attacker alive ${attacker.alive}, phase ${st.phase}, winner ${st.winnerId}`);
+      // A presentation number, deliberately left alone: the floating damage number, the shake,
+      // the hit-stop and the audio weight are all driven off it, and HP-lost would shrink every
+      // finishing blow in every match, items or not. Pinned so it stays a DECISION.
+      const blowEv = ofType(evs, 'hit-landed').find((e) => e.targetId === wearer.id);
+      check('(b) …and the wearer\'s own hit-landed still publishes the BLOW (12), not the 3 it lost — presentation\'s number, unchanged',
+        blowEv !== undefined && blowEv.amount === BLOW.damage, `amount ${blowEv?.amount}`);
+    }
+    // CONTROL: a blow the wearer survives is reflected exactly — `lost` IS `dealt` there, bit
+    // for bit, which is what keeps every non-lethal reflection in the item corpus unchanged.
+    {
+      const { st } = raiseShield(3);
+      const [wearer, attacker] = st.fighters;
+      wearer.hp = 50;
+      const hp0 = attacker.hp;
+      const back = reflectedOn(smash(st, wearer), attacker.id);
+      check('(b) CONTROL: a blow the wearer survives (50 HP) is reflected in full — 12 back for 12 taken',
+        back.length === 1 && back[0].amount === BLOW.damage && attacker.hp === hp0 - BLOW.damage && wearer.hp === 50 - BLOW.damage,
+        `reflected ${JSON.stringify(back.map((e) => e.amount))}, attacker ${hp0} -> ${attacker.hp}`);
+    }
+    // `combat.ts` cited this row for a year before it existed: *"Two shielded fighters hitting
+    // each other resolve in one level. §42 plants exactly that — both shields up, both hitting
+    // — and asserts the call does not recur."* The reflection carries `itemDamageSource`, so it
+    // is item damage and is never reflected again; one blow is exactly two `hit-landed`.
+    {
+      const st = seats(2, { items: [['shiitake'], ['shiitake']] });
+      const ins = idle(st);
+      ins[0] = { ...NEUTRAL, useItem: 0 };
+      ins[1] = { ...NEUTRAL, useItem: 0 };
+      const up = stepMatch(st, DT, ins);
+      for (let i = 0; i < Math.ceil(ITEM_TUNING.shiitake.windupMs / DT) + 2; i++) up.push(...stepMatch(st, DT, idle(st)));
+      const both = st.fighters.every((f) => st.elapsed < f.item.shieldUntil);
+      const evs = smash(st, st.fighters[0]);
+      check('(b) BOTH shields up, one blow: exactly TWO hit-landed — the blow and one reflection — the mirror does not ring',
+        both && ofType(evs, 'hit-landed').length === 2 && st.fighters.every((f) => f.alive),
+        `both up ${both}, hit-landed ×${ofType(evs, 'hit-landed').length}: ${ofType(evs, 'hit-landed').map((e) => `${e.targetId}:${e.amount}${e.source.itemId ? '/' + e.source.itemId : ''}`).join(' ')}`);
+    }
+  }
+
+  // ── (c) 🔴 LEFTOVERS RETURNS A CORPSE'S WORTH *AT YOUR LEVEL* — BH-11 ────────────
+  //
+  // `ITEM_TUNING.leftovers.hp` is *"one corpse's worth of medikits"* — `MEDIKIT.heal ×
+  // MEDIKIT.count` — and `MEDIKIT.heal` is documented as *"HP per kit, BEFORE the picker's
+  // level multiplier"*. Every other link in that chain scales (`stepMedikits` multiplies by the
+  // taker's `levelHealthMultiplier`, the Onion heal by the caster's); the revive did not, so at
+  // L15 it returned 18 of 119 HP (15.1% of the pool) against the 25.7% it returns at L1.
+  //
+  // 🚨 FOUR SEATS AT LEAST, AND AT A LEVEL ABOVE 1 — both are required for the row to be able
+  // to fail. A revive needs the killer to die with two still standing, which no match below
+  // four seats can hold; and `levelHealthMultiplier(1)` is exactly 1.0, so an L1 row passes
+  // with the bug in place. The L1 arm is here as the CONTROL that says so.
+  {
+    const kill = (st, victim, killer) => {
+      const evs = [];
+      const w = CHARACTERS[st.fighters[killer].characterId].weapons[0];
+      applyDamage(st, st.fighters[victim], 1e6, null,
+        { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: killer }, evs);
+      return evs;
+    };
+    /** Seat 0 wears Leftovers and is killed by seat 1, who is then killed by seat 2: a revive. */
+    const reviveAt = (n, levels) => {
+      const st = seats(n, { items: [['leftovers']], levels });
+      kill(st, 0, 1);
+      const down = !st.fighters[0].alive;
+      const evs = kill(st, 1, 2);
+      return { st, down, rev: ofType(evs, 'item-revived'), me: st.fighters[0] };
+    };
+    /** What the same fighter collects walking over its killer's kits: `stepMedikits`' own rule. */
+    const corpseWorth = (lvl) => MEDIKIT.heal * MEDIKIT.count * levelHealthMultiplier(lvl);
+    for (const n of [4, MAX_FIGHTERS]) {
+      const { st, down, rev, me } = reviveAt(n, Array(n).fill(LEVEL_MAX));
+      check(`(c) N=${n} NON-VACUITY: seat 0 went down, its killer went down with ${n - 2} standing, and Leftovers FIRED`,
+        down && rev.length === 1 && rev[0].fighterId === 0 && me.alive && st.phase === 'playing' && me.level === LEVEL_MAX,
+        `down ${down}, revived ${JSON.stringify(rev)}, phase ${st.phase}, level ${me.level}`);
+      check(`(c) N=${n} 🔴 at L${LEVEL_MAX} the revive is a corpse's worth AT THAT LEVEL — ${corpseWorth(LEVEL_MAX).toFixed(2)} HP, not a flat ${ITEM_TUNING.leftovers.hp}`,
+        rev.length === 1 && approx(rev[0].hp, corpseWorth(LEVEL_MAX), 1e-9) && approx(me.hp, corpseWorth(LEVEL_MAX), 1e-9),
+        `item-revived.hp ${rev[0]?.hp}, fighter hp ${me.hp} of ${me.maxHp}, a corpse's kits ${corpseWorth(LEVEL_MAX)}`);
+    }
+    {
+      const { rev } = reviveAt(4, Array(4).fill(LEVEL_MIN));
+      check(`(c) CONTROL: at L${LEVEL_MIN} it is exactly ${ITEM_TUNING.leftovers.hp} — the multiplier is 1.0, which is why an L1 row cannot see BH-11`,
+        rev.length === 1 && rev[0].hp === ITEM_TUNING.leftovers.hp && levelHealthMultiplier(LEVEL_MIN) === 1,
+        `item-revived.hp ${rev[0]?.hp}`);
+    }
+    // Whose level? The REVIVED fighter's — the pool it refills, and the key `stepMedikits` uses
+    // for the taker. An L15 wearer killed by L1 fighters must still come back with an L15 share.
+    {
+      const { rev } = reviveAt(4, [LEVEL_MAX, LEVEL_MIN, LEVEL_MIN, LEVEL_MIN]);
+      check('(c) 🔴 MIXED LEVELS: an L15 wearer revived by an L1 killer\'s death gets the L15 share — its OWN level, not the killer\'s',
+        rev.length === 1 && approx(rev[0].hp, corpseWorth(LEVEL_MAX), 1e-9),
+        `item-revived.hp ${rev[0]?.hp} vs ${corpseWorth(LEVEL_MAX)} (L15) / ${corpseWorth(LEVEL_MIN)} (L1)`);
+    }
+    // `reviveThoseKilledBy` clears "every lock and every accumulator", and since BH-07 the
+    // fighter carries one more: Blue Cheese's per-cloud clocks (`item.auraTimers`, the VICTIM's).
+    // A partial second banked as a corpse must not cut the first tick after it stands up.
+    {
+      const st = seats(4, { items: [['leftovers']] });
+      st.fighters[0].item.auraTimers[3] = 900;   // 0.9 s into slot 3's cloud when it went down
+      kill(st, 0, 1);
+      const evs = kill(st, 1, 2);
+      check('(c) a revived fighter\'s accumulators are cleared — Blue Cheese\'s per-cloud clocks included',
+        ofType(evs, 'item-revived').length === 1 && st.fighters[0].item.auraTimers.length === 0,
+        `auraTimers [${st.fighters[0].item.auraTimers.join(',')}]`);
+    }
+  }
+
+  // ── (d) 🔴 AN ITEM ID IS AN *OWN* KEY OF THE REGISTRY — META-09 ────────────────
+  //
+  // `validateLoadout` exists so *"a typo in a tool would otherwise equip a ghost that never
+  // fires"*, and it asked `it in ITEMS` — which walks `Object.prototype`. `ITEMS` is a plain
+  // object literal, so `constructor`, `toString`, `__proto__` and nine more were accepted as
+  // items, equipped, shown, and never fired: exactly the ghost the throw is for. §41(i)'s
+  // unknown-id row could not see it — its only known-bad is `not_an_item`, which `in` refuses.
+  // `match.ts:sanitiseLoadout` carries the same predicate on the way in and is that file's
+  // owner's half; this is the sim's gate, which every caller passes through.
+  {
+    const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+    const ghosts = Object.getOwnPropertyNames(Object.prototype);
+    check('(d) NON-VACUITY: Object.prototype supplies the ghost names, constructor and toString among them, none a real item',
+      ghosts.length >= 10 && ghosts.includes('constructor') && ghosts.includes('toString')
+      && ghosts.every((g) => !Object.values(ITEMS).some((d) => d.id === g)),
+      `${ghosts.length} names: ${ghosts.join(' ')}`);
+    const accepted = ghosts.filter((g) => !throws(() => createMatch(ITEM_ARENA, [
+      { characterId: 'hamburger', items: [g] }, { characterId: 'donut' },
+    ])));
+    check('(d) 🔴 EVERY Object.prototype name is REFUSED as an item id — a ghost that never fires is what the throw is for',
+      accepted.length === 0, `accepted: [${accepted.join(', ')}]`);
+    // ⚠️ SPAWNS ARE EXPLICIT. This row was first written without them, and at six seats on this
+    // fixture arena `createMatch` throws for EVERY loadout (no sixth spawn — `defaultSpawn` reads
+    // `undefined.x`), so "every ghost refused" was green on the broken tree for the wrong reason.
+    // The CONTROL below is what now proves a six-seat call can be ACCEPTED at all.
+    const sixWith = (items3) => createMatch(ITEM_ARENA, Array.from({ length: MAX_FIGHTERS }, (_, i) => ({
+      characterId: 'hamburger', controller: i === 0 ? 'human' : 'ai',
+      spawn: { x: 400 + i * 300, y: 600 }, ...(i === 3 ? { items: items3 } : {}),
+    })));
+    check(`(d) CONTROL: the N=${MAX_FIGHTERS} call with a REAL item on bot slot 3 is accepted — so a refusal below is the name`,
+      !throws(() => sixWith(['pompa'])) && sixWith(['pompa']).fighters[3].item.equipped[0] === 'pompa');
+    const six = ghosts.filter((g) => !throws(() => sixWith([g])));
+    check('(d) 🔴 …on a six-seat bot slot too — the gate is createFighter\'s, not the duel\'s',
+      six.length === 0, `accepted on slot 3: [${six.join(', ')}]`);
+    check('(d) CONTROL: every REAL id is still accepted, one at a time — the refusal is the name, not the call',
+      Object.keys(ITEMS).every((id) => !throws(() => createMatch(ITEM_ARENA, [
+        { characterId: 'hamburger', items: [id] }, { characterId: 'donut' },
+      ]))));
+  }
+
+  // ── (e) 🔴 BLUE CHEESE HAS A CLOUD — BH-07 / ML-5 / META-04 ──────────────────────
+  //
+  // Offered in the picker, the boxes and the road; its HUD plate said AUTO; `combat.ts` routed
+  // it to *"`sim.ts:applyWorldTick`'s aura block"* — and there was no aura block. `sim.ts`
+  // imported `ITEM_AURA_TICK_MS`, `itemDamageSource` and `hasItem` and called none of them, so
+  // every match with it equipped was bit-identical to one without (`bh_meta_items`: 110/110
+  // duels, 12/12 six-seat rosters). The contract it now meets is the one the code already
+  // stated: `ITEM_TUNING.blue_cheese` (`dps` per second inside `radius`), one tick per
+  // `ITEM_AURA_TICK_MS`, through `itemDamageSource` so the hit is off the level ladder, feeds
+  // no Tenderiser streak and is never reflected, accumulated per (victim, owner) pair in the
+  // VICTIM's `item.auraTimers`.
+  //
+  // Six seats, every one human and idle, so nobody moves and the cloud is the only thing that
+  // can hurt anybody: the wearer at the centre, three opponents inside the 84 wu radius and two
+  // outside it — one of them 2 wu past the edge.
+  //
+  // MEASURED on `83754a9` (the rows assert bounds; these are the readings, kept because that
+  // commit's message quoted three of them wrong from the bounds): 10 s → 9, 9, 9 ticks — sixty
+  // `1000/60` steps sum to just under 1000 in IEEE-754, so the first tick lands on frame 61
+  // (≈1016.7 ms) and each later one 60 frames on, which is why the 120 s row reads 119–120 and
+  // not 120; two clouds on one victim → 4 + 4 in 5 s; a half-HP fighter over 12 s → 35 → 32 in
+  // the cloud (the first second regenerates before the first tick) against 35 → 70 outside.
+  {
+    const C = { x: 1400, y: 1000 };
+    const R = ITEM_TUNING.blue_cheese.radius;
+    const SPOTS = [C, { x: C.x + 30, y: C.y }, { x: C.x - 60, y: C.y }, { x: C.x, y: C.y - (R - 1) },
+      { x: C.x, y: C.y + R + 2 }, { x: C.x + 400, y: C.y }];
+    const INSIDE = [1, 2, 3];
+    const OUTSIDE = [4, 5];
+    const board = (items, opts = {}) => seats(MAX_FIGHTERS, { spawns: SPOTS, items, ...opts });
+    /** Step `ms` of play; returns every Blue Cheese hit-landed, with the tick it landed on. */
+    const run = (st, ms) => {
+      const hits = [];
+      const all = [];
+      for (let i = 0; i < Math.round(ms / DT); i++) {
+        const evs = stepMatch(st, DT, idle(st));
+        for (const e of ofType(evs, 'hit-landed')) {
+          all.push(e);
+          if (e.source.kind === 'weapon' && e.source.itemId === 'blue_cheese') hits.push({ ...e, at: st.elapsed });
+        }
+      }
+      return { hits, all };
+    };
+    const on = (hits, id) => hits.filter((h) => h.targetId === id);
+    {
+      const st = board([['blue_cheese']]);
+      const d = (i) => Math.hypot(st.fighters[i].x - C.x, st.fighters[i].y - C.y);
+      check('(e) NON-VACUITY: slot 0 wears it, it is a passive (no button), three opponents stand INSIDE the radius and two OUTSIDE',
+        st.fighters[0].item.equipped[0] === 'blue_cheese' && ITEMS.blue_cheese.kind === 'passive'
+        && INSIDE.every((i) => d(i) < R) && OUTSIDE.every((i) => d(i) > R) && R > 0 && ITEM_TUNING.blue_cheese.dps > 0,
+        `radius ${R}; separations ${st.fighters.slice(1).map((f) => `${f.id}:${d(f.id).toFixed(0)}`).join(' ')}`);
+      const SECONDS = 10;
+      const { hits, all } = run(st, SECONDS * 1000);
+      const counts = INSIDE.map((i) => on(hits, i).length);
+      check(`(e) 🔴 EVERY opponent inside the cloud is hurt about once a second — ${SECONDS} s gives ${SECONDS - 1}–${SECONDS} ticks each`,
+        counts.every((c) => c >= SECONDS - 1 && c <= SECONDS),
+        `ticks per inside victim [${counts.join(', ')}] (4dbf937: [0, 0, 0])`);
+      check('(e) 🔴 …each tick is exactly `dps`, is item damage (itemId blue_cheese) and names the WEARER as its attacker',
+        hits.length > 0 && hits.every((h) => h.amount === ITEM_TUNING.blue_cheese.dps && h.effect === null
+          && h.source.attackerId === 0 && h.source.weaponKey === 'blue_cheese'),
+        `${hits.length} ticks, amounts {${[...new Set(hits.map((h) => h.amount))].join(',')}}`);
+      // `combat.ts:ITEM_AURA_TICK_MS`'s doc cited this row for a year: "§42 asserts the
+      // relationship (one tick per second, `dps` damage per tick) rather than the number".
+      const gaps = on(hits, 1).slice(1).map((h, k) => h.at - on(hits, 1)[k].at);
+      check('(e) 🔴 …ONE TICK PER `ITEM_AURA_TICK_MS` — consecutive ticks on one victim are a second apart, to within a frame',
+        gaps.length >= SECONDS - 2 && gaps.every((g) => Math.abs(g - ITEM_AURA_TICK_MS) <= DT + 1e-9),
+        `gaps [${gaps.map((g) => g.toFixed(1)).join(', ')}] vs ${ITEM_AURA_TICK_MS}`);
+      check('(e) opponents OUTSIDE the cloud — one of them 2 wu past its edge — take nothing',
+        OUTSIDE.every((i) => on(all, i).length === 0 && st.fighters[i].hp === st.fighters[i].maxHp),
+        OUTSIDE.map((i) => `${i}: ${on(all, i).length} hits`).join(', '));
+      check('(e) …and the wearer takes nothing from its own cloud',
+        on(all, 0).length === 0, `${on(all, 0).length} hits on the wearer`);
+    }
+    {
+      // `dps` means PER SECOND on average, not "about". A timer reset to 0 on each tick (the older
+      // timers' shape) fires every 61 frames at 60 Hz — 0.984 dps — and that drift is invisible to
+      // the 10 s rows above (9 ticks satisfies 9–10, and 1016.7 ms is within a frame of 1000). It
+      // is a whole tick short by 120 s: 118 against 119–120. The victim is given a pool the cloud
+      // cannot empty, so the count is the cadence and nothing else.
+      const st = board([['blue_cheese']]);
+      st.fighters[1].hp = st.fighters[1].maxHp = 1e6;
+      const LONG = 120;
+      const n = on(run(st, LONG * 1000).hits, 1).length;
+      check(`(e) 🔴 …and it HOLDS: ${LONG} s inside the cloud is ${LONG - 1}–${LONG} ticks, not the ${LONG - 2} a reset-to-zero clock delivers`,
+        n >= LONG - 1 && n <= LONG, `${n} ticks in ${LONG} s`);
+    }
+    {
+      const st = board(undefined);
+      const { all } = run(st, 5000);
+      check('(e) CONTROL: the same board with NO item hurts nobody — so the ticks above are the cloud',
+        all.length === 0 && st.fighters.every((f) => f.hp === f.maxHp), `${all.length} hits`);
+    }
+    {
+      const st = board([['blue_cheese']], { level: LEVEL_MAX });
+      const { hits } = run(st, 3000);
+      check(`(e) 🔴 at L${LEVEL_MAX} a tick is STILL \`dps\` — item damage is off the character ladder (damageMul ${st.fighters[0].damageMul.toFixed(2)})`,
+        hits.length > 0 && st.fighters[0].damageMul > 1 && hits.every((h) => h.amount === ITEM_TUNING.blue_cheese.dps),
+        `${hits.length} ticks, amounts {${[...new Set(hits.map((h) => h.amount))].join(',')}}`);
+    }
+    {
+      // Slot 1 sits inside slot 0's cloud AND slot 2's: two clouds, two clocks, two ticks a second.
+      const st = seats(3, { spawns: [C, { x: C.x + 40, y: C.y }, { x: C.x + 80, y: C.y }], items: [['blue_cheese'], undefined, ['blue_cheese']] });
+      const { hits } = run(st, 5000);
+      const fromA = on(hits, 1).filter((h) => h.source.attackerId === 0).length;
+      const fromB = on(hits, 1).filter((h) => h.source.attackerId === 2).length;
+      check('(e) TWO clouds on one victim tick independently — each owner\'s clock is its own (the per-pair accumulator)',
+        fromA >= 4 && fromA <= 5 && fromB >= 4 && fromB <= 5,
+        `from slot 0: ${fromA}, from slot 2: ${fromB} in 5 s`);
+    }
+    {
+      // Stepping out of the cloud resets that pair's clock — the hazard's rule, applied to the
+      // hazard the wearer carries. Inside 0.9 s, out one frame, repeated: never a whole second in.
+      const st = board([['blue_cheese']]);
+      const v = st.fighters[1];
+      const hits = [];
+      for (let lap = 0; lap < 6; lap++) {
+        v.x = C.x + 30;
+        hits.push(...run(st, 900).hits.filter((h) => h.targetId === 1));
+        v.x = C.x + R + 20;
+        hits.push(...run(st, DT).hits.filter((h) => h.targetId === 1));
+      }
+      check('(e) stepping OUT resets the pair\'s clock: six 0.9 s visits, one frame outside between them, never a tick',
+        hits.length === 0 && v.item.auraTimers[0] !== undefined, `${hits.length} ticks, timer cell ${v.item.auraTimers[0]}`);
+    }
+    {
+      // 🔴 PARKED FOR URI — NOT A BUG, A CONSEQUENCE, PINNED SO IT IS SEEN. Every tick goes through
+      // `applyDamage`, which stamps `lastDamagedAt`; the tick (1000 ms) is shorter than
+      // `REGEN_DELAY_MS`, so a hurt fighter standing in the cloud never regenerates. Denied regen
+      // is worth several times the cloud's own damage. If the cloud should hurt WITHOUT denying
+      // regen, this row flips and the change is one clause in `applyDamage`.
+      const inCloud = board([['blue_cheese']]);
+      const clear = board(undefined);
+      for (const st of [inCloud, clear]) st.fighters[1].hp = st.fighters[1].maxHp / 2;
+      run(inCloud, 12000);
+      run(clear, 12000);
+      const a = inCloud.fighters[1], b = clear.fighters[1];
+      check('(e) PARKED FOR URI: a hurt fighter standing in the cloud does NOT regenerate — the tick resets the regen delay',
+        a.hp < a.maxHp / 2 && b.hp > b.maxHp / 2 && REGEN_DELAY_MS > ITEM_AURA_TICK_MS,
+        `12 s from half HP: in the cloud ${a.hp.toFixed(1)}, out of it ${b.hp.toFixed(1)} (of ${a.maxHp})`);
+    }
+    {
+      const st = board([['blue_cheese']]);
+      const before = run(st, 1500).hits;
+      applyDamage(st, st.fighters[0], 1e6, null, weaponSource(st, 5), []);
+      const after = run(st, 3000).hits;
+      // `before > 0` is the non-vacuity: with no cloud at all, "nobody is hurt after" is free.
+      check('(e) the cloud is the LIVING wearer\'s: it was ticking, and once the wearer is down nobody inside it is hurt',
+        before.length > 0 && !st.fighters[0].alive && after.length === 0,
+        `${before.length} ticks before the wearer died, ${after.length} after`);
+    }
+  }
+
+  // ── (f) THE ITEM DAMAGE SOURCE — two rows `combat.ts` and `state.ts` cited before they existed ──
+  //
+  // `itemDamageSource` puts the ITEM ID in `weaponKey`, so every consumer that looks a weapon up
+  // by key misses and falls back. Two claims ride on that and both were cited as "§42": *"§42
+  // asserts no item id can collide with a weapon key"*, and — at `applyDamage`'s displacement
+  // guard — *"§42 asserts the namespaces are disjoint AND this line refuses"*. The second is the
+  // one that matters: relying on a lookup MISS is relying on two id namespaces never colliding.
+  {
+    const weaponKeys = new Set(CHARACTER_IDS.flatMap((c) => CHARACTERS[c].weapons.map((w) => w.key)));
+    const ids = Object.keys(ITEMS);
+    check('(f) the two namespaces are DISJOINT — no item id is a weapon key (both sets non-empty)',
+      weaponKeys.size > 0 && ids.length > 0 && ids.every((id) => !weaponKeys.has(id)),
+      `${ids.length} item ids vs ${weaponKeys.size} weapon keys; collisions [${ids.filter((id) => weaponKeys.has(id)).join(',')}]`);
+    // An ITEM-sourced hit carrying a REAL lure weapon's key must still displace nobody: the
+    // guard is `!isItemDamage`, stated, not the miss. Same press with `itemId` absent is the
+    // CONTROL that the key really would have lured.
+    const SEAWEED = CHARACTERS.sushi.weapons.find((w) => w.key === 'Seaweed');
+    const lureWith = (itemId) => {
+      const st = seats(3, { chars: ['sushi', 'hamburger', 'hamburger'],
+        spawns: [{ x: 1000, y: 1000 }, { x: 1100, y: 1000 }, { x: 1100 + SEAWEED.lure / 2, y: 1000 }] });
+      applyDamage(st, st.fighters[1], 1, null, {
+        kind: 'weapon', weaponKey: SEAWEED.key, weaponName: SEAWEED.name, attackerId: 0, ...(itemId ? { itemId } : {}),
+      }, []);
+      return st.fighters[2].push.remaining;
+    };
+    check('(f) CONTROL: that weapon key, as a WEAPON hit, really lures the bystander (non-vacuity)',
+      (SEAWEED.lure ?? 0) > 0 && lureWith(undefined) > 0, `owed ${lureWith(undefined)}`);
+    check('(f) 🔴 …and the SAME key on an ITEM hit displaces nobody — `!isItemDamage` refuses, not the lookup\'s miss',
+      lureWith('blue_cheese') === 0, `owed ${lureWith('blue_cheese')}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 43. THE BOT PRESSES THE SAME BUTTONS THE PLAYER DOES — `ai.ts`'s LOADOUT ITEMS block
 //
 // 🚨 THIS SECTION WAS CITED EIGHT TIMES BEFORE IT EXISTED, AND THAT IS THE FINDING.
@@ -11254,9 +11751,11 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
 //   tenderiser 662 stack hits · leftovers 22 resurrections · **blue_cheese 0 of everything.**
 //
 // 🔴 Blue Cheese's zero is NOT an AI finding and this section must not be read as one: the
-// aura it is supposed to tick is missing from `sim.ts` entirely (`32438b4` reported it and
-// it is still open). `itemWorthIt` returns `false` for it CORRECTLY — it is a passive with
-// no button. (e) pins that, and pins that the pin is about the button and not the effect.
+// aura it is supposed to tick was missing from `sim.ts` entirely (`32438b4` reported it; the
+// B3 sweep landed it on 2026-10-15 — BH-07, §42(e)). `itemWorthIt` returns `false` for it
+// CORRECTLY — it is a passive with no button. (e) pins that, and since the aura landed its
+// last row asserts the other half: a bot wearing it hurts the opponent in its cloud with no
+// press. ⚠️ The census above predates the aura; its `blue_cheese 0 of everything` is stale.
 // ─────────────────────────────────────────────────────────────────────────────
 {
   const ITEM_ARENA = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
@@ -11532,19 +12031,43 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
     check('(e) …and the SIM refuses the slot too, so the AI branch is unreachable rather than merely false',
       passiveEquipped.fighters[0].item.equipped[0] === 'blue_cheese'
       && !itemUsable(passiveEquipped, passiveEquipped.fighters[0], 0));
-    // 🔴 THIS ROW IS ABOUT THE BUTTON AND NOT ABOUT THE EFFECT, STATED SO NOBODY READS IT AS
-    // A CLEAN BILL OF HEALTH. `32438b4` reported Blue Cheese as a NO-OP — `combat.ts` routes
-    // it to "`sim.ts:applyWorldTick`'s aura block" and there is no aura block; `sim.ts`
-    // imports `ITEM_AURA_TICK_MS`, `itemDamageSource` and `hasItem` and calls none of them.
-    // `ub2_itemuse` re-measured it at `e5631cd`: 66 seats wearing it, 0 damage, 0 hits.
-    // `noUnusedLocals: false` means three dead imports are not even a warning, so the
-    // ABSENCE is asserted here — this row goes red the day somebody implements the aura,
-    // which is the correct time for a test that says "this is missing" to demand attention.
-    const simSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'sim.ts'), 'utf8');
-    const auraCalls = (stripComments(simSrc).match(/ITEM_AURA_TICK_MS/g) ?? []).length;
-    check('(e) 🔴 OPEN DEFECT, PINNED: Blue Cheese\'s aura is imported by `sim.ts` and called NOWHERE — 1 mention is the import alone',
-      auraCalls === 1,
-      `${auraCalls} live mentions of ITEM_AURA_TICK_MS in sim.ts — >1 means the aura landed and this row should be REWRITTEN, not deleted`);
+    // ⚠️ THIS ROW WAS A PINNED OPEN DEFECT, AND IT WENT RED EXACTLY WHEN IT SAID IT WOULD — the
+    // B3 sweep landed the aura (BH-07, 2026-10-15). Rewritten, not deleted, as it asked. It read:
+    //
+    //   > *"🔴 THIS ROW IS ABOUT THE BUTTON AND NOT ABOUT THE EFFECT, STATED SO NOBODY READS IT
+    //   > AS A CLEAN BILL OF HEALTH. `32438b4` reported Blue Cheese as a NO-OP — `combat.ts`
+    //   > routes it to "`sim.ts:applyWorldTick`'s aura block" and there is no aura block;
+    //   > `sim.ts` imports `ITEM_AURA_TICK_MS`, `itemDamageSource` and `hasItem` and calls none
+    //   > of them. `ub2_itemuse` re-measured it at `e5631cd`: 66 seats wearing it, 0 damage,
+    //   > 0 hits. `noUnusedLocals: false` means three dead imports are not even a warning, so
+    //   > the ABSENCE is asserted here — this row goes red the day somebody implements the
+    //   > aura, which is the correct time for a test that says "this is missing" to demand
+    //   > attention."*
+    //
+    //   with the row `(e) 🔴 OPEN DEFECT, PINNED: … 1 mention is the import alone`, asserting
+    //   `ITEM_AURA_TICK_MS` appeared exactly once in `sim.ts` with comments stripped.
+    //
+    // What replaces it is BEHAVIOURAL, and it is this section's own claim turned the right way
+    // up: a passive needs no button, so a BOT wearing it hurts an opponent standing in the cloud
+    // while pressing nothing at all. The rule itself — radius, cadence, item damage — is §42(e).
+    // Deep pools on both, so five seconds of melee is five seconds of contact rather than a kill.
+    {
+      const st = itemMatch([{ items: ['blue_cheese'], x: 1000, y: 1000 }, { x: 1040, y: 1000 }, { x: 1600, y: 1000 }]);
+      for (const f of st.fighters.slice(0, 2)) { f.hp = 1e6; f.maxHp = 1e6; }
+      const idleAll = st.fighters.map(() => ({ move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false }));
+      let ticks = 0;
+      let pressed = 0;
+      for (let i = 0; i < 300; i++) {
+        for (const e of stepMatch(st, 1000 / 60, idleAll)) {
+          if (e.type === 'hit-landed' && e.source.kind === 'weapon' && e.source.itemId === 'blue_cheese'
+            && e.source.attackerId === 0 && e.targetId === 1) ticks++;
+          if (e.type === 'item-used' && e.fighterId === 0) pressed++;
+        }
+      }
+      check('(e) 🔴 a BOT wearing Blue Cheese hurts the opponent in its cloud with NO PRESS — the passive needs no button (was: 0 hits, pinned)',
+        ticks >= 3 && pressed === 0 && st.fighters[0].controller === 'ai',
+        `${ticks} cloud ticks on slot 1 in 5 s, ${pressed} presses by the wearer`);
+    }
   }
 
   // ── (f) 🔴 ONE CONSTANT, TWO FILES, ASSERTED AGAINST THE SOURCE TEXT ──────

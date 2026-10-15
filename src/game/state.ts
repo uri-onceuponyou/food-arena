@@ -700,7 +700,13 @@ function validateLoadout(items: readonly ItemId[], id: FighterId): ItemId[] {
     );
   }
   for (const it of items) {
-    if (!(it in ITEMS)) {
+    // ⚠️ AN *OWN* KEY, NOT `in`. This read `!(it in ITEMS)`, and `ITEMS` is a plain object
+    // literal — so `in` walks `Object.prototype`, and `constructor`, `toString`, `__proto__`
+    // and nine more passed as items: equipped, shown, and never fired, which is precisely the
+    // ghost this throw exists to stop (META-09). `Object.hasOwn` is ES2022, inside both the
+    // `tsconfig` lib and the Vite build target. `match.ts:sanitiseLoadout` asks the same
+    // question on the way in with the same `in` and is that file's owner's to change.
+    if (!Object.hasOwn(ITEMS, it)) {
       throw new RangeError(`createFighter: slot ${id} was handed an unknown item id "${it}" (see rules.ts:ITEMS)`);
     }
   }
@@ -1615,11 +1621,16 @@ export type GameEvent =
    * ⚠️ `reason` GAINED `'sleep'` WITH THE LOADOUT ITEMS. `ITEMS.warm_milk` denies a fighter
    * its whole turn, so a wind-up it had already opened must die exactly as a stun kills one
    * — and calling that `'stun'` would have been a lie in the one field whose job is to say
-   * which terminator fired. Additive: `combat.ts` is the only emitter and nothing in `src/`
-   * consumes this event yet, so the widening reaches no consumer today (`vfx.ts`'s
-   * `cancelCastTelegraph` takes its own separate `'stun' | 'death' | 'resolved'` and is
-   * called from `match.ts`, which does not route this event at all — reported, not fixed
-   * here: a cast telegraph that is never cancelled outlives the cast it draws).
+   * which terminator fired. `combat.ts` is the only emitter.
+   *
+   * ⚠️ IT GOES ON TO SAY, AND IT IS NO LONGER TRUE: *"Additive: … nothing in `src/` consumes this
+   * event yet, so the widening reaches no consumer today (`vfx.ts`'s `cancelCastTelegraph` …
+   * is called from `match.ts`, which does not route this event at all — reported, not fixed
+   * here: a cast telegraph that is never cancelled outlives the cast it draws)."* Since the B1
+   * package (`75148fd`, 2026-10-15) `match.ts` DOES route it — `cast-started` draws Mega's
+   * telegraph and `cast-cancelled` calls `vfx.cancelCastTelegraph`, mapping `'sleep'` onto the
+   * stun (interrupt) look rather than `'resolved'`. A new `reason` now reaches a consumer, and
+   * that consumer's mapping is where it must be handled.
    */
   | { type: 'cast-cancelled'; fighterRole: FighterRole; fighterId: FighterId; weaponKey: string; reason: 'stun' | 'death' | 'sleep' }
   | {
@@ -1673,9 +1684,13 @@ export type GameEvent =
     }
   /**
    * SOMEBODY PICKED ONE UP. `amount` is what the fighter actually GAINED — capped at its
-   * own deficit and already scaled by its level, exactly as `hit-landed.amount` is what the
-   * target actually lost — so a card, a number or a sound driven off it cannot disagree
-   * with the health bar.
+   * own deficit and already scaled by its level — so a card, a number or a sound driven off
+   * it cannot disagree with the health bar.
+   *
+   * ⚠️ IT SAID *"exactly as `hit-landed.amount` is what the target actually lost"*. That is
+   * true of every hit except a killing one, where `hit-landed.amount` is the BLOW and carries
+   * the overkill (`combat.ts:applyDamage` — `dealt` vs `lost`, BH-05). This event is capped;
+   * that one deliberately is not. Do not "make them consistent" without that file's note.
    *
    * 🚨 **A `heal` EVENT IS EMITTED ALONGSIDE THIS ONE, AND THAT IS NOT REDUNDANCY.**
    * `audio/director.ts` already voices `heal`, and splits regen from a deliberate heal on
@@ -1718,10 +1733,18 @@ export type GameEvent =
    * like, which is the contract every other member of this union already has.
    *
    * 🚨 **DAMAGE IS NOT HERE.** Blue Cheese's tick and Shiitake's reflection are ordinary
-   * `hit-landed` events carrying `DamageSource { kind: 'item' }`, so every consumer that
-   * already draws a hit — the damage number, the flash, the shake, the audio — works on
-   * them with no change. A second damage channel would be a second answer to "how much did
-   * that cost", and `DECISIONS §13` is the record of what that costs.
+   * `hit-landed` events carrying `DamageSource { kind: 'weapon', itemId }` (`combat.ts:
+   * itemDamageSource`), so every consumer that already draws a hit — the damage number, the
+   * flash, the shake, the audio — works on them with no change. A second damage channel would
+   * be a second answer to "how much did that cost", and `DECISIONS §13` is the record of what
+   * that costs.
+   *
+   * ⚠️ IT SAID `DamageSource { kind: 'item' }` — the FIRST design, which broke `tsc` in
+   * `audio/director.ts` and was replaced by the optional `itemId` (see `DamageSource`). And
+   * "works with no change" is true of the PLUMBING, not of the LOOK: a consumer that keys on
+   * `kind: 'weapon'` treats a cloud tick as a weapon hit — burst, shake, hit-stop — once a
+   * second, while `ITEMS.blue_cheese.look` says the cloud "must NOT be loud". The quiet path
+   * keys on `source.itemId === 'blue_cheese'` and is the presentation owners' (BH-07).
    */
   /**
    * AN ITEM WAS ACTIVATED. Emitted at the PRESS, for actives only, once the press has

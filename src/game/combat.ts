@@ -447,6 +447,22 @@ export function applyDamage(
   // than left to be re-derived from a field the renderer would have to poll.
   const stacks = streaks ? feedTenderiserStreak(attacker as Fighter, target, state.elapsed) : 0;
 
+  // ── WHAT THE TARGET ACTUALLY LOSES — which is NOT `dealt` on a killing blow ──────
+  //
+  // `dealt` is the blow; `lost` is the part of it the health bar could absorb. They are the
+  // same number on every hit the target survives and differ on exactly one kind of hit: the
+  // one that finishes it, where the HP clamp below eats the overkill. Shiitake's mirror is
+  // defined on `lost` (its block at the bottom of this function), and before this line
+  // existed it reflected `dealt` — a 12-damage swing into a 3-HP wearer sent 12 back, and an
+  // attacker could die for finishing somebody (BH-05; 66 of 180 HP cells in the verifier's
+  // sweep were attacker deaths only the overkill could cause).
+  //
+  // ⚠️ A COMPARISON TAKEN BEFORE THE CLAMP, NOT `hpBefore - target.hp` AFTER IT. The
+  // subtraction is the obvious form and it is not exact in IEEE-754 — `70 - (70 - 10.2)` is
+  // `10.200000000000003` — so it would move every non-lethal reflection by an ulp and break
+  // bit-identity on matches where nothing was overkilled. This form IS `dealt`, bit for bit,
+  // whenever the target survives.
+  const lost = dealt < target.hp ? dealt : target.hp;
   target.hp = Math.max(0, target.hp - dealt);
   target.lastDamagedAt = state.elapsed;
 
@@ -488,12 +504,34 @@ export function applyDamage(
       // press opportunities: if ANY damage cancelled, only 24.8% of ultimates would
       // survive a 900 ms wind-up — three in four dying on a 3.5 s cooldown, which is a
       // dead button, not counterplay. Stun-only leaves 84.1%. The gap is 59.3 pp against
-      // a ±2.86 pp floor. Parked as `DECISIONS §74(a)` with stun-only IN FORCE.
+      // a ±2.86 pp floor. Stun-only is IN FORCE.
+      //
+      // ⚠️ THIS SAID *"Parked as `DECISIONS §74(a)`"* AND THAT CITATION IS DEAD — kept so the
+      // next reader does not go looking. `DECISIONS §74` is Uri's 2026-08-12 answer about the
+      // phone and the six-seat lobby; it has no (a), and no section of that file records the
+      // stun-only interrupt. The decision is real and measured (above); its parking entry was
+      // never written. Found 2026-10-15 by the B3 sweep (BH-06's verifiers), reported.
       //
       // The cooldown is NOT refunded: `lastUsed[]` was stamped at the press and stays
       // stamped, exactly as a melee swing that misses stays spent.
       if (target.cast !== null) {
         cancelCast(target, 'stun', events);
+      }
+      // ── AND IT KILLS AN *ITEM* WIND-UP TOO — `state.ts:ItemCast`'s contract ────────
+      //
+      // That record promised, from the item system's first commit, to share *"cancellation
+      // on the two terminators that kill a weapon cast (an applied stun, and death)"*, and
+      // `item-cancelled.reason` has carried `'stun'` all along. This line is the one that was
+      // never written: `cancelItemCast` had a `'death'` site and a `'sleep'` site and no
+      // `'stun'` one, so a stunned Shiitake wearer finished its 2.5 s wind-up on schedule —
+      // 4 of 6 measured wind-ups went off WHILE STILL STUNNED (BH-06) — and the counterplay
+      // `ITEMS.shiitake.look` is built on (*"that is what makes it counterable"*) did not exist.
+      //
+      // ⚠️ INSIDE this `stunMs > 0` guard for the reason the weapon cancel above is: a
+      // grace-refused stun is not a stun, and a cancel placed beside the `hit-landed` event
+      // would kill wind-ups on stuns that never happened. §42(a) plants exactly that.
+      if (target.itemCast !== null) {
+        cancelItemCast(target, 'stun', events);
       }
     }
   }
@@ -524,11 +562,21 @@ export function applyDamage(
     if (w !== undefined) applyHitDisplacement(state, attacker, target, w);
   }
 
-  // `amount` on the event is what the target actually LOST, not what the weapon table
-  // says — otherwise the floating damage number and the health bar would disagree by the
-  // level multiplier, which is precisely the class of defect (`DECISIONS §13`) where a
-  // screen shows a number the model does not compute. `hud.ts` already rounds it for
-  // display and `setBar` already ceils HP, so a continuous term needs nothing downstream.
+  // `amount` on the event is the BLOW AS DEALT — the weapon's number after the level and
+  // Tenderiser terms, not what the weapon table says — otherwise the floating damage number
+  // and the health bar would disagree by the level multiplier, which is precisely the class
+  // of defect (`DECISIONS §13`) where a screen shows a number the model does not compute.
+  // `hud.ts` already rounds it for display and `setBar` already ceils HP, so a continuous
+  // term needs nothing downstream.
+  //
+  // ⚠️ IT USED TO SAY *"`amount` on the event is what the target actually LOST"*, and that is
+  // true on every hit but a killing one — where it carries the overkill (`lost` above is the
+  // HP that left the bar). Kept as `dealt` DELIBERATELY rather than corrected to `lost`: the
+  // damage number, the shake (`0.012 + amount × 0.0175`), the hit-stop, the impact burst, the
+  // model's hit intensity and the audio weight all read it, so publishing `lost` would shrink
+  // the feedback on every finishing blow in every match, items or none, and break the no-item
+  // event stream's identity. That is a presentation call for `match.ts`/`audio/` to make, not
+  // a side effect of the Shiitake fix. §42(b) pins it so it stays a decision.
   events.push({ type: 'hit-landed', targetRole: target.role, targetId: target.id, amount: dealt, effect, source, x: target.x, y: target.y });
 
   // ── THE STACK, PUBLISHED, BECAUSE THE COUNT *IS* THE MECHANIC ─────────────
@@ -682,8 +730,15 @@ export function applyDamage(
   //
   // Uri: *"it created a fungas shield arround the character causing the enemies attacking
   // him get damage on every damage they do."* Every point, not a fraction —
-  // `ITEM_TUNING.shiitake.reflect` is 1.0 and is applied to `dealt`, the number the victim
+  // `ITEM_TUNING.shiitake.reflect` is 1.0 and is applied to `lost`, the number the victim
   // ACTUALLY lost, so the mirror cannot disagree with the health bar it is mirroring.
+  //
+  // ⚠️ IT SAID *"applied to `dealt`, the number the victim ACTUALLY lost"* — the right rule
+  // over the wrong variable. `dealt` is fixed before the HP clamp, so on a killing blow it
+  // includes the overkill: a 3-HP wearer struck for 12 reflected 12 (BH-05). `lost` is
+  // computed beside the clamp and equals `dealt` bit for bit on every hit the wearer
+  // survives, so only finishing blows move. §42(b) drives it at three seats, where the
+  // overkill used to kill the attacker and hand the match to the bystander.
   //
   // 🚨 **LAST IN THE FUNCTION, AFTER THE VICTIM'S ENTIRE DEATH BLOCK, AND THAT IS AN EVENT
   // ORDER DECISION.** A reflection can kill the attacker, and `applyDamage` is re-entered to
@@ -706,9 +761,9 @@ export function applyDamage(
   // armour, and reading it as damage reduction would be inventing a second effect he did
   // not ask for. The wearer takes the blow and the attacker takes it too.
   if (!isItemDamage && source.kind === 'weapon' && attacker != null && attacker !== target
-      && dealt > 0 && state.elapsed < target.item.shieldUntil) {
+      && lost > 0 && state.elapsed < target.item.shieldUntil) {
     applyDamage(
-      state, attacker, dealt * ITEM_TUNING.shiitake.reflect, null,
+      state, attacker, lost * ITEM_TUNING.shiitake.reflect, null,
       itemDamageSource(target, 'shiitake'), events,
     );
   }
@@ -743,7 +798,8 @@ export function applyDamage(
  *
  * ── WHAT COMING BACK MEANS, STATED RATHER THAN INHERITED ────────────────────
  *
- * `ITEM_TUNING.leftovers.hp` — *"one corpse's worth of medikits"* — and **where the body
+ * `ITEM_TUNING.leftovers.hp` — *"one corpse's worth of medikits"*, scaled by the revived
+ * fighter's own `levelHealthMultiplier` exactly as a kit is (see the line below) — and **where the body
  * fell**, which is a standable point by proof rather than by argument: a fighter was
  * standing on it one tick ago (the same reasoning `dropMedikits` uses for its fallback).
  *
@@ -770,7 +826,26 @@ function reviveThoseKilledBy(state: MatchState, killer: Fighter, events: GameEve
     f.item.revivesLeft--;
     f.item.killerId = NO_FIGHTER;
     f.alive = true;
-    f.hp = Math.min(f.maxHp, ITEM_TUNING.leftovers.hp);
+    // ── A CORPSE'S WORTH OF MEDIKITS *AT THIS FIGHTER'S LEVEL* — BH-11 ──────────────
+    //
+    // IT READ `Math.min(f.maxHp, ITEM_TUNING.leftovers.hp)` — a flat 18. That constant is
+    // derived as `MEDIKIT.heal × MEDIKIT.count`, and `MEDIKIT.heal` is documented as "HP per
+    // kit, BEFORE the picker's level multiplier": `sim.ts:stepMedikits` multiplies it by the
+    // TAKER's `levelHealthMultiplier`, and so does the Onion heal it was itself derived from.
+    // The revive was the one link in that chain left flat, so at L15 it returned 18 of 119 HP
+    // (15.1% of the pool) where the kits it is "worth" return 30.6 (25.7%, the L1 share).
+    //
+    // ⚠️ **THIS ITEM NUMBER IS ON THE HEALTH LADDER AND ITEM *DAMAGE* IS NOT, AND THAT IS NOT
+    // AN INCONSISTENCY.** `applyDamage` keeps the cloud's `dps` and the mirror's `reflect` off
+    // the character ladder because they are statements about an ITEM (*"small damage per
+    // second"*, *"every point"*). This one is a statement about a POOL — what one corpse's kits
+    // would refill — and a pool's share is only constant across levels if the HP scales with it.
+    // A future "items are flat" consistency pass must not revert this line on that argument.
+    //
+    // The REVIVED fighter's level (`f.level`), not the killer's: it is `f`'s pool being
+    // refilled, exactly as `stepMedikits` keys on the taker. Exactly 1.0 at `LEVEL_MIN`, so
+    // every L1 match is bit-identical. §42(c) drives it at four and six seats at L15.
+    f.hp = Math.min(f.maxHp, ITEM_TUNING.leftovers.hp * levelHealthMultiplier(f.level));
     // Every deadline back to "never", every accumulator back to its identity. See above.
     f.status.slowedUntil = -Infinity;
     f.status.stunnedUntil = -Infinity;
@@ -786,6 +861,9 @@ function reviveThoseKilledBy(state: MatchState, killer: Fighter, events: GameEve
     f.fogTimer = 0;
     f.regenTimer = 0;
     f.hazardTimers.length = 0;
+    // Blue Cheese's per-cloud clocks on THIS fighter (it is the victim's accumulator): a revived
+    // fighter is not part-way through a second it spent standing in a cloud as a corpse.
+    f.item.auraTimers.length = 0;
     // The regen delay starts now rather than from whenever the body last took a hit, so
     // coming back does not immediately tick health up out of a corpse's stale timestamp.
     f.lastDamagedAt = state.elapsed;
@@ -1669,7 +1747,11 @@ type ItemStatusField = 'sleepUntil' | 'clogUntil' | 'rootUntil' | 'blotUntil';
  * asleep for the whole match. The same arithmetic is exactly level for Pompa and Liquorice
  * (5,000 cooldown against a 5,000 state). The fix is a cooldown or a grace window in
  * `rules.ts`, which this pass does not own; the refusal here is the half that belongs in the
- * sim. §42 measures the gap rather than describing it.
+ * sim.
+ *
+ * ⚠️ THIS ENDED *"§42 measures the gap rather than describing it"* — and no §42 existed until
+ * 2026-10-15, when the B3 sweep opened it for other rows. **It does not measure this gap.** The
+ * chain is still open and still unmeasured in `sim.test.mjs`; the arithmetic above is the record.
  *
  * ⚠️ **SLEEP KILLS BOTH KINDS OF WIND-UP.** Uri's sleep denies a fighter its whole turn, so
  * a commitment it had already opened dies exactly as a stun kills one — `cast-cancelled` and
@@ -1801,7 +1883,9 @@ function resolveItem(
     // cannot be a sim input without the sim ceasing to be a pure function of its inputs, and
     // a bot's sight is `movement.ts:isVisibleFrom`, which is geometry. So a slate-blind
     // fighter behaves identically to a sighted one INSIDE the simulation, and the entire
-    // effect is what the player can see. §42 asserts that inertness rather than assuming it.
+    // effect is what the player can see.
+    // ⚠️ This said *"§42 asserts that inertness rather than assuming it"*. No such row exists —
+    // §42 (opened 2026-10-15 by the B3 sweep) does not contain it; the inertness is ASSUMED.
     case 'squid_ink': {
       const t = itemTargetInRange(state, user, ITEM_THROW_RANGE);
       if (t === null) return;

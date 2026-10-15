@@ -3135,6 +3135,11 @@ export const ITEM_TUNING = {
     /**
      * HP on resurrection: one corpse's worth of medikits. You come back with exactly
      * what the body you died next to would have dropped.
+     *
+     * ⚠️ **A BASE, BEFORE THE LEVEL MULTIPLIER — exactly as `MEDIKIT.heal` is.** The revive
+     * applies the revived fighter's own `levelHealthMultiplier`, as a kit picked up does,
+     * so "what the body would have dropped" holds at every level (`combat.ts:
+     * reviveThoseKilledBy`, BH-11). It shipped flat until 2026-10-15: 18 of 119 HP at L15.
      */
     hp: MEDIKIT.heal * MEDIKIT.count,
     /**

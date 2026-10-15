@@ -820,8 +820,19 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
 
   // Projectiles update every tick regardless of match phase — faithfully
   // reproducing the prototype, whose projectile loop is never gated by gameState
-  // either (see the report: projectiles keep flying and can still land damage for
-  // one extra tick after a match technically ends).
+  // either.
+  //
+  // ⚠️ IT WENT ON *"(see the report: projectiles keep flying and can still land damage for one
+  // extra tick after a match technically ends)"* — and "one extra tick" is FALSE. Nothing here
+  // retires a shot when the phase leaves `'playing'`, so the sim steps every projectile on EVERY
+  // call after the whistle, for as long as its caller keeps calling — and the shipped
+  // `GameSession` does, under the result card. A shot in flight therefore flew its whole
+  // remaining range and could hit, or kill, the declared winner: 18 of 550 winners across
+  // N=2..6 (BH-01, up to ~41 ticks late). Since `03db60e` the SESSION retires them
+  // (`match.ts:retireShotsAfterWhistle` empties `state.projectiles` before stepping a decided
+  // match); the sim still does not. A sim-side gate here was measured turning `sim.test.mjs`
+  // §20(b) red — its fixture and `tools/tmp/press_value.mjs` park a state with phase `'ended'`
+  // and rely on shots still landing — so moving the rule into the sim is a trade with those.
   stepProjectiles(state, dt, events);
 
   // Time limit. Resolved AFTER everything else in the tick, so a killing blow — or a
@@ -1310,6 +1321,69 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
     }
   }
 
+  // ── BLUE CHEESE: OPPONENTS STANDING IN THIS FIGHTER'S CLOUD (BH-07) ──────────
+  //
+  // `ITEMS.blue_cheese` — *"A permanent stink cloud that hurts anyone who stands too close"*.
+  // `combat.ts` routed the item here ("`sim.ts:applyWorldTick`'s aura block") and this block did
+  // not exist: the three names it needs were imported and called nowhere, so the item did
+  // nothing at all while the picker sold it and the HUD said AUTO. It is built to the contract
+  // the code already stated, in four places:
+  //
+  //   * `ITEM_TUNING.blue_cheese` — `dps` damage per SECOND to every living opponent strictly
+  //     inside `radius` of the living wearer (`<`, as the trail and the pot measure);
+  //   * `combat.ts:ITEM_AURA_TICK_MS` — one tick per second, carrying `dps × tick / 1000`, so the
+  //     number stays denominated in seconds if the cadence ever moves;
+  //   * `combat.ts:itemDamageSource` — the hit is ITEM damage: off the level ladder, never a
+  //     Tenderiser stack, never reflected by Shiitake (`applyDamage`'s `isItemDamage` clauses,
+  //     all written for this caller), and it names the wearer as the attacker, so a cloud kill
+  //     is a kill for Leftovers' "who killed you";
+  //   * `state.ts:ItemState.auraTimers` — the VICTIM's accumulator indexed by the OWNER's slot,
+  //     sparse, grown on first contact, read through `?? 0`.
+  //
+  // ⚠️ OWNER-CENTRIC, LIKE THE TRAIL ABOVE IT: this is the wearer's turn, and the cloud is a
+  // thing the wearer carries, so it is resolved here for every opponent in it — in slot order,
+  // which is what makes "who was hurt first" a pure function of `createMatch`'s arguments. A dead
+  // wearer takes no turn (the fighter loop's corpse guard), so its cloud is gone with it.
+  //
+  // ⚠️ THE OVERSHOOT IS CARRIED (`t -= ITEM_AURA_TICK_MS`), NOT RESET TO ZERO. The older timers
+  // in this function reset to 0 and therefore run slow — 61 frames to a "second" at 60 Hz, so a
+  // 1 dps cloud reset that way would deal 0.984 dps — and that is an open defect on those timers
+  // (`docs/REVAMP.md` §5 B4), not a precedent to copy into a new one.
+  //
+  // ⚠️ LEAVING THE CLOUD RESETS THAT PAIR'S CLOCK, the pot's rule (`hazardTimers` below): a
+  // second means a second spent inside. A cell is written only for a WEARER's cloud — first on
+  // contact, then reset on exit — so a match nobody brought the item to never writes one, and
+  // every no-item state stays bit-identical (`us_bitid` fingerprints `item.auraTimers`).
+  //
+  // 🔴 PARKED FOR URI, NOT DECIDED HERE: each tick goes through `applyDamage`, which stamps
+  // `lastDamagedAt`, and the tick is shorter than `REGEN_DELAY_MS` — so a hurt fighter standing
+  // in the cloud does not regenerate at all. That is the same rule every damage source in the
+  // game already follows (the trail's 3-damage bite included), and it makes the cloud worth far
+  // more than its 1 dps; `sim.test.mjs` §42(e) pins it so the consequence is visible.
+  //
+  // ⚠️ PRESENTATION: the tick is an ordinary `hit-landed` with `source.itemId === 'blue_cheese'`.
+  // `ITEMS.blue_cheese.look` says the effect "must NOT be loud"; the layers that draw a hit key on
+  // `kind: 'weapon'`, so they must branch on that `itemId` for a quiet path (the fog has one) —
+  // their owners' change, reported with this one. The cloud itself is drawn off STATE: every
+  // living fighter for which `hasItem(f, 'blue_cheese')`, at `ITEM_TUNING.blue_cheese.radius`.
+  if (hasItem(fighter, 'blue_cheese')) {
+    const radius = ITEM_TUNING.blue_cheese.radius;
+    const perTick = ITEM_TUNING.blue_cheese.dps * (ITEM_AURA_TICK_MS / 1000);
+    for (const victim of state.fighters) {
+      if (!isLivingOpponentOf(victim, fighter)) continue;
+      const timers = victim.item.auraTimers;
+      if (Math.hypot(victim.x - fighter.x, victim.y - fighter.y) < radius) {
+        let t = (timers[fighter.id] ?? 0) + dt;
+        const due = t >= ITEM_AURA_TICK_MS;
+        if (due) t -= ITEM_AURA_TICK_MS;
+        timers[fighter.id] = t;
+        if (due) applyDamage(state, victim, perTick, null, itemDamageSource(fighter, 'blue_cheese'), events);
+      } else if (timers[fighter.id] !== undefined) {
+        timers[fighter.id] = 0;
+      }
+    }
+  }
+
   // Central damage hazard(s) — any arena hazard of kind 'damage'.
   state.arena.hazards.forEach((hazard, idx) => {
     if (hazard.kind !== 'damage') return;
@@ -1425,9 +1499,11 @@ function applySuddenDeathFog(state: MatchState, dt: number, events: GameEvent[])
     // pass walks past `combat.ts`'s `lastFighterStanding` and kills the fighter it has just
     // declared the winner: 6 deaths out of 6 seats, `state.winner` naming a corpse for the
     // victory screen to draw. The ordinary fighter loop deliberately does NOT stop on a
-    // phase change (the prototype's projectile loop keeps running for one more tick and
+    // phase change (the prototype's projectile loop is never gated on phase either, and
     // `stepMatch` reproduces that), but a fog that keeps burning after the whistle is a
     // different thing: it damages a fighter for whom the match is over.
+    // ⚠️ The parenthesis said the projectile loop *"keeps running for ONE MORE TICK"*. It keeps
+    // running on every call after the whistle — see the `stepProjectiles` call in `stepMatch`.
     if (state.phase !== 'playing') break;
     if (!fighter.alive || fighter.hp <= 0) continue;
     // ⚠️ THE SAME PREDICATE THE ORDINARY FOG USES — `dist > safeRadius` — AND NOT AN
