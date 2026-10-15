@@ -2909,6 +2909,17 @@ export class GameSession {
       roster.map((f) => f.hp / f.maxHp),
     );
 
+    // ── SEATS-1: THE GAME STATES ITS SEATS, SO A CORPSE LOSES ITS RING (B3b) ────────
+    // F1's seat rings (`render/seatRings.ts`) ring what the game states through
+    // `stage.setFighterSeats`, and until this line nothing stated anything: the stage
+    // INFERRED the seats from the scene, and inference cannot see death — at six seats a
+    // knocked-out opponent's corpse stays drawn, so it kept its ring ("a corpse is not a
+    // unit and gets no ring"). F1 routed this exact call here. Re-stated every frame
+    // because `spawnMatch` rebuilds `models` on a restart and the stage drops a statement
+    // whose roots left the scene; the HP pills above map `models` per frame the same way.
+    // `tools/tmp/b3b_seats.mjs` (six seats, a drawn corpse): rings 6 → 6 before, 6 → 5 here.
+    this.stage.setFighterSeats(this.models.map((m, i) => ({ root: m.root, local: i === LOCAL_SLOT, alive: roster[i]?.alive ?? false })));
+
     // Camera (follow lerp + shake decay) always runs in real time — a shaking camera
     // that also froze during hit-stop would just look like a rendering hitch instead
     // of a deliberate punch.

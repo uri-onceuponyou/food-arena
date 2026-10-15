@@ -103,6 +103,12 @@ const MIN_DISTANCE_GAIN = 0.32;
  * (`FOG_TICK_MS`), which is a nag, not a rhythm. */
 const FOG_MIN_INTERVAL_MS = 900;
 
+/** Minimum gap between two Blue Cheese aura ticks being voiced — the fog's number, for the
+ * fog's reason (QUIET-1, B3b). The sim ticks the cloud once per `ITEM_AURA_TICK_MS` PER
+ * VICTIM on independent clocks, so up to five victims make up to five ticks a second; one
+ * voice per interval keeps the cloud a pressure rather than a drum. */
+const AURA_MIN_INTERVAL_MS = 900;
+
 /**
  * Minimum gap between two REGEN heal ticks being voiced.
  *
@@ -243,6 +249,7 @@ export class MatchAudio {
    */
   private readonly localSlot: number;
   private lastFogSoundAt = -Infinity;
+  private lastAuraSoundAt = -Infinity;
   private lastHealSoundAt = -Infinity;
   /** One-shot latch for the ring reaching `MIN_SAFE_RADIUS`. See `watchZone`. */
   private ringFloored = false;
@@ -368,6 +375,7 @@ export class MatchAudio {
     // through `place()`'s `?? state.player` and be silently right by accident.
     this.listenerSlot = this.localSlot;
     this.lastFogSoundAt = -Infinity;
+    this.lastAuraSoundAt = -Infinity;
     this.lastHealSoundAt = -Infinity;
     this.ringFloored = false;
     this.sawRingAboveFloor = false;
@@ -839,6 +847,28 @@ export class MatchAudio {
     }
     if (ev.source.kind === 'trail') {
       this.playPlaced(S.trailTick(), { ...place, priority: Priority.Ambient, key: 'trail' });
+      return;
+    }
+    // ── 🧀 THE BLUE CHEESE AURA TICK IS QUIET (QUIET-1, B3b) ─────────────────────
+    // B3's cloud (`sim.ts:applyWorldTick`) hurts every victim inside the wearer's radius
+    // once a second through `combat.ts:itemDamageSource` — `kind: 'weapon'` with `itemId:
+    // 'blue_cheese'` — so it fell through to the weapon path below: a placed impact and,
+    // on the local seat, the 0.9-gain `hurt` layer, per victim, every second.
+    // `ITEMS.blue_cheese.look`: *"the one item that must NOT be loud"*. `match.ts` took
+    // the visual half in `c77793a` (a small number, no burst / kick / hit-stop); this is
+    // the audio half, and it takes the FOG's shape because the cloud is the same kind of
+    // thing — a standing pressure, not a blow: `fogTick` is the catalogue's one sound with
+    // no transient, "so it never competes with a real hit", throttled the fog's way
+    // (`AURA_MIN_INTERVAL_MS`) and keyed apart from it. PLACED where the fog is not: the
+    // cloud is somewhere — it follows its wearer — so it pans, attenuates and is culled
+    // like every other placed voice. No `hurt` layer, as the fog has none.
+    // ⚠️ Keyed on `itemId`, not on "any item damage": Shiitake's reflection is the other
+    // `itemDamageSource` caller and it IS a blow — it stays an impact
+    // (`tools/tmp/b3b_audio.mjs` keeps that as a control).
+    if (ev.source.kind === 'weapon' && ev.source.itemId === 'blue_cheese') {
+      if (state.elapsed - this.lastAuraSoundAt < AURA_MIN_INTERVAL_MS) return;
+      this.lastAuraSoundAt = state.elapsed;
+      this.playPlaced(S.fogTick(), { ...place, priority: Priority.Ambient, key: 'aura' });
       return;
     }
 

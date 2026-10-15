@@ -793,7 +793,9 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
       // ⚠️ `state.elapsed` is passed so `stepPush` can ask `movementLocked` rather than
       // re-derive it: a stunned or mid-cast fighter is not displaced, and its budget is burned
       // anyway so the shove cannot be banked across the lock. See `stepPush`.
-      stepPush(fighter, dt, state.arena, state.elapsed);
+      // `state.fighters` is passed so a LURE can stop level with its bait wherever the bait
+      // now is (`Fighter.push.anchor`, BH-09) — the pull can arrive, never pass through.
+      stepPush(fighter, dt, state.arena, state.elapsed, state.fighters);
       applyWorldTick(state, fighter, dt, moved, events);
     }
     // The fog is applied OUT OF the fighter loop during sudden death, and only then.

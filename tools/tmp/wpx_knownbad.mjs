@@ -41,6 +41,7 @@
  *                                                                              -> §39(c)
  *   no-clamp       the pull is not clamped to its victim's separation, so a nearby fighter
  *                  is dragged THROUGH the bait and out the far side.            -> §39(c)
+ *                  (B3b: re-anchored on `lureFighter`'s call site — see the arm.)
  *   over-author    a shipped weapon authors 4 body lengths instead of half of one, breaking
  *                  the roster rate bound `6ea35f5` was refused on.              -> §39(f)
  *   global-push    `w.knockback ?? 0` becomes `?? 10` — every weapon in the game pushes.
@@ -168,9 +169,18 @@ export const ARMS = [
   {
     name: 'no-clamp',
     why: 'a pull is not clamped to its separation, so a near fighter is dragged through the bait',
+    // ⚠️ RE-ANCHORED BY B3b (BH-09, 2026-10-15). It replaced
+    //   `      displaceFighter(victim, dx, dy, lure < sep ? lure : sep);`
+    // in combat.ts's lure loop — the PER-PULL clamp, which BH-09 retired because it held per
+    // pull and broke in total (three pellets dragged a bystander through the bait). The clamp
+    // now lives in `movement.ts:lureFighter` (the TOTAL owed pull <= the separation) plus a
+    // live anchor that stops the pull level with the bait (`stepPush`). This arm reverts the
+    // CALL to an unclamped, unanchored `displaceFighter` — no clamp of either kind, which is
+    // the arm's original meaning — so both of its rows still go red. Each mechanism ALONE has
+    // its own arm in `tools/tmp/b3b_knownbad.mjs`.
     file: 'game/combat.ts',
-    find: '      displaceFighter(victim, dx, dy, lure < sep ? lure : sep);',
-    repl: '      displaceFighter(victim, dx, dy, lure); // WPX KNOWN-BAD: no clamp, so a pull overshoots',
+    find: '      lureFighter(victim, target, lure);',
+    repl: '      displaceFighter(victim, target.x - victim.x, target.y - victim.y, lure); // WPX KNOWN-BAD: no clamp, so a pull overshoots',
     mustFail: [
       '(c) …and the near fighter is owed its SEPARATION',
       '(c) 🔴 a pull never overshoots its anchor',

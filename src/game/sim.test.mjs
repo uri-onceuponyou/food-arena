@@ -58,6 +58,12 @@ import { castThreat, itemWorthIt, offensiveReach, pickItem, pressValue, stepAI }
 import {
   applyDamage, attemptAttack, isOnOwnTrail, ITEM_AURA_TICK_MS, itemUsable, resolveDueCast, statusReadyAt,
 } from './combat.ts';
+// §46(a) reads `weaponRefusal` / `weaponUsable` through a NAMESPACE, not a named import, and
+// that is load-bearing for the known-bad rule: a named import of an export that does not exist
+// is a LINK error that kills all ~1,000 rows before the first runs, so on the base tree the
+// section could not be shown red — it could only be shown absent. Through the namespace a
+// missing export is `undefined`, and §46(a)'s rows fail one by one with a reason.
+import * as COMBAT from './combat.ts';
 // Section 26 tests CONCEALMENT. The predicates are imported rather than re-derived for
 // the same reason `pressValue` and `statusReadyAt` are: the section's entire claim is that
 // ONE rule is read by four call sites, and a copy of the AABB test here would pass forever
@@ -9414,6 +9420,22 @@ console.log('\n36. A projectile hits whoever it strikes — body-blocking, at si
   // nobody in particular (facing east) while its NOMINAL target — `nearestLivingOpponent`
   // — stands to the north. Pre-fix the shot expires having damaged nobody, which is the
   // whole reason a six-seat brawl felt like six private duels.
+  //
+  // ⚠️ **RE-AUTHORED BY B3b (BH-04) — THE OLD PRECONDITION WAS THE BUG, SO IT IS KEPT HERE.**
+  // The shooter was a HUMAN facing east and the row read:
+  //
+  //   > `check('(c) the shot really is aimed NORTH at slot 3, and slot 3 really is the nearest
+  //   > (non-vacuity)', … st.projectiles.every((p) => p.targetId === st.fighters[3].id) …)`
+  //
+  // i.e. it asserted that a human's shot is framed on the NEAREST opponent rather than on what
+  // the human aimed at — which is BH-04 itself, so it went red under ANY aim rule (B3 said so
+  // before this was written). A human facing east with slot 2 on the line now frames slot 2
+  // (`state.ts:aimedLivingOpponent`, §46(b)), and a shot that hits its own frame is not a
+  // stray. The stray is still real for a BOT, whose frame is still its nearest — so the press
+  // is made as an AI seat (the controller is read at the press and nowhere else in this
+  // experiment) and handed back to `'human'` before the flight, so `flyOut`'s idle inputs keep
+  // every seat inert exactly as before. The 🔴 row below is unchanged, name and all
+  // (`tools/tmp/bb_block.mjs --knownbad` matches it by prefix).
   {
     const st = line('hotdog', MUSTARD_IDX);
     // Slot 3 to the north, nearest, so it becomes the aim; slot 2 due east, in the path.
@@ -9423,8 +9445,10 @@ console.log('\n36. A projectile hits whoever it strikes — body-blocking, at si
     st.fighters[2].x = arena.center.x + MUSTARD.range * 0.6;
     st.fighters[2].y = arena.center.y;
     const ev = [];
+    st.fighters[0].controller = 'ai';
     attemptAttack(st, st.fighters[0], MUSTARD_IDX, ev);
-    check('(c) the shot really is aimed NORTH at slot 3, and slot 3 really is the nearest (non-vacuity)',
+    st.fighters[0].controller = 'human';
+    check('(c) a BOT\'s shot really is framed NORTH on slot 3 — its nearest — while it flies EAST through slot 2 (non-vacuity)',
       st.projectiles.length > 0 && st.projectiles.every((p) => p.targetId === st.fighters[3].id)
       && Math.hypot(st.fighters[3].x - st.fighters[0].x, st.fighters[3].y - st.fighters[0].y)
          < Math.hypot(st.fighters[2].x - st.fighters[0].x, st.fighters[2].y - st.fighters[0].y),
@@ -12435,6 +12459,512 @@ console.log('\n45. A knocked-out seat\'s place is final at the knockout (six sea
     check('(e) 🔴 …and once no revive is left, the second knockout\'s place holds to the whistle (5th: seat 1 went out before it)',
       st.fighters[0].item.revivesLeft === 0 && st.phase === 'ended' && atSecond === MAX_FIGHTERS - 2 && trail.every((p) => p === atSecond),
       `revivesLeft ${st.fighters[0].item.revivesLeft}, phase ${st.phase}, places ${trail.map((p) => p + 1).join(' ')}`);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 46. COMBAT + ITEMS, THE SECOND HALF (`docs/REVAMP.md` §5 B3 → B3b, 2026-10-15)
+//
+// B3 fixed six of ten combat/item bugs and stopped with worked designs for the rest; B3b
+// finishes them here. Every row marked 🔴 was run RED on `d46f750` before its fix landed, and
+// `tools/tmp/b3b_knownbad.mjs` re-runs that claim: each arm reverts ONE fix on a scratch copy
+// of `src/` and requires its own 🔴 rows to go red and its controls to stay green.
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n46. Combat + items, the second half — why a press is refused, the aimed shot, the Ring, the lure');
+{
+  // ── (a) U1: WHY IS THIS PRESS REFUSED? ONE ANSWER, AND IT IS THE SIM'S ─────────
+  //
+  // The tray read READY over a clogged (Pompa) or sleeping (Warm Milk) fighter while
+  // `attemptAttack` refused every press. F1 (`b0eaa81`) made the tray ask
+  // `state.ts:weaponsLocked`, which stops the lie but cannot say WHICH lock, and any finer
+  // answer written in `hud.ts` would be a second copy of `attemptAttack`'s gates — the shape
+  // `combat.ts:itemUsable`'s header calls "a button that lies". So the gates are named once,
+  // in `combat.ts:weaponRefusal`, IN `attemptAttack`'S OWN ORDER, and `attemptAttack` asks it.
+  //
+  // ⚠️ Two seats suffice: every gate is a property of the presser alone (`minSeats` 2).
+  {
+    const weaponRefusal = typeof COMBAT.weaponRefusal === 'function' ? COMBAT.weaponRefusal : () => 'MISSING';
+    const weaponUsable = typeof COMBAT.weaponUsable === 'function' ? COMBAT.weaponUsable : () => 'MISSING';
+    check('(a) 🔴 `combat.ts` exports `weaponRefusal` and `weaponUsable` — a reader can ask the sim WHY',
+      typeof COMBAT.weaponRefusal === 'function' && typeof COMBAT.weaponUsable === 'function',
+      `${typeof COMBAT.weaponRefusal} / ${typeof COMBAT.weaponUsable}`);
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const KIT = CHARACTERS.waterbottle.weapons;
+    const MEGA = KIT.findIndex((w) => w.key === 'Mega');
+    const fresh = () => {
+      const st = createMatch(arena, [
+        { characterId: 'waterbottle', spawn: { x: 1000, y: 1000 }, controller: 'human' },
+        { characterId: 'hamburger', spawn: { x: 1000 + REACH.meleeQuick * 0.5, y: 1000 }, controller: 'human' },
+      ]);
+      st.phase = 'playing';
+      st.elapsed = 20_000;
+      for (let i = 0; i < st.fighters[0].lastUsed.length; i++) st.fighters[0].lastUsed[i] = -1e9;
+      return st;
+    };
+    // Each case is a STATE; the expected answer is per weapon. `casting` is the one case where
+    // the weapons disagree: only a second CAST weapon is refused mid-wind-up (`DECISIONS §78`
+    // removed the lockout for everything else), and its own cooldown, already stamped by the
+    // press that opened the wind-up, is NOT the reason given — the cast gate sits above it.
+    const CASES = [
+      ['free', () => {}, () => null],
+      ['phase', (st) => { st.phase = 'countdown'; }, () => 'phase'],
+      ['asleep', (st) => { st.fighters[0].item.sleepUntil = st.elapsed + 3000; }, () => 'asleep'],
+      ['clogged', (st) => { st.fighters[0].item.clogUntil = st.elapsed + 3000; }, () => 'clogged'],
+      ['asleep+clogged', (st) => { st.fighters[0].item.sleepUntil = st.elapsed + 3000; st.fighters[0].item.clogUntil = st.elapsed + 3000; }, () => 'asleep'],
+      ['clogged+cooling', (st) => { st.fighters[0].item.clogUntil = st.elapsed + 3000; st.fighters[0].lastUsed.fill(st.elapsed - 1); }, () => 'clogged'],
+      ['casting', (st) => { attemptAttack(st, st.fighters[0], MEGA, []); }, (wi) => (wi === MEGA ? 'casting' : null)],
+      ['cooling', (st) => { st.fighters[0].lastUsed.fill(st.elapsed - 1); }, () => 'cooldown'],
+    ];
+    const grid = [];
+    for (const [name, setup, expect] of CASES) {
+      for (let wi = 0; wi <= KIT.length; wi++) {   // `wi === KIT.length` is the no-weapon slot
+        const st = fresh();
+        setup(st);
+        const me = st.fighters[0];
+        const before = JSON.stringify([me.lastUsed, me.cast, me.item]);
+        const why = weaponRefusal(st, me, wi);
+        const usable = weaponUsable(st, me, wi);
+        const pure = JSON.stringify([me.lastUsed, me.cast, me.item]) === before;
+        const ev = [];
+        const ok = attemptAttack(st, me, wi, ev);
+        const spent = JSON.stringify([me.lastUsed, me.cast, me.item]) !== before || ev.length > 0;
+        grid.push({ name, wi, why, want: name !== 'phase' && wi === KIT.length ? 'no-weapon' : expect(wi), usable, pure, ok, spent });
+      }
+    }
+    const refused = grid.filter((c) => c.ok === false);
+    const fired = grid.filter((c) => c.ok === true);
+    const reasons = new Set(grid.map((c) => c.want).filter((r) => r !== null));
+    check('(a) NON-VACUITY: the grid holds refused AND accepted presses, and every reason is planted at least once',
+      refused.length > 0 && fired.length > 0 && reasons.size === 6
+      && ['phase', 'no-weapon', 'asleep', 'clogged', 'casting', 'cooldown'].every((r) => reasons.has(r)),
+      `${grid.length} cells: ${refused.length} refused, ${fired.length} fired; reasons [${[...reasons].join(' ')}]`);
+    const wrong = grid.filter((c) => c.why !== c.want);
+    check('(a) 🔴 every refusal is NAMED — phase / no-weapon / asleep / clogged / casting / cooldown — in `attemptAttack`\'s order',
+      wrong.length === 0,
+      wrong.slice(0, 4).map((c) => `${c.name}#${c.wi}: got ${c.why}, want ${c.want}`).join(' · ') || 'all named');
+    const disagree = grid.filter((c) => (c.why === null) !== c.ok);
+    check('(a) 🔴 …and it AGREES with `attemptAttack` on every cell — null exactly when the press goes off',
+      disagree.length === 0,
+      disagree.slice(0, 4).map((c) => `${c.name}#${c.wi}: refusal ${c.why}, attemptAttack ${c.ok}`).join(' · ') || `${grid.length}/${grid.length}`);
+    check('(a) 🔴 `weaponUsable` is exactly `weaponRefusal === null`, and asking either changes NOTHING',
+      grid.every((c) => c.usable === (c.why === null) && c.pure),
+      `${grid.filter((c) => c.usable !== (c.why === null)).length} usable mismatches, ${grid.filter((c) => !c.pure).length} impure`);
+    check('(a) CONTROL: a refused press spends nothing and emits nothing; an accepted one stamps its cooldown',
+      refused.every((c) => !c.spent) && fired.every((c) => c.spent),
+      `${refused.filter((c) => c.spent).length} refused-but-spent, ${fired.filter((c) => !c.spent).length} fired-but-free`);
+  }
+
+  // ── (b) BH-04: A HUMAN'S SHOT IS FRAMED ON WHAT THEY AIMED AT, NOT ON THE NEAREST ──
+  //
+  // `combat.ts:deliverWeapon` stamped `nearestLivingOpponent` on every projectile, and
+  // `sim.ts:stepProjectiles` reads that `targetId` for two things — the homing steer and the
+  // range budget's frame (`rules.ts` AUTHORISED DEVIATION #12, "range means a SEPARATION").
+  // For a bot the nearest IS the aim (`ai.ts` faces it). For a human it is not: a homing shot
+  // aimed at one fighter curved into whoever stood nearest, and a straight shot was budgeted
+  // against a bystander running alongside it — reaching past its card range.
+  //
+  // 🚨 SIX SEATS. At two the only opponent is both the nearest and the aimed-at one, so the
+  // two rules are the same sentence and every two-seat row passes on the bug (`minSeats` 3).
+  //
+  // The rule (humans only): the opponent IN FRONT (`facing·v ≥ 0`) with the smallest
+  // perpendicular miss from the aim line; ties → nearer → lower slot; nobody in front →
+  // nearest. Bots keep nearest. Every distance is a fraction of the weapon's own `range`.
+  {
+    const N = MAX_FIGHTERS;
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const CX = arena.center.x, CY = arena.center.y;
+    const DT = 16.667;
+    const IDLE = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+    const EAST = { move: { x: 1, y: 0 }, selectedWeapon: 0, attack: false };
+    const kit = (c, k) => { const i = CHARACTERS[c].weapons.findIndex((w) => w.key === k); return [i, CHARACTERS[c].weapons[i]]; };
+    const [HATCH_I, HATCH] = kit('egg', 'Hatch');
+    const [LETTUCE_I, LETTUCE] = kit('hamburger', 'Lettuce');
+    /** Six seats: slot 0 shoots from the centre facing due east; slots 1-5 parked far
+     *  BEHIND it (west, off the business end) until a row places them. HP inflated so "who
+     *  was hit" is never confounded with "who died first" (§36's reason). */
+    const six = (shooter, ctl0 = 'human', others = 'hamburger') => {
+      const st = createMatch(arena, [
+        { characterId: shooter, spawn: { x: CX, y: CY }, controller: ctl0 },
+        ...Array.from({ length: N - 1 }, (_, i) => ({
+          characterId: Array.isArray(others) ? others[i] : others,
+          spawn: { x: CX - 900 - i * 150, y: CY + 700 }, controller: 'human',
+        })),
+      ]);
+      st.phase = 'playing';
+      for (const f of st.fighters) { f.hp = 1e7; f.maxHp = 1e7; }
+      st.fighters[0].facing = { x: 1, y: 0 };
+      return st;
+    };
+    const put = (f, x, y) => { f.x = x; f.y = y; };
+    /** Fly every live projectile out; `inputOf(slot)` drives the seats. */
+    const fly = (st, inputOf = () => IDLE, ticks = 600) => {
+      const hits = []; let end = null; let ground = 0;
+      for (let t = 0; t < ticks && st.projectiles.length > 0; t++) {
+        const evs = stepMatch(st, DT, st.fighters.map((_, i) => inputOf(i)));
+        for (const p of st.projectiles) ground = Math.max(ground, Math.hypot(p.x - CX, p.y - CY));
+        for (const e of evs) {
+          if (e.type === 'hit-landed' && e.source?.kind === 'weapon') hits.push(e.targetId);
+          if (e.type === 'projectile-destroyed' && end === null) end = e.reason;
+        }
+      }
+      return { hits, end, ground };
+    };
+    const along = (st, f) => (f.x - st.fighters[0].x) * st.fighters[0].facing.x + (f.y - st.fighters[0].y) * st.fighters[0].facing.y;
+    const dist = (st, f) => Math.hypot(f.x - st.fighters[0].x, f.y - st.fighters[0].y);
+
+    // (b1) HOMING: aimed due east at C on the line; B nearer, to the north-west (BEHIND).
+    {
+      const st = six('egg');
+      const [, B, C] = st.fighters;
+      put(C, CX + HATCH.range * 0.85, CY);
+      put(B, CX - HATCH.range * 0.5, CY - HATCH.range * 0.5);
+      const opp = st.fighters.slice(1).filter((f) => f.alive);
+      check('(b) NON-VACUITY: six seats, five living opponents; B is NEARER than the aimed-at C, and C sits on the aim line',
+        st.fighters.length === 6 && opp.length === 5 && dist(st, B) < dist(st, C) && C.y === CY && along(st, C) > 0 && HATCH.homing === true,
+        `B ${dist(st, B).toFixed(1)} wu, C ${dist(st, C).toFixed(1)} wu, homing ${HATCH.homing}`);
+      attemptAttack(st, st.fighters[0], HATCH_I, []);
+      const framed = st.projectiles.map((p) => p.targetId);
+      const r = fly(st);
+      check('(b) 🔴 a HOMING shot aimed at C is framed on C and strikes C — not the nearer B behind the shooter',
+        framed.length > 0 && framed.every((id) => id === C.id) && r.hits[0] === C.id,
+        `framed on [${framed}], first hit ${r.hits[0]} (C=${C.id}, B=${B.id}; pre-fix: framed on B, first hit B)`);
+    }
+
+    // (b2) A BYSTANDER ALONGSIDE: D in FRONT and nearer than C, but off the line by more than
+    // its own hit radius — the perpendicular-miss term, not the in-front filter, decides.
+    {
+      const st = six('egg');
+      const [, , C, D] = st.fighters;
+      put(C, CX + HATCH.range * 0.85, CY);
+      put(D, CX + HATCH.range * 0.45, CY - HATCH.range * 0.3);
+      check('(b) NON-VACUITY: D is IN FRONT, NEARER than C, and further off the line than its own hit radius',
+        along(st, D) > 0 && dist(st, D) < dist(st, C) && Math.abs(D.y - CY) > D.hitRadius,
+        `D along ${along(st, D).toFixed(1)}, D ${dist(st, D).toFixed(1)} vs C ${dist(st, C).toFixed(1)} wu, lateral ${Math.abs(D.y - CY).toFixed(1)} vs r ${D.hitRadius}`);
+      attemptAttack(st, st.fighters[0], HATCH_I, []);
+      const framed = st.projectiles.map((p) => p.targetId);
+      const r = fly(st);
+      check('(b) 🔴 a homing shot flies PAST a bystander alongside the line to the fighter on it',
+        framed.length > 0 && framed.every((id) => id === C.id) && r.hits[0] === C.id && !r.hits.includes(D.id),
+        `framed on [${framed}], hits [${r.hits.slice(0, 4)}] (C=${C.id}, D=${D.id}; pre-fix: curves into D)`);
+    }
+
+    // (b3) THE RANGE BUDGET: aimed at a STILL C beyond range + hit radius; B (nearest) runs
+    // east alongside the shot. Framed on B, B's motion is refunded and the shot reaches C.
+    {
+      const run = (bRuns) => {
+        const st = six('hamburger', 'human', ['sushi', 'soup', 'hamburger', 'hamburger', 'hamburger']);
+        const [, B, C] = st.fighters;
+        put(C, CX + LETTUCE.range * 1.57, CY);
+        put(B, CX, CY - LETTUCE.range * 0.71);
+        const pre = { bNearer: dist(st, B) < dist(st, C), cBeyond: dist(st, C) > LETTUCE.range + C.hitRadius };
+        attemptAttack(st, st.fighters[0], LETTUCE_I, []);
+        const framed = st.projectiles.map((p) => p.targetId);
+        return { ...fly(st, (i) => (bRuns && i === 1 ? EAST : IDLE)), framed, pre, C, B };
+      };
+      const still = run(false);
+      const runs = run(true);
+      check('(b) NON-VACUITY: B is nearer, C is beyond range + hit radius, and with B STANDING the shot expires short',
+        still.pre.bNearer && still.pre.cBeyond && still.end === 'expired' && still.hits.length === 0,
+        `end ${still.end}, hits [${still.hits}], ground ${still.ground.toFixed(1)} of range ${LETTUCE.range}`);
+      check('(b) 🔴 …and with B RUNNING alongside, the shot STILL expires short — a bystander\'s legs do not extend it',
+        runs.framed.length > 0 && runs.framed.every((id) => id === runs.C.id) && runs.end === 'expired' && runs.hits.length === 0
+        && runs.ground <= LETTUCE.range + 1e-6 + LETTUCE.speed * DT / 1000,
+        `framed on [${runs.framed}], end ${runs.end}, hits [${runs.hits}], ground ${runs.ground.toFixed(1)} vs range ${LETTUCE.range} (pre-fix: hit C at ~195)`);
+    }
+
+    // (b4) A FLEEING AIMED TARGET is charged in ITS frame — the separation the card promises.
+    // The nearest (B) stands still behind the shooter; framed on B the budget is plain ground
+    // and the fleeing C gets away; framed on C the shot closes the separation and lands.
+    {
+      const seats = ['hamburger', 'sushi', 'hamburger', 'hamburger', 'hamburger'];
+      const st = six('hamburger', 'human', seats);
+      const [, B, C] = st.fighters;
+      put(C, CX + LETTUCE.range * 0.9, CY);
+      put(B, CX - LETTUCE.range * 0.4, CY - LETTUCE.range * 0.4);
+      // C's real running speed, MEASURED on a scratch copy of the same seat, not assumed.
+      const probe = six('hamburger', 'human', seats);
+      const x0 = probe.fighters[2].x;
+      for (let t = 0; t < 30; t++) stepMatch(probe, DT, probe.fighters.map((_, i) => (i === 2 ? EAST : IDLE)));
+      const vC = (probe.fighters[2].x - x0) / (30 * DT / 1000);
+      const gap = dist(st, C) - C.hitRadius;
+      const groundNeeded = LETTUCE.speed * gap / (LETTUCE.speed - vC);
+      check('(b) NON-VACUITY: B is nearer and behind; C really runs, slower than the shot, and catching it needs MORE ground than the range',
+        dist(st, B) < dist(st, C) && along(st, B) < 0 && vC > 0 && vC < LETTUCE.speed && groundNeeded > LETTUCE.range && gap < LETTUCE.range,
+        `vC ${vC.toFixed(1)} wu/s, separation to close ${gap.toFixed(1)}, ground needed ${groundNeeded.toFixed(1)} vs range ${LETTUCE.range}`);
+      attemptAttack(st, st.fighters[0], LETTUCE_I, []);
+      const framed = st.projectiles.map((p) => p.targetId);
+      const r = fly(st, (i) => (i === 2 ? EAST : IDLE));
+      check('(b) 🔴 a fleeing AIMED target is budgeted in its own frame — the shot closes the separation and lands',
+        framed.length > 0 && framed.every((id) => id === C.id) && r.hits[0] === C.id,
+        `framed on [${framed}], end ${r.end}, hits [${r.hits}], ground ${r.ground.toFixed(1)} (pre-fix: framed on B, expired)`);
+    }
+
+    // (b5) THE TIE-BREAKS AND THE FALLBACK — read straight off `targetId` at the press. These
+    // agree with the old rule by construction (the nearer, then the lower slot, then nearest
+    // when nobody is in front), so they are CONTROLS: green on both trees, and red the day the
+    // aim rule grows a tie-break the two-seat sentence never needed.
+    {
+      const MUSTARD_I = CHARACTERS.hotdog.weapons.findIndex((w) => w.key === 'Mustard');
+      const R = CHARACTERS.hotdog.weapons[MUSTARD_I].range;
+      const frameOf = (setup, ctl0 = 'human') => {
+        const st = six('hotdog', ctl0);
+        setup(st);
+        attemptAttack(st, st.fighters[0], MUSTARD_I, []);
+        return st.projectiles.map((p) => p.targetId);
+      };
+      const sameLine = frameOf((st) => { put(st.fighters[2], CX + R * 0.9, CY); put(st.fighters[3], CX + R * 0.5, CY); });
+      const mirror = frameOf((st) => { put(st.fighters[2], CX + R * 0.6, CY + R * 0.2); put(st.fighters[3], CX + R * 0.6, CY - R * 0.2); });
+      const behind = frameOf((st) => { put(st.fighters[2], CX - R * 0.9, CY); put(st.fighters[3], CX - R * 0.4, CY + R * 0.1); });
+      check('(b) CONTROL: two on the aim line → the NEARER (slot 3, higher slot); a mirrored exact tie → the LOWER slot (2)',
+        sameLine.length > 0 && sameLine.every((id) => id === 3) && mirror.length > 0 && mirror.every((id) => id === 2),
+        `same line → [${sameLine}], mirrored tie → [${mirror}]`);
+      check('(b) CONTROL: nobody in front → the NEAREST, as before',
+        behind.length > 0 && behind.every((id) => id === 3), `→ [${behind}]`);
+      // BOTS KEEP NEAREST: (b2)'s geometry with an AI shooter frames the nearer bystander.
+      const bot = frameOf((st) => { put(st.fighters[2], CX + R * 0.85, CY); put(st.fighters[3], CX + R * 0.45, CY - R * 0.3); }, 'ai');
+      check('(b) CONTROL: a BOT\'s shot is still framed on its NEAREST opponent — the AI faces it, so for a bot the nearest IS the aim',
+        bot.length > 0 && bot.every((id) => id === 3), `→ [${bot}]`);
+      // TWO SEATS: the only opponent, wherever it stands — even directly behind the aim.
+      const st2 = createMatch(arena, [
+        { characterId: 'hotdog', spawn: { x: CX, y: CY }, controller: 'human' },
+        { characterId: 'hamburger', spawn: { x: CX - R * 0.6, y: CY }, controller: 'human' },
+      ]);
+      st2.phase = 'playing';
+      st2.fighters[0].facing = { x: 1, y: 0 };
+      attemptAttack(st2, st2.fighters[0], MUSTARD_I, []);
+      check('(b) CONTROL: at TWO seats the frame is the only opponent even when it stands behind the aim (identical by construction)',
+        st2.projectiles.length > 0 && st2.projectiles.every((p) => p.targetId === 1), `→ [${st2.projectiles.map((p) => p.targetId)}]`);
+    }
+  }
+
+  // ── (c) BH-03: A DECLARED TRAIL BOOST IS A BOOST THAT LANDS — FOR A SWING TOO ──
+  //
+  // `donut.Ring` declared `trailBoosted` and the melee branch of `combat.ts:deliverWeapon`
+  // never read the flag (only the ranged branch did), so every Ring Spin on the trail landed
+  // 9 where the card promised round(9 × `TRAIL.damageBoost`) = 14. Two defects in one: a
+  // promise the sim did not keep, and a melee path that ignores a field every weapon may set.
+  //
+  // The fix is both halves, chosen so SHIPPED BALANCE DOES NOT MOVE: the melee loop honours
+  // the flag, and the flag is REMOVED from Ring (a verifier measured the boost taking Donut —
+  // already dominant at six seats — from 20 to 26 wins of 30). Whether Ring SHOULD be boosted
+  // is parked for Uri; these rows pin both halves so neither can drift alone.
+  //
+  // ⚠️ (c)'s known-bad lever is the roster object itself: a row sets `trailBoosted` on Ring
+  // for ONE swing and restores it in `finally`, so it can ask "does the swing path honour
+  // the flag" independently of what the roster ships.
+  {
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const CX = arena.center.x, CY = arena.center.y;
+    const KIT = CHARACTERS.donut.weapons;
+    const RING_I = KIT.findIndex((w) => w.key === 'Ring');
+    const RING = KIT[RING_I];
+    /** Donut (slot 0, facing east) with `victims` opponents inside Ring's arc and the rest
+     *  parked far behind; optionally standing on a live mark of its own trail. Returns what
+     *  each press LANDED: hit-landed amounts for a swing, spawned pellet damage for a shot. */
+    const press = (wi, { onTrail, declare, victims = 1, seats = 2 }) => {
+      const st = createMatch(arena, [
+        { characterId: 'donut', spawn: { x: CX, y: CY }, controller: 'human' },
+        ...Array.from({ length: seats - 1 }, (_, i) => ({
+          characterId: 'hamburger', controller: 'human',
+          spawn: i < victims
+            ? { x: CX + RING.range * 0.6 * Math.cos((i - (victims - 1) / 2) * 0.5), y: CY + RING.range * 0.6 * Math.sin((i - (victims - 1) / 2) * 0.5) }
+            : { x: CX - 900 - i * 150, y: CY + 700 },
+        })),
+      ]);
+      st.phase = 'playing';
+      st.elapsed = 20_000;
+      st.fighters[0].facing = { x: 1, y: 0 };
+      for (const f of st.fighters) { f.hp = 1e6; f.maxHp = 1e6; }
+      if (onTrail) {
+        st.trailMarks.push({ id: st.nextId++, ownerId: 0, ownerRole: st.fighters[0].role, x: CX, y: CY,
+          expiresAt: st.elapsed + TRAIL.durationMs, damagedMask: 0, damaged: false });
+      }
+      const w = KIT[wi];
+      const had = Object.prototype.hasOwnProperty.call(w, 'trailBoosted');
+      const old = w.trailBoosted;
+      if (declare !== undefined) w.trailBoosted = declare;
+      try {
+        const ev = [];
+        const trail = isOnOwnTrail(st, st.fighters[0]);
+        attemptAttack(st, st.fighters[0], wi, ev);
+        const landed = w.type === 'melee'
+          ? ev.filter((e) => e.type === 'hit-landed' && e.source?.kind === 'weapon').map((e) => e.amount)
+          : st.projectiles.map((p) => p.damage);
+        return { landed, trail, declared: !!w.trailBoosted };
+      } finally {
+        if (had) w.trailBoosted = old; else delete w.trailBoosted;
+      }
+    };
+    const boosted = (d) => Math.round(d * TRAIL.damageBoost);
+    const onArm = press(RING_I, { onTrail: true });
+    const offArm = press(RING_I, { onTrail: false });
+    check('(c) NON-VACUITY: Donut really stands on its own live mark (and off it in the control), Ring connects in both, and the boost is not 1',
+      onArm.trail === true && offArm.trail === false && onArm.landed.length === 1 && offArm.landed.length === 1 && TRAIL.damageBoost !== 1
+      && boosted(RING.damage) !== RING.damage,
+      `on ${onArm.trail} [${onArm.landed}], off ${offArm.trail} [${offArm.landed}], boost ×${TRAIL.damageBoost}`);
+
+    // (c1) DECLARED == APPLIED, for every weapon of every character that has a trail.
+    const trailChars = CHARACTER_IDS.filter((id) => CHARACTERS[id].hasTrail);
+    const broken = [];
+    let rowsSeen = 0;
+    for (const id of trailChars) {
+      if (id !== 'donut') { broken.push(`${id}: a second trail character — extend (c)'s fixture`); continue; }
+      KIT.forEach((w, wi) => {
+        if (w.type === 'self') return;
+        const r = press(wi, { onTrail: true });
+        rowsSeen++;
+        const want = r.declared ? boosted(w.damage) : w.damage;
+        if (r.landed.length === 0 || r.landed.some((d) => d !== want)) broken.push(`${w.key}: declared ${r.declared}, landed [${r.landed}], want ${want}`);
+      });
+    }
+    check('(c) 🔴 on its own trail, every weapon lands EXACTLY what it declares — boosted iff `trailBoosted`',
+      trailChars.length > 0 && rowsSeen >= 3 && broken.length === 0,
+      broken.join(' · ') || `${rowsSeen} weapons agree (pre-fix: Ring declared, landed [9], want 14)`);
+    const strays = CHARACTER_IDS.filter((id) => !CHARACTERS[id].hasTrail)
+      .flatMap((id) => CHARACTERS[id].weapons.filter((w) => w.trailBoosted).map((w) => `${id}.${w.key}`));
+    check('(c) CONTROL: no character WITHOUT a trail declares a trail-boosted weapon (it could never land)',
+      strays.length === 0, strays.join(', ') || 'none');
+
+    // (c2) THE SWING PATH HONOURS THE FLAG — Ring declared for one swing, at SIX seats with
+    // THREE opponents in the arc, because a swing hits everyone in it (§35) and the boost is
+    // one fact about the swing, not about the first victim.
+    const decl = press(RING_I, { onTrail: true, declare: true, victims: 3, seats: 6 });
+    const declOff = press(RING_I, { onTrail: false, declare: true, victims: 3, seats: 6 });
+    check('(c) 🔴 a SWING declared trail-boosted lands the boost on EVERY victim in its arc while on the trail',
+      decl.trail && decl.landed.length === 3 && decl.landed.every((d) => d === boosted(RING.damage)),
+      `landed [${decl.landed}] vs ${boosted(RING.damage)} (pre-fix: [9,9,9])`);
+    check('(c) CONTROL: …and the same declared swing OFF the trail lands its plain damage on all three',
+      !declOff.trail && declOff.landed.length === 3 && declOff.landed.every((d) => d === RING.damage),
+      `landed [${declOff.landed}] vs ${RING.damage}`);
+
+    // (c3) BALANCE PINNED: the SHIPPED Ring is not boosted — the flag was removed in the same
+    // change that made it work, so a fix that only applied the flag would show up HERE.
+    check('(c) CONTROL: the SHIPPED Ring lands its base damage on the trail — Ring\'s boost is parked for Uri, not shipped',
+      onArm.landed.length > 0 && onArm.landed.every((d) => d === RING.damage) && offArm.landed.every((d) => d === RING.damage),
+      `Ring declares ${!!RING.trailBoosted}; on [${onArm.landed}], off [${offArm.landed}] vs ${RING.damage}`);
+  }
+
+  // ── (d) BH-09: A LURE NEVER DRAGS ANYONE THROUGH THE BAIT — at six seats ─────
+  //
+  // `combat.ts:applyHitDisplacement` clamped each PULL to the victim's separation and its own
+  // comment promised *"nobody is dragged THROUGH the bait"* — but `movement.ts:displaceFighter`
+  // ACCUMULATES (`remaining = min(cap, remaining + distance)`), so Big Catch's three pellets,
+  // landing inside the time one pull is spent, owed a bystander up to 42 wu toward a bait 10-41
+  // wu away and dragged it out the far side. The residual case is worse: a later pellet that
+  // hooks the BYSTANDER makes it the new bait mid-pull, and the two then close on each other
+  // from both ends. A third shape: a bait that walks INTO the pull is passed by the fighter
+  // pulled toward where it used to stand.
+  //
+  // The fix is two mechanisms, and each has its own red row here and its own known-bad arm in
+  // `tools/tmp/b3b_knownbad.mjs`: the TOTAL owed pull is clamped to the separation at every
+  // application (`movement.ts:lureFighter`), and the pull is spent toward a LIVE anchor — it
+  // stops level with the bait wherever the bait now is (`stepPush`).
+  //
+  // 🚨 SIX SEATS: a lure moves "EVERY living opponent" and at two seats the only opponent IS the
+  // bait, so nothing is ever pulled (§39(c) runs that vacuous control on purpose).
+  // ⚠️ "Through" is measured ONLY on ticks where a pull was being spent: a bait that keeps
+  // walking after a pull has ended passes the bystander on its own legs, which is not a drag.
+  {
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const CX = arena.center.x, CY = arena.center.y;
+    const DT = 16.667;
+    const IDLE = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+    const KIT = CHARACTERS.sushi.weapons;
+    const CATCH_I = KIT.findIndex((w) => w.key === 'Catch');
+    const SEAWEED_I = KIT.findIndex((w) => w.key === 'Seaweed');
+    const CATCH = KIT[CATCH_I];
+    const SEAWEED = KIT[SEAWEED_I];
+    const BX = CX + CATCH.range * 0.71;
+    /** Sushi (slot 0) at the centre facing east; the bait B (slot 1) on the aim line; the
+     *  bystander C (slot 2) `gap` wu due south of B; slots 3-5 parked far west. */
+    const board = (gap) => {
+      const st = createMatch(arena, [
+        { characterId: 'sushi', spawn: { x: CX, y: CY }, controller: 'human' },
+        { characterId: 'pizza', spawn: { x: BX, y: CY }, controller: 'human' },
+        { characterId: 'soup', spawn: { x: BX, y: CY + gap }, controller: 'human' },
+        ...Array.from({ length: MAX_FIGHTERS - 3 }, (_, i) => ({
+          characterId: 'hamburger', spawn: { x: CX - 900 - i * 150, y: CY + 700 }, controller: 'human',
+        })),
+      ]);
+      st.phase = 'playing';
+      for (const f of st.fighters) { f.hp = 1e7; f.maxHp = 1e7; }
+      st.fighters[0].facing = { x: 1, y: 0 };
+      return st;
+    };
+    /** Fire `wi` once and run 2.5 s. `s` = C.y − B.y (starts at +gap; < 0 means crossed),
+     *  sampled only after ticks in which B or C began with a pull to spend. */
+    const run = (wi, gap, { bWalks = false } = {}) => {
+      const st = board(gap);
+      const [, B, C] = st.fighters;
+      let minS = Infinity; let pulledTicks = 0; let hitsOnB = 0; let hitsOnC = 0;
+      for (let t = 0; t < 150; t++) {
+        const pulling = B.push.remaining > 0 || C.push.remaining > 0;
+        const inputs = st.fighters.map((_, i) => (i === 0
+          ? { move: { x: 0, y: 0 }, aim: { x: 1, y: 0 }, selectedWeapon: wi, attack: t === 0 }
+          : i === 1 && bWalks && hitsOnB > 0 ? { move: { x: 0, y: 1 }, selectedWeapon: 0, attack: false } : IDLE));
+        for (const e of stepMatch(st, DT, inputs)) {
+          if (e.type === 'hit-landed' && e.source?.kind === 'weapon') { if (e.targetId === 1) hitsOnB++; if (e.targetId === 2) hitsOnC++; }
+        }
+        if (pulling) { pulledTicks++; minS = Math.min(minS, C.y - B.y); }
+      }
+      return { gap, minS, pulledTicks, hitsOnB, hitsOnC, finalS: C.y - B.y };
+    };
+    const fmt = (r) => `gap ${r.gap.toFixed(1)}: min ${r.minS.toFixed(2)} (B hit ${r.hitsOnB}, C hit ${r.hitsOnC}, ${r.pulledTicks} pulled ticks)`;
+
+    const gaps = [0.24, 0.48, 0.71, 0.98].map((k) => CATCH.lure * k);
+    const arms = gaps.map((g) => run(CATCH_I, g));
+    const accumulation = arms.filter((r) => r.hitsOnC === 0);
+    const residual = arms.filter((r) => r.hitsOnC > 0);
+    check('(d) NON-VACUITY: Big Catch lands MORE THAN ONE pellet on the bait, every gap is inside one pellet\'s lure, and a pull really ran',
+      arms.length === 4 && arms.every((r) => r.hitsOnB + r.hitsOnC >= 2 && r.pulledTicks > 0 && r.gap < CATCH.lure) && CATCH.pellets > 1,
+      arms.map(fmt).join(' · '));
+    check('(d) NON-VACUITY: the board holds BOTH shapes — bystanders never hit (accumulation) and one hooked mid-pull (residual)',
+      accumulation.length > 0 && residual.length > 0,
+      `${accumulation.length} accumulation arm(s), ${residual.length} residual arm(s)`);
+    check('(d) 🔴 several pellets owe a bystander more than its separation — it is still never dragged THROUGH the bait',
+      accumulation.length > 0 && accumulation.every((r) => r.minS >= -1e-6),
+      accumulation.map(fmt).join(' · ') + ' (pre-fix: crosses — e.g. −4 at gap 41)');
+    check('(d) 🔴 …nor when a later pellet hooks the BYSTANDER and makes it the new bait mid-pull (the residual case)',
+      residual.length > 0 && residual.every((r) => r.minS >= -1e-6),
+      residual.map(fmt).join(' · ') + ' (pre-fix: −43.5 at gap 30)');
+
+    // THE TOTAL CLAMP, stated directly: three applications in ONE tick (three pellets landing
+    // together), driven through `applyDamage` so the separation is an exact number.
+    {
+      const st = board(CATCH.lure * 0.71);
+      const [, B, C] = st.fighters;
+      const sep = Math.hypot(B.x - C.x, B.y - C.y);
+      for (let k = 0; k < 3; k++) {
+        applyDamage(st, B, CATCH.damage, CATCH.effect, { kind: 'weapon', weaponKey: 'Catch', weaponName: CATCH.name, attackerId: 0 }, []);
+      }
+      check('(d) 🔴 three pellets in one tick owe the bystander AT MOST its separation — not 3 × min(lure, sep) capped at a body length',
+        C.push.remaining > 0 && C.push.remaining <= sep + 1e-9,
+        `owed ${C.push.remaining.toFixed(3)} wu, separation ${sep.toFixed(3)} (pre-fix: ${Math.min(CATCH.lure, 3 * sep).toFixed(1)})`);
+    }
+
+    // A BAIT THAT WALKS INTO THE PULL. One Seaweed pellet (lure 21, and it SLOWS the bait):
+    // C is owed min(lure, gap) toward where B stood; B walks toward C once hooked (not before:
+    // a bait that walks off the line first is simply missed). Spent toward
+    // that fixed point, C passes B; spent toward the live bait, C stops level with it.
+    {
+      const walk = run(SEAWEED_I, SEAWEED.lure * 1.2, { bWalks: true });
+      const still = run(SEAWEED_I, SEAWEED.lure * 1.2);
+      check('(d) NON-VACUITY: one Seaweed pellet hooked the bait, and the bystander was really pulled',
+        walk.hitsOnB === 1 && walk.pulledTicks > 0 && still.hitsOnB === 1 && still.pulledTicks > 0,
+        `walk ${fmt(walk)} · still ${fmt(still)}`);
+      check('(d) 🔴 a bait that walks INTO the pull is not passed — the pull is spent toward where the bait IS',
+        walk.minS >= -1e-6, `${fmt(walk)} (pre-fix: crosses)`);
+      check('(d) CONTROL: a STILL bait and one pellet — the bystander ends exactly `gap − min(lure, gap)` short, as before',
+        Math.abs(still.finalS - (still.gap - Math.min(SEAWEED.lure, still.gap))) < 1e-6,
+        `ended ${still.finalS.toFixed(6)} short, want ${(still.gap - Math.min(SEAWEED.lure, still.gap)).toFixed(6)}`);
+    }
+
+    // A bystander BEYOND the whole lure: pulled, and still short of the bait on both trees.
+    {
+      const far = run(CATCH_I, CATCH.lure * 1.45);
+      check('(d) CONTROL: a bystander beyond the lure is pulled toward the bait and stops SHORT of it',
+        far.pulledTicks > 0 && far.finalS > 0 && far.finalS < far.gap, fmt(far));
+    }
   }
 }
 

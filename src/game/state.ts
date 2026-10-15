@@ -644,6 +644,25 @@ export interface PushState {
    * two behaviourally identical states must also be BIT-identical.
    */
   speed: number;
+  /**
+   * THE BAIT A LURE IS PULLING TOWARD — a `FighterId` — or `NO_FIGHTER` for every other
+   * displacement (BH-09, B3b, 2026-10-15).
+   *
+   * A pull used to be a direction and a distance captured at the hit, i.e. spent toward the
+   * point where the bait STOOD. Three shapes dragged a bystander through the bait that way:
+   * several pellets owing it more than its separation, a later pellet hooking the bystander
+   * so the two closed from both ends, and a bait walking into the pull. With an anchor,
+   * `movement.ts:stepPush` stops the pull LEVEL WITH THE BAIT WHEREVER IT NOW IS. The
+   * direction is still the hit's (`x`/`y`) — the anchor is a stop condition, not a steer.
+   *
+   * ⚠️ AN ID, NOT A `Fighter` REFERENCE: `net/wire.ts` walks state structurally and two
+   * fighters luring each other would be a reference cycle in every digest that serialises it.
+   *
+   * Written only by `movement.ts:lureFighter` (a real id) and `displaceFighter` /
+   * `placeFighterAt` / a spent push (`NO_FIGHTER`) — newest displacement wins, as for `x`/`y`
+   * and `speed`.
+   */
+  anchor: number;
 }
 
 /**
@@ -761,7 +780,7 @@ export function createFighter(spec: FighterSpec): Fighter {
     // Seeded here and only here — see `Fighter.push`. A fighter that has never been shoved
     // holds `{0,0,0}`, which is the identity for `stepPush` and is what makes a roster with
     // no authored displacement bit-identical to the sim before this field existed.
-    push: { x: 0, y: 0, remaining: 0, speed: 0 },
+    push: { x: 0, y: 0, remaining: 0, speed: 0, anchor: NO_FIGHTER },
     // ── THE LOADOUT, SEEDED WHOLE, EVEN WHEN IT IS EMPTY — see `ItemState` ───
     //
     // Every field is written here and nowhere else, exactly as `push` and `cast` are, so
@@ -1385,6 +1404,59 @@ export function nearestLivingOpponent(
     }
   }
   return best;
+}
+
+/**
+ * THE OPPONENT A FIGHTER IS AIMING AT — the frame a HUMAN's projectile is stamped with (BH-04).
+ *
+ * `combat.ts:deliverWeapon` stamped `nearestLivingOpponent` on every projectile, and
+ * `sim.ts:stepProjectiles` reads that `targetId` for exactly two things: the HOMING steer and
+ * the RANGE BUDGET's frame (`rules.ts` AUTHORISED DEVIATION #12 — "range means a
+ * SEPARATION"). For a bot the nearest IS the aim — `ai.ts:stepAI` faces the same
+ * `nearestLivingOpponent` on the same tick — so bots keep it. For a human the aim is the
+ * input, and from three seats the two come apart: a homing shot aimed at one fighter curved
+ * into whoever stood nearest, and a straight shot was budgeted against a bystander running
+ * alongside it and reached past its card range (`sim.test.mjs` §46(b), red on `d46f750`).
+ *
+ * THE RULE, in the order it decides:
+ *   1. **IN FRONT.** Only opponents with `facing · v ≥ 0` — a shot cannot be aimed at a
+ *      fighter behind the shooter. `≥`, so one standing exactly abeam still counts.
+ *   2. **THE SMALLEST PERPENDICULAR MISS** from the aim line, `|facing × v|` — who the shot
+ *      would pass closest to if nothing curved it. Not the angle: an angle would rank a
+ *      far fighter a few degrees off the line above a near one squarely on it.
+ *   3. **TIES → THE NEARER, THEN THE LOWER SLOT** — a strict `<` over `state.fighters`, the
+ *      sim's one iteration order, exactly as `nearestLivingOpponent` breaks its own ties.
+ *   4. **NOBODY IN FRONT → `nearestLivingOpponent`**, the old answer, so a shot fired away
+ *      from everyone is still framed on somebody and the budget still has a frame.
+ *
+ * ⚠️ **AT TWO SEATS THIS IS `nearestLivingOpponent` BY CONSTRUCTION** — one opponent: in
+ * front it is the minimum, behind it is the fallback. `tools/tmp/b3b_digest.mjs` hum2 (110
+ * ordered pairs, slot 0 a scripted human) is the measurement rather than this sentence.
+ *
+ * ⚠️ `facing` is a unit vector for every writer (`sim.ts:applyAim` normalises; spawn facings
+ * are axis-aligned), but the ranking does not depend on it: a uniform scale on `facing`
+ * scales every miss by the same factor and leaves the argmin and the `≥ 0` test unchanged.
+ */
+export function aimedLivingOpponent(state: MatchState, fighter: Fighter): Fighter | null {
+  const fx = fighter.facing.x;
+  const fy = fighter.facing.y;
+  let best: Fighter | null = null;
+  let bestMiss = Infinity;
+  let bestDist = Infinity;
+  for (const other of state.fighters) {
+    if (!isLivingOpponentOf(other, fighter)) continue;
+    const vx = other.x - fighter.x;
+    const vy = other.y - fighter.y;
+    if (fx * vx + fy * vy < 0) continue; // behind the aim
+    const miss = Math.abs(fx * vy - fy * vx);
+    const d = Math.hypot(vx, vy);
+    if (miss < bestMiss || (miss === bestMiss && d < bestDist)) {
+      bestMiss = miss;
+      bestDist = d;
+      best = other;
+    }
+  }
+  return best ?? nearestLivingOpponent(state, fighter);
 }
 
 /**
