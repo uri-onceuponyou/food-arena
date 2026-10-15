@@ -281,8 +281,8 @@ Root causes, deduplicated across finders (finder IDs in brackets). Full evidence
 |---|---|---|
 | **1** | **R1** · **A1** · **B1** | the two biggest measured levers on the floor + fighters, plus the bugs Uri hits every match (items, the result screen, the wind-up) |
 | **2** | **F1** · **B3** · **B2** | the fighter unit needs R1's stage; B3/B2 are disjoint from F1 (F1 owns `hud.ts`) |
-| **3** | **V1** · **C1** · **U1** | VFX and characters tuned under the new lighting; menus after B2 frees the screens |
-| **4** | **A2** · **B4** · **B5** | the prop kit + beauty corner, scored before scaling |
+| **3** | **C1** · **A2** · **U1** | ⚠️ re-ordered after w1 (§8): characters that read at 58° and a filled, built district are what 24 of 24 critic notes ask for; menus after B2 frees the screens. ~~V1 · C1 · U1~~ was the plan before the score |
+| **4** | **V1** · **B4** · **B5** | VFX under the new lighting and the new cast; ~~A2 · B4 · B5~~ before w1 |
 | **5+** | chosen from the last round's critic notes and measurements | A3, P1, the minors, second passes |
 
 **After every wave:** merge the branches → gates on a clean worktree of the merge (`tsc`, `sim.test`,
@@ -317,6 +317,27 @@ under it.
 
 ## 8. Scoreboard
 
+### What w1 taught (2026-10-15) — every mechanical target met, the score did not move
+
+R1 and A1 hit their acceptance numbers (front/top 0.51–0.58, shadow ratio 0.69–0.70, hue shift
+≤3.2°, fighter contour share 0.087–0.156, dead-flat floor 0.56–0.61, litter 0.00–0.01%) and the
+blind score is flat — `LESSONS §6b` again. The critics' sentences say why, and they are unanimous:
+
+| theme in the critic's one change for OUR panel | arena (8) | arena6 (8) | cast (8) |
+|---|---|---|---|
+| the floor is **empty / flat / nothing on it** | 8 | 8 | 4 |
+| the fighters are **small, pale, unreadable blobs** | 8 | 8 | 8 |
+| **fill the playfield with cover / props** | 7 | 7 | 4 |
+| props are **plain untextured blocks** | 4 | 3 | 4 |
+| a fighter is **"a jumble of overlapping shapes with no clear head, body or silhouette"** | — | — | 8 |
+| VFX hides the fighters | 2 | 0 | 3 |
+
+r0's critics asked for a calmer floor *and* for cover; A1 delivered the first, so the second is now
+the whole complaint. **Re-ordered waves 3–4 on this evidence (§6): C1 (characters) and A2 (props +
+a filled district) move up, V1 (VFX) moves down** — VFX is named in 5 of 24 notes, characters in 24.
+
+
 | round | tree | arena | arena6 | cast | home | select | notes |
 |---|---|---|---|---|---|---|---|
 | r0 | `1090046` | 4.60 | 4.97 | 4.51 | 5.37 | 5.83 | baseline; ref 7.91–8.43; ctl_high 8.10, ctl_low 3.20 |
+| w1 | `ef26eeb` (R1 + A1) | 4.50 | 4.81 | 4.45 | = r0 | = r0 | **flat** — every Δ inside the floor. k=8 per match element; home/select frames byte-identical to r0 (R1 left the lobby untouched), so not re-scored. ref 8.00–8.49, 0 invalid; drift (r0's own sheets, same-sheet paired, n=10) **−0.11**; ctl_high 8.2, ctl_low 3.5. Data: `shots/rv/w1/scores.json` |
