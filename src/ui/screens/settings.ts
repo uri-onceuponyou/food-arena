@@ -72,10 +72,11 @@
  *     That is why the arrows are shown as a row of their own and labelled as fixed
  *     rather than quietly omitted.
  *  2. **A key that already does something is refused, with the reason said out loud.**
- *     `MUTE_KEY`, `PAUSE_KEY`, the weapon digits and the keys the browser needs for
- *     focus are all imported from the modules that own them, so the refusal list
- *     cannot drift from the game either. `Esc` cancels a capture instead of binding,
- *     which is also why it can never be bound: it is `PAUSE_KEY`.
+ *     `MUTE_KEY`, `PAUSE_KEY`, the weapon digits, the item keys and the keys the browser
+ *     needs for focus are all imported from the modules that own them (the focus keys
+ *     excepted — the browser owns those), so the refusal list cannot drift from the game
+ *     either. `Esc` cancels a capture instead of binding, which is also why it can never
+ *     be bound: it is `PAUSE_KEY`.
  *
  * Everything else on the Controls list is stated as fixed BECAUSE IT IS: `MUTE_KEY`
  * and `PAUSE_KEY` are compared as string primitives inside their own modules, so no
@@ -102,7 +103,7 @@ import {
 } from '../../render/quality';
 // The bindings the game actually listens for. See the KEYMAP block below — this used
 // to be a copy maintained by hand in this file.
-import { MOVE_KEYS, MUTE_KEY, MAX_WEAPON_SLOT_KEY, type MoveDirection } from '../../game/input';
+import { ITEM_KEYS, MOVE_KEYS, MUTE_KEY, MAX_WEAPON_SLOT_KEY, type MoveDirection } from '../../game/input';
 import { CHARACTERS, CHARACTER_IDS, LEVEL_MIN } from '../../game/rules';
 import { PAUSE_KEY } from './matchScreen';
 import { NAME_MAX } from './profile';
@@ -232,13 +233,30 @@ type MoveBindings = Partial<Record<MoveDirection, string>>;
  * The digits are the subtle ones. `input.ts:onKeyDown` reads `Number(e.key)` — the
  * CHARACTER, not the code — so both the number row and the numpad select a weapon, and
  * both have to be reserved even though only one of them is a `Digit*` code.
+ *
+ * 🚨 **THE ITEM KEYS WERE MISSING, AND ONCE ITEMS WORKED THAT WAS A KEY THAT DID TWO THINGS
+ * (F8).** `input.ts:ITEM_KEYS` (Q, E) press an equip slot; its own header called this list's
+ * ignorance of them *"a reported gap, not a decision"*, and B1 (`056b868`) made the press
+ * live — so "Move up" rebound to Q moved AND spent item 1 on every step, and the Controls
+ * list never mentioned items at all. Measured by `tools/tmp/b2_input.mjs` §F8 on `8586f00`:
+ * the screen answered "Move up is now E." and a stored `up: 'KeyQ'` moved the fighter.
+ * ⚠️ **AND SPACE, FOR ENTER'S REASON.** Space presses the focused control exactly as Enter
+ * does (Enter has been on this list for that reason all along); with "left = Space" a player
+ * whose focus sat on a match chip paused the match by walking left (F3). F3 also stops match
+ * chips taking focus from a mouse click, which makes this belt-and-braces rather than the
+ * only defence — it stays because the rule is the rule Enter already follows.
+ * ⚠️ A stored binding on any of these is now DROPPED on load by `sanitizeBindings`, silently,
+ * and the direction falls back to its shipped key (the arrows always work). That is the safe
+ * direction; it is said here because the player is not told.
  */
 const RESERVED_KEYS: ReadonlyArray<{ code: string; does: string }> = [
   { code: MUTE_KEY, does: 'mutes the game' },
   { code: PAUSE_KEY, does: 'pauses a match' },
+  ...ITEM_KEYS.map((code, i) => ({ code, does: `uses item ${i + 1}` })),
   { code: 'Tab', does: 'moves between controls' },
   { code: 'Enter', does: 'presses the control you are on' },
   { code: 'NumpadEnter', does: 'presses the control you are on' },
+  { code: 'Space', does: 'presses the control you are on' },
   ...Array.from({ length: MAX_WEAPON_SLOT_KEY }, (_, i) => [
     { code: `Digit${i + 1}`, does: 'picks a weapon' },
     { code: `Numpad${i + 1}`, does: 'picks a weapon' },
@@ -402,6 +420,11 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
     if (kit > 1) {
       rows.push({ action: 'Switch weapon', keys: Array.from({ length: kit }, (_, i) => String(i + 1)) });
     }
+    // The two equip slots, one key each, read off the table the game matches against —
+    // the same caps `hud.ts` prints on the item buttons. Unconditional: an empty slot's key
+    // still belongs to it, and a player who equips one mid-session should not have to find
+    // out from a refusal what Q does.
+    rows.push({ action: 'Use item', keys: ITEM_KEYS.map(keyCap) });
     rows.push({ action: 'Mute / unmute', keys: [keyCap(MUTE_KEY)] });
     rows.push({ action: 'Pause', keys: [keyCap(PAUSE_KEY)] });
     return rows;
@@ -424,7 +447,7 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
     const kit = CHARACTERS[ctx.profile.selected].weapons.length;
     const solo = kit > 1 ? '' : ` ${CHARACTERS[ctx.profile.selected].name} carries one weapon, `
       + 'so there is no weapon-switch key while it is equipped.';
-    return `Aim, fire, mute and pause are fixed.${solo} On a phone, twin sticks appear `
+    return `Aim, fire, items, mute and pause are fixed.${solo} On a phone, twin sticks appear `
       + 'under your thumbs — the left half of the screen moves, the right half aims and '
       + 'fires — in landscape and in portrait alike.';
   };

@@ -526,10 +526,14 @@ try {
         };
         const ok = await tryBind('down', 'KeyJ');
         row('F8', 'CONTROL: the screen accepts a free key (down = J)', ok.cap === 'J', ok);
+        // A refusal keeps the capture ARMED for another key (the cap reads "…"), so "refused"
+        // is: the cap never became the new key, the note says why, and nothing was stored.
+        // ⚠️ The first cut asserted the cap was back to "W" and went red on a correct refusal.
         const e = await tryBind('up', 'KeyE');
-        row('F8', 'BUG: binding "up" to E is REFUSED, with the reason', e.cap === 'W' && /item/i.test(e.note), e);
         const sp = await tryBind('left', 'Space');
-        row('F8', 'BUG: binding "left" to Space is REFUSED', sp.cap === 'A', sp);
+        const stored = await page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? '{}').moveKeys ?? {}, SETTINGS_KEY);
+        row('F8', 'BUG: binding "up" to E is REFUSED, with the reason', e.cap !== 'E' && /already/.test(e.note) && /item/i.test(e.note) && !stored.up, { ...e, stored });
+        row('F8', 'BUG: binding "left" to Space is REFUSED', sp.cap !== 'Space' && /already/.test(sp.note) && !stored.left, { ...sp, stored });
         const rowsTxt = await page.evaluate(() => [...document.querySelectorAll('[data-el="keys"] .set-key-row')].map((r) => ({
           action: r.querySelector('.set-key-action')?.textContent ?? '', caps: [...r.querySelectorAll('kbd')].map((k) => k.textContent) })));
         const item = rowsTxt.find((r) => /item/i.test(r.action));

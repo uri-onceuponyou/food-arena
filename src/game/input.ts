@@ -119,6 +119,11 @@ export const MAX_WEAPON_SLOT_KEY = 9;
  * key that moves AND fires an item, and the Controls reference does not mention items at
  * all. The fix is two lines in a file this pass does not own; the export exists so it is
  * one import when somebody takes it.
+ *
+ * ⚠️ **CLOSED (F8) — kept above because it was true for 43 days and became a live defect
+ * the day `056b868` made the press reach the sim.** `settings.ts` now imports this table
+ * into `RESERVED_KEYS` (refusing Q/E as movement keys, and dropping a stored binding on
+ * either) and prints a "Use item" row off it.
  */
 export const ITEM_KEYS = ['KeyQ', 'KeyE'] as const;
 

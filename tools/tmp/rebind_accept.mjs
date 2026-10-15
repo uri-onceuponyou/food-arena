@@ -311,17 +311,23 @@ try {
   // Every one of these is a value the UI can never produce, which is the point: storage
   // is user input (`profile.ts` says so about the name field for the same reason) and it
   // is read straight into the table the game matches key events against.
+  // ⚠️ THE DUPLICATE WAS `KeyQ` (`left: 'KeyQ', down: 'KeyQ'`, then `holdKey('KeyQ')`) AND
+  // IT IS `KeyJ` NOW, BECAUSE Q STOPPED BEING A FREE KEY. `input.ts:ITEM_KEYS` makes Q item
+  // 1, and F8 (B2, wave 2) put it on `settings.ts:RESERVED_KEYS`, so `sanitizeBindings`
+  // drops BOTH claims and this row would read (0, 0) — a red that says nothing about
+  // duplicates. The row tests the duplicate rule, so its key must be one nothing listens
+  // for: not KeyI (`NEW_UP` above), not Q/E/Space/M/Esc/Tab/Enter, a digit, WASD or an arrow.
   await page.evaluate((k) => localStorage.setItem(k, JSON.stringify({
     reduceMotion: false,
-    moveKeys: { up: 'KeyM', left: 'KeyQ', down: 'KeyQ', right: 42 },
+    moveKeys: { up: 'KeyM', left: 'KeyJ', down: 'KeyJ', right: 42 },
   })), SETTINGS_KEY);
   await enterMatch(page);
   const hostile = await holdKey(page, 'KeyW');
   record('hostile', 'a-reserved-key-in-storage-is-dropped', hostile.moveY === -1,
     `KeyW after a blob claiming up=KeyM -> move=(${hostile.moveX}, ${hostile.moveY})`);
-  const dup = await holdKey(page, 'KeyQ');
+  const dup = await holdKey(page, 'KeyJ');
   record('hostile', 'a-duplicate-binds-once', dup.moveX === -1 && dup.moveY === 0,
-    `KeyQ claimed by BOTH left and down -> move=(${dup.moveX}, ${dup.moveY}), want (-1, 0)`);
+    `KeyJ claimed by BOTH left and down -> move=(${dup.moveX}, ${dup.moveY}), want (-1, 0)`);
   const bad = await holdKey(page, 'KeyD');
   record('hostile', 'a-non-string-is-dropped', bad.moveX === 1 && bad.moveY === 0,
     `KeyD after a blob claiming right=42 -> move=(${bad.moveX}, ${bad.moveY})`);
