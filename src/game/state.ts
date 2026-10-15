@@ -644,6 +644,25 @@ export interface PushState {
    * two behaviourally identical states must also be BIT-identical.
    */
   speed: number;
+  /**
+   * THE BAIT A LURE IS PULLING TOWARD — a `FighterId` — or `NO_FIGHTER` for every other
+   * displacement (BH-09, B3b, 2026-10-15).
+   *
+   * A pull used to be a direction and a distance captured at the hit, i.e. spent toward the
+   * point where the bait STOOD. Three shapes dragged a bystander through the bait that way:
+   * several pellets owing it more than its separation, a later pellet hooking the bystander
+   * so the two closed from both ends, and a bait walking into the pull. With an anchor,
+   * `movement.ts:stepPush` stops the pull LEVEL WITH THE BAIT WHEREVER IT NOW IS. The
+   * direction is still the hit's (`x`/`y`) — the anchor is a stop condition, not a steer.
+   *
+   * ⚠️ AN ID, NOT A `Fighter` REFERENCE: `net/wire.ts` walks state structurally and two
+   * fighters luring each other would be a reference cycle in every digest that serialises it.
+   *
+   * Written only by `movement.ts:lureFighter` (a real id) and `displaceFighter` /
+   * `placeFighterAt` / a spent push (`NO_FIGHTER`) — newest displacement wins, as for `x`/`y`
+   * and `speed`.
+   */
+  anchor: number;
 }
 
 /**
@@ -761,7 +780,7 @@ export function createFighter(spec: FighterSpec): Fighter {
     // Seeded here and only here — see `Fighter.push`. A fighter that has never been shoved
     // holds `{0,0,0}`, which is the identity for `stepPush` and is what makes a roster with
     // no authored displacement bit-identical to the sim before this field existed.
-    push: { x: 0, y: 0, remaining: 0, speed: 0 },
+    push: { x: 0, y: 0, remaining: 0, speed: 0, anchor: NO_FIGHTER },
     // ── THE LOADOUT, SEEDED WHOLE, EVEN WHEN IT IS EMPTY — see `ItemState` ───
     //
     // Every field is written here and nowhere else, exactly as `push` and `cast` are, so

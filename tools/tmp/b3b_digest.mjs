@@ -14,6 +14,7 @@
  *   ai6    C(11,6) evenly subsampled, rotated, every seat `ai`        (--rosters, default 24)
  *   hum2   ai2's pairs with slot 0 a SCRIPTED HUMAN                    (110 cells)
  *   hum6   ai6's rosters with slot 0 a SCRIPTED HUMAN                  (--rosters)
+ *   lure6  12 six-seat AI matches with THREE Sushis each (Seaweed + Big Catch lures)
  * The scripted human aims along a slowly rotating bearing, walks a slow circle and presses fire
  * every tick, cycling weapons every 2 s — deterministic, and deliberately NOT aimed at the
  * nearest opponent, so a rule that only reads a human's aim can be seen to move (or not).
@@ -120,6 +121,13 @@ const SUITES = {
   ai6: () => rosters(6).map((r) => [r, false]),
   hum2: () => rosters(2).map((r) => [r, true]),
   hum6: () => rosters(6).map((r) => [r, true]),
+  // LURE-HEAVY: three AI Sushis in every six-seat match (Seaweed + Big Catch), so a lure rule
+  // is in front of the corpus often enough for "0 moved" to mean something (BH-09).
+  lure6: () => {
+    const others = CHARACTER_IDS.filter((i) => i !== 'sushi');
+    return Array.from({ length: 12 }, (_, r) => [['sushi', others[r % others.length], 'sushi',
+      others[(r + 3) % others.length], 'sushi', others[(r + 6) % others.length]], false]);
+  },
 };
 
 if (ARGS.includes('--selftest')) {

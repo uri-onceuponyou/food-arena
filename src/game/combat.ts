@@ -43,7 +43,7 @@ import {
   actionsLocked, aimedLivingOpponent, hasItem, isLivingOpponentOf, lastFighterStanding, livingFighterCount,
   nearestLivingOpponent, NO_FIGHTER, weaponsLocked,
 } from './state.ts';
-import { boxesOverlap, breakConcealment, displaceFighter, placeFighterAt } from './movement.ts';
+import { boxesOverlap, breakConcealment, displaceFighter, lureFighter, placeFighterAt } from './movement.ts';
 
 const RAD2DEG = 180 / Math.PI;
 const DEG2RAD = Math.PI / 180;
@@ -284,14 +284,19 @@ function applyHitDisplacement(state: MatchState, attacker: Fighter, target: Figh
     // bait and out the far side. Un-clamped, a fighter standing 10 wu away would be yanked
     // 32 wu past it and a second application would yank it back — an oscillation that reads
     // on screen as the controls fighting the player.
-    const ax = target.x;
-    const ay = target.y;
+    //
+    // 🚨 **THAT PROMISE WAS KEPT PER PULL AND BROKEN IN TOTAL (BH-09, B3b).** The loop read
+    // `displaceFighter(victim, dx, dy, lure < sep ? lure : sep);` — each pull clamped, but
+    // `displaceFighter` ACCUMULATES, so Big Catch's three pellets owed a bystander up to a
+    // body length toward a bait 10-41 wu away and dragged it out the far side; a later
+    // pellet hooking the bystander made the two close from both ends; and a bait walking
+    // into the pull was passed. `movement.ts:lureFighter` now clamps the TOTAL owed pull to
+    // the separation and anchors it to the bait, so `stepPush` stops it level with the bait
+    // wherever the bait now is. The per-pull clamp above is subsumed and retired.
+    // `sim.test.mjs` §46(d) holds every shape at six seats.
     for (const victim of state.fighters) {
       if (!isLivingOpponentOf(victim, attacker)) continue;
-      const dx = ax - victim.x;
-      const dy = ay - victim.y;
-      const sep = Math.hypot(dx, dy);
-      displaceFighter(victim, dx, dy, lure < sep ? lure : sep);
+      lureFighter(victim, target, lure);
     }
   }
 }

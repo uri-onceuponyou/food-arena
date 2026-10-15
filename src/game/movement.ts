@@ -32,7 +32,7 @@ import type { Fighter, Splat } from './state.ts';
 // standing reason — "stunned or casting" is stated once, in the module that owns the
 // fields, and a copy of `elapsed < stunnedUntil || cast !== null` here would keep passing
 // against a sim that had changed its mind about what a lock is.
-import { movementLocked } from './state.ts';
+import { movementLocked, NO_FIGHTER } from './state.ts';
 import {
   CONCEAL_REVEAL_RADIUS, concealmentKeepoutRadius, PLAYER_SIZE, PLAYER_SPEED,
   PUDDLE_SLOW_FACTOR, SPLAT_RADIUS,
@@ -592,6 +592,46 @@ export function displaceFighter(
   // spend to the ordinary rate along with the ordinary direction, and `0` is the identity a
   // spent push snaps back to.
   p.speed = opts?.speed ?? 0;
+  // No bait — see `lureFighter`, the only writer of a real anchor. Written on every
+  // displacement for the reason `speed` is: the newest displacement wins, so a knockback
+  // landing mid-lure turns the leftover into an ordinary shove rather than a pull that
+  // still stops at a bait it no longer points at.
+  p.anchor = NO_FIGHTER;
+}
+
+/**
+ * PULL `fighter` TOWARD `bait` BY UP TO `distance` — a lure's displacement (BH-09, B3b).
+ *
+ * `combat.ts:applyHitDisplacement` promised *"nobody is dragged THROUGH the bait and out the
+ * far side"* and clamped each PULL to the separation — but `displaceFighter` accumulates, so
+ * Big Catch's three pellets, landing inside the time one pull is spent, owed a bystander up
+ * to a body length toward a bait 10-41 wu away (`sim.test.mjs` §46(d), red on `d46f750`).
+ * Two rules, each with its own red row and its own known-bad arm (`tools/tmp/b3b_knownbad`):
+ *
+ *   1. **THE TOTAL OWED PULL IS AT MOST THE SEPARATION**, after the shared accumulate-and-cap
+ *      rule has run — not each pull, the total. That is what the per-pull clamp in
+ *      `applyHitDisplacement` was trying to say, and it makes that clamp redundant.
+ *   2. **THE PULL STOPS LEVEL WITH THE BAIT WHEREVER IT NOW IS** — `push.anchor`, read by
+ *      `stepPush`. Rule 1 is a promise about where the bait stood at the hit; it cannot see
+ *      a bait that walks into the pull, nor a later pellet that hooks THIS fighter and makes
+ *      it the new bait while it is still being pulled (then the two close from both ends).
+ *
+ * The direction is the hit's, exactly as `displaceFighter` sets it, so a pull toward a bait
+ * that stands still travels the identical path it always did; only the stop moved.
+ *
+ * ⚠️ A FIGHTER COINCIDENT WITH THE BAIT IS NOT PULLED and its own pending displacement is left
+ * alone — the same `PUSH_COINCIDENT_EPS` `displaceFighter` refuses on, so the bait itself
+ * (the victim, standing AT the anchor) is never touched here: you are not lured toward yourself.
+ */
+export function lureFighter(fighter: Fighter, bait: Fighter, distance: number): void {
+  const dx = bait.x - fighter.x;
+  const dy = bait.y - fighter.y;
+  const sep = Math.hypot(dx, dy);
+  if (!(distance > 0) || sep < PUSH_COINCIDENT_EPS) return;
+  displaceFighter(fighter, dx, dy, distance);
+  const p = fighter.push;
+  if (p.remaining > sep) p.remaining = sep;
+  p.anchor = bait.id;
 }
 
 /**
@@ -636,6 +676,7 @@ export function placeFighterAt(fighter: Fighter, x: number, y: number, arena: Ar
   p.x = 0;
   p.y = 0;
   p.speed = 0;
+  p.anchor = NO_FIGHTER;
 }
 
 /**
@@ -668,8 +709,24 @@ export function placeFighterAt(fighter: Fighter, x: number, y: number, arena: Ar
  *
  * ⚠️ **`remaining` IS SNAPPED TO EXACTLY 0**, and the direction with it, so a spent
  * displacement leaves no float dust in the state digest — see `Fighter.push`.
+ *
+ * ── A LURE STOPS LEVEL WITH ITS BAIT, WHEREVER THE BAIT NOW IS (BH-09, B3b) ──
+ *
+ * With `push.anchor` set (only `lureFighter` sets it), the step is capped at the bait's
+ * distance ALONG the pull's own direction, measured from where the bait stands NOW, and the
+ * pull ends there: it can arrive, it cannot pass. The direction is never re-aimed — the anchor
+ * is a stop condition, so a pull toward a bait that stands still runs the path it always ran.
+ * `fighters` is optional so every caller that has no anchor to resolve (§39's direct drives)
+ * keeps the 4-argument form; `sim.ts`'s loop passes `state.fighters`. Without it the anchor is
+ * simply not consulted, which is exactly the pre-BH-09 behaviour.
  */
-export function stepPush(fighter: Fighter, dt: number, arena: ArenaDefinition, elapsed: number): boolean {
+export function stepPush(
+  fighter: Fighter,
+  dt: number,
+  arena: ArenaDefinition,
+  elapsed: number,
+  fighters?: readonly Fighter[],
+): boolean {
   const p = fighter.push;
   if (p.remaining <= 0) return false;
   // ⚠️ `p.speed > 0 ? p.speed : PLAYER_SPEED` — the sentinel is 0 and NOT `PLAYER_SPEED`
@@ -678,12 +735,25 @@ export function stepPush(fighter: Fighter, dt: number, arena: ArenaDefinition, e
   // `displaceFighter`'s `opts` block for why a rate is authorable at all.
   const rate = p.speed > 0 ? p.speed : PLAYER_SPEED;
   const full = rate * dt;
-  const step = p.remaining < full ? p.remaining : full;
+  let step = p.remaining < full ? p.remaining : full;
+  if (p.anchor !== NO_FIGHTER && fighters !== undefined) {
+    const bait = fighters[p.anchor];
+    if (bait !== undefined) {
+      const along = (bait.x - fighter.x) * p.x + (bait.y - fighter.y) * p.y;
+      if (along <= step) {
+        // The last step of this pull: level with the bait, or none at all if the bait is
+        // already level or behind (a zero step is a no-op in `tryMove`, which skips even
+        // `escapeCover` for it). What is left of the budget is spent arriving.
+        step = along > 0 ? along : 0;
+        p.remaining = step;
+      }
+    }
+  }
   p.remaining -= step;
   const moved = movementLocked(fighter, elapsed)
     ? false
     : tryMove(fighter, p.x * step, p.y * step, arena);
-  if (p.remaining <= 0) { p.remaining = 0; p.x = 0; p.y = 0; p.speed = 0; }
+  if (p.remaining <= 0) { p.remaining = 0; p.x = 0; p.y = 0; p.speed = 0; p.anchor = NO_FIGHTER; }
   return moved;
 }
 

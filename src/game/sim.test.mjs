@@ -12843,6 +12843,129 @@ console.log('\n46. Combat + items, the second half — why a press is refused, t
       onArm.landed.length > 0 && onArm.landed.every((d) => d === RING.damage) && offArm.landed.every((d) => d === RING.damage),
       `Ring declares ${!!RING.trailBoosted}; on [${onArm.landed}], off [${offArm.landed}] vs ${RING.damage}`);
   }
+
+  // ── (d) BH-09: A LURE NEVER DRAGS ANYONE THROUGH THE BAIT — at six seats ─────
+  //
+  // `combat.ts:applyHitDisplacement` clamped each PULL to the victim's separation and its own
+  // comment promised *"nobody is dragged THROUGH the bait"* — but `movement.ts:displaceFighter`
+  // ACCUMULATES (`remaining = min(cap, remaining + distance)`), so Big Catch's three pellets,
+  // landing inside the time one pull is spent, owed a bystander up to 42 wu toward a bait 10-41
+  // wu away and dragged it out the far side. The residual case is worse: a later pellet that
+  // hooks the BYSTANDER makes it the new bait mid-pull, and the two then close on each other
+  // from both ends. A third shape: a bait that walks INTO the pull is passed by the fighter
+  // pulled toward where it used to stand.
+  //
+  // The fix is two mechanisms, and each has its own red row here and its own known-bad arm in
+  // `tools/tmp/b3b_knownbad.mjs`: the TOTAL owed pull is clamped to the separation at every
+  // application (`movement.ts:lureFighter`), and the pull is spent toward a LIVE anchor — it
+  // stops level with the bait wherever the bait now is (`stepPush`).
+  //
+  // 🚨 SIX SEATS: a lure moves "EVERY living opponent" and at two seats the only opponent IS the
+  // bait, so nothing is ever pulled (§39(c) runs that vacuous control on purpose).
+  // ⚠️ "Through" is measured ONLY on ticks where a pull was being spent: a bait that keeps
+  // walking after a pull has ended passes the bystander on its own legs, which is not a drag.
+  {
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const CX = arena.center.x, CY = arena.center.y;
+    const DT = 16.667;
+    const IDLE = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+    const KIT = CHARACTERS.sushi.weapons;
+    const CATCH_I = KIT.findIndex((w) => w.key === 'Catch');
+    const SEAWEED_I = KIT.findIndex((w) => w.key === 'Seaweed');
+    const CATCH = KIT[CATCH_I];
+    const SEAWEED = KIT[SEAWEED_I];
+    const BX = CX + CATCH.range * 0.71;
+    /** Sushi (slot 0) at the centre facing east; the bait B (slot 1) on the aim line; the
+     *  bystander C (slot 2) `gap` wu due south of B; slots 3-5 parked far west. */
+    const board = (gap) => {
+      const st = createMatch(arena, [
+        { characterId: 'sushi', spawn: { x: CX, y: CY }, controller: 'human' },
+        { characterId: 'pizza', spawn: { x: BX, y: CY }, controller: 'human' },
+        { characterId: 'soup', spawn: { x: BX, y: CY + gap }, controller: 'human' },
+        ...Array.from({ length: MAX_FIGHTERS - 3 }, (_, i) => ({
+          characterId: 'hamburger', spawn: { x: CX - 900 - i * 150, y: CY + 700 }, controller: 'human',
+        })),
+      ]);
+      st.phase = 'playing';
+      for (const f of st.fighters) { f.hp = 1e7; f.maxHp = 1e7; }
+      st.fighters[0].facing = { x: 1, y: 0 };
+      return st;
+    };
+    /** Fire `wi` once and run 2.5 s. `s` = C.y − B.y (starts at +gap; < 0 means crossed),
+     *  sampled only after ticks in which B or C began with a pull to spend. */
+    const run = (wi, gap, { bWalks = false } = {}) => {
+      const st = board(gap);
+      const [, B, C] = st.fighters;
+      let minS = Infinity; let pulledTicks = 0; let hitsOnB = 0; let hitsOnC = 0;
+      for (let t = 0; t < 150; t++) {
+        const pulling = B.push.remaining > 0 || C.push.remaining > 0;
+        const inputs = st.fighters.map((_, i) => (i === 0
+          ? { move: { x: 0, y: 0 }, aim: { x: 1, y: 0 }, selectedWeapon: wi, attack: t === 0 }
+          : i === 1 && bWalks && hitsOnB > 0 ? { move: { x: 0, y: 1 }, selectedWeapon: 0, attack: false } : IDLE));
+        for (const e of stepMatch(st, DT, inputs)) {
+          if (e.type === 'hit-landed' && e.source?.kind === 'weapon') { if (e.targetId === 1) hitsOnB++; if (e.targetId === 2) hitsOnC++; }
+        }
+        if (pulling) { pulledTicks++; minS = Math.min(minS, C.y - B.y); }
+      }
+      return { gap, minS, pulledTicks, hitsOnB, hitsOnC, finalS: C.y - B.y };
+    };
+    const fmt = (r) => `gap ${r.gap.toFixed(1)}: min ${r.minS.toFixed(2)} (B hit ${r.hitsOnB}, C hit ${r.hitsOnC}, ${r.pulledTicks} pulled ticks)`;
+
+    const gaps = [0.24, 0.48, 0.71, 0.98].map((k) => CATCH.lure * k);
+    const arms = gaps.map((g) => run(CATCH_I, g));
+    const accumulation = arms.filter((r) => r.hitsOnC === 0);
+    const residual = arms.filter((r) => r.hitsOnC > 0);
+    check('(d) NON-VACUITY: Big Catch lands MORE THAN ONE pellet on the bait, every gap is inside one pellet\'s lure, and a pull really ran',
+      arms.length === 4 && arms.every((r) => r.hitsOnB + r.hitsOnC >= 2 && r.pulledTicks > 0 && r.gap < CATCH.lure) && CATCH.pellets > 1,
+      arms.map(fmt).join(' · '));
+    check('(d) NON-VACUITY: the board holds BOTH shapes — bystanders never hit (accumulation) and one hooked mid-pull (residual)',
+      accumulation.length > 0 && residual.length > 0,
+      `${accumulation.length} accumulation arm(s), ${residual.length} residual arm(s)`);
+    check('(d) 🔴 several pellets owe a bystander more than its separation — it is still never dragged THROUGH the bait',
+      accumulation.length > 0 && accumulation.every((r) => r.minS >= -1e-6),
+      accumulation.map(fmt).join(' · ') + ' (pre-fix: crosses — e.g. −4 at gap 41)');
+    check('(d) 🔴 …nor when a later pellet hooks the BYSTANDER and makes it the new bait mid-pull (the residual case)',
+      residual.length > 0 && residual.every((r) => r.minS >= -1e-6),
+      residual.map(fmt).join(' · ') + ' (pre-fix: −43.5 at gap 30)');
+
+    // THE TOTAL CLAMP, stated directly: three applications in ONE tick (three pellets landing
+    // together), driven through `applyDamage` so the separation is an exact number.
+    {
+      const st = board(CATCH.lure * 0.71);
+      const [, B, C] = st.fighters;
+      const sep = Math.hypot(B.x - C.x, B.y - C.y);
+      for (let k = 0; k < 3; k++) {
+        applyDamage(st, B, CATCH.damage, CATCH.effect, { kind: 'weapon', weaponKey: 'Catch', weaponName: CATCH.name, attackerId: 0 }, []);
+      }
+      check('(d) 🔴 three pellets in one tick owe the bystander AT MOST its separation — not 3 × min(lure, sep) capped at a body length',
+        C.push.remaining > 0 && C.push.remaining <= sep + 1e-9,
+        `owed ${C.push.remaining.toFixed(3)} wu, separation ${sep.toFixed(3)} (pre-fix: ${Math.min(CATCH.lure, 3 * sep).toFixed(1)})`);
+    }
+
+    // A BAIT THAT WALKS INTO THE PULL. One Seaweed pellet (lure 21, and it SLOWS the bait):
+    // C is owed min(lure, gap) toward where B stood; B walks toward C once hooked (not before:
+    // a bait that walks off the line first is simply missed). Spent toward
+    // that fixed point, C passes B; spent toward the live bait, C stops level with it.
+    {
+      const walk = run(SEAWEED_I, SEAWEED.lure * 1.2, { bWalks: true });
+      const still = run(SEAWEED_I, SEAWEED.lure * 1.2);
+      check('(d) NON-VACUITY: one Seaweed pellet hooked the bait, and the bystander was really pulled',
+        walk.hitsOnB === 1 && walk.pulledTicks > 0 && still.hitsOnB === 1 && still.pulledTicks > 0,
+        `walk ${fmt(walk)} · still ${fmt(still)}`);
+      check('(d) 🔴 a bait that walks INTO the pull is not passed — the pull is spent toward where the bait IS',
+        walk.minS >= -1e-6, `${fmt(walk)} (pre-fix: crosses)`);
+      check('(d) CONTROL: a STILL bait and one pellet — the bystander ends exactly `gap − min(lure, gap)` short, as before',
+        Math.abs(still.finalS - (still.gap - Math.min(SEAWEED.lure, still.gap))) < 1e-6,
+        `ended ${still.finalS.toFixed(6)} short, want ${(still.gap - Math.min(SEAWEED.lure, still.gap)).toFixed(6)}`);
+    }
+
+    // A bystander BEYOND the whole lure: pulled, and still short of the bait on both trees.
+    {
+      const far = run(CATCH_I, CATCH.lure * 1.45);
+      check('(d) CONTROL: a bystander beyond the lure is pulled toward the bait and stops SHORT of it',
+        far.pulledTicks > 0 && far.finalS > 0 && far.finalS < far.gap, fmt(far));
+    }
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
