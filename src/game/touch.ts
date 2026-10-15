@@ -154,6 +154,8 @@ export function isTouchCapable(): boolean {
  * whether to draw the resting-position hints: a mouse user should not have two ghost
  * rings on screen, while a phone player has nothing else to tell them the game has
  * controls at all.
+ * ⚠️ "Only" stopped being true twice: it also sets `fa-touch-capable` (the layout flag) and,
+ * since F7, `fa-touch` from the first frame — see the TWO-flags note in `createTouchControls`.
  */
 function isPrimaryCoarse(): boolean {
   if (typeof window.matchMedia !== 'function') return false;
@@ -282,11 +284,25 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
    * `fa-touch` (below, on the first real finger) is about INTERACTION: it is what lets
    * the HUD's weapon slots claim pointer events, and it must not be set on a machine
    * where the player is using a mouse, or the bar would start eating fire clicks.
+   *
+   * 🚨 **"ON THE FIRST REAL FINGER" MADE THAT FIRST FINGER A SHOT (F7).** Until a finger had
+   * landed on the game surface the slots were `pointer-events: none`, so on a phone the FIRST
+   * touch of every match on a weapon (or item) button fell through to the canvas, claimed
+   * the aim stick and FIRED the current weapon instead of selecting — and only then was
+   * `fa-touch` set. Measured by `tools/tmp/b2_input.mjs` §F7 on `8586f00` (844x390, a CDP
+   * touch held 3 frames on slot 2): selection 0 -> 0 and 4 attack frames.
+   * So on a device whose PRIMARY pointer is coarse — the same test that already moves the
+   * radar on the first frame — `fa-touch` is set here, at construction, too. Nothing else
+   * reads it (every reader is a `hud.ts` slot rule). The rule above still holds where it was
+   * aimed: a touchscreen laptop's primary pointer is fine, so its bar still waits for a real
+   * finger. Remaining risk, not measured: a coarse-primary tablet driven by a mouse has the
+   * tray claim clicks from the first frame instead of after one touch. `engaged` is unchanged
+   * — still the first claimed finger — and is QA-only.
    */
   const coarse = isPrimaryCoarse();
   if (coarse) {
     root.classList.add('is-hinted');
-    document.documentElement.classList.add('fa-touch-capable');
+    document.documentElement.classList.add('fa-touch-capable', 'fa-touch');
   }
 
   // The browser's own gestures on the game surface are all wrong for a twin-stick:
