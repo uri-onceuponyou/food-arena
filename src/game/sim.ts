@@ -1395,6 +1395,12 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   // second means a second spent inside. A cell is written only for a WEARER's cloud — first on
   // contact, then reset on exit — so a match nobody brought the item to never writes one, and
   // every no-item state stays bit-identical (`us_bitid` fingerprints `item.auraTimers`).
+  // ⚠️ (B4, 2026-10-15) IT IS NO LONGER THE POT'S RULE. move B4 found the pot and the fog could
+  // be danced out of — step off one frame in fifteen and take nothing — so both now ACCUMULATE
+  // exposure across a step out (§47(f)). This clock still resets, deliberately left alone: §42(e)
+  // pins it as the item's own rule ("stepping OUT resets the pair's clock"), and at 1 dps the same
+  // dance is worth 1 HP a second plus the regen it would otherwise suppress. Whether the cloud
+  // should follow the pot is PARKED FOR URI rather than changed under a peer's pinned row.
   //
   // 🔴 PARKED FOR URI, NOT DECIDED HERE: each tick goes through `applyDamage`, which stamps
   // `lastDamagedAt`, and the tick is shorter than `REGEN_DELAY_MS` — so a hurt fighter standing
@@ -1459,7 +1465,18 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
         fighter.hazardTimers[idx] = t;
       }
     } else {
-      fighter.hazardTimers[idx] = 0;
+      // ── 🚨 STEPPING OFF DOES NOT RESET THE CLOCK (move B4) ───────────────────
+      //
+      // This line was `fighter.hazardTimers[idx] = 0;` — the prototype's `potTimer = 0`, and the
+      // same shape as the fog's `fogTimer = 0` below. With it, a fighter who stepped off the pot
+      // for ONE frame in fifteen stood on it 93% of the time and took nothing, and the fog could
+      // be danced the same way (`sim.test.mjs` §47(f): 0 ticks for 11,200 ms on the pot and for
+      // 11,333 ms in the fog on `31ed880`). So exposure now ACCUMULATES: what a fighter owes a
+      // hazard is a function of how long it stood in it, not of whether it ever stood in it for a
+      // whole interval at a stretch. A single brush shorter than one interval still costs nothing.
+      // ⚠️ `?? 0` rather than leaving the cell alone, so a fighter who has never touched the pot
+      // carries `[0]` exactly as it did — the state's shape is unchanged where play is.
+      fighter.hazardTimers[idx] = fighter.hazardTimers[idx] ?? 0;
     }
   });
 
@@ -1486,14 +1503,17 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   // sites cannot disagree about what "sudden death" means.
   if (suddenDeathActive(state.timeRemaining)) return;
   const distFromCenter = Math.hypot(fighter.x - state.arena.center.x, fighter.y - state.arena.center.y);
+  // ⚠️ (move B4) AND NO `else { fighter.fogTimer = 0; }` ANY MORE — that line restarted the clock
+  // for every frame spent inside the ring, so a fighter outside 94% of the time, stepping back in
+  // one frame in eighteen, took no fog at all. The endgame ring is what ends a match nobody is
+  // winning (`DECISIONS §2`); a tick it can be danced out of is an exploit. Exposure accumulates,
+  // exactly as on the pot above — see there.
   if (distFromCenter > state.safeRadius && fighter.hp > 0) {
     fighter.fogTimer += dt;
     if (fighter.fogTimer >= FOG_TICK_MS) {
       fighter.fogTimer = (fighter.fogTimer - FOG_TICK_MS) % FOG_TICK_MS;
       applyDamage(state, fighter, FOG_DAMAGE, null, { kind: 'fog' }, events);
     }
-  } else {
-    fighter.fogTimer = 0;
   }
 }
 

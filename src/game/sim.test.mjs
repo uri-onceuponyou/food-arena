@@ -13401,6 +13401,70 @@ console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up
         Object.entries(corpus).map(([k, r]) => `${k} ${r.n}/${r.want}`).join(' · '));
     }
   }
+
+  // ── (f) move B4: STEPPING BACK IN FOR ONE FRAME DOES NOT RESET THE FOG, OR THE POT ──
+  //
+  // The fog's clock restarted every time its fighter was inside the ring for even ONE frame
+  // (`else { fighter.fogTimer = 0; }`), and the pot's every time its fighter stepped off it — so
+  // a fighter who dipped back inside once every < `FOG_TICK_MS` took NOTHING while standing in
+  // the fog ~94% of the time, and the same on the pot's rim. The endgame ring is the one thing
+  // that ends a match nobody is winning (`DECISIONS §2`); a tick it can be danced out of is an
+  // exploit, not a nicety. Exposure now ACCUMULATES: what a fighter owes the fog is a function of
+  // how long it stood in it, not of whether it ever stood in it for 300 ms at a stretch.
+  //
+  // ⚠️ Teleported, not walked, so the duty cycle is exact and the only variable is the rule.
+  {
+    const DANCE_MS = 12_000;
+    const dance = (kind, outTicks, inTicks) => {
+      const pot = { x: 1400, y: 1000, radius: POT.dangerRadius, kind: 'damage', damage: POT.damage, tickMs: POT.tickMs };
+      const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: kind === 'fog' ? 300 : 50_000, hazards: kind === 'pot' ? [pot] : [] });
+      const st = seatMatch(arena, [{ char: 'hamburger', x: 1400, y: 1000 }, { char: 'pizza', x: 1600, y: 1000 }]);
+      const me = st.fighters[0];
+      me.maxHp = 1e6; me.hp = 1e6;
+      // fog: "exposed" is OUTSIDE the 300 wu ring; pot: "exposed" is INSIDE its 95 wu rim.
+      const EXPOSED = kind === 'fog' ? { x: 2300, y: 1000 } : { x: 1430, y: 1000 };
+      const SAFE = kind === 'fog' ? { x: 1500, y: 1000 } : { x: 1600, y: 1000 };
+      const cycle = outTicks + inTicks;
+      const steps = Math.round(DANCE_MS / DT);
+      let n = 0, exposedMs = 0;
+      for (let i = 0; i < steps; i++) {
+        const exposed = i % cycle < outTicks;
+        const at = exposed ? EXPOSED : SAFE;
+        me.x = at.x; me.y = at.y;
+        if (exposed) exposedMs += DT;
+        for (const e of stepMatch(st, DT, idle(st))) {
+          if (e.type === 'hit-landed' && e.targetId === 0 && e.source.kind === (kind === 'fog' ? 'fog' : 'hazard')) n++;
+        }
+      }
+      return { n, exposedMs, share: exposedMs / (steps * DT) };
+    };
+    const fogDance = dance('fog', 17, 1);    // 283 ms out, one frame in
+    const potDance = dance('pot', 14, 1);    // 233 ms on the pot, one frame off
+    const fogStay = dance('fog', 1, 0);      // never steps back in
+    check('(f) NON-VACUITY: the dancer is exposed > 90% of the time, and a fighter who just STAYS out is ticked',
+      fogDance.share > 0.9 && potDance.share > 0.9 && fogStay.n >= Math.floor(fogStay.exposedMs / FOG_TICK_MS) - 1,
+      `fog share ${(fogDance.share * 100).toFixed(1)}%, pot share ${(potDance.share * 100).toFixed(1)}%, stay-out ticks ${fogStay.n}`);
+    check('(f) 🔴 a fighter OUTSIDE the ring 94% of the time, stepping in one frame in eighteen, is ticked for that exposure',
+      Math.abs(fogDance.n - Math.floor(fogDance.exposedMs / FOG_TICK_MS)) <= 1,
+      `${fogDance.n} fog ticks for ${fogDance.exposedMs.toFixed(0)} ms outside (exposure owes ${Math.floor(fogDance.exposedMs / FOG_TICK_MS)})`);
+    check('(f) 🔴 …and the pot, stepped off for one frame in fifteen, likewise',
+      Math.abs(potDance.n - Math.floor(potDance.exposedMs / POT.tickMs)) <= 1,
+      `${potDance.n} pot ticks for ${potDance.exposedMs.toFixed(0)} ms on it (exposure owes ${Math.floor(potDance.exposedMs / POT.tickMs)})`);
+    // The other side of the rule: a brush shorter than one interval, once, costs nothing.
+    {
+      const pot = { x: 1400, y: 1000, radius: POT.dangerRadius, kind: 'damage', damage: POT.damage, tickMs: POT.tickMs };
+      const st = seatMatch(makeArena({ width: 2800, height: 2000, maxSafeRadius: 300, hazards: [pot] }), [{ char: 'hamburger', x: 1500, y: 1000 }, { char: 'pizza', x: 1600, y: 1000 }]);
+      const me = st.fighters[0];
+      let n = 0;
+      for (let i = 0; i < 600; i++) {
+        const at = i < 12 ? { x: 2300, y: 1000 } : i < 24 ? { x: 1430, y: 1000 } : { x: 1600, y: 1000 };   // 200 ms in the fog, 200 on the pot, then safe
+        me.x = at.x; me.y = at.y;
+        n += stepMatch(st, DT, idle(st)).filter((e) => e.type === 'hit-landed' && e.targetId === 0).length;
+      }
+      check('(f) CONTROL: one brush of the fog and one of the pot, each shorter than its interval, cost nothing',
+        n === 0, `${n} ticks`);
+    }
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
