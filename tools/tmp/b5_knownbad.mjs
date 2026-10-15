@@ -38,6 +38,10 @@ const A_CONTROL = [
   '(a) CONTROL: a HUMAN Hamburger at 40% heals in sudden death',
 ];
 const A_OVERFIX = '(a) CONTROL: before the collapse a bot in the fog still walks IN';
+const B_BELIEF = '(b) 🔴 three seats: the belief about an opponent the bot never targeted';
+const B_FIND = '(b) 🔴 three seats: …so when its fight ends it finds the hider';
+const B_SIX = '(b) 🔴 six seats: every bot\'s belief about every opponent it can see';
+const B_CONTROL = ['(b) NON-VACUITY: the hider walked in the bot\'s sight', '(b) CONTROL: two seats — the hider was the target all along'];
 
 export const ARMS = [
   // ── AI-B1 ──────────────────────────────────────────────────────────────────────
@@ -58,6 +62,25 @@ export const ARMS = [
     repl: '  if (false) {',
     mustFail: [A_OVERFIX],
     mustPass: [...A_RED, ...A_CONTROL],
+  },
+  // ── AI-B2 ──────────────────────────────────────────────────────────────────────
+  {
+    name: 'target-only-belief',
+    bug: 'AI-B2 — only the current target\'s cell is refreshed; everyone else stays at their spawn (the shipped bug)',
+    file: 'game/ai.ts',
+    find: '      if (other === target) { visible = seen; continue; }\n      if (!seen) continue;',
+    repl: '      if (other === target) { visible = seen; continue; }\n      continue;',
+    mustFail: [B_BELIEF, B_FIND, B_SIX],
+    mustPass: B_CONTROL,
+  },
+  {
+    name: 'belief-omniscient',
+    bug: 'AI-B2 over-fix — every opponent\'s cell refreshed whether or not it can be SEEN (concealment broken)',
+    file: 'game/ai.ts',
+    find: '      if (other === target) { visible = seen; continue; }\n      if (!seen) continue;',
+    repl: '      if (other === target) { visible = seen; continue; }',
+    mustFail: [B_BELIEF],
+    mustPass: [B_SIX, ...B_CONTROL],
   },
 ];
 

@@ -165,7 +165,7 @@ import {
 } from './rules.ts';
 import type { Fighter, GameEvent, MatchState, Medikit } from './state.ts';
 import {
-  actionsLocked, isCasting, movementLocked, nearestLivingOpponent, sightingIndex, weaponsLocked,
+  actionsLocked, isCasting, isLivingOpponentOf, movementLocked, nearestLivingOpponent, sightingIndex, weaponsLocked,
 } from './state.ts';
 import { attemptAttack, attemptItem, isOnOwnTrail, itemUsable } from './combat.ts';
 import { isVisibleFrom, moveToward, terrainSlowAt } from './movement.ts';
@@ -1547,7 +1547,50 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
   // the separation, the facing AND the nav target in one edit. Route it to two of the three
   // and you get the sixth instance of this file's oldest defect; `sim.test.mjs` §26(k)
   // pins all three behaviourally in one experiment, with its ablation.
-  const visible = isVisibleFrom(self.x, self.y, target.x, target.y, state.arena, state, target);
+  // ── 🚨 EVERY OPPONENT THIS FIGHTER CAN SEE, NOT ONLY THE ONE IT IS FIGHTING (AI-B2) ──────
+  //
+  // This block used to refresh ONE cell — the target's, just below — and `sim.ts:createMatch`
+  // seeds every cell with the target's SPAWN at `at: 0`. So a bot's belief about anyone it
+  // was not fighting was that fighter's spawn point for the whole match, however long it had
+  // watched them walk in the open, and a bot that switched to a now-hidden opponent walked
+  // back to where that opponent had STARTED and stood there. `DECISIONS §29`'s rule is
+  // "while you are concealed, nothing that tracks you updates — the belief freezes at your
+  // LAST SIGHTING", and a sighting is a sighting whoever the bot happened to be shooting.
+  // Measured on `a53d8b0`: `sim.test.mjs` §48(b) — belief (1900,1000)@0 ms, the hider's spawn,
+  // against a last sighting at (1401,656); no press in the 10 s after its fight ended, never
+  // closer than 317 wu, against a first press at +4.93 s fixed. Six bots on an open floor:
+  // 7,200 of 9,000 pair-ticks stale, every one of them about a non-target.
+  //
+  // ⚠️ THE SAME PREDICATE, SO A CONCEALED OPPONENT'S CELL STILL FREEZES — the rule is
+  // unchanged, only its reach grew from one column to the row. The target's own cell is still
+  // written below, by the line that always wrote it, so nothing about how the target is
+  // perceived moved.
+  // ⚠️ BIT-IDENTICAL AT TWO SEATS BY CONSTRUCTION — the target is the only opponent, so the
+  // loop skips everyone — and causally unreachable on any arena without concealment, where
+  // every cell is refreshed before it is read anyway (`conceal_lab.mjs --ablate`'s argument,
+  // one column wider). `tools/tmp/b5_digest.mjs` is the measurement rather than this sentence.
+  //
+  // ⚠️ ONE `isVisibleFrom` CALL, AND THE TARGET'S ANSWER IS TAKEN FROM IT. This line read
+  // `const visible = isVisibleFrom(self.x, self.y, target.x, target.y, state.arena, state,
+  // target);` on its own; the loop asks the identical question of every living opponent and
+  // keeps the target's reply as `visible`, so the predicate is still asked from ONE call site
+  // in this file (`sim.test.mjs` §26(m) counts them — two in `src/game/`, this and
+  // `sim.ts:stepProjectiles`). The query is pure, so asking it in slot order changes nothing.
+  let visible = false;
+  {
+    const n = state.fighters.length;
+    for (const other of state.fighters) {
+      if (!isLivingOpponentOf(other, self)) continue;
+      const seen = isVisibleFrom(self.x, self.y, other.x, other.y, state.arena, state, other);
+      // The target's own cell is written below, by the lines that always wrote it.
+      if (other === target) { visible = seen; continue; }
+      if (!seen) continue;
+      const cell = state.sightings[sightingIndex(self.id, other.id, n)];
+      cell.x = other.x;
+      cell.y = other.y;
+      cell.at = now;
+    }
+  }
   // THIS OBSERVER'S ROW, THIS TARGET'S COLUMN. One cell of `MatchState.sightings`, mutated
   // in place — the belief belongs to the pair, not to the match, which is why the single
   // `state.aiSighting` became an N x N matrix. At N=2 the index is 1 * 2 + 0 = 2, which is

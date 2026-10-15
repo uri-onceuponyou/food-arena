@@ -13117,6 +13117,128 @@ console.log('\n48. The bot at two, three and six seats — sudden death, what it
         fired === 0 && dc < out - 30, `presses ${fired}, ${out.toFixed(0)} -> ${dc.toFixed(1)} wu from the centre`);
     }
   }
+
+  // A human seat walking to a point: the per-tick input that moves it there and stops on it.
+  const walk48 = (f, x, y) => {
+    const dx = x - f.x;
+    const dy = y - f.y;
+    const d = Math.hypot(dx, dy);
+    return { move: d > 2 ? { x: dx / d, y: dy / d } : { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  };
+
+  // ── (b) AI-B2: A BOT'S BELIEF ABOUT AN OPPONENT IT NEVER TARGETED WAS ITS SPAWN ─────────
+  //
+  // `stepAI` refreshed ONE cell of `MatchState.sightings` — its current target's — and
+  // `createMatch` seeds every cell with the target's spawn at `at: 0`. So a bot's belief about
+  // anyone it was not fighting stayed that fighter's SPAWN however long it watched them walk in
+  // the open, and a bot that switched to a now-hidden opponent walked to where it had started
+  // the match and stood there. `DECISIONS §29`: "while you are concealed, nothing that tracks
+  // you updates — the AI's belief freezes at your LAST SIGHTING." At two seats the target is
+  // the only opponent, so the defect cannot express (`minSeats` 3).
+  {
+    // One 110 wu patch — the shipped tray size — north of an open floor; no hazards, no ring.
+    const PATCH = { x: 1400, y: 600, w: 110, h: 110, kind: 'tray_rack' };
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000, concealment: [PATCH] });
+    const edgeS = PATCH.y + PATCH.h / 2;
+    const OPEN = { x: PATCH.x, y: edgeS + 65 };   // in the open, south of the patch
+    const IN = { x: PATCH.x, y: edgeS - 35 };     // 35 wu inside — inside the 84 wu reveal from the edge
+    // Slot 0 is C — the hider, a human, so it moves FIRST and the bot sees this tick's position.
+    // Slot 1 is A — the bot under test. Slot 2 is B — a statue A fights first (nearest), killed
+    // on cue once C is hidden. `three === false` drops B: the two-seat control.
+    const run = (three) => {
+      const seats = [
+        { characterId: 'pizza', controller: 'human', maxHp: 1e5, spawn: { x: 1900, y: 1000 } },
+        { characterId: 'taco', controller: 'ai', maxHp: 1e5, spawn: { x: 1400, y: 860 } },
+      ];
+      if (three) seats.push({ characterId: 'hamburger', controller: 'human', maxHp: 1e5, spawn: { x: 1400, y: 940 } });
+      const st = seat48(arena, seats);
+      st.phase = 'playing';
+      const [C, A] = st.fighters;
+      const inputs = st.fighters.map(() => null);
+      let leg = 0;
+      let seenTicks = 0;
+      let last = null;
+      let killedAt = -1;
+      let hiddenAtKill = false;
+      let beliefAtKill = null;
+      let firstPress = -1;
+      let minSep = Infinity;
+      // Up to 15 s for the hider to walk in, then 10 s after B falls for the bot to find it.
+      for (let k = 0; k < 1500 && firstPress < 0 && (killedAt < 0 || st.elapsed - killedAt < 10_000); k++) {
+        const wp = leg === 0 ? OPEN : IN;
+        inputs[0] = walk48(C, wp.x, wp.y);
+        const evs = stepMatch(st, DT48, inputs);
+        if (leg === 0 && Math.hypot(C.x - OPEN.x, C.y - OPEN.y) < 3) leg = 1;
+        const vis = isVisibleFrom(A.x, A.y, C.x, C.y, st.arena, st, C);
+        if (vis && killedAt < 0) { seenTicks++; last = { x: C.x, y: C.y }; }
+        if (killedAt < 0 && leg === 1 && Math.hypot(C.x - IN.x, C.y - IN.y) < 3) {
+          killedAt = st.elapsed;
+          hiddenAtKill = !vis;
+          const cell = st.sightings[sightingIndex(A.id, C.id, st.fighters.length)];
+          beliefAtKill = { x: cell.x, y: cell.y, at: cell.at };
+          if (three) applyDamage(st, st.fighters[2], st.fighters[2].hp, null, { kind: 'fog' }, []);
+        }
+        if (killedAt >= 0) {
+          minSep = Math.min(minSep, Math.hypot(A.x - C.x, A.y - C.y));
+          if (evs.some((e) => isPress48(e, A))) firstPress = st.elapsed - killedAt;
+        }
+      }
+      return { killedAt, hiddenAtKill, seenTicks, last, beliefAtKill, firstPress, minSep, spawn: seats[0].spawn };
+    };
+    const three = run(true);
+    const two = run(false);
+    const fmtB = (r) => `seen ${r.seenTicks} ticks, last at (${r.last?.x.toFixed(0)},${r.last?.y.toFixed(0)}); `
+      + `belief (${r.beliefAtKill?.x.toFixed(0)},${r.beliefAtKill?.y.toFixed(0)})@${r.beliefAtKill?.at.toFixed(0)} ms; `
+      + `first press ${r.firstPress < 0 ? 'NEVER' : `+${(r.firstPress / 1000).toFixed(2)} s`}; closest ${r.minSep.toFixed(0)} wu`;
+    check('(b) NON-VACUITY: the hider walked in the bot\'s sight for over a second, and was hidden from it when B fell',
+      three.killedAt > 0 && three.hiddenAtKill && three.seenTicks > 60
+      && Math.hypot(three.last.x - three.spawn.x, three.last.y - three.spawn.y) > 4 * CONCEAL_REVEAL_RADIUS, fmtB(three));
+    check('(b) 🔴 three seats: the belief about an opponent the bot never targeted is where it last SAW it, not its spawn',
+      three.beliefAtKill !== null && three.beliefAtKill.at > 0
+      && Math.hypot(three.beliefAtKill.x - three.last.x, three.beliefAtKill.y - three.last.y) < 1, fmtB(three));
+    check('(b) 🔴 three seats: …so when its fight ends it finds the hider — a press within 8 s',
+      three.firstPress >= 0 && three.firstPress < 8000, fmtB(three));
+    check('(b) CONTROL: two seats — the hider was the target all along, and the bot finds it',
+      two.hiddenAtKill && two.firstPress >= 0 && two.firstPress < 8000, fmtB(two));
+
+    // SIX bots, open floor, nothing to hide behind — so every opponent is visible to every bot on
+    // every tick, and every cell of every bot's row must have been refreshed ON THIS TICK. On
+    // the old rule only the current target's column ever was.
+    {
+      const open = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+      const ids = ['hamburger', 'taco', 'sushi', 'pizza', 'egg', 'waterbottle'];
+      const st = seat48(open, ids.map((c, i) => ({
+        characterId: c, controller: 'ai', maxHp: 1e5,
+        spawn: { x: 1400 + 320 * Math.cos((i * Math.PI) / 3), y: 1000 + 320 * Math.sin((i * Math.PI) / 3) },
+      })));
+      st.phase = 'playing';
+      const n = st.fighters.length;
+      let pairs = 0;
+      let nonTarget = 0;
+      let stale = 0;
+      let example = '';
+      for (let k = 0; k < 300; k++) {
+        stepMatch(st, DT48, new Array(n).fill(null));
+        for (const a of st.fighters) {
+          if (!a.alive) continue;
+          const tgt = nearestLivingOpponent(st, a);
+          for (const o of st.fighters) {
+            if (o === a || !o.alive) continue;
+            pairs++;
+            if (o !== tgt) nonTarget++;
+            const cell = st.sightings[sightingIndex(a.id, o.id, n)];
+            if (cell.at !== st.elapsed) {
+              stale++;
+              if (!example) example = `t=${st.elapsed.toFixed(0)} ${ids[a.id]}->${ids[o.id]} stamped ${cell.at.toFixed(0)}`;
+            }
+          }
+        }
+      }
+      check('(b) 🔴 six seats: every bot\'s belief about every opponent it can see is refreshed on every tick',
+        pairs > 0 && nonTarget > 0 && stale === 0,
+        `${stale} stale of ${pairs} pair-ticks (${nonTarget} about a non-target)${example ? ` · e.g. ${example}` : ''}`);
+    }
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
