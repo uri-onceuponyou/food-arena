@@ -1026,8 +1026,34 @@ function expireGroundEffects(state: MatchState): void {
   for (let i = state.splats.length - 1; i >= 0; i--) {
     if (state.elapsed >= state.splats[i].expiresAt) state.splats.splice(i, 1);
   }
+  // ── A STICKY TRAIL LEAVES WITH ITS OWNER (BH-08) ──────────────────────────────
+  //
+  // A mark bites only during its OWNER's turn — `applyWorldTick`'s victim loop tests
+  // `mark.ownerId === fighter.id` — and a corpse takes no turn (the fighter loop's corpse guard,
+  // and `applyWorldTick`'s own precondition beneath it). So from the moment a Donut died its
+  // marks did nothing, while every one of them stayed here, in the list the renderer draws with
+  // no owner filter, until `TRAIL.durationMs` ran out: up to 4.5 s of a hazard on the floor that
+  // was not one. Only at N >= 3 — at two seats the death ends the match.
+  //
+  // 🔴 PARKED FOR URI — WHICH WAY A DEAD OWNER'S TRAIL SHOULD GO IS A DESIGN CALL, AND THIS IS
+  // THE READING THAT CHANGES LEAST: the marks are retired on the first tick after the death, so
+  // nothing that happens in play changes — they already dealt nothing — and what is drawn becomes
+  // what can hurt. The other reading, "a ground hazard outlives its maker" (a splat and a shot in
+  // flight already do), is a real rule too, and it MOVES outcomes: the BH-08 verifier's six-seat
+  // corpus (on `1090046`) had living fighters crossing a dead Donut's lane in 4 of 36 matches and
+  // two winners flip. It would be the victim
+  // loop called for a corpse ABOVE the corpse guard — never by editing that guard's two lines,
+  // which `tools/tmp/wpx_knownbad.mjs` anchors on. `sim.test.mjs` §47(c)'s CONTROL rows are the
+  // ones it would flip.
+  //
+  // ⚠️ `owner !== undefined` keeps a fixture's mark for a slot nobody sits in exactly as it was —
+  // no fighter takes that turn, so it was inert before and is inert now. And a Leftovers revive
+  // inside the SAME tick as the death leaves the marks down: the owner is alive again by the time
+  // this asks, and its marks bite again, which is what a revive means.
   for (let i = state.trailMarks.length - 1; i >= 0; i--) {
-    if (state.elapsed >= state.trailMarks[i].expiresAt) state.trailMarks.splice(i, 1);
+    const mark = state.trailMarks[i];
+    const owner = state.fighters[mark.ownerId];
+    if (state.elapsed >= mark.expiresAt || (owner !== undefined && !owner.alive)) state.trailMarks.splice(i, 1);
   }
   // Medikits expire on the same unconditional pass, for the same reason: a kit that ran out
   // while the match was ending must not still be lying there when the next tick draws.
@@ -1259,10 +1285,21 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   const def = CHARACTERS[fighter.characterId];
 
   // Sticky Trail: drop a mark while moving.
+  //
+  // ⚠️ (move B3, part 2) THE DROP CARRIES ITS OVERSHOOT, as the fog, the pot and regen below do
+  // and for their reason — but this one MOVES THE CORPUS, and that is why it is its own commit.
+  // 160 ms is not a whole number of 16.667 frames (9.6), so the reset-to-zero clock dropped a mark
+  // every 10 frames — 166.67 ms — in the Node corpus AND in a 60/120/144 Hz browser alike: every
+  // Donut balance number was measured at 6.0 marks a second against a declared 6.25. Carrying
+  // the remainder delivers the declared 160 at every frame time (`sim.test.mjs` §47(e)).
+  // 🔴 PARKED FOR URI: if 6.0 a second is the density he wants, the answer is the constant —
+  // `rules.ts:TRAIL.dropIntervalMs = 1000 / 6` restores it to the frame — not a clock that quietly
+  // rounds 160 up, by 4% at 60 Hz and by 12.5% at a 45 ms hitch.
+  // The `else` reset below stays: a Donut that stops has stopped laying track.
   if (def.hasTrail && attemptedMove) {
     fighter.trailDropTimer += dt;
     if (fighter.trailDropTimer >= TRAIL.dropIntervalMs) {
-      fighter.trailDropTimer = 0;
+      fighter.trailDropTimer = (fighter.trailDropTimer - TRAIL.dropIntervalMs) % TRAIL.dropIntervalMs;
       const mark: TrailMark = {
         id: state.nextId++,
         ownerId: fighter.id,
@@ -1351,11 +1388,19 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   // in this function reset to 0 and therefore run slow — 61 frames to a "second" at 60 Hz, so a
   // 1 dps cloud reset that way would deal 0.984 dps — and that is an open defect on those timers
   // (`docs/REVAMP.md` §5 B4), not a precedent to copy into a new one.
+  // (B4, 2026-10-15: CLOSED. The fog, the pot and regen carry theirs since `2cf23cf`, the trail
+  // drop since the commit after it — `sim.test.mjs` §47(e).)
   //
   // ⚠️ LEAVING THE CLOUD RESETS THAT PAIR'S CLOCK, the pot's rule (`hazardTimers` below): a
   // second means a second spent inside. A cell is written only for a WEARER's cloud — first on
   // contact, then reset on exit — so a match nobody brought the item to never writes one, and
   // every no-item state stays bit-identical (`us_bitid` fingerprints `item.auraTimers`).
+  // ⚠️ (B4, 2026-10-15) IT IS NO LONGER THE POT'S RULE. move B4 found the pot and the fog could
+  // be danced out of — step off one frame in fifteen and take nothing — so both now ACCUMULATE
+  // exposure across a step out (§47(f)). This clock still resets, deliberately left alone: §42(e)
+  // pins it as the item's own rule ("stepping OUT resets the pair's clock"), and at 1 dps the same
+  // dance is worth 1 HP a second plus the regen it would otherwise suppress. Whether the cloud
+  // should follow the pot is PARKED FOR URI rather than changed under a peer's pinned row.
   //
   // 🔴 PARKED FOR URI, NOT DECIDED HERE: each tick goes through `applyDamage`, which stamps
   // `lastDamagedAt`, and the tick is shorter than `REGEN_DELAY_MS` — so a hurt fighter standing
@@ -1386,20 +1431,52 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
     }
   }
 
+  // ── 🚨 THE FOG, THE POT AND REGEN CARRY THEIR OVERSHOOT (move B3, B4 package) ──
+  //
+  // Each of them used to RESET TO ZERO when it fired, throwing away whatever the frame had
+  // overshot the interval by. So the delivered period was the declared one rounded UP to a whole
+  // number of frames, and that rounding is a function of the frame time `match.ts` steps — which
+  // is variable: at a true 60 Hz frame (16.6667 ms) the pot ticked every 266.67 ms against its
+  // declared 250, regen every 216.67 against 200, and at a 45 ms hitch the fog every 315 against
+  // 300 (`sim.test.mjs` §47(e)). The Node corpus steps 16.667, a hair ABOVE 1000/60, which lands
+  // all three on their nominal frames — so every balance number measured there was right for the
+  // corpus and wrong, by up to 8%, for the browser it was measured for.
+  //
+  // `(t - period) % period` and not `t - period`: identical whenever `dt < period`, which the
+  // shipped loop guarantees (its 50 ms clamp against intervals of 160 ms and up), and it keeps an
+  // instrument that steps seconds at a time from banking a backlog that would then fire on every
+  // later frame. One tick per step either way — the same shape `ITEM_AURA_TICK_MS`'s clock took.
+  //
+  // At 16.667 the carried remainder grows by 0.004–0.006 ms a period, so it cannot pull a tick
+  // one frame early for over 800 s of continuous exposure: the corpus is bit-identical (the
+  // commit carries the digest).
+
   // Central damage hazard(s) — any arena hazard of kind 'damage'.
   state.arena.hazards.forEach((hazard, idx) => {
     if (hazard.kind !== 'damage') return;
     const dist = Math.hypot(fighter.x - hazard.x, fighter.y - hazard.y);
     if (dist < hazard.radius) {
       const t = (fighter.hazardTimers[idx] ?? 0) + dt;
-      if (t >= (hazard.tickMs ?? Infinity)) {
-        fighter.hazardTimers[idx] = 0;
+      const period = hazard.tickMs ?? Infinity;
+      if (t >= period) {
+        fighter.hazardTimers[idx] = (t - period) % period;
         applyDamage(state, fighter, hazard.damage ?? 0, null, { kind: 'hazard' }, events);
       } else {
         fighter.hazardTimers[idx] = t;
       }
     } else {
-      fighter.hazardTimers[idx] = 0;
+      // ── 🚨 STEPPING OFF DOES NOT RESET THE CLOCK (move B4) ───────────────────
+      //
+      // This line was `fighter.hazardTimers[idx] = 0;` — the prototype's `potTimer = 0`, and the
+      // same shape as the fog's `fogTimer = 0` below. With it, a fighter who stepped off the pot
+      // for ONE frame in fifteen stood on it 93% of the time and took nothing, and the fog could
+      // be danced the same way (`sim.test.mjs` §47(f): 0 ticks for 11,200 ms on the pot and for
+      // 11,333 ms in the fog on `31ed880`). So exposure now ACCUMULATES: what a fighter owes a
+      // hazard is a function of how long it stood in it, not of whether it ever stood in it for a
+      // whole interval at a stretch. A single brush shorter than one interval still costs nothing.
+      // ⚠️ `?? 0` rather than leaving the cell alone, so a fighter who has never touched the pot
+      // carries `[0]` exactly as it did — the state's shape is unchanged where play is.
+      fighter.hazardTimers[idx] = fighter.hazardTimers[idx] ?? 0;
     }
   });
 
@@ -1407,7 +1484,7 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   if (state.elapsed - fighter.lastDamagedAt > REGEN_DELAY_MS && fighter.hp < fighter.maxHp && fighter.hp > 0) {
     fighter.regenTimer += dt;
     if (fighter.regenTimer >= REGEN_TICK_MS) {
-      fighter.regenTimer = 0;
+      fighter.regenTimer = (fighter.regenTimer - REGEN_TICK_MS) % REGEN_TICK_MS;
       const before = fighter.hp;
       fighter.hp = Math.min(fighter.maxHp, fighter.hp + REGEN_AMOUNT);
       if (fighter.hp > before) {
@@ -1426,14 +1503,17 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   // sites cannot disagree about what "sudden death" means.
   if (suddenDeathActive(state.timeRemaining)) return;
   const distFromCenter = Math.hypot(fighter.x - state.arena.center.x, fighter.y - state.arena.center.y);
+  // ⚠️ (move B4) AND NO `else { fighter.fogTimer = 0; }` ANY MORE — that line restarted the clock
+  // for every frame spent inside the ring, so a fighter outside 94% of the time, stepping back in
+  // one frame in eighteen, took no fog at all. The endgame ring is what ends a match nobody is
+  // winning (`DECISIONS §2`); a tick it can be danced out of is an exploit. Exposure accumulates,
+  // exactly as on the pot above — see there.
   if (distFromCenter > state.safeRadius && fighter.hp > 0) {
     fighter.fogTimer += dt;
     if (fighter.fogTimer >= FOG_TICK_MS) {
-      fighter.fogTimer = 0;
+      fighter.fogTimer = (fighter.fogTimer - FOG_TICK_MS) % FOG_TICK_MS;
       applyDamage(state, fighter, FOG_DAMAGE, null, { kind: 'fog' }, events);
     }
-  } else {
-    fighter.fogTimer = 0;
   }
 }
 
@@ -1630,6 +1710,30 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
         removeProjectile(state, i, 'expired', events);
         continue;
       }
+      // ── THE CHICK RIDES THE BODY IT LATCHED ONTO (BH-12) ────────────────────────
+      //
+      // The peck below has no distance test — the 2D prototype's rule, and the damage is right.
+      // But nothing ever MOVED the arrived chick, so against a victim that walked off it pecked
+      // from where it LANDED: drawn on bare floor while the burst and the number popped on the
+      // victim, 115 wu away by the third peck (`sim.test.mjs` §47(d)). The prototype redrew the
+      // arrived chick at its target every frame; the port split the sim from rendering and that
+      // line had no home. So the chick moves by exactly what its victim moved since the last
+      // step — it keeps the OFFSET it struck from rather than snapping to the body's centre,
+      // where the body would hide it at either camera.
+      //
+      // ⚠️ `p.tx`/`p.ty` ARE THE VICTIM'S POSITION AT THE LAST STEP — the field's own doc ("the
+      // target's position when this projectile last stepped"), re-anchored on the body actually
+      // struck at the strike below. After arrival the range budget they were kept for is never
+      // read again (this branch `continue`s), so no new `Projectile` field: a new key would show
+      // up in every bit-identity differ that walks the state with `Object.keys`.
+      // ⚠️ POSITION ONLY. Nothing below reads `p.x`/`p.y` but the final `projectile-destroyed`;
+      // the peck's damage, its timing and its `hit-landed` (at the victim) are untouched.
+      if (p.tx !== undefined && p.ty !== undefined) {
+        p.x += target.x - p.tx;
+        p.y += target.y - p.ty;
+      }
+      p.tx = target.x;
+      p.ty = target.y;
       p.peckTimer = (p.peckTimer ?? 0) + dt;
       if (p.peckTimer >= (w.peckInterval ?? 500)) {
         p.peckTimer = 0;
@@ -1758,6 +1862,11 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
         p.arrived = true;
         p.peckTimer = 0;
         p.hitsSoFar = 1;
+        // The latch's anchor (BH-12): from here on `tx`/`ty` follow the body STRUCK — which is
+        // not the aimed `target` when a bystander stepped into the line — so the peck branch
+        // above moves the chick with it.
+        p.tx = victim.x;
+        p.ty = victim.y;
         continue;
       }
       removeProjectile(state, i, 'hit-target', events);

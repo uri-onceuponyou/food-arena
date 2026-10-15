@@ -200,6 +200,15 @@ export interface StatusTimers {
  * lands. Storing them would create a second answer to "where is this going off", which
  * could then disagree with the first.
  *
+ * ⚠️ (B4, BH-10) "`x`/`y` are written only by `movement.ts:tryMove`" STOPPED BEING TRUE ON
+ * `f6c13aa`: `movement.ts:placeFighterAt` — Disposal — writes them directly, and nothing there
+ * read the root, so a Water Bottle thrown mid-Mega resolved its slam from where it LANDED, any
+ * distance the arena allows from the telegraph `match.ts` draws at the press. The construction
+ * holds again by a different route, still with no stored copy: the one site that calls
+ * `placeFighterAt` (`combat.ts`, `case 'disposal'`) CANCELS an open wind-up first —
+ * `cast-cancelled{displaced}`, cooldown spent, as a stun or a sleep. A future writer of `x`/`y`
+ * owes the same: cancel, or refuse a fighter it may not move (`stepPush`'s rule).
+ *
  * ⚠️ IT LIVES ON THE FIGHTER, NOT ON THE WEAPON. `rules.ts:CHARACTERS` is a module-level
  * record and `ai.ts:PRESS_VALUE` is a `ReadonlyMap` keyed on **weapon object identity** —
  * the roster's `Weapon` objects are process-wide singletons by design. A `w.castStartedAt`
@@ -1703,8 +1712,14 @@ export type GameEvent =
    * telegraph and `cast-cancelled` calls `vfx.cancelCastTelegraph`, mapping `'sleep'` onto the
    * stun (interrupt) look rather than `'resolved'`. A new `reason` now reaches a consumer, and
    * that consumer's mapping is where it must be handled.
+   *
+   * ⚠️ AND IT GAINED `'displaced'` (B4, BH-10): Disposal throws a fighter mid-wind-up, and a
+   * cast whose origin has just moved hundreds of wu cannot resolve without lying about where its
+   * telegraph said it would land (see `ActiveCast`). That consumer's mapping already reads every
+   * reason but `'death'` as the INTERRUPT look, at the telegraph's own spot — which is the read
+   * a throw wants: the slam that was coming there is not coming.
    */
-  | { type: 'cast-cancelled'; fighterRole: FighterRole; fighterId: FighterId; weaponKey: string; reason: 'stun' | 'death' | 'sleep' }
+  | { type: 'cast-cancelled'; fighterRole: FighterRole; fighterId: FighterId; weaponKey: string; reason: 'stun' | 'death' | 'sleep' | 'displaced' }
   | {
       type: 'projectile-spawned';
       id: number;

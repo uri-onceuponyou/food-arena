@@ -75,10 +75,13 @@ import * as COMBAT from './combat.ts';
 // of `Math.min(MAX_PUSH_DISTANCE, …)` written here would keep passing against a sim that had
 // grown a second one. `stepPush` comes in so the lock rule can be driven directly, without
 // having to manufacture a whole tick around it.
+// §47(a) imports `placeFighterAt` — Disposal's relocation primitive — for the same reason: its
+// claim is that the ONE function every positional write goes through never leaves a fighter
+// inside cover, and a copy of the depenetration written here would only test the copy.
 import {
   breakConcealment, concealmentInsideRadius, concealmentKeepoutViolations, concealmentOf,
   displaceFighter, isConcealed, isHidden, isVisibleFrom, MAX_PUSH_DISTANCE, moveToward,
-  navStats, stepPush, tryMove,
+  navStats, placeFighterAt, stepPush, tryMove,
 } from './movement.ts';
 // Section 26(m) reads `src/game/*.ts` back off disk and asserts that every gameplay reader
 // of `isVisibleFrom` passes the two per-match arguments. "Everybody remembered" is a claim
@@ -1352,6 +1355,11 @@ const preFog = (hp) => hp + FOG_DAMAGE;
 // axes: every step from inside also overlaps, so every step is refused, with no event and
 // no error. Unreachable by a player today (spawns are clear, knockback is visual-only) and
 // reachable the moment anyone lands sim knockback, a dash, a pull, or a prop over a spawn.
+//
+// ⚠️ (B4, 2026-10-15) Reached by Disposal (`placeFighterAt`, `f6c13aa`) — and every row below
+// uses ONE box, which is exactly the case minimum translation always solved. The two it could
+// not — a seam narrower than a body and a box flush with the wall — were a permanent freeze
+// (BH-02) and are §47(a)'s.
 //
 // The numbers below are the real repro found by the input agent, not an invention:
 // `?px=850&py=500` puts a 42 wu fighter 25 wu from the centre of `spice_cart`
@@ -12964,6 +12972,505 @@ console.log('\n46. Combat + items, the second half — why a press is refused, t
       const far = run(CATCH_I, CATCH.lure * 1.45);
       check('(d) CONTROL: a bystander beyond the lure is pulled toward the bait and stops SHORT of it',
         far.pulledTicks > 0 && far.finalS > 0 && far.finalS < far.gap, fmt(far));
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 47. MOVEMENT + SIM TIMERS (`docs/REVAMP.md` §5 B4, 2026-10-15)
+//
+// Disposal's landing and the wind-up it interrupts, a dead owner's trail, the latched chick, and
+// the world-tick timers. Every row marked 🔴 was run RED on `31ed880` before its fix landed, and
+// `tools/tmp/b4_knownbad.mjs` re-runs that claim: each arm reverts ONE fix on a scratch copy of
+// `src/` and requires its own 🔴 rows to go red and its controls to stay green.
+//
+// ⚠️ THE SEAT COUNT IS PART OF EACH ROW. Disposal is refused below three living fighters
+// (`ITEMS.disposal.minAlive`), and a death leaves a body on the floor only at N ≥ 3 — at two
+// seats it ends the match — so (a), (b) and (c) are built at three seats or more, where their
+// defects can express themselves at all. (d) is a two-seat defect and is driven at two AND six.
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up it breaks, a dead owner\'s trail, the latched chick');
+{
+  const DT = 1000 / 60;
+  const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  const FLOOR = () => makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+  /** `seats` = [{ char, x, y, items?, facing? }] — every seat a HUMAN, so only scripted inputs act. */
+  const seatMatch = (arena, seats) => {
+    const st = createMatch(arena, seats.map((s) => ({
+      characterId: s.char, controller: 'human', spawn: { x: s.x, y: s.y },
+      ...(s.facing ? { facing: s.facing } : {}), ...(s.items ? { items: s.items } : {}),
+    })));
+    st.phase = 'playing';
+    return st;
+  };
+  const idle = (st) => st.fighters.map(() => NEUTRAL);
+  const ofType = (evs, type) => evs.filter((e) => e.type === type);
+  const inCoverAt = (arena, x, y) =>
+    arena.cover.some((o) => Math.abs(x - o.x) < (PLAYER_SIZE + o.w) / 2 && Math.abs(y - o.y) < (PLAYER_SIZE + o.h) / 2);
+  const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+  // ── (a) BH-02: DISPOSAL NEVER LEAVES ITS VICTIM INSIDE COVER ──────────────────
+  //
+  // `movement.ts:placeFighterAt` clamped, then depenetrated with `escapeCover` — four passes of
+  // MINIMUM translation against the single deepest box. Between two boxes closer together than a
+  // body (the shipped kitchen butts props 2.5–15 wu apart) the push out of one lands in the
+  // other, and against a box flush with the arena wall the clamp undoes the push; either way the
+  // passes ran out INSIDE cover. `tryMove` runs the same escape on every step, so a fighter it
+  // failed once it failed forever: frozen for the rest of the match, and immune to every
+  // projectile, which dies on the box first. 10,757 of 224,961 drop points on `31ed880`'s kitchen
+  // (`tools/tmp/b4_trapgrid.mjs`).
+  //
+  // ⚠️ A FIXTURE, NOT THE SHIPPED STOVES — so a future layout change cannot make these rows
+  // vacuous while they keep passing (`valuescan` read a perfect selftest pointed at the wrong
+  // quadrant). Two 170×90 boxes 5 wu apart and a 48×46 box flush with the west wall are the two
+  // mechanisms, and the NON-VACUITY row checks each requested point really is inside cover.
+  {
+    const SEAM_N = { x: 700, y: 1255, w: 170, h: 90, kind: 'seam_n' };
+    const SEAM_S = { x: 700, y: 1350, w: 170, h: 90, kind: 'seam_s' };
+    const WALL = { x: 24, y: 1250, w: 48, h: 46, kind: 'wall_flush' };
+    const SINGLE = { x: 1800, y: 600, w: 50, h: 50, kind: 'single' };
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000, cover: [SEAM_N, SEAM_S, WALL, SINGLE] });
+    const SEAM_PT = { x: 644, y: 1302.5 };   // inside both boxes, 2.5 wu from each face of the gap
+    const WALL_PT = { x: 0, y: 1250 };       // clamped to x = 21: inside the flush box
+    const SINGLE_PT = { x: 1775, y: 600 };   // 25 wu west of a lone box's centre
+    const OPEN_PT = { x: 1500, y: 900 };
+    const lone = () => seatMatch(arena, [
+      { char: 'hamburger', x: 1400, y: 300 }, { char: 'pizza', x: 2400, y: 300 }, { char: 'taco', x: 2400, y: 1700 },
+    ]);
+    const placed = (pt) => { const st = lone(); placeFighterAt(st.fighters[0], pt.x, pt.y, arena); return st.fighters[0]; };
+
+    check('(a) NON-VACUITY: every requested drop point is INSIDE cover (seam, wall-flush, lone box); the open one is not',
+      inCoverAt(arena, SEAM_PT.x, SEAM_PT.y) && inCoverAt(arena, PLAYER_SIZE / 2, WALL_PT.y)
+      && inCoverAt(arena, SINGLE_PT.x, SINGLE_PT.y) && !inCoverAt(arena, OPEN_PT.x, OPEN_PT.y));
+
+    const seam = placed(SEAM_PT);
+    check('(a) 🔴 `placeFighterAt` into a seam narrower than a body leaves the fighter STANDABLE — no box overlaps it',
+      !inCoverAt(arena, seam.x, seam.y), `landed (${seam.x.toFixed(2)}, ${seam.y.toFixed(2)})`);
+    const wall = placed(WALL_PT);
+    check('(a) 🔴 …and into a box flush with the arena wall, likewise',
+      !inCoverAt(arena, wall.x, wall.y), `landed (${wall.x.toFixed(2)}, ${wall.y.toFixed(2)})`);
+
+    // NEAREST, checked against a brute force rather than believed: every point of a 0.5 wu
+    // lattice around the request that is inside the clamp and clear of every box.
+    const nearestOnLattice = (pt) => {
+      const half = PLAYER_SIZE / 2;
+      let best = Infinity;
+      for (let dx = -200; dx <= 200; dx += 0.5) {
+        for (let dy = -200; dy <= 200; dy += 0.5) {
+          const x = pt.x + dx, y = pt.y + dy;
+          if (x < half || y < half || x > arena.width - half || y > arena.height - half) continue;
+          if (inCoverAt(arena, x, y)) continue;
+          const d = Math.hypot(dx, dy);
+          if (d < best) best = d;
+        }
+      }
+      return best;
+    };
+    {
+      const reqWall = { x: PLAYER_SIZE / 2, y: WALL_PT.y };
+      const dSeam = Math.hypot(seam.x - SEAM_PT.x, seam.y - SEAM_PT.y), bSeam = nearestOnLattice(SEAM_PT);
+      const dWall = Math.hypot(wall.x - reqWall.x, wall.y - reqWall.y), bWall = nearestOnLattice(reqWall);
+      check('(a) 🔴 …at the NEAREST standable point to the request — within half a step of a 0.5 wu brute force',
+        Number.isFinite(bSeam) && Number.isFinite(bWall) && Math.abs(dSeam - bSeam) <= 0.5 && Math.abs(dWall - bWall) <= 0.5,
+        `seam: moved ${dSeam.toFixed(3)}, lattice ${bSeam.toFixed(3)} · wall: moved ${dWall.toFixed(3)}, lattice ${bWall.toFixed(3)}`);
+    }
+
+    const single = placed(SINGLE_PT);
+    check('(a) CONTROL: a lone box still resolves by MINIMUM TRANSLATION, to the bit — the success path did not move',
+      single.x === SINGLE_PT.x - ((PLAYER_SIZE + SINGLE.w) / 2 - (SINGLE.x - SINGLE_PT.x) + 0.01) && single.y === SINGLE_PT.y,
+      `(${single.x}, ${single.y})`);
+    const open = placed(OPEN_PT);
+    check('(a) CONTROL: a drop onto open floor is written exactly where asked — no search, no nudge',
+      open.x === OPEN_PT.x && open.y === OPEN_PT.y, `(${open.x}, ${open.y})`);
+
+    // THROUGH THE REAL PRESS, at three seats. T throws V (the only fighter inside its throw); the
+    // destination is D, V's nearest living opponent other than T, and the drop point is 84 wu
+    // from D back toward V — (644, 1302.5), in the seam. Then V tries to walk off, eight ways.
+    const SEATS = [
+      { char: 'pizza', x: 900, y: 1400, items: ['disposal'] },
+      { char: 'hamburger', x: 900, y: 1302.5 },
+      { char: 'taco', x: 560, y: 1302.5 },
+    ];
+    const throwThenWalk = (dir) => {
+      const st = seatMatch(arena, SEATS);
+      const ins = idle(st);
+      ins[0] = { ...NEUTRAL, useItem: 0 };
+      const hit = ofType(stepMatch(st, DT, ins), 'item-hit').find((e) => e.itemId === 'disposal');
+      const V = st.fighters[1];
+      const landed = { x: V.x, y: V.y };
+      let maxD = 0;
+      if (dir) {
+        const walk = idle(st);
+        walk[1] = { ...NEUTRAL, move: { x: dir[0], y: dir[1] } };
+        for (let i = 0; i < 60; i++) {
+          stepMatch(st, DT, walk);
+          maxD = Math.max(maxD, Math.hypot(V.x - landed.x, V.y - landed.y));
+        }
+      }
+      return { hit, landed, maxD };
+    };
+    const thrown = throwThenWalk(null);
+    check('(a) NON-VACUITY: the press throws V, and the drop point it was given is inside the seam',
+      thrown.hit !== undefined && thrown.hit.targetId === 1 && inCoverAt(arena, 644, 1302.5),
+      thrown.hit ? `item-hit → (${thrown.hit.x.toFixed(2)}, ${thrown.hit.y.toFixed(2)})` : 'no item-hit');
+    check('(a) 🔴 a REAL Disposal at three seats lands its victim on standable floor',
+      !inCoverAt(arena, thrown.landed.x, thrown.landed.y), `landed (${thrown.landed.x.toFixed(2)}, ${thrown.landed.y.toFixed(2)})`);
+    const walks = DIRS8.map((d) => throwThenWalk(d).maxD);
+    check('(a) 🔴 …and the victim can WALK AWAY — more than a body length inside one second, in some direction',
+      Math.max(...walks) >= PLAYER_SIZE, `max displacement per direction: ${walks.map((w) => w.toFixed(1)).join(' ')}`);
+
+    // THE ESCAPE ITSELF, through `tryMove`: a fighter already wedged in the seam (a QA
+    // `?px=`/`?py=` drop) is out after its first step…
+    {
+      const st = lone();
+      const f = st.fighters[0];
+      f.x = SEAM_PT.x; f.y = SEAM_PT.y;
+      const ins = idle(st);
+      ins[0] = { ...NEUTRAL, move: { x: 0, y: 1 } };
+      stepMatch(st, DT, ins);
+      check('(a) 🔴 a fighter already WEDGED in the seam is out after its first step — `tryMove`\'s own escape',
+        !inCoverAt(arena, f.x, f.y), `(${f.x.toFixed(2)}, ${f.y.toFixed(2)})`);
+    }
+    // …and one parked there with NO input stays exactly where it was put — the photography
+    // diagnostic `escapeCover`'s header protects, because the escape runs only for a mover.
+    {
+      const st = lone();
+      const f = st.fighters[0];
+      f.x = SEAM_PT.x; f.y = SEAM_PT.y;
+      for (let i = 0; i < 30; i++) stepMatch(st, DT, idle(st));
+      check('(a) CONTROL: a fighter PARKED in the seam with no input stays put (QA photography)',
+        f.x === SEAM_PT.x && f.y === SEAM_PT.y, `(${f.x}, ${f.y})`);
+    }
+  }
+
+  // ── (b) BH-10: DISPOSAL BREAKS THE WIND-UP IT INTERRUPTS ──────────────────────
+  //
+  // A cast ROOTS its caster and freezes its aim so that *"a telegraph drawn where the caster
+  // stands at the press cannot lie about where the effect lands"* (`state.ts:ActiveCast`), and
+  // since `75148fd` `match.ts` DRAWS that telegraph, at the press position. `placeFighterAt` was
+  // the one writer of `x`/`y` that ignored the root, so a Water Bottle thrown mid-Mega resolved
+  // its slam from where it LANDED — 316 wu from the telegraph here, bounded only by the arena —
+  // while the telegraph went on filling at its old feet. The throw now kills the cast, as a stun
+  // or a Warm Milk sleep does: `cast-cancelled{displaced}`, cooldown spent.
+  //
+  // ⚠️ NOT `stepPush`'s guard copied over. That one REFUSES to move a `movementLocked` fighter,
+  // and `movementLocked` also covers a stun, a root and a sleep, so copying it would make Disposal
+  // useless against a Liquorice-tied victim. A CONTROL pins that a locked victim is still thrown.
+  {
+    const arena = FLOOR();
+    const KIT = CHARACTERS.waterbottle.weapons;
+    const MEGA = KIT.findIndex((w) => w.key === 'Mega');
+    // T throws V (the only fighter inside its throw); D is V's nearest other opponent, so V lands
+    // 84 wu short of D, at (1416, 1000) — 316 wu from where it pressed.
+    const SEATS = [
+      { char: 'hamburger', x: 1000, y: 1000, items: ['disposal'] },
+      { char: 'waterbottle', x: 1100, y: 1000, facing: { x: -1, y: 0 } },
+      { char: 'taco', x: 1500, y: 1000 },
+    ];
+    const run = ({ dispose = true, cast = true, root = false, shield = false } = {}) => {
+      const st = seatMatch(arena, SEATS.map((s, i) => (i === 1 && shield ? { ...s, items: ['shiitake'] } : s)));
+      const V = st.fighters[1];
+      const log = [];
+      const step = (ins) => { const evs = stepMatch(st, DT, ins); log.push(...evs); return evs; };
+      const first = idle(st);
+      if (cast) first[1] = { ...NEUTRAL, aim: { x: -1, y: 0 }, selectedWeapon: MEGA, attack: true };
+      if (shield) first[1] = { ...NEUTRAL, useItem: 0 };
+      step(first);
+      const pressAt = st.elapsed;
+      const castOpen = V.cast !== null;
+      if (root) V.item.rootUntil = st.elapsed + 5000;
+      for (let i = 0; i < 18; i++) step(idle(st));   // ~300 ms into the wind-up
+      const before = { x: V.x, y: V.y };
+      let throwEvs = [];
+      if (dispose) { const ins = idle(st); ins[0] = { ...NEUTRAL, useItem: 0 }; throwEvs = step(ins); }
+      const after = { x: V.x, y: V.y, cast: V.cast, itemCast: V.itemCast };
+      for (let i = 0; i < 160; i++) step(idle(st));   // past the Mega's 1,400 ms and Shiitake's wind-up
+      const fired = log.filter((e) => e.type === 'weapon-fired' && e.fighterId === 1 && e.weaponKey === 'Mega');
+      return { st, V, log, castOpen, pressAt, before, after, throwEvs, fired, moved: Math.hypot(V.x - before.x, V.y - before.y) };
+    };
+
+    const ctl = run({ dispose: false });
+    check('(b) NON-VACUITY / CONTROL: unthrown, V\'s Mega opens, roots it, and goes off where it was pressed',
+      ctl.castOpen && ctl.fired.length === 1 && ctl.V.x === 1100 && ctl.V.y === 1000,
+      `cast ${ctl.castOpen}, Mega fired ${ctl.fired.length}×, V at (${ctl.V.x}, ${ctl.V.y})`);
+    const hit = run();
+    const jump = Math.hypot(hit.after.x - hit.before.x, hit.after.y - hit.before.y);
+    check('(b) NON-VACUITY: the throw lands while the wind-up is open, and really relocates V',
+      hit.castOpen && ofType(hit.throwEvs, 'item-hit').some((e) => e.itemId === 'disposal' && e.targetId === 1) && jump > 200,
+      `relocated ${jump.toFixed(1)} wu`);
+    const cancels = ofType(hit.throwEvs, 'cast-cancelled').filter((e) => e.fighterId === 1);
+    check('(b) 🔴 the throw CANCELS the wind-up — one `cast-cancelled{displaced}` for Mega, on the throw\'s own tick',
+      cancels.length === 1 && cancels[0].reason === 'displaced' && cancels[0].weaponKey === 'Mega' && hit.after.cast === null,
+      `${cancels.map((e) => `${e.weaponKey}/${e.reason}`).join(' ') || 'no cancel'}; cast ${hit.after.cast === null ? 'null' : 'still open'}`);
+    check('(b) 🔴 …so the slam never goes off from where V landed',
+      hit.fired.length === 0, `Mega fired ${hit.fired.length}× after the throw`);
+    check('(b) CONTROL: the cooldown stays SPENT — the press that opened the wind-up is still stamped',
+      hit.V.lastUsed[MEGA] === hit.pressAt, `lastUsed ${hit.V.lastUsed[MEGA]}, pressed at ${hit.pressAt}`);
+    const tied = run({ cast: false, root: true });
+    check('(b) CONTROL: a ROOTED victim that is not casting (Liquorice) is still thrown — a lock is not a shield',
+      ofType(tied.throwEvs, 'item-hit').some((e) => e.itemId === 'disposal') && Math.hypot(tied.after.x - tied.before.x, tied.after.y - tied.before.y) > 200,
+      `relocated ${Math.hypot(tied.after.x - tied.before.x, tied.after.y - tied.before.y).toFixed(1)} wu`);
+    const shielded = run({ cast: false, shield: true });
+    check('(b) CONTROL: an ITEM wind-up (Shiitake) survives the throw and resolves — its shield sits on the body, not a spot',
+      shielded.after.itemCast !== null && ofType(shielded.throwEvs, 'item-cancelled').length === 0
+      && shielded.log.some((e) => e.type === 'item-hit' && e.itemId === 'shiitake' && e.targetId === 1),
+      `itemCast ${shielded.after.itemCast === null ? 'null' : 'open'} after the throw; shield resolved ${shielded.log.some((e) => e.type === 'item-hit' && e.itemId === 'shiitake')}`);
+  }
+
+  // ── (c) BH-08: A DEAD OWNER'S TRAIL — WHAT IS DRAWN IS WHAT CAN HURT ──────────
+  //
+  // A Sticky Trail mark bites only during its OWNER's turn (`applyWorldTick`'s victim loop tests
+  // `mark.ownerId === fighter.id`), and a corpse takes no turn — so the moment a Donut died its
+  // marks went inert, while every one of them stayed in `state.trailMarks`, which the renderer
+  // draws with no owner filter, until `TRAIL.durationMs` ran out: a hazard on the floor that did
+  // nothing. Only at N ≥ 3 — at two seats the death ends the match.
+  //
+  // 🔴 PARKED FOR URI: the marks now LEAVE WITH THEIR OWNER — the reading that changes least,
+  // because nothing that happens in play changes (they already did no damage), only what is
+  // drawn. The other reading — the trail outlives its maker and keeps biting, as a splat and a
+  // shot in flight already do — moves outcomes in natural six-seat play; it is Uri's to choose,
+  // and the CONTROL rows below are the ones it would flip.
+  {
+    const arena = FLOOR();
+    const run = (n, kill) => {
+      const seats = [{ char: 'donut', x: 600, y: 1000 }, { char: 'hamburger', x: 500, y: 1300 }];
+      for (let i = 2; i < n; i++) seats.push({ char: 'pizza', x: 2400, y: 250 + i * 250 });
+      const st = seatMatch(arena, seats);
+      const donut = st.fighters[0], walker = st.fighters[1];
+      const lay = idle(st);
+      lay[0] = { ...NEUTRAL, move: { x: 1, y: 0 } };
+      for (let i = 0; i < 90; i++) stepMatch(st, DT, lay);   // 1.5 s of lane along y = 1000
+      const marksDown = st.trailMarks.filter((m) => m.ownerId === 0).length;
+      if (kill) applyDamage(st, donut, donut.hp, null, { kind: 'fog' }, []);
+      walker.x = 560; walker.y = 1000;                        // then the walker crosses all of it
+      const walk = idle(st);
+      walk[1] = { ...NEUTRAL, move: { x: 1, y: 0 } };
+      const hp0 = walker.hp;
+      let bites = 0, staleTicks = 0, ownMarksAfterOne = -1;
+      for (let i = 0; i < 120; i++) {
+        const evs = stepMatch(st, DT, walk);
+        bites += evs.filter((e) => e.type === 'hit-landed' && e.targetId === 1 && e.source.kind === 'trail').length;
+        if (i === 0) ownMarksAfterOne = st.trailMarks.filter((m) => m.ownerId === 0).length;
+        if (st.trailMarks.some((m) => !st.fighters[m.ownerId].alive)) staleTicks++;
+      }
+      return { marksDown, ownMarksAfterOne, bites, staleTicks, lost: hp0 - walker.hp, phase: st.phase, donutAlive: donut.alive };
+    };
+    const alive3 = run(3, false), dead3 = run(3, true), dead6 = run(6, true);
+    check('(c) NON-VACUITY: Donut laid a lane, the match goes on after its death, and a LIVING Donut\'s lane bites the walker',
+      alive3.marksDown >= 6 && dead3.marksDown === alive3.marksDown && dead3.phase === 'playing' && dead6.phase === 'playing'
+      && !dead3.donutAlive && alive3.bites >= 3,
+      `marks ${alive3.marksDown}/${dead3.marksDown}, phase ${dead3.phase}/${dead6.phase}, living-lane bites ${alive3.bites}`);
+    check('(c) 🔴 the tick after Donut dies, none of its marks is left on the floor — three seats',
+      dead3.ownMarksAfterOne === 0, `${dead3.ownMarksAfterOne} of ${dead3.marksDown} still in state.trailMarks`);
+    check('(c) 🔴 …and six seats',
+      dead6.ownMarksAfterOne === 0, `${dead6.ownMarksAfterOne} of ${dead6.marksDown} still in state.trailMarks`);
+    check('(c) 🔴 on NO tick after the death is a mark drawn whose owner is dead — what is drawn is what can hurt',
+      dead3.staleTicks === 0 && dead6.staleTicks === 0, `stale ticks: N=3 ${dead3.staleTicks}, N=6 ${dead6.staleTicks} of 120`);
+    check('(c) CONTROL: the walker crossing a dead Donut\'s lane takes NOTHING — as on the shipped tree, so no outcome moves',
+      dead3.bites === 0 && dead3.lost === 0 && dead6.bites === 0 && dead6.lost === 0,
+      `bites ${dead3.bites}/${dead6.bites}, HP lost ${dead3.lost}/${dead6.lost}`);
+    check('(c) CONTROL: a LIVING Donut\'s marks all stay down — only a dead owner\'s leave',
+      alive3.marksDown >= 6 && alive3.ownMarksAfterOne === alive3.marksDown && alive3.staleTicks === 0,
+      `${alive3.ownMarksAfterOne} of ${alive3.marksDown}`);
+  }
+
+  // ── (d) BH-12: THE HATCHED CHICK RIDES THE BODY IT LATCHED ONTO ───────────────
+  //
+  // Egg's Hatch! strikes, then pecks its latched victim every `peckInterval` with no distance
+  // test — the prototype's rule, and the damage was right. But nothing moved the arrived chick,
+  // so against a victim that walked off it pecked from where it LANDED: drawn on bare floor while
+  // the burst and the number popped on the victim, 115 wu away by the third peck. The 2D
+  // prototype redrew the arrived chick at its target every frame; the 3D port split the sim from
+  // rendering and that line had no home. The sim now carries the chick with its victim, at the
+  // offset it struck from — never snapped to the body's centre, where the body would hide it.
+  //
+  // ⚠️ A DISTANCE TEST IS NOT THE FIX: a peck that needs contact is an 11% nerf to Egg (the
+  // verifier's known-bad). The CONTROL rows hold the damage fixed.
+  {
+    const arena = FLOOR();
+    const HATCH = CHARACTERS.egg.weapons.findIndex((w) => w.key === 'Hatch');
+    const W = CHARACTERS.egg.weapons[HATCH];
+    const run = (n, { flee = true, blocker = false } = {}) => {
+      // Egg faces east at (1000, 1000); the aimed fighter is 100 wu east. With `blocker` a third
+      // fighter STEPS INTO the line at 60 wu once the shot is in the air, and is the one struck,
+      // latched, and running — so the body struck is NOT the one the shot was framed on.
+      // ⚠️ It used to STAND in the line from the start, and then a human's shot is framed on IT
+      // (BH-04's aimed-opponent rule picks the nearest body on the aim line), aimed === struck,
+      // and the latch's re-anchor on the struck body was never exercised: `b4_knownbad`'s
+      // `chick-anchored-on-aim` arm deleted it and this row stayed green. Measured, then moved.
+      const seats = [{ char: 'egg', x: 1000, y: 1000, facing: { x: 1, y: 0 } }, { char: 'sushi', x: 1100, y: 1000 }];
+      if (blocker) seats.push({ char: 'hamburger', x: 1060, y: 1090 });
+      while (seats.length < n) seats.push({ char: 'pizza', x: 2400, y: 250 + seats.length * 250 });
+      const st = seatMatch(arena, seats);
+      const latched = blocker ? 2 : 1;
+      const hits = [];
+      let framedOn = null;
+      for (let tick = 0; tick < 240 && hits.length < W.peckHits; tick++) {
+        const ins = idle(st);
+        if (tick === 0) ins[0] = { ...NEUTRAL, aim: { x: 1, y: 0 }, selectedWeapon: HATCH, attack: true };
+        if (blocker && tick === 1) { st.fighters[2].x = 1060; st.fighters[2].y = 1000; }
+        if (hits.length > 0 && flee) ins[latched] = { ...NEUTRAL, move: blocker ? { x: 0, y: -1 } : { x: 1, y: 0 } };
+        const evs = stepMatch(st, DT, ins);
+        if (tick === 0) framedOn = st.projectiles.find((q) => q.weapon.key === 'Hatch')?.targetId ?? null;
+        for (const e of evs) {
+          if (e.type !== 'hit-landed' || e.source.kind !== 'weapon' || e.source.weaponKey !== 'Hatch') continue;
+          const p = st.projectiles.find((q) => q.weapon.key === 'Hatch');
+          const gone = evs.find((x) => x.type === 'projectile-destroyed');
+          const cx = p ? p.x : gone.x, cy = p ? p.y : gone.y;
+          hits.push({ target: e.targetId, vx: e.x, vy: e.y, dx: cx - e.x, dy: cy - e.y, amount: e.amount, tick });
+        }
+      }
+      return { hits, latched, framedOn, radius: st.fighters[latched].hitRadius };
+    };
+    const still = run(2, { flee: false }), flee2 = run(2), flee6 = run(6), block6 = run(6, { blocker: true });
+    const ran = (r) => Math.hypot(r.hits[r.hits.length - 1].vx - r.hits[0].vx, r.hits[r.hits.length - 1].vy - r.hits[0].vy);
+    const onBody = (r) => r.hits.every((h) => Math.hypot(h.dx, h.dy) < r.radius);
+    const heldOffset = (r) => r.hits.every((h) => Math.hypot(h.dx - r.hits[0].dx, h.dy - r.hits[0].dy) < 1e-6);
+    const fmtHits = (r) => r.hits.map((h) => Math.hypot(h.dx, h.dy).toFixed(1)).join('/');
+    check('(d) NON-VACUITY: every arm struck and pecked its full count, every fleeing victim really moved, and the blocker was NOT the body the shot was framed on',
+      [still, flee2, flee6, block6].every((r) => r.hits.length === W.peckHits && r.hits.every((h) => h.target === r.latched))
+      && ran(flee2) > 60 && ran(flee6) > 60 && ran(block6) > 60 && ran(still) === 0 && block6.framedOn === 1,
+      `peck counts ${[still, flee2, flee6, block6].map((r) => r.hits.length).join('/')}, ran ${[flee2, flee6, block6].map((r) => ran(r).toFixed(1)).join('/')}, blocker arm framed on slot ${block6.framedOn}`);
+    check('(d) 🔴 two seats, a fleeing victim: at every peck the chick is still ON it — inside its hit radius',
+      onBody(flee2), `chick-to-victim at each hit: ${fmtHits(flee2)} (radius ${flee2.radius})`);
+    check('(d) 🔴 …at the very offset it struck from — never snapped into the body',
+      heldOffset(flee2), fmtHits(flee2));
+    check('(d) 🔴 six seats, and a BLOCKER that stepped into the line and ran: the chick rides the body it latched onto',
+      onBody(flee6) && heldOffset(flee6) && onBody(block6) && heldOffset(block6),
+      `six ${fmtHits(flee6)} · blocker ${fmtHits(block6)}`);
+    check('(d) CONTROL: the pecks themselves are untouched — the same amounts on the same ticks, still or fleeing',
+      JSON.stringify(flee2.hits.map((h) => [h.amount, h.tick])) === JSON.stringify(still.hits.map((h) => [h.amount, h.tick])),
+      `${JSON.stringify(flee2.hits.map((h) => [h.amount, h.tick]))} vs ${JSON.stringify(still.hits.map((h) => [h.amount, h.tick]))}`);
+    check('(d) CONTROL: a victim that stands still keeps the chick exactly where it struck',
+      heldOffset(still) && onBody(still), fmtHits(still));
+  }
+
+  // ── (e) move B3: A WORLD-TICK TIMER DELIVERS ITS DECLARED RATE AT ANY FRAME TIME ──
+  //
+  // Four per-fighter accumulators — the fog (`FOG_TICK_MS`), the pot (`POT.tickMs`), regen
+  // (`REGEN_TICK_MS`) and the Sticky Trail drop (`TRAIL.dropIntervalMs`) — were reset to ZERO
+  // when they fired, throwing the overshoot away. So the delivered period was the declared one
+  // rounded UP to a whole number of frames, and the rounding depends on the frame time
+  // `match.ts` steps, which is variable (a 60 Hz frame is 16.6667 ms, a 30 fps phone 33.3, a
+  // hitch up to the 50 ms clamp). At a true 60 Hz frame the pot ticked every 266.67 ms (declared
+  // 250), regen every 216.67 (200) and the trail every 166.67 (160); at a 45 ms hitch the fog
+  // every 315 (300). The Node corpus's 16.667 is a hair ABOVE 1000/60, which is why it happened
+  // to land the fog, the pot and regen on time (the CONTROL row) and nobody saw it there.
+  //
+  // ⚠️ Driven at TWO seats: every timer is a property of the one fighter it belongs to.
+  {
+    const W_MS = 12_000;
+    const DTS = [1000 / 60, 1000 / 30, 1000 / 144, 45];
+    const BIG = 1e6;
+    /** Firings of one timer over `W_MS` of uninterrupted exposure, at frame time `dt`. */
+    const firings = (kind, dt) => {
+      const pot = { x: 1400, y: 1000, radius: POT.dangerRadius, kind: 'damage', damage: POT.damage, tickMs: POT.tickMs };
+      const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: kind === 'fog' ? 300 : 50_000, hazards: kind === 'pot' ? [pot] : [] });
+      const subjectAt = { fog: { x: 2300, y: 1000 }, pot: { x: 1430, y: 1000 }, regen: { x: 600, y: 600 }, trail: { x: 300, y: 1000 } }[kind];
+      const st = seatMatch(arena, [{ char: kind === 'trail' ? 'donut' : 'hamburger', ...subjectAt }, { char: 'pizza', x: 1600, y: 1000 }]);
+      const me = st.fighters[0];
+      me.maxHp = BIG;
+      me.hp = kind === 'regen' ? 1 : BIG;
+      const ins = idle(st);
+      if (kind === 'trail') ins[0] = { ...NEUTRAL, move: { x: 1, y: 0 } };
+      const steps = Math.round(W_MS / dt);
+      let n = 0;
+      for (let i = 0; i < steps; i++) {
+        for (const e of stepMatch(st, dt, ins)) {
+          if (kind === 'fog' && e.type === 'hit-landed' && e.targetId === 0 && e.source.kind === 'fog') n++;
+          if (kind === 'pot' && e.type === 'hit-landed' && e.targetId === 0 && e.source.kind === 'hazard') n++;
+          if (kind === 'regen' && e.type === 'heal' && e.fighterId === 0) n++;
+          if (kind === 'trail' && e.type === 'trail-mark-created' && e.ownerId === 0) n++;
+        }
+      }
+      return { n, ms: steps * dt };
+    };
+    const PERIOD = { fog: FOG_TICK_MS, pot: POT.tickMs, regen: REGEN_TICK_MS, trail: TRAIL.dropIntervalMs };
+    const sweep = (kind) => DTS.map((dt) => { const r = firings(kind, dt); return { dt, ...r, want: Math.floor(r.ms / PERIOD[kind]) }; });
+    const fmtSweep = (rows) => rows.map((r) => `${r.dt.toFixed(2)} ms: ${r.n} (declared ${r.want})`).join(' · ');
+    const onRate = (rows) => rows.every((r) => Math.abs(r.n - r.want) <= 1);
+    const rows = { fog: sweep('fog'), pot: sweep('pot'), regen: sweep('regen'), trail: sweep('trail') };
+    check('(e) NON-VACUITY: every timer fires in every arm — the exposure is real at every frame time',
+      Object.values(rows).every((rs) => rs.every((r) => r.n > 0 && r.want > 10)),
+      Object.entries(rows).map(([k, rs]) => `${k} ${rs.map((r) => r.n).join('/')}`).join(' · '));
+    check(`(e) 🔴 the FOG ticks once per FOG_TICK_MS (${FOG_TICK_MS}) at 60 Hz, 30 fps, 144 Hz and a 45 ms hitch`, onRate(rows.fog), fmtSweep(rows.fog));
+    check(`(e) 🔴 the POT ticks once per POT.tickMs (${POT.tickMs}) at every frame time`, onRate(rows.pot), fmtSweep(rows.pot));
+    check(`(e) 🔴 REGEN ticks once per REGEN_TICK_MS (${REGEN_TICK_MS}) at every frame time`, onRate(rows.regen), fmtSweep(rows.regen));
+    check(`(e) 🔴 the Sticky Trail drops once per TRAIL.dropIntervalMs (${TRAIL.dropIntervalMs}) at every frame time`, onRate(rows.trail), fmtSweep(rows.trail));
+    // The corpus frame. 16.667 is a hair above 1000/60, so 18 / 15 / 12 frames reach 300 / 250 /
+    // 200 and the three hazard timers fire on their nominal frames on BOTH trees — which is what
+    // keeps every balance number measured at 16.667 valid for them. The trail is not among them:
+    // 160 / 16.667 = 9.6 frames, so it delivered 166.67 there too.
+    {
+      const at = (kind) => { const r = firings(kind, 16.667); return { ...r, want: Math.floor(r.ms / PERIOD[kind]) }; };
+      const corpus = { fog: at('fog'), pot: at('pot'), regen: at('regen') };
+      check('(e) CONTROL: at the corpus\'s 16.667 ms the fog, the pot and regen fire exactly on their declared counts — on both trees',
+        Object.values(corpus).every((r) => r.n === r.want),
+        Object.entries(corpus).map(([k, r]) => `${k} ${r.n}/${r.want}`).join(' · '));
+    }
+  }
+
+  // ── (f) move B4: STEPPING BACK IN FOR ONE FRAME DOES NOT RESET THE FOG, OR THE POT ──
+  //
+  // The fog's clock restarted every time its fighter was inside the ring for even ONE frame
+  // (`else { fighter.fogTimer = 0; }`), and the pot's every time its fighter stepped off it — so
+  // a fighter who dipped back inside once every < `FOG_TICK_MS` took NOTHING while standing in
+  // the fog ~94% of the time, and the same on the pot's rim. The endgame ring is the one thing
+  // that ends a match nobody is winning (`DECISIONS §2`); a tick it can be danced out of is an
+  // exploit, not a nicety. Exposure now ACCUMULATES: what a fighter owes the fog is a function of
+  // how long it stood in it, not of whether it ever stood in it for 300 ms at a stretch.
+  //
+  // ⚠️ Teleported, not walked, so the duty cycle is exact and the only variable is the rule.
+  {
+    const DANCE_MS = 12_000;
+    const dance = (kind, outTicks, inTicks) => {
+      const pot = { x: 1400, y: 1000, radius: POT.dangerRadius, kind: 'damage', damage: POT.damage, tickMs: POT.tickMs };
+      const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: kind === 'fog' ? 300 : 50_000, hazards: kind === 'pot' ? [pot] : [] });
+      const st = seatMatch(arena, [{ char: 'hamburger', x: 1400, y: 1000 }, { char: 'pizza', x: 1600, y: 1000 }]);
+      const me = st.fighters[0];
+      me.maxHp = 1e6; me.hp = 1e6;
+      // fog: "exposed" is OUTSIDE the 300 wu ring; pot: "exposed" is INSIDE its 95 wu rim.
+      const EXPOSED = kind === 'fog' ? { x: 2300, y: 1000 } : { x: 1430, y: 1000 };
+      const SAFE = kind === 'fog' ? { x: 1500, y: 1000 } : { x: 1600, y: 1000 };
+      const cycle = outTicks + inTicks;
+      const steps = Math.round(DANCE_MS / DT);
+      let n = 0, exposedMs = 0;
+      for (let i = 0; i < steps; i++) {
+        const exposed = i % cycle < outTicks;
+        const at = exposed ? EXPOSED : SAFE;
+        me.x = at.x; me.y = at.y;
+        if (exposed) exposedMs += DT;
+        for (const e of stepMatch(st, DT, idle(st))) {
+          if (e.type === 'hit-landed' && e.targetId === 0 && e.source.kind === (kind === 'fog' ? 'fog' : 'hazard')) n++;
+        }
+      }
+      return { n, exposedMs, share: exposedMs / (steps * DT) };
+    };
+    const fogDance = dance('fog', 17, 1);    // 283 ms out, one frame in
+    const potDance = dance('pot', 14, 1);    // 233 ms on the pot, one frame off
+    const fogStay = dance('fog', 1, 0);      // never steps back in
+    check('(f) NON-VACUITY: the dancer is exposed > 90% of the time, and a fighter who just STAYS out is ticked',
+      fogDance.share > 0.9 && potDance.share > 0.9 && fogStay.n >= Math.floor(fogStay.exposedMs / FOG_TICK_MS) - 1,
+      `fog share ${(fogDance.share * 100).toFixed(1)}%, pot share ${(potDance.share * 100).toFixed(1)}%, stay-out ticks ${fogStay.n}`);
+    check('(f) 🔴 a fighter OUTSIDE the ring 94% of the time, stepping in one frame in eighteen, is ticked for that exposure',
+      Math.abs(fogDance.n - Math.floor(fogDance.exposedMs / FOG_TICK_MS)) <= 1,
+      `${fogDance.n} fog ticks for ${fogDance.exposedMs.toFixed(0)} ms outside (exposure owes ${Math.floor(fogDance.exposedMs / FOG_TICK_MS)})`);
+    check('(f) 🔴 …and the pot, stepped off for one frame in fifteen, likewise',
+      Math.abs(potDance.n - Math.floor(potDance.exposedMs / POT.tickMs)) <= 1,
+      `${potDance.n} pot ticks for ${potDance.exposedMs.toFixed(0)} ms on it (exposure owes ${Math.floor(potDance.exposedMs / POT.tickMs)})`);
+    // The other side of the rule: a brush shorter than one interval, once, costs nothing.
+    {
+      const pot = { x: 1400, y: 1000, radius: POT.dangerRadius, kind: 'damage', damage: POT.damage, tickMs: POT.tickMs };
+      const st = seatMatch(makeArena({ width: 2800, height: 2000, maxSafeRadius: 300, hazards: [pot] }), [{ char: 'hamburger', x: 1500, y: 1000 }, { char: 'pizza', x: 1600, y: 1000 }]);
+      const me = st.fighters[0];
+      let n = 0;
+      for (let i = 0; i < 600; i++) {
+        const at = i < 12 ? { x: 2300, y: 1000 } : i < 24 ? { x: 1430, y: 1000 } : { x: 1600, y: 1000 };   // 200 ms in the fog, 200 on the pot, then safe
+        me.x = at.x; me.y = at.y;
+        n += stepMatch(st, DT, idle(st)).filter((e) => e.type === 'hit-landed' && e.targetId === 0).length;
+      }
+      check('(f) CONTROL: one brush of the fog and one of the pot, each shorter than its interval, cost nothing',
+        n === 0, `${n} ticks`);
     }
   }
 }
