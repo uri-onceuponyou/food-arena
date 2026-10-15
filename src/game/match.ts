@@ -228,6 +228,10 @@ const FEEL_EVENT_KEYS = [
   'projectile-spawned', 'projectile-destroyed:hit-target', 'projectile-destroyed:hit-cover',
   'projectile-destroyed:expired', 'hit-landed:weapon', 'hit-landed:trail', 'hit-landed:hazard',
   'hit-landed:fog', 'heal', 'death', 'splat-created', 'trail-mark-created',
+  // Added with the two cases that answer them (B2, the wind-up): a handled event the
+  // census cannot count is the "never fires" / "no response" ambiguity this record exists
+  // to remove. Keyed by `ev.type`, as `feel_census.mjs` keys everything.
+  'cast-started', 'cast-cancelled',
 ] as const;
 
 /**
@@ -2035,6 +2039,48 @@ export class GameSession {
           this.triggerHitStop(90);
           break;
         }
+        // ── THE WIND-UP, DRAWN — `cast-started` / `cast-cancelled` ───────────────
+        //
+        // 🚨 BOTH FELL INTO `default` (B2). `vfx.ts:spawnCastTelegraph`'s own contract reads
+        // *"`match.ts` calls this on `cast-started` … and `cancelCastTelegraph` on
+        // `cast-cancelled`"*, and it was routed here in `e81df64` (2026-08-12) and never
+        // landed — so `waterbottle.Mega`'s 1,400 ms wind-up, whose `castMs` was DERIVED so the
+        // slowest human can escape a telegraph they can see, drew nothing in a real match: the
+        // caster stood rooted on bare floor, then the blow landed. Bots dodged it anyway
+        // (`ai.ts` reads `other.cast` straight off the sim); humans could not. The only caller
+        // of `spawnCastTelegraph` was the QA spawner. Red/green: `b1_match.mjs` §T.
+        //
+        // The resolve needs no call: the telegraph's own lifetime is `castMs`, and
+        // `weapon-fired`, emitted AT the resolve, brings the swing in on top of it (see the
+        // `vfx.ts` contract). Only the interrupt has to be told.
+        case 'cast-started': {
+          const slot = slotOf(ev.fighterId, ev.fighterRole);
+          const caster = fighterOf(this.state, ev.fighterId, ev.fighterRole);
+          // 🚨 `state.ts`'s MUST: *"AN OPPONENT-FACING TELEGRAPH DRAWN OFF THIS MUST RIDE THE
+          // SAME VISIBILITY NULL CHANNEL AS THE HP PILL"* — a wedge under a concealed enemy is
+          // a free read of its position. `hud.ts:fighterVisibleTo`, the HP pill's own
+          // predicate, asked from the camera's observer exactly as the model hide in `loop`
+          // asks it — NOT a direct `isVisibleFrom` call: `sim.test.mjs` §26(m) source-scans
+          // `src/game/*.ts` for those, and a review verifier measured a direct call here
+          // turning it red. Moot for every cast today (the press runs `spendCover`, which
+          // reveals the caster, and the caster is rooted), and kept because "moot today" is
+          // how the next concealment change ships a leak.
+          if (slot !== LOCAL_SLOT && !fighterVisibleTo(this.state, this.viewObserver(), caster)) break;
+          const weapon = CHARACTERS[caster.characterId].weapons.find((w) => w.key === ev.weaponKey);
+          if (!weapon) break;
+          this.vfx.spawnCastTelegraph(ev.fighterId, caster.x, caster.y, caster.facing, weapon,
+            caster.characterId, ev.castMs);
+          this.feel.responses.vfx++;
+          break;
+        }
+        case 'cast-cancelled':
+          // `vfx.ts` reads `'stun' | 'death'` as the two INTERRUPT looks (the footprint
+          // craters inward). The sim's third terminator, `'sleep'` (Warm Milk), is the same
+          // interrupt from the victim's side — its own `state.ts` note says it "must die
+          // exactly as a stun kills one" — so it takes the stun read, not `'resolved'`, which
+          // would make an interrupted cast vanish as if it had landed.
+          this.vfx.cancelCastTelegraph(ev.fighterId, ev.reason === 'death' ? 'death' : 'stun');
+          break;
         default:
           break;
       }
