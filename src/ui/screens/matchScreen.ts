@@ -80,7 +80,7 @@
 import { startGame, type GameSession, type MatchOutcome } from '../../game/match';
 import type { MatchPayout } from '../hud';
 import { CHARACTERS } from '../../game/rules';
-import { MAX_FIGHTERS, MIN_FIGHTERS, type MatchPhase } from '../../game/state';
+import { MAX_FIGHTERS, MIN_FIGHTERS, type FighterRole, type MatchPhase } from '../../game/state';
 import { brawlRoster } from './brawl';
 // 🚨 THE LOADOUT'S LAST HOP. `loadEquipped` and `ownedItems` both live in `lobby.ts`
 // because that is the file that WRITES the storage key, and a second reader with its own
@@ -163,37 +163,99 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
    *  — so the result must be banked exactly once per completed match. */
   let banked = false;
   /**
-   * 🚨 A RESULT BANKED BEFORE THE WHISTLE — the knocked-out seat at three or more (META-02).
+   * WHAT THIS MATCH'S ONE BANK PAID, as the card shows it — `null` until it has banked.
    *
-   * `banked` used to be set only on `'ended'`, so a 5th- or 6th-place finisher could Quit
-   * while spectating and keep every trophy (+84% trophies per match measured at 1,500 for
-   * "leave whenever the delta is negative"), and a 3rd-place finisher who left threw their
-   * payout away. The place is final at the knockout (`GameSession.notifyLocalResult` says why),
-   * so it is banked THERE, under the same `banked` guard, and this remembers what it paid so
-   * the whistle shows that payout on the card instead of banking a second time.
+   * 🚨 IT CAN BANK BEFORE THE WHISTLE NOW — the knocked-out seat at three or more (META-02).
+   * `banked` used to be set only on `'ended'`, so a 5th- or 6th-place finisher could Quit while
+   * spectating and keep every trophy (+84% trophies per match measured at 1,500 for "leave
+   * whenever the delta is negative"), and a 3rd-place finisher who left threw their payout
+   * away. The place is final at the knockout (`GameSession.notifyLocalResult` says why), so it
+   * is banked THERE — through `bankOnce`, the same single site the whistle uses — and this
+   * remembers what it paid so the whistle re-hands it to the card instead of banking again.
    *
    * Cleared with `banked` on every non-`'ended'` transition: a restart is a new match.
    */
-  let earlyPaid: { payout: MatchPayout; place: number; seats: number } | null = null;
+  let paidOut: { payout: MatchPayout; place: number; seats: number } | null = null;
 
-  /** Bank a decided PLACE and return what it paid, as the card shows it. The one call that
-   *  mutates the economy, for both the early bank and the Leave-with-a-revive-pending one. */
-  const bankPlace = (outcome: MatchOutcome): void => {
-    banked = true;
-    const paid = ctx.profile.recordPlacement(outcome.localPlace, outcome.seats);
-    earlyPaid = {
-      payout: { trophies: paid.trophies, coins: paid.coins, xp: placementXp(paid.place, paid.seats), chests: paid.chests },
-      place: paid.place,
-      seats: paid.seats,
-    };
-    // Harmless before the whistle — `hudResult()` gates the payout on `endedOutcome` — and it
-    // means the card is right even if the whistle's own re-hand below were ever skipped.
-    session.showPayout(earlyPaid.payout);
-  };
-  /** The same seat-range test the whistle's bank applies. Outside it, defer to the whistle,
-   *  whose `recordResult` fallback is the one path that can pay an unpayable outcome. */
+  /** The seat-range test the bank applies before it trusts a placement. Outside it the bank
+   *  falls back to the old boolean path — see `bankOnce`. */
   const payable = (o: MatchOutcome | null): o is MatchOutcome => o !== null
     && o.localPlace >= 0 && o.seats >= MIN_FIGHTERS && o.seats <= MAX_FIGHTERS;
+
+  /**
+   * 🚨 THE ONE PLACE THIS SCREEN BANKS A MATCH — at the whistle, at a six-seat knockout
+   * (`onLocalResult`), and on a Leave that forfeits a pending Leftovers revive.
+   *
+   * ⚠️ ONE SITE, NOT ONE PER CALLER, AND THAT IS THE DOUBLE-BANK DEFENCE. `recordPlacement`
+   * mutates and commits the economy, so a second call is a silently doubled payout that looks
+   * perfect on screen. `tools/tmp/rc_card.mjs` §F asserts this file has exactly two payout
+   * calls — the two arms of the branch below — both after `banked = true`, inside
+   * `if (!banked)`. The first cut of META-02 (`3d0cff0`) added a third call in a helper of its
+   * own and both of §F's structural rows went red on it ("3 call sites"; the call before the
+   * guard); this function is the answer, not a weakened check.
+   *
+   * After the guard it always re-hands what was paid: harmless before the whistle
+   * (`GameSession.hudResult` gates the payout on `endedOutcome`), and at the whistle it is
+   * what puts an EARLY bank's numbers on the card without banking them a second time.
+   */
+  function bankOnce(outcome: MatchOutcome | null, winner: FighterRole | null): void {
+    if (!banked) {
+      banked = true;
+      // ── 🚨 THE PAYOUT JOIN ──────────────────────────────────────────────
+      // This was `ctx.profile.recordResult(winner === 'player')` — a BOOLEAN, which
+      // `profile.ts` forwards as `recordPlacement(won ? 0 : 1, MIN_FIGHTERS)`. So
+      // **every match this product has ever played paid as a duel**, and the whole
+      // 3-6 seat curve built in `DECISIONS §59` and wired through in `§61` was
+      // unreachable from the game. At 500 trophies a six-player match paid 2nd, 3rd,
+      // 4th AND 5th the LAST-PLACE rate — -5 trophies / 20 coins / 35 XP — instead of
+      // 11/52/87, 7/44/74, 3/36/61 and -1/28/48. Priced over a real place
+      // distribution that is **4.16-6.92 trophies, 11.1 coins and 18.0 XP per match**,
+      // silently, every match. `tools/tmp/mp_join.mjs` is the gate and it is RED on
+      // the line this replaces.
+      //
+      // ⚠️ THE FALLBACK IS THE OLD LINE, NOT A GUESS. A session that hands over no
+      // outcome, or one whose seat count `trophyRoad.ts:placementRank01` would THROW
+      // on, pays exactly what it paid before — correct at two seats, which is the only
+      // seat count that path can reach. (The two pre-whistle callers only ever hand in a
+      // `payable` outcome, so they can never reach this arm with no winner to read.)
+      //
+      // ⚠️ AND IT IS A NO-OP AT TWO SEATS BY CONSTRUCTION, NOT BY TUNING: at two seats
+      // `resolvePlaces` returns [winner, loser], so `localPlace` is 0 or 1 and `seats`
+      // is 2 — the exact arguments `recordResult` forwards. `mp_join.mjs` §B proves
+      // that against the shipped boolean path at every standing rather than asserting
+      // it.
+      const paid = payable(outcome)
+        ? ctx.profile.recordPlacement(outcome.localPlace, outcome.seats)
+        : ctx.profile.recordResult(winner === 'player');
+
+      // ── 🚨 AND NOW THE PLAYER IS TOLD WHAT IT PAID ────────────────────────
+      //
+      // `DECISIONS §64` defect 3: the payouts above became correct in `bb00d66` and
+      // stayed **invisible** — a 3rd-of-6 finish banks +9 trophies, 44 coins and 74 XP
+      // and the result card said none of it. `GameSession.showPayout` is the socket,
+      // matching the one `48ad6ca` opened for the finishing PLACE.
+      //
+      // 🚨 **THE RETURN VALUE OF THE ONE BANK ABOVE, NEVER A SECOND CALL.** The payout
+      // is applied as a SIDE EFFECT of banking — `recordPlacement` mutates the economy
+      // and commits it — so a display that "looked up" what the match paid would bank
+      // it twice, which looks perfect on screen and silently doubles every trophy the
+      // player owns. That is why this reads `paid` and why nothing below the session
+      // boundary can reach the economy at all.
+      //
+      // ⚠️ `paid.place`/`paid.seats` RATHER THAN `outcome`, deliberately: they are what
+      // `applyMatchPlacement` actually banked (it stores its own arguments on
+      // `LastMatch`), so the XP shown is the XP added even on the `recordResult`
+      // fallback, where `outcome` is null or unpayable. `placementXp` is a pure
+      // function of those two numbers — the same call `recordPlacement` just made, not
+      // a second application of it.
+      paidOut = {
+        payout: { trophies: paid.trophies, coins: paid.coins, xp: placementXp(paid.place, paid.seats), chests: paid.chests },
+        place: paid.place,
+        seats: paid.seats,
+      };
+    }
+    if (paidOut) session.showPayout(paidOut.payout);
+  }
 
   // ── 🚨 DECISIONS §66'S FLAG, AND IT IS OFF UNLESS A ROUTE SAYS OTHERWISE ─────
   //
@@ -261,81 +323,22 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     // mirrors it inside `GameSession` — see `enemyLevelFor`, which is where Uri's
     // "AI players adjust to the player's level" answer is expressed exactly once.
     playerLevel: ctx.profile.characterLevel(route.player),
-    // ── 🚨 THE KNOCKED-OUT SEAT BANKS AT THE KNOCKOUT (META-02) — see `earlyPaid`. ──
+    // ── 🚨 THE KNOCKED-OUT SEAT BANKS AT THE KNOCKOUT (META-02) — see `paidOut`. ──
     // Never fires at two seats (a knockout ends a duel on the same tick), so the duel's bank
-    // below is untouched by construction. An unpayable outcome is left for the whistle.
+    // at the whistle is untouched by construction. An unpayable outcome is left for the
+    // whistle, whose fallback arm is the one path that can pay it.
     onLocalResult(outcome) {
-      if (banked || !payable(outcome)) return;
-      bankPlace(outcome);
+      if (payable(outcome)) bankOnce(outcome, null);
     },
     onPhase(phase: MatchPhase, winner, outcome) {
       if (phase === 'ended') {
-        // Banked at the knockout: the whistle must not bank again (`recordPlacement` mutates
-        // and commits), but the card still has to be handed what that bank paid.
-        if (banked && earlyPaid) session.showPayout(earlyPaid.payout);
-        if (!banked) {
-          banked = true;
-          // ── 🚨 THE PAYOUT JOIN ──────────────────────────────────────────────
-          // This was `ctx.profile.recordResult(winner === 'player')` — a BOOLEAN, which
-          // `profile.ts` forwards as `recordPlacement(won ? 0 : 1, MIN_FIGHTERS)`. So
-          // **every match this product has ever played paid as a duel**, and the whole
-          // 3-6 seat curve built in `DECISIONS §59` and wired through in `§61` was
-          // unreachable from the game. At 500 trophies a six-player match paid 2nd, 3rd,
-          // 4th AND 5th the LAST-PLACE rate — -5 trophies / 20 coins / 35 XP — instead of
-          // 11/52/87, 7/44/74, 3/36/61 and -1/28/48. Priced over a real place
-          // distribution that is **4.16-6.92 trophies, 11.1 coins and 18.0 XP per match**,
-          // silently, every match. `tools/tmp/mp_join.mjs` is the gate and it is RED on
-          // the line this replaces.
-          //
-          // ⚠️ THE FALLBACK IS THE OLD LINE, NOT A GUESS. A session that hands over no
-          // outcome, or one whose seat count `trophyRoad.ts:placementRank01` would THROW
-          // on, pays exactly what it paid before — correct at two seats, which is the only
-          // seat count that path can reach.
-          //
-          // ⚠️ AND IT IS A NO-OP AT TWO SEATS BY CONSTRUCTION, NOT BY TUNING: at two seats
-          // `resolvePlaces` returns [winner, loser], so `localPlace` is 0 or 1 and `seats`
-          // is 2 — the exact arguments `recordResult` forwards. `mp_join.mjs` §B proves
-          // that against the shipped boolean path at every standing rather than asserting
-          // it.
-          const payable = outcome !== null
-            && outcome.localPlace >= 0
-            && outcome.seats >= MIN_FIGHTERS
-            && outcome.seats <= MAX_FIGHTERS;
-          const paid = payable && outcome
-            ? ctx.profile.recordPlacement(outcome.localPlace, outcome.seats)
-            : ctx.profile.recordResult(winner === 'player');
-
-          // ── 🚨 AND NOW THE PLAYER IS TOLD WHAT IT PAID ────────────────────────
-          //
-          // `DECISIONS §64` defect 3: the payouts above became correct in `bb00d66` and
-          // stayed **invisible** — a 3rd-of-6 finish banks +9 trophies, 44 coins and 74 XP
-          // and the result card said none of it. `GameSession.showPayout` is the socket,
-          // matching the one `48ad6ca` opened for the finishing PLACE.
-          //
-          // 🚨 **THE RETURN VALUE OF THE ONE BANK ABOVE, NEVER A SECOND CALL.** The payout
-          // is applied as a SIDE EFFECT of banking — `recordPlacement` mutates the economy
-          // and commits it — so a display that "looked up" what the match paid would bank
-          // it twice, which looks perfect on screen and silently doubles every trophy the
-          // player owns. That is why this reads `paid` and why nothing below the session
-          // boundary can reach the economy at all.
-          //
-          // ⚠️ `paid.place`/`paid.seats` RATHER THAN `outcome`, deliberately: they are what
-          // `applyMatchPlacement` actually banked (it stores its own arguments on
-          // `LastMatch`), so the XP shown is the XP added even on the `recordResult`
-          // fallback, where `outcome` is null or unpayable. `placementXp` is a pure
-          // function of those two numbers — the same call `recordPlacement` just made, not
-          // a second application of it.
-          session.showPayout({
-            trophies: paid.trophies,
-            coins: paid.coins,
-            xp: placementXp(paid.place, paid.seats),
-            chests: paid.chests,
-          });
-        }
+        // Banks here unless the knockout already did — then it only re-hands that payout to
+        // the card. See `bankOnce`.
+        bankOnce(outcome, winner);
         root.classList.add('is-ended');
       } else {
         banked = false;
-        earlyPaid = null;
+        paidOut = null;
         root.classList.remove('is-ended');
       }
     },
@@ -414,7 +417,7 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
    * their place is already paid. It stays word for word for the standing fighter.
    */
   function confirmBody(): string {
-    if (earlyPaid) return `You finished ${ordinal(earlyPaid.place + 1)} of ${earlyPaid.seats} — that is already banked.`;
+    if (paidOut) return `You finished ${ordinal(paidOut.place + 1)} of ${paidOut.seats} — that is already banked.`;
     const ko = session.knockedOutOutcome();
     if (payable(ko)) {
       return `You are out in ${ordinal(ko.localPlace + 1)} of ${ko.seats}. Leaving banks that now and gives up your Leftovers revive.`;
@@ -427,7 +430,7 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     leaveBtn.innerHTML = `${icon(glyph)} ${label}`;
     q<HTMLParagraphElement>('confirmbody').textContent = confirmBody();
     // A knocked-out player is not playing; the safe option says what it actually does.
-    const out = earlyPaid !== null || session.knockedOutOutcome() !== null;
+    const out = paidOut !== null || session.knockedOutOutcome() !== null;
     q<HTMLButtonElement>('keep').innerHTML = `${icon('play')} ${out ? 'Keep Watching' : 'Keep Playing'}`;
     panePause.hidden = true;
     paneConfirm.hidden = false;
@@ -469,11 +472,10 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     // (see `GameSession.notifyLocalResult`). Leaving forfeits that revive, so the place held
     // right now IS this player's final place, and banking it here is what stops "leave while
     // the revive is pending" from re-opening the loss-skip META-02 closed. A standing fighter
-    // gets `null` and banks nothing, exactly as before (`DECISIONS §19`).
-    if (!banked) {
-      const ko = session.knockedOutOutcome();
-      if (payable(ko)) bankPlace(ko);
-    }
+    // gets `null` and banks nothing, exactly as before (`DECISIONS §19`). Through `bankOnce`,
+    // so a seat the knockout already banked is not banked twice.
+    const ko = session.knockedOutOutcome();
+    if (payable(ko)) bankOnce(ko, null);
     ctx.navigate(pendingExit);
   });
   exitBtn.addEventListener('click', () => ctx.navigate({ name: 'home' }));
