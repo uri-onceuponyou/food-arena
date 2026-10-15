@@ -565,8 +565,28 @@ function dangerSteer(
   // walks in rather than trading shots, and §48(a)'s over-fix CONTROL pins that.
   if (dc > EPS && !suddenDeathActive(state.timeRemaining)) {
     const margin = state.safeRadius - dc; // > 0 inside the safe disc
-    if (margin < AI_RING_MARGIN) {
-      const t = Math.min(2, (AI_RING_MARGIN - margin) / AI_RING_MARGIN);
+    const t = Math.min(2, (AI_RING_MARGIN - margin) / AI_RING_MARGIN);
+    // ── 🚨 INSIDE THE SAFE DISC, THE RING'S PUSH YIELDS TO A HAZARD PRESSING HARDER (AI-U1) ──
+    //
+    // This read `if (margin < AI_RING_MARGIN) {`, so inside the disc the term was a spring
+    // toward the centre — and the centre is the pot. At N<=4 the final circle (140 wu) is no
+    // wider than `AI_RING_MARGIN` (140), so the spring is live on EVERY standable point, and
+    // with the bot's own intent toward a target standing IN the burn it outweighed the pot's
+    // push: the bot settled inside the burn, the pot's `t >= 1` made it `urgent`, and the
+    // chase branch stopped shooting for as long as the target stayed. Measured on `a53d8b0`
+    // (`sim.test.mjs` §48(e)), a living target at 84 wu from the centre: 0-3 presses in 8 s
+    // and 399-480 of 480 ticks in the burn for 11 of 11 characters, at two seats and four —
+    // against 24-34 presses with the target 26 wu further out.
+    //
+    // Inside the disc the ring term is PRECAUTION (its `t` < 1 — nothing is burning yet); a
+    // damaging hazard whose `t` is at least as large is the more pressing danger, so the
+    // precaution stands aside and the hazard and the fighter's intent steer. Outside the disc,
+    // or wherever the ring presses harder, nothing changes — §48(e)'s over-fix CONTROL holds a
+    // bot inside the final circle while its target stands in the fog. `worst` here is the
+    // hazards' alone: the telegraph loop below has not run yet.
+    // ⚠️ At six seats the final circle is 237 wu and the term is ~0 near the pot, so this was
+    // never a six-seat defect — §48(e) keeps a six-seat CONTROL to say so.
+    if (margin < AI_RING_MARGIN && !(margin >= 0 && worst >= t)) {
       DANGER.x += (toCx / dc) * t * AI_RING_WEIGHT;
       DANGER.y += (toCy / dc) * t * AI_RING_WEIGHT;
       if (t > worst) worst = t;

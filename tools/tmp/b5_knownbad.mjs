@@ -98,6 +98,13 @@ const C_CONTROL = [
 ];
 const C_CONTRACT = '(c) CONTROL: a 300 wu region';
 const SITE3 = 'SITE 3 (the chase nav target): a concealed player is chased to where it was LAST SEEN';
+const E_RED = [
+  '(e) 🔴 two seats: a target standing IN the burn is still shot',
+  '(e) 🔴 two seats: …and no bot spends half its time in the burn',
+  '(e) 🔴 four seats (the same 140 wu floor)',
+];
+const E_CONTROL = ['(e) CONTROL: the target just OUTSIDE the burn', '(e) CONTROL: six seats (a 237 wu floor)'];
+const E_OVERFIX = '(e) CONTROL: the ring term still holds a bot inside the final circle';
 
 export const ARMS = [
   // ── AI-B1 ──────────────────────────────────────────────────────────────────────
@@ -193,6 +200,28 @@ export const ARMS = [
     repl: '    sighting.x = target.x; sighting.y = target.y;\n',
     mustFail: [C_CONTRACT, SITE3],
     mustPass: [C_TWO, ...C_CONTROL],
+  },
+  // ── AI-U1 ──────────────────────────────────────────────────────────────────────
+  {
+    name: 'ring-into-pot',
+    bug: 'AI-U1 — inside the final circle the ring term pushes toward the centre, i.e. into the pot (the shipped rule)',
+    file: 'game/ai.ts',
+    find: '    if (margin < AI_RING_MARGIN && !(margin >= 0 && worst >= t)) {',
+    repl: '    if (margin < AI_RING_MARGIN) {',
+    mustFail: E_RED,
+    mustPass: [...E_CONTROL, E_OVERFIX],
+  },
+  {
+    name: 'ring-off-near-pot',
+    bug: 'AI-U1 over-fix — the ring term switched off wherever ANY hazard encroaches (the bot follows a target into the fog)',
+    file: 'game/ai.ts',
+    find: '    if (margin < AI_RING_MARGIN && !(margin >= 0 && worst >= t)) {',
+    repl: '    if (margin < AI_RING_MARGIN && !(margin >= 0 && worst > 0)) {',
+    // It also lets bots drift into the burn beside a target standing just OUTSIDE it, so that
+    // control legitimately goes red with it; the 🔴 rows stay green — which is exactly why the
+    // over-fix control exists.
+    mustFail: [E_OVERFIX],
+    mustPass: [...E_RED, '(e) CONTROL: six seats (a 237 wu floor)'],
   },
 ];
 

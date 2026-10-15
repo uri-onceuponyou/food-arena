@@ -13507,6 +13507,84 @@ console.log('\n48. The bot at two, three and six seats — sudden death, what it
         `facing E on ${facingE}/60 ticks; |A-E| ${d0.toFixed(1)} -> ${d1.toFixed(1)}`);
     }
   }
+
+  // ── (e) AI-U1: A TARGET STANDING IN THE POT'S BURN PULLED THE BOT IN AND SILENCED IT ─────
+  //
+  // Arrived UNSURE ("observed once, against a statue"); this is the test that decides. A LIVING
+  // human walks into the burn and stands there, 14 s before the collapse — the final circle. At
+  // N<=4 that circle is 140 wu, the same as `AI_RING_MARGIN`, so `dangerSteer`'s ring term is live
+  // on every standable point and pushes toward the centre — which is the pot. Ring push plus the
+  // bot's own intent (toward a target IN the burn) outweighed the pot's push, the bot settled
+  // inside the burn where the pot's `t >= 1` made it `urgent`, and the chase branch stopped
+  // shooting. At six seats the circle is 237 wu and the ring term is ~0 near the pot, so the
+  // defect needs the N<=4 floor: a CONTROL here says so rather than rounding it up to six.
+  {
+    const arena = potArena48();
+    const CX = arena.center.x;
+    const CY = arena.center.y;
+    const run = (n, bot, standR) => {
+      const seats = [
+        { characterId: 'hamburger', controller: 'human', maxHp: 1e5, spawn: { x: CX + 135, y: CY } },
+        { characterId: bot, controller: 'ai', maxHp: 1e5, spawn: { x: CX + 120, y: CY - 70 } },
+      ];
+      for (let i = 2; i < n; i++) seats.push({ characterId: CHARACTER_IDS[(i + 3) % CHARACTER_IDS.length], controller: 'human', maxHp: 1e5, spawn: { x: 300 + 500 * i, y: 200 } });
+      const st = seat48(arena, seats);
+      st.phase = 'playing';
+      st.timeRemaining = SUDDEN_DEATH_REMAINING_MS + 14_000;
+      const [T, A] = st.fighters;
+      const spot = { x: CX + standR, y: CY };
+      const inputs = st.fighters.map(() => null);
+      let at = -1;
+      const r = { presses: 0, burn: 0, ticks: 0 };
+      for (let k = 0; k < 1200 && st.phase === 'playing' && !suddenDeathActive(st.timeRemaining); k++) {
+        inputs[0] = walk48(T, spot.x, spot.y);
+        const evs = stepMatch(st, DT48, inputs);
+        if (at < 0 && Math.hypot(T.x - spot.x, T.y - spot.y) < 3) at = k;
+        if (at >= 0 && k - at >= 60 && k - at < 540) {   // 8 s, after a 1 s settle
+          r.ticks++;
+          for (const e of evs) if (isPress48(e, A)) r.presses++;
+          if (Math.hypot(A.x - CX, A.y - CY) < POT.dangerRadius) r.burn++;
+        }
+      }
+      return r;
+    };
+    const IN = 84;    // inside the 95 wu burn, outside the 73 wu the pot's box allows
+    const OUT = 110;  // in the final circle's safe annulus
+    const sweep = (n) => CHARACTER_IDS.map((c) => ({ c, inn: run(n, c, IN), out: run(n, c, OUT) }));
+    const fmtE = (rows) => rows.map((r) => `${r.c} ${r.inn.presses}p/${r.inn.burn}b (out ${r.out.presses}p)`).join(' · ');
+    const two = sweep(2);
+    check('(e) CONTROL: the target just OUTSIDE the burn is shot by every character\'s bot — the fixture can fire',
+      two.every((r) => r.out.ticks === 480 && r.inn.ticks === 480 && r.out.presses > 0 && r.out.burn === 0), fmtE(two));
+    check('(e) 🔴 two seats: a target standing IN the burn is still shot — every bot presses at least half as often as when it stands outside',
+      two.every((r) => r.inn.presses * 2 >= r.out.presses), fmtE(two));
+    check('(e) 🔴 two seats: …and no bot spends half its time in the burn following it',
+      two.every((r) => r.inn.burn * 2 < r.inn.ticks), fmtE(two));
+    const four = sweep(4);
+    check('(e) 🔴 four seats (the same 140 wu floor): …the same, every character',
+      four.every((r) => r.inn.presses * 2 >= r.out.presses && r.inn.burn * 2 < r.inn.ticks), fmtE(four));
+    const six = sweep(6);
+    check('(e) CONTROL: six seats (a 237 wu floor) — the bot already shot a target standing in the burn; the defect needs N<=4',
+      six.every((r) => r.inn.presses * 2 >= r.out.presses), fmtE(six));
+
+    // CONTROL — THE OVER-FIX. The ring term must still hold a bot inside the final circle when its
+    // target stands out in the fog beyond its reach. A fix that switched the ring term off near
+    // the pot altogether would pass every 🔴 row above and walk the bot out into the fog here.
+    {
+      const st = seat48(arena, [
+        { characterId: 'hamburger', controller: 'human', maxHp: 1e5, spawn: { x: CX + 300, y: CY } },
+        { characterId: 'taco', controller: 'ai', maxHp: 1e5, spawn: { x: CX + 120, y: CY } },
+      ]);
+      st.phase = 'playing';
+      st.timeRemaining = SUDDEN_DEATH_REMAINING_MS + 10_000;
+      let maxDc = 0;
+      for (let k = 0; k < 300; k++) {
+        stepMatch(st, DT48, [null, null]);
+        maxDc = Math.max(maxDc, Math.hypot(st.fighters[1].x - CX, st.fighters[1].y - CY));
+      }
+      check('(e) CONTROL: the ring term still holds a bot inside the final circle while its target stands in the fog',
+        maxDc <= minSafeRadiusFor(2), `farthest ${maxDc.toFixed(1)} wu from the centre, final circle ${minSafeRadiusFor(2)}`);
+    }
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
