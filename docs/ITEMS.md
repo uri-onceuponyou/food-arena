@@ -100,7 +100,9 @@ stale constant becomes a red row instead of a silent lie.
 * Warm Milk's range is `GUARANTEED_VISIBLE_RADIUS` — "half a screen" is the disc every
   supported aspect ratio guarantees. Springform is half of that.
 * Blue Cheese and Disposal both work at `REACH.meleeHeavy`.
-* Leftovers returns you with `MEDIKIT.heal × MEDIKIT.count` — one corpse's worth of kits.
+* Leftovers returns you with `MEDIKIT.heal × MEDIKIT.count` × your own `levelHealthMultiplier` —
+  one corpse's worth of kits *at your level*, scaled exactly as a kit you pick up is. (It was a
+  flat 18 until 2026-10-15 — 18 of 119 HP at L15 — BH-11.)
 * The Shiitake wind-up is `SUPER_MIN_COOLDOWN_MS`, and reflect is **1.0** — Uri said
   attackers take damage on *every* damage they do, not a fraction.
 

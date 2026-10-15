@@ -798,7 +798,8 @@ export function applyDamage(
  *
  * ── WHAT COMING BACK MEANS, STATED RATHER THAN INHERITED ────────────────────
  *
- * `ITEM_TUNING.leftovers.hp` — *"one corpse's worth of medikits"* — and **where the body
+ * `ITEM_TUNING.leftovers.hp` — *"one corpse's worth of medikits"*, scaled by the revived
+ * fighter's own `levelHealthMultiplier` exactly as a kit is (see the line below) — and **where the body
  * fell**, which is a standable point by proof rather than by argument: a fighter was
  * standing on it one tick ago (the same reasoning `dropMedikits` uses for its fallback).
  *
@@ -825,7 +826,26 @@ function reviveThoseKilledBy(state: MatchState, killer: Fighter, events: GameEve
     f.item.revivesLeft--;
     f.item.killerId = NO_FIGHTER;
     f.alive = true;
-    f.hp = Math.min(f.maxHp, ITEM_TUNING.leftovers.hp);
+    // ── A CORPSE'S WORTH OF MEDIKITS *AT THIS FIGHTER'S LEVEL* — BH-11 ──────────────
+    //
+    // IT READ `Math.min(f.maxHp, ITEM_TUNING.leftovers.hp)` — a flat 18. That constant is
+    // derived as `MEDIKIT.heal × MEDIKIT.count`, and `MEDIKIT.heal` is documented as "HP per
+    // kit, BEFORE the picker's level multiplier": `sim.ts:stepMedikits` multiplies it by the
+    // TAKER's `levelHealthMultiplier`, and so does the Onion heal it was itself derived from.
+    // The revive was the one link in that chain left flat, so at L15 it returned 18 of 119 HP
+    // (15.1% of the pool) where the kits it is "worth" return 30.6 (25.7%, the L1 share).
+    //
+    // ⚠️ **THIS ITEM NUMBER IS ON THE HEALTH LADDER AND ITEM *DAMAGE* IS NOT, AND THAT IS NOT
+    // AN INCONSISTENCY.** `applyDamage` keeps the cloud's `dps` and the mirror's `reflect` off
+    // the character ladder because they are statements about an ITEM (*"small damage per
+    // second"*, *"every point"*). This one is a statement about a POOL — what one corpse's kits
+    // would refill — and a pool's share is only constant across levels if the HP scales with it.
+    // A future "items are flat" consistency pass must not revert this line on that argument.
+    //
+    // The REVIVED fighter's level (`f.level`), not the killer's: it is `f`'s pool being
+    // refilled, exactly as `stepMedikits` keys on the taker. Exactly 1.0 at `LEVEL_MIN`, so
+    // every L1 match is bit-identical. §42(c) drives it at four and six seats at L15.
+    f.hp = Math.min(f.maxHp, ITEM_TUNING.leftovers.hp * levelHealthMultiplier(f.level));
     // Every deadline back to "never", every accumulator back to its identity. See above.
     f.status.slowedUntil = -Infinity;
     f.status.stunnedUntil = -Infinity;

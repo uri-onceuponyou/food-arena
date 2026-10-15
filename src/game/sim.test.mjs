@@ -11235,14 +11235,14 @@ console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the r
   const DT = 1000 / 60;
   const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
   const ITEM_ARENA = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
-  /** `n` HUMAN seats on clear floor, 300 wu apart on one row, PLAYING. `opts.items[i]` per seat. */
+  /** `n` HUMAN seats on clear floor, 300 wu apart on one row, PLAYING. `opts.items[i]` / `opts.levels[i]` per seat. */
   const seats = (n, opts = {}) => {
     const st = createMatch(ITEM_ARENA, Array.from({ length: n }, (_, i) => ({
       characterId: opts.chars?.[i] ?? 'hamburger',
       controller: 'human',
       spawn: opts.spawns?.[i] ?? { x: 400 + i * 300, y: 600 },
       ...(opts.items?.[i] ? { items: opts.items[i] } : {}),
-      ...(opts.level !== undefined ? { level: opts.level } : {}),
+      ...(opts.levels ? { level: opts.levels[i] } : opts.level !== undefined ? { level: opts.level } : {}),
     })));
     st.phase = 'playing';
     return st;
@@ -11413,6 +11413,61 @@ console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the r
       check('(b) BOTH shields up, one blow: exactly TWO hit-landed — the blow and one reflection — the mirror does not ring',
         both && ofType(evs, 'hit-landed').length === 2 && st.fighters.every((f) => f.alive),
         `both up ${both}, hit-landed ×${ofType(evs, 'hit-landed').length}: ${ofType(evs, 'hit-landed').map((e) => `${e.targetId}:${e.amount}${e.source.itemId ? '/' + e.source.itemId : ''}`).join(' ')}`);
+    }
+  }
+
+  // ── (c) 🔴 LEFTOVERS RETURNS A CORPSE'S WORTH *AT YOUR LEVEL* — BH-11 ────────────
+  //
+  // `ITEM_TUNING.leftovers.hp` is *"one corpse's worth of medikits"* — `MEDIKIT.heal ×
+  // MEDIKIT.count` — and `MEDIKIT.heal` is documented as *"HP per kit, BEFORE the picker's
+  // level multiplier"*. Every other link in that chain scales (`stepMedikits` multiplies by the
+  // taker's `levelHealthMultiplier`, the Onion heal by the caster's); the revive did not, so at
+  // L15 it returned 18 of 119 HP (15.1% of the pool) against the 25.7% it returns at L1.
+  //
+  // 🚨 FOUR SEATS AT LEAST, AND AT A LEVEL ABOVE 1 — both are required for the row to be able
+  // to fail. A revive needs the killer to die with two still standing, which no match below
+  // four seats can hold; and `levelHealthMultiplier(1)` is exactly 1.0, so an L1 row passes
+  // with the bug in place. The L1 arm is here as the CONTROL that says so.
+  {
+    const kill = (st, victim, killer) => {
+      const evs = [];
+      const w = CHARACTERS[st.fighters[killer].characterId].weapons[0];
+      applyDamage(st, st.fighters[victim], 1e6, null,
+        { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: killer }, evs);
+      return evs;
+    };
+    /** Seat 0 wears Leftovers and is killed by seat 1, who is then killed by seat 2: a revive. */
+    const reviveAt = (n, levels) => {
+      const st = seats(n, { items: [['leftovers']], levels });
+      kill(st, 0, 1);
+      const down = !st.fighters[0].alive;
+      const evs = kill(st, 1, 2);
+      return { st, down, rev: ofType(evs, 'item-revived'), me: st.fighters[0] };
+    };
+    /** What the same fighter collects walking over its killer's kits: `stepMedikits`' own rule. */
+    const corpseWorth = (lvl) => MEDIKIT.heal * MEDIKIT.count * levelHealthMultiplier(lvl);
+    for (const n of [4, MAX_FIGHTERS]) {
+      const { st, down, rev, me } = reviveAt(n, Array(n).fill(LEVEL_MAX));
+      check(`(c) N=${n} NON-VACUITY: seat 0 went down, its killer went down with ${n - 2} standing, and Leftovers FIRED`,
+        down && rev.length === 1 && rev[0].fighterId === 0 && me.alive && st.phase === 'playing' && me.level === LEVEL_MAX,
+        `down ${down}, revived ${JSON.stringify(rev)}, phase ${st.phase}, level ${me.level}`);
+      check(`(c) N=${n} 🔴 at L${LEVEL_MAX} the revive is a corpse's worth AT THAT LEVEL — ${corpseWorth(LEVEL_MAX).toFixed(2)} HP, not a flat ${ITEM_TUNING.leftovers.hp}`,
+        rev.length === 1 && approx(rev[0].hp, corpseWorth(LEVEL_MAX), 1e-9) && approx(me.hp, corpseWorth(LEVEL_MAX), 1e-9),
+        `item-revived.hp ${rev[0]?.hp}, fighter hp ${me.hp} of ${me.maxHp}, a corpse's kits ${corpseWorth(LEVEL_MAX)}`);
+    }
+    {
+      const { rev } = reviveAt(4, Array(4).fill(LEVEL_MIN));
+      check(`(c) CONTROL: at L${LEVEL_MIN} it is exactly ${ITEM_TUNING.leftovers.hp} — the multiplier is 1.0, which is why an L1 row cannot see BH-11`,
+        rev.length === 1 && rev[0].hp === ITEM_TUNING.leftovers.hp && levelHealthMultiplier(LEVEL_MIN) === 1,
+        `item-revived.hp ${rev[0]?.hp}`);
+    }
+    // Whose level? The REVIVED fighter's — the pool it refills, and the key `stepMedikits` uses
+    // for the taker. An L15 wearer killed by L1 fighters must still come back with an L15 share.
+    {
+      const { rev } = reviveAt(4, [LEVEL_MAX, LEVEL_MIN, LEVEL_MIN, LEVEL_MIN]);
+      check('(c) 🔴 MIXED LEVELS: an L15 wearer revived by an L1 killer\'s death gets the L15 share — its OWN level, not the killer\'s',
+        rev.length === 1 && approx(rev[0].hp, corpseWorth(LEVEL_MAX), 1e-9),
+        `item-revived.hp ${rev[0]?.hp} vs ${corpseWorth(LEVEL_MAX)} (L15) / ${corpseWorth(LEVEL_MIN)} (L1)`);
     }
   }
 }
