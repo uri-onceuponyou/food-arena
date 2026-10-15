@@ -7637,7 +7637,9 @@ console.log('\n31. Projectile retirement in the target\'s frame (DECISIONS §50b
   // The rule itself is a balance decision, measured on 880 real matches
   // (`tools/tmp/cst_interrupt.mjs`): "any damage cancels" leaves 24.8% of ultimates alive
   // at a 900 ms wind-up — three in four dying on a 3.5 s cooldown — against 84.1% for
-  // stun-only, a 59.3 pp gap against a ±2.86 pp floor. `DECISIONS §74(a)`.
+  // stun-only, a 59.3 pp gap against a ±2.86 pp floor. ⚠️ This cited `DECISIONS §74(a)`, which
+  // does not exist — §74 is the phone / six-seat-lobby answer; the stun-only decision was
+  // never written into that file (see `combat.ts`'s TERMINATOR 2 note; reported 2026-10-15).
   {
     const openCast = (state) => {
       const evs = [];
@@ -11333,6 +11335,85 @@ console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the r
     check('(a) 🔴 a blow that STUNS AND KILLS reports the wind-up once, as \'stun\' — death finds it already gone',
       !wearer.alive && cancels.length === 1 && cancels[0].reason === 'stun',
       `alive ${wearer.alive}, cancels ${JSON.stringify(cancels.map((c) => c.reason))}`);
+  }
+
+  // ── (b) 🔴 THE MIRROR RETURNS WHAT THE WEARER *LOST*, NOT WHAT WAS SWUNG — BH-05 ──
+  //
+  // `combat.ts`'s own contract: the reflection is *"applied to `dealt`, the number the victim
+  // ACTUALLY lost, so the mirror cannot disagree with the health bar it is mirroring"*. On a
+  // killing blow those are different numbers — `dealt` is fixed before the HP clamp — so a
+  // 12-damage swing into a 3-HP wearer reflected 12, and an attacker could die for finishing
+  // somebody. Built at THREE seats because that is where the overkill DECIDES something: at
+  // two, the wearer's death has already declared the attacker the winner before the
+  // reflection lands, so the duel can show the extra damage but never a changed result.
+  {
+    const raiseShield = (n) => {
+      const st = seats(n, { items: [['shiitake']] });
+      const evs = stepMatch(st, DT, pressItem(st, 0, 0));
+      for (let i = 0; i < Math.ceil(ITEM_TUNING.shiitake.windupMs / DT) + 2; i++) evs.push(...stepMatch(st, DT, idle(st)));
+      return { st, evs };
+    };
+    const BLOW = CHARACTERS.hamburger.weapons.find((w) => w.key === 'Smash');
+    const smash = (st, target) => {
+      const evs = [];
+      applyDamage(st, target, BLOW.damage, BLOW.effect,
+        { kind: 'weapon', weaponKey: BLOW.key, weaponName: BLOW.name, attackerId: 1 }, evs);
+      return evs;
+    };
+    const reflectedOn = (evs, id) => ofType(evs, 'hit-landed').filter((e) => e.targetId === id && e.source.itemId === 'shiitake');
+    {
+      const { st, evs: up } = raiseShield(3);
+      const [wearer, attacker] = st.fighters;
+      wearer.hp = 3;
+      attacker.hp = 10;
+      check('(b) NON-VACUITY: the shield is UP off a real press, the wearer has 3 HP and the blow is bigger than that',
+        ofType(up, 'item-resolved').length === 1 && st.elapsed < wearer.item.shieldUntil
+        && attacker.damageMul === 1 && BLOW.damage > wearer.hp && st.fighters.length === 3,
+        `resolved ×${ofType(up, 'item-resolved').length}, shieldUntil ${wearer.item.shieldUntil}, blow ${BLOW.damage} vs hp ${wearer.hp}`);
+      const evs = smash(st, wearer);
+      const back = reflectedOn(evs, attacker.id);
+      check('(b) 🔴 a 12-damage blow into a 3-HP wearer reflects 3 — the HP the wearer LOST — not the 12 it swung',
+        back.length === 1 && back[0].amount === 3 && attacker.hp === 7,
+        `reflected ${JSON.stringify(back.map((e) => e.amount))}, attacker hp 10 -> ${attacker.hp}`);
+      check('(b) 🔴 …so at N=3 the attacker SURVIVES its own finishing blow and the match goes on',
+        !wearer.alive && attacker.alive && st.phase === 'playing' && st.winnerId === null,
+        `wearer alive ${wearer.alive}, attacker alive ${attacker.alive}, phase ${st.phase}, winner ${st.winnerId}`);
+      // A presentation number, deliberately left alone: the floating damage number, the shake,
+      // the hit-stop and the audio weight are all driven off it, and HP-lost would shrink every
+      // finishing blow in every match, items or not. Pinned so it stays a DECISION.
+      const blowEv = ofType(evs, 'hit-landed').find((e) => e.targetId === wearer.id);
+      check('(b) …and the wearer\'s own hit-landed still publishes the BLOW (12), not the 3 it lost — presentation\'s number, unchanged',
+        blowEv !== undefined && blowEv.amount === BLOW.damage, `amount ${blowEv?.amount}`);
+    }
+    // CONTROL: a blow the wearer survives is reflected exactly — `lost` IS `dealt` there, bit
+    // for bit, which is what keeps every non-lethal reflection in the item corpus unchanged.
+    {
+      const { st } = raiseShield(3);
+      const [wearer, attacker] = st.fighters;
+      wearer.hp = 50;
+      const hp0 = attacker.hp;
+      const back = reflectedOn(smash(st, wearer), attacker.id);
+      check('(b) CONTROL: a blow the wearer survives (50 HP) is reflected in full — 12 back for 12 taken',
+        back.length === 1 && back[0].amount === BLOW.damage && attacker.hp === hp0 - BLOW.damage && wearer.hp === 50 - BLOW.damage,
+        `reflected ${JSON.stringify(back.map((e) => e.amount))}, attacker ${hp0} -> ${attacker.hp}`);
+    }
+    // `combat.ts` cited this row for a year before it existed: *"Two shielded fighters hitting
+    // each other resolve in one level. §42 plants exactly that — both shields up, both hitting
+    // — and asserts the call does not recur."* The reflection carries `itemDamageSource`, so it
+    // is item damage and is never reflected again; one blow is exactly two `hit-landed`.
+    {
+      const st = seats(2, { items: [['shiitake'], ['shiitake']] });
+      const ins = idle(st);
+      ins[0] = { ...NEUTRAL, useItem: 0 };
+      ins[1] = { ...NEUTRAL, useItem: 0 };
+      const up = stepMatch(st, DT, ins);
+      for (let i = 0; i < Math.ceil(ITEM_TUNING.shiitake.windupMs / DT) + 2; i++) up.push(...stepMatch(st, DT, idle(st)));
+      const both = st.fighters.every((f) => st.elapsed < f.item.shieldUntil);
+      const evs = smash(st, st.fighters[0]);
+      check('(b) BOTH shields up, one blow: exactly TWO hit-landed — the blow and one reflection — the mirror does not ring',
+        both && ofType(evs, 'hit-landed').length === 2 && st.fighters.every((f) => f.alive),
+        `both up ${both}, hit-landed ×${ofType(evs, 'hit-landed').length}: ${ofType(evs, 'hit-landed').map((e) => `${e.targetId}:${e.amount}${e.source.itemId ? '/' + e.source.itemId : ''}`).join(' ')}`);
+    }
   }
 }
 

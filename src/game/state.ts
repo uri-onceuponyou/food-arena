@@ -1673,9 +1673,13 @@ export type GameEvent =
     }
   /**
    * SOMEBODY PICKED ONE UP. `amount` is what the fighter actually GAINED — capped at its
-   * own deficit and already scaled by its level, exactly as `hit-landed.amount` is what the
-   * target actually lost — so a card, a number or a sound driven off it cannot disagree
-   * with the health bar.
+   * own deficit and already scaled by its level — so a card, a number or a sound driven off
+   * it cannot disagree with the health bar.
+   *
+   * ⚠️ IT SAID *"exactly as `hit-landed.amount` is what the target actually lost"*. That is
+   * true of every hit except a killing one, where `hit-landed.amount` is the BLOW and carries
+   * the overkill (`combat.ts:applyDamage` — `dealt` vs `lost`, BH-05). This event is capped;
+   * that one deliberately is not. Do not "make them consistent" without that file's note.
    *
    * 🚨 **A `heal` EVENT IS EMITTED ALONGSIDE THIS ONE, AND THAT IS NOT REDUNDANCY.**
    * `audio/director.ts` already voices `heal`, and splits regen from a deliberate heal on

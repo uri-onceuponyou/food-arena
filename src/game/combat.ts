@@ -447,6 +447,22 @@ export function applyDamage(
   // than left to be re-derived from a field the renderer would have to poll.
   const stacks = streaks ? feedTenderiserStreak(attacker as Fighter, target, state.elapsed) : 0;
 
+  // ── WHAT THE TARGET ACTUALLY LOSES — which is NOT `dealt` on a killing blow ──────
+  //
+  // `dealt` is the blow; `lost` is the part of it the health bar could absorb. They are the
+  // same number on every hit the target survives and differ on exactly one kind of hit: the
+  // one that finishes it, where the HP clamp below eats the overkill. Shiitake's mirror is
+  // defined on `lost` (its block at the bottom of this function), and before this line
+  // existed it reflected `dealt` — a 12-damage swing into a 3-HP wearer sent 12 back, and an
+  // attacker could die for finishing somebody (BH-05; 66 of 180 HP cells in the verifier's
+  // sweep were attacker deaths only the overkill could cause).
+  //
+  // ⚠️ A COMPARISON TAKEN BEFORE THE CLAMP, NOT `hpBefore - target.hp` AFTER IT. The
+  // subtraction is the obvious form and it is not exact in IEEE-754 — `70 - (70 - 10.2)` is
+  // `10.200000000000003` — so it would move every non-lethal reflection by an ulp and break
+  // bit-identity on matches where nothing was overkilled. This form IS `dealt`, bit for bit,
+  // whenever the target survives.
+  const lost = dealt < target.hp ? dealt : target.hp;
   target.hp = Math.max(0, target.hp - dealt);
   target.lastDamagedAt = state.elapsed;
 
@@ -546,11 +562,21 @@ export function applyDamage(
     if (w !== undefined) applyHitDisplacement(state, attacker, target, w);
   }
 
-  // `amount` on the event is what the target actually LOST, not what the weapon table
-  // says — otherwise the floating damage number and the health bar would disagree by the
-  // level multiplier, which is precisely the class of defect (`DECISIONS §13`) where a
-  // screen shows a number the model does not compute. `hud.ts` already rounds it for
-  // display and `setBar` already ceils HP, so a continuous term needs nothing downstream.
+  // `amount` on the event is the BLOW AS DEALT — the weapon's number after the level and
+  // Tenderiser terms, not what the weapon table says — otherwise the floating damage number
+  // and the health bar would disagree by the level multiplier, which is precisely the class
+  // of defect (`DECISIONS §13`) where a screen shows a number the model does not compute.
+  // `hud.ts` already rounds it for display and `setBar` already ceils HP, so a continuous
+  // term needs nothing downstream.
+  //
+  // ⚠️ IT USED TO SAY *"`amount` on the event is what the target actually LOST"*, and that is
+  // true on every hit but a killing one — where it carries the overkill (`lost` above is the
+  // HP that left the bar). Kept as `dealt` DELIBERATELY rather than corrected to `lost`: the
+  // damage number, the shake (`0.012 + amount × 0.0175`), the hit-stop, the impact burst, the
+  // model's hit intensity and the audio weight all read it, so publishing `lost` would shrink
+  // the feedback on every finishing blow in every match, items or none, and break the no-item
+  // event stream's identity. That is a presentation call for `match.ts`/`audio/` to make, not
+  // a side effect of the Shiitake fix. §42(b) pins it so it stays a decision.
   events.push({ type: 'hit-landed', targetRole: target.role, targetId: target.id, amount: dealt, effect, source, x: target.x, y: target.y });
 
   // ── THE STACK, PUBLISHED, BECAUSE THE COUNT *IS* THE MECHANIC ─────────────
@@ -704,8 +730,15 @@ export function applyDamage(
   //
   // Uri: *"it created a fungas shield arround the character causing the enemies attacking
   // him get damage on every damage they do."* Every point, not a fraction —
-  // `ITEM_TUNING.shiitake.reflect` is 1.0 and is applied to `dealt`, the number the victim
+  // `ITEM_TUNING.shiitake.reflect` is 1.0 and is applied to `lost`, the number the victim
   // ACTUALLY lost, so the mirror cannot disagree with the health bar it is mirroring.
+  //
+  // ⚠️ IT SAID *"applied to `dealt`, the number the victim ACTUALLY lost"* — the right rule
+  // over the wrong variable. `dealt` is fixed before the HP clamp, so on a killing blow it
+  // includes the overkill: a 3-HP wearer struck for 12 reflected 12 (BH-05). `lost` is
+  // computed beside the clamp and equals `dealt` bit for bit on every hit the wearer
+  // survives, so only finishing blows move. §42(b) drives it at three seats, where the
+  // overkill used to kill the attacker and hand the match to the bystander.
   //
   // 🚨 **LAST IN THE FUNCTION, AFTER THE VICTIM'S ENTIRE DEATH BLOCK, AND THAT IS AN EVENT
   // ORDER DECISION.** A reflection can kill the attacker, and `applyDamage` is re-entered to
@@ -728,9 +761,9 @@ export function applyDamage(
   // armour, and reading it as damage reduction would be inventing a second effect he did
   // not ask for. The wearer takes the blow and the attacker takes it too.
   if (!isItemDamage && source.kind === 'weapon' && attacker != null && attacker !== target
-      && dealt > 0 && state.elapsed < target.item.shieldUntil) {
+      && lost > 0 && state.elapsed < target.item.shieldUntil) {
     applyDamage(
-      state, attacker, dealt * ITEM_TUNING.shiitake.reflect, null,
+      state, attacker, lost * ITEM_TUNING.shiitake.reflect, null,
       itemDamageSource(target, 'shiitake'), events,
     );
   }
