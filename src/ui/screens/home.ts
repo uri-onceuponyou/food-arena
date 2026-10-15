@@ -1067,14 +1067,26 @@ const CSS = `
    of step on this base, so half the joints did not clear it and there were few of them.
    The point of tiling a wall is not the pattern, it is that a room has EDGES in it and
    a gradient does not. */
+/* ⚠️ DEEPER, NOT DESATURATED (graphics campaign U1). WAS, verbatim:
+     repeating-linear-gradient(90deg,  rgba(52,14,0,0.30) 0 3px, rgba(255,240,200,0.26) 3px 7px, transparent 7px 46px),
+     repeating-linear-gradient(180deg, rgba(52,14,0,0.30) 0 3px, rgba(255,240,200,0.26) 3px 7px, transparent 7px 46px),
+     radial-gradient(120% 90% at 50% 100%, rgba(255,222,150,0.55) 0%, transparent 62%),
+     linear-gradient(180deg, #E9761F 0%, #EE8A22 46%, #F2A22C 100%);
+   r0: 6 of 6 home critics described a hero "in a big, flat orange frame of plain cream
+   boxes" and asked for "a lit, deep background". REVAMP 2.7 measured the menus LIGHTER and
+   far LESS vivid than the reference (median luma 0.58 vs 0.15-0.40; vivid share 12.6% vs
+   46.8%). So the kitchen keeps its hue and its tiles and spends VALUE: a deep, saturated
+   burnt orange, darker toward the ceiling, so the lit recess holding the hero is the
+   brightest place in the room and the cream panels separate from it. The grout keeps a
+   step well over 'hm_lang''s 30-count edge threshold on the darker base. */
 .fa-home .home-room-wall {
   position: absolute;
   inset: 0 0 42% 0;
   background:
-    repeating-linear-gradient(90deg, rgba(52,14,0,0.30) 0 3px, rgba(255,240,200,0.26) 3px 7px, transparent 7px 46px),
-    repeating-linear-gradient(180deg, rgba(52,14,0,0.30) 0 3px, rgba(255,240,200,0.26) 3px 7px, transparent 7px 46px),
-    radial-gradient(120% 90% at 50% 100%, rgba(255,222,150,0.55) 0%, transparent 62%),
-    linear-gradient(180deg, #E9761F 0%, #EE8A22 46%, #F2A22C 100%);
+    repeating-linear-gradient(90deg, rgba(30,6,0,0.42) 0 3px, rgba(255,196,130,0.24) 3px 7px, transparent 7px 46px),
+    repeating-linear-gradient(180deg, rgba(30,6,0,0.42) 0 3px, rgba(255,196,130,0.24) 3px 7px, transparent 7px 46px),
+    radial-gradient(120% 90% at 50% 100%, rgba(255,170,80,0.40) 0%, transparent 62%),
+    linear-gradient(180deg, #7C2A0A 0%, #A23E10 46%, #C65616 100%);
 }
 /* The counter run and the floor under it. A hard bright lip on top of a dark body: the
    single highest-contrast horizontal in the frame, which is what stops the eye and
@@ -1090,7 +1102,8 @@ const CSS = `
        lit edge beside it does, and it is what a board joint looks like anyway. */
     repeating-linear-gradient(90deg, rgba(0,0,0,0.30) 0 3px, rgba(255,214,150,0.14) 3px 6px, transparent 6px 84px),
     repeating-linear-gradient(180deg, rgba(0,0,0,0.22) 0 2px, transparent 2px 58px),
-    linear-gradient(180deg, #A63A18 0%, #7E240F 55%, #5E1608 100%);
+    /* WAS '#A63A18 0%, #7E240F 55%, #5E1608 100%' — deepened with the wall (note above). */
+    linear-gradient(180deg, #6E200C 0%, #4C1407 55%, #300B04 100%);
 }
 /* ── THE ALCOVE, and it is the third attempt at this seam ─────────────────────
    The stage's clear colour is an opaque saturated azure and the room around it is a
@@ -1127,9 +1140,12 @@ const CSS = `
      recess and never crosses its frame. */
   width: min(97vh, 60vw);
   border-radius: 46% 46% 4% 4% / 30% 30% 2% 2%;
+  /* WAS 'rgba(120,190,235,0.30)' over '#1B5375 0%, #164866 52%, #0E3149 100%' — keyed to the
+     lit teal cove 'charStage.ts' used to render. Re-keyed to its painted deep-blue set (U1)
+     so the recess and the canvas inside it remain one place. */
   background:
-    radial-gradient(58% 44% at 50% 30%, rgba(120,190,235,0.30) 0%, transparent 72%),
-    linear-gradient(180deg, #1B5375 0%, #164866 52%, #0E3149 100%);
+    radial-gradient(58% 44% at 50% 30%, rgba(90,166,255,0.30) 0%, transparent 72%),
+    linear-gradient(180deg, #1F3F94 0%, #183178 52%, #101E4E 100%);
   box-shadow:
     inset 0 0 0 5px rgba(255,196,104,0.92),
     inset 0 0 0 10px rgba(58,18,2,0.72),

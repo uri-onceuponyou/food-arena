@@ -105,9 +105,12 @@ import type { CharacterId } from '../../game/rules';
 // style: the value is not arbitrary, it is KEYED TO THE WALL so no seam can show, so it
 // has to move whenever `CYC_COLOR` moves. It is a slightly lighter, slightly bluer
 // relative of the wall albedo, and it stays that.
-const PORTRAIT_BG = 0x2f5266;
+// ⚠️ WAS `0x2f5266` / `'#2f5266'` (keyed to the lit `#2E4E60` cove). U1 painted the cove
+// a deep saturated blue whose EDGES go to navy, so the clear colour follows the edge — the
+// only place it can ever show — and so does every screen's pre-WebGL CSS background.
+const PORTRAIT_BG = 0x14265a;
 /** The same colour as a CSS string, so no screen has to re-type the hex. */
-export const PORTRAIT_BG_CSS = '#2f5266';
+export const PORTRAIT_BG_CSS = '#14265a';
 
 /**
  * Cyclorama albedo. Lighter than the floor on purpose — see the header note on the
@@ -168,7 +171,12 @@ export const PORTRAIT_BG_CSS = '#2f5266';
  * everything else. It was pre-screened offline on the sweep PNGs before any constant
  * moved.
  */
-const CYC_COLOR = '#2E4E60';
+// ⚠️ WAS '#2E4E60' — a LIT albedo, chosen by the sweep above at "S35/L28" on a wall the key
+// barely reached. The cove is PAINTED now (unlit, see `buildSet`), so this is the colour
+// itself rather than a reflectance: a saturated azure that the value ramp below takes to
+// navy at the top and sides. It stays inside `home_metrics`'s blue-field test by
+// construction (b dominant, g > r at every multiplier the ramp uses).
+const CYC_COLOR = '#2F66D8';
 /** Floor albedo — deeper than the wall, so the horizon separates two materials rather
  *  than two brightnesses of one.
  *
@@ -206,7 +214,9 @@ const CYC_COLOR = '#2E4E60';
  *  DEEPER than the wall, which is what makes the horizon a boundary between two
  *  materials instead of two brightnesses of one, and it stays comfortably inside
  *  `home_metrics`'s blue-field test. */
-const FLOOR_COLOR = '#284053';
+// ⚠️ WAS '#284053'. Deeper and bluer to sit under the painted cove's navy edge, and lit,
+// so the hero's cast shadow and the pool of key light under the podium both read on it.
+const FLOOR_COLOR = '#1F3F86';
 
 /**
  * The podium, and it used to be GOLD: `#8A4E15` / `#C07A23` / `#F4C55E`.
@@ -237,9 +247,16 @@ const FLOOR_COLOR = '#284053';
  * still read against it. What changed is that the stage is no longer competing for the
  * same hue: it separates by VALUE and by HUE now instead of by chroma.
  */
-const PEDESTAL_BODY = '#3F5462';
-const PEDESTAL_RIM = '#6D8290';
-const PEDESTAL_TOP = '#9FB1BE';
+// ⚠️ WAS '#3F5462' / '#6D8290' / '#9FB1BE' (cool stone). r0's critics called it "a plain
+// blue pedestal" and "a bare pedestal" 9 times in 12 menu sheets. Still out of the cast's
+// warm band (the hue rule above holds), but built like a showcase platform now: a deep
+// navy body, a top face a step lighter, and a rim that EMITS (`PEDESTAL_GLOW`), so the
+// stand reads as lit equipment rather than as a coloured disc — without bloom, because the
+// phone tier has none.
+const PEDESTAL_BODY = '#1A2B5E';
+const PEDESTAL_RIM = '#2A4C9C';
+const PEDESTAL_TOP = '#7E9CCF';
+const PEDESTAL_GLOW = '#38D6FF';
 
 /** Radius of the cyclorama, in metres.
  *
@@ -257,16 +274,28 @@ const CYC_HEIGHT = 14;
 /** The cove starts below the floor so no seam can open at the horizon. */
 const CYC_BASE_Y = -0.6;
 
-/** Vertex-colour multiplier on the cyclorama, as [worldY, multiplier] pairs. */
+/** Vertex-colour multiplier on the cyclorama, as [worldY, multiplier] pairs.
+ *
+ *  ⚠️ INVERTED for U1, and the cove is now PAINTED (unlit) — see `buildSet`. WAS
+ *  `[-0.6, 0.86] [0, 0.88] [1.2, 0.94] [2.6, 1.02] [3.8, 1.16] [8, 1.40] [14, 1.55]`:
+ *  brightest at the TOP, which on a lit wall compensated a key that fell off with height.
+ *  Painted, the wall is what the reference plates' sets are — brightest in a band BEHIND
+ *  THE HERO (the glow sprite sits on it) and falling to a deep, saturated navy toward the
+ *  top and the floor, so the edges of the panel go dark and the middle carries the light.
+ *  That is a vignette authored into the set rather than painted over the canvas by CSS. */
 const CYC_VALUE: Array<[number, number]> = [
-  [-0.6, 0.86],
-  [0.0, 0.88],
-  [1.2, 0.94],
-  [2.6, 1.02],
-  [3.8, 1.16],
-  [8.0, 1.40],
-  [14.0, 1.55],
+  [-0.6, 0.34],
+  [0.4, 0.44],
+  [1.6, 0.50],
+  [3.0, 0.40],
+  [5.0, 0.25],
+  [8.0, 0.16],
+  [14.0, 0.12],
 ];
+/** Horizontal falloff away from the back wall, so the cove darkens toward the panel's
+ *  sides: multiplier = floor + (1 - floor) * ((1 + cos theta) / 2) ^ power. */
+const CYC_SIDE_FLOOR = 0.42;
+const CYC_SIDE_POWER = 1.6;
 
 /**
  * Azimuth compensation on the cove, and it is a MEASURED correction rather than a look.
@@ -288,11 +317,69 @@ const CYC_VALUE: Array<[number, number]> = [
  * the direction — the cove is still visibly lit from one side — and gives up the part
  * of it that was beating the hero.
  */
-const CYC_AZIMUTH_SHADE = 1.30;
-const CYC_AZIMUTH_LIT = 0.52;
-/** Direction to the key, from `src/render/lighting.ts`. Only the horizontal part is
- *  used: a cylinder wall's normal has no vertical component. */
-const KEY_DIR = new THREE.Vector3(16.35, 9.82, 4.69).normalize();
+/* ⚠️ RETIRED with the lit cove (see `buildSet`): CYC_AZIMUTH_SHADE 1.30 / CYC_AZIMUTH_LIT
+ * 0.52 and, under them:
+ *     "Direction to the key, from `src/render/lighting.ts`. Only the horizontal part is
+ *      used: a cylinder wall's normal has no vertical component."
+ *     const KEY_DIR = new THREE.Vector3(16.35, 9.82, 4.69).normalize();
+ * 🚨 THAT CLAIM DID NOT CHECK OUT. No such vector exists in `src/render/` — the key sits at
+ * `KEY_OFFSET` = (26.79, 32.37, -16.10), BEHIND the subject, since `140d054` — so the
+ * compensation was darkening the cove where a key that no longer exists would have hit it.
+ * Found re-deriving it for U1 (2026-10-15). The cove is now painted and unlit, and the key
+ * is this file's own (`PORTRAIT_KEY_DIR`), so there is nothing left to compensate. */
+
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * THE PORTRAIT LIGHT RIG — key, rim, and a camera-axis fill that no longer flattens
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * r0 (`shots/rv/r0/critics.json`, 2026-10-15): 6 of 6 select critics and 6 of 6 home
+ * critics described the hero as "lit flatly", "small and dull", "flat plastic", and asked
+ * for "a lit, deep background" and "a brighter rim or backlight". Measured cause: this
+ * Stage ran the MATCH rig. Its key is `KEY_OFFSET`, behind and to the right of a subject
+ * the menu camera sees from the front, so every face the player looks at was lit only by
+ * the hemisphere fill and by `front` — a 2.2-intensity light ON THE CAMERA AXIS, which is
+ * a ring flash: it lights every visible surface equally and erases form.
+ *
+ * So this Stage gets a portrait rig on its OWN lights (the match's Stage is a different
+ * instance and is untouched; `src/render/` is not edited):
+ *   * KEY from front-right and above — form on the face, a shadow side, and the cast
+ *     shadow thrown back-left onto the floor where it reads as depth.
+ *   * RIM from back-left and above, warm, strong — the bright silhouette edge that
+ *     separates a warm-hued cast from a cool, dark set. The reference plates do this.
+ *   * The camera-axis FILL cut to well under half, so the key models instead of competing.
+ * The cove no longer takes the key at all (it is painted, below), so moving the key to the
+ * front cannot flood the backdrop — which is what it would otherwise do.
+ */
+const PORTRAIT_KEY_DIR = new THREE.Vector3(0.55, 0.80, 0.70).normalize();
+const PORTRAIT_KEY_DIST = 45;
+const PORTRAIT_KEY_INTENSITY = 3.0;
+const PORTRAIT_RIM_DIR = new THREE.Vector3(-0.78, 0.52, -0.86).normalize();
+const PORTRAIT_RIM_INTENSITY = 3.4;
+const PORTRAIT_RIM_COLOR = 0xffdcae;
+/** The camera-axis fill. `FRONT_FILL_CHARACTER` (2.2) in the match; `applyLook` writes it
+ *  once at the first render, so `update()` re-asserts this value before every frame. */
+const PORTRAIT_FRONT_INTENSITY = 0.85;
+const PORTRAIT_HEMI_INTENSITY = 0.8;
+
+/** The light card behind the hero: centred behind the chest, on the cove's lit band. */
+const GLOW_COLOR = '#5AA6FF';
+const GLOW_OPACITY = 0.9;
+const GLOW_Y = 2.35;
+const GLOW_Z = -1.9;
+const GLOW_SIZE = 5.0;
+/** The burst under it — slow, faint, wide; reads as energy, never as stripes. */
+const RAYS_COUNT = 18;
+const RAYS_COLOR = '#8CC8FF';
+const RAYS_OPACITY = 0.16;
+const RAYS_SIZE = 9.5;
+const RAYS_SPIN = 0.05;   // rad/s
+/** The pool under the podium. */
+const POOL_COLOR = '#3FA9FF';
+const POOL_OPACITY = 0.42;
+const POOL_SIZE = 4.6;
+/** Emission on the podium's rim, so the stand reads as lit equipment. */
+const PEDESTAL_GLOW_INTENSITY = 1.15;
 
 /** Vertex-colour multiplier on the floor, as [radius, multiplier] pairs.
  *
@@ -302,13 +389,18 @@ const KEY_DIR = new THREE.Vector3(16.35, 9.82, 4.69).normalize();
  *  corners so the value break stays positive against the wall behind the head, and it
  *  puts the floor's brightest band right where it meets the cove — the read every hero
  *  podium in the reference set uses. */
+//  ⚠️ INVERTED for U1 — WAS [0, 0.58] [1.5, 0.62] [2.6, 0.88] [3.8, 1.16] [4.7, 1.36]
+//  [6.4, 1.42]: darkest at the podium, for a podium that was WARM and had to sit in the
+//  darkest part of the frame. It has been cool stone since the palette-hierarchy pass,
+//  and the reference sets do the opposite — a POOL of light under the hero falling away
+//  toward the horizon — so the floor now carries the pool, and the vignette with it.
 const FLOOR_VALUE: Array<[number, number]> = [
-  [0.0, 0.58],
-  [1.5, 0.62],
-  [2.6, 0.88],
-  [3.8, 1.16],
-  [4.7, 1.36],
-  [6.4, 1.42],
+  [0.0, 1.00],
+  [1.5, 0.92],
+  [2.6, 0.66],
+  [3.8, 0.50],
+  [4.7, 0.46],
+  [6.4, 0.40],
 ];
 
 /** Height of the podium's rim, in metres — the top of the whole assembly. */
@@ -438,6 +530,73 @@ function shadowDecal(size: number, core: [number, number, number], order: number
 }
 
 /**
+ * A soft white disc with an alpha falloff — the light BEHIND the hero, and the pool under
+ * it. `rays` cuts it into wedges for the slow burst behind the glow.
+ */
+function lightTexture(rays = 0, px = 256): THREE.Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = px;
+  canvas.height = px;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const g = ctx.createRadialGradient(px / 2, px / 2, 0, px / 2, px / 2, px / 2);
+    g.addColorStop(0, 'rgba(255,255,255,0.95)');
+    g.addColorStop(0.22, 'rgba(255,255,255,0.62)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.22)');
+    g.addColorStop(0.76, 'rgba(255,255,255,0.06)');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, px, px);
+    if (rays > 0) {
+      // Keep only alternating wedges of the disc: destination-in with a fan of triangles.
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.beginPath();
+      const step = (Math.PI * 2) / rays;
+      for (let i = 0; i < rays; i++) {
+        const a0 = i * step;
+        ctx.moveTo(px / 2, px / 2);
+        ctx.arc(px / 2, px / 2, px, a0, a0 + step * 0.42);
+        ctx.closePath();
+      }
+      ctx.fill();
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
+/**
+ * An additive light card, depth-tested, standing BETWEEN the set and the hero.
+ *
+ * In front of the lobby's counter and shelves, so it back-lights them as haze instead of
+ * hiding behind them (a cove-only card was the first version, and the kitchen covered it);
+ * behind the hero, so the depth test lets the hero cover it. ⚠️ Its centre must sit at
+ * least ~one radius above the floor: anything under y = 0 is hidden by the floor plane, and
+ * that boundary is a straight line across the floor in front of the horizon. With the
+ * texture's alpha nearly spent at the radius, the line falls where nothing is left to cut.
+ */
+function lightCard(tex: THREE.Texture, color: THREE.ColorRepresentation, opacity: number, order: number): THREE.Sprite {
+  const mat = new THREE.SpriteMaterial({
+    map: tex,
+    color,
+    opacity,
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    depthTest: true,
+    depthWrite: false,
+    fog: false,
+    toneMapped: false,
+  });
+  const sprite = new THREE.Sprite(mat);
+  sprite.renderOrder = order;
+  sprite.userData.noOutline = true;
+  return sprite;
+}
+
+/**
  * ═══════════════════════════════════════════════════════════════════════════
  * THE LOBBY SET — a room, because the lobby was a backdrop
  * ═══════════════════════════════════════════════════════════════════════════
@@ -532,6 +691,8 @@ class MenuCharacterStage implements CharacterStage {
   private disposed = false;
   /** The kitchen, built on first `setScene('lobby')` and then only toggled. */
   private dressing: THREE.Group | null = null;
+  /** The ray burst behind the hero; spun in `update`. */
+  private rays: THREE.Sprite | null = null;
 
   constructor() {
     // A holder the Stage can measure. The Stage appends its canvas here and reads
@@ -587,6 +748,26 @@ class MenuCharacterStage implements CharacterStage {
     // tip of it. 1024 texels across 12 m is 85 texels/m — nearly triple the shipped
     // match's 30.1, so the extra metre costs nothing that can be seen.
     this.stage.lighting.focus(0, 0, 6);
+    this.applyPortraitRig();
+  }
+
+  /**
+   * The portrait rig (see `PORTRAIT_KEY_DIR`) on THIS Stage's own lights. `focus()` above
+   * seats the key at the match's `KEY_OFFSET`; nothing calls it again on this Stage, so the
+   * key is re-aimed once here. `front` is the exception — `Stage.applyLook` writes it on
+   * the first render — so `update()` re-asserts it every frame.
+   */
+  private applyPortraitRig(): void {
+    const L = this.stage.lighting;
+    L.key.position.copy(PORTRAIT_KEY_DIR).multiplyScalar(PORTRAIT_KEY_DIST);
+    L.key.target.position.set(0, 0, 0);
+    L.key.target.updateMatrixWorld();
+    L.key.intensity = PORTRAIT_KEY_INTENSITY;
+    L.rim.position.copy(PORTRAIT_RIM_DIR).multiplyScalar(30);
+    L.rim.color.set(PORTRAIT_RIM_COLOR);
+    L.rim.intensity = PORTRAIT_RIM_INTENSITY;
+    L.fill.intensity = PORTRAIT_HEMI_INTENSITY;
+    L.front.intensity = PORTRAIT_FRONT_INTENSITY;
   }
 
   /**
@@ -603,18 +784,25 @@ class MenuCharacterStage implements CharacterStage {
     // below was chosen — `tools/tmp/stage_fg.mjs --sweep`).
     const cycGeo = new THREE.CylinderGeometry(CYC_RADIUS, CYC_RADIUS, CYC_HEIGHT, 72, 28, true);
     this.paintVertexRamp(cycGeo, (x, y, z) => {
-      // Inward normal of a cylinder wall is (-x, 0, -z)/R, so this is its dot with the
-      // key. Clamped at 0: the unlit half is already at the shade end of the ramp.
-      const lit = THREE.MathUtils.clamp(-(x * KEY_DIR.x + z * KEY_DIR.z) / CYC_RADIUS, 0, 1);
-      return rampAt(CYC_VALUE, y + CYC_HEIGHT / 2 + CYC_BASE_Y)
-        * (CYC_AZIMUTH_SHADE + (CYC_AZIMUTH_LIT - CYC_AZIMUTH_SHADE) * lit);
+      // cos of the angle from the back wall (-Z), the wall the camera faces: 1 behind the
+      // hero, 0 at the sides. The cove is a cylinder centred on the subject, so the sway
+      // cannot move this falloff relative to the horizon.
+      const c = THREE.MathUtils.clamp(-z / CYC_RADIUS, -1, 1);
+      const side = CYC_SIDE_FLOOR + (1 - CYC_SIDE_FLOOR) * ((1 + c) / 2) ** CYC_SIDE_POWER;
+      return rampAt(CYC_VALUE, y + CYC_HEIGHT / 2 + CYC_BASE_Y) * side;
     });
-    const cycMat = toonMat({ color: CYC_COLOR, ramp: RAMP_SOFT(), roughness: 0.9, rim: false });
+    // PAINTED, NOT LIT — WAS `toonMat({ color: CYC_COLOR, ramp: RAMP_SOFT(), roughness: 0.9,
+    // rim: false })` with an azimuth "compensation" against a key direction that had
+    // stopped existing (see the note above `PORTRAIT_KEY_DIR`). A studio cove is lit
+    // separately from its subject; here that means the backdrop's values are authored and
+    // the portrait key (now in FRONT of the subject, so it would face this wall head-on)
+    // cannot flood it. No shadow lands on it any more — the hero's cast shadow falls on the
+    // floor, which stays lit, which is where it does its grounding work.
+    const cycMat = new THREE.MeshBasicMaterial({ color: CYC_COLOR, vertexColors: true, fog: false });
     cycMat.side = THREE.BackSide;
-    cycMat.vertexColors = true;
     const cyc = new THREE.Mesh(cycGeo, cycMat);
     cyc.position.y = CYC_HEIGHT / 2 + CYC_BASE_Y;
-    cyc.receiveShadow = true;
+    cyc.receiveShadow = false;   // painted: nothing would land on it
     cyc.userData.noOutline = true;
     cyc.name = 'menu_wall';
     cyc.renderOrder = -1;
@@ -636,6 +824,45 @@ class MenuCharacterStage implements CharacterStage {
     floor.userData.noOutline = true;
     floor.name = 'menu_ground';
     this.stage.scene.add(floor);
+
+    // ── The light behind the hero (U1) ───────────────────────────────────────
+    // Both reference home/select plates put a large soft luminous disc directly behind the
+    // hero's upper body on an otherwise deep set, and r0's critics asked for exactly that
+    // ("a lit, deep background", "a brighter rim or backlight"). It is a light CARD standing
+    // between the set and the hero (see `lightCard`), centred behind the head and shoulders,
+    // plus a slow burst of rays at low opacity — explicit geometry rather than bloom, because
+    // the phone tier renders without bloom and this has to read there. Cool against a
+    // warm-hued cast; in the lobby it back-lights the counter and shelves as haze.
+    const glow = lightCard(lightTexture(0), GLOW_COLOR, GLOW_OPACITY, 0);
+    glow.position.set(0, GLOW_Y, GLOW_Z);
+    glow.scale.set(GLOW_SIZE, GLOW_SIZE, 1);
+    glow.name = 'menu_glow';
+    this.stage.scene.add(glow);
+    const rays = lightCard(lightTexture(RAYS_COUNT), RAYS_COLOR, RAYS_OPACITY, 0);
+    rays.position.set(0, GLOW_Y, GLOW_Z - 0.01);
+    rays.scale.set(RAYS_SIZE, RAYS_SIZE, 1);
+    rays.name = 'menu_glow_rays';
+    this.stage.scene.add(rays);
+    this.rays = rays;
+
+    // The POOL the hero stands in: additive on the lit floor, under the podium, so the
+    // stand sits in light and the floor falls away to the vignette (`FLOOR_VALUE`).
+    const poolMat = new THREE.MeshBasicMaterial({
+      map: lightTexture(0),
+      color: POOL_COLOR,
+      opacity: POOL_OPACITY,
+      blending: THREE.AdditiveBlending,
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const pool = new THREE.Mesh(new THREE.PlaneGeometry(POOL_SIZE, POOL_SIZE), poolMat);
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.y = 0.008;
+    pool.renderOrder = 0;
+    pool.userData.noOutline = true;
+    pool.name = 'menu_ground_pool';
+    this.stage.scene.add(pool);
 
     // ── Grounding under the podium ───────────────────────────────────────────
     // The key's cast shadow says "something is over there"; this says "this object is
@@ -689,6 +916,10 @@ class MenuCharacterStage implements CharacterStage {
     // §1 case 5 (Sushi's maki roll inside the default torso barrel) rebuilt from
     // scratch. The recess has to be genuinely OPEN for the face to be seen through it.
     const rimMat = toonMat({ color: PEDESTAL_RIM, ramp: RAMP_SOFT(), roughness: 0.55 });
+    // U1: the rim EMITS — a lit ring on the stand, so it reads as showcase equipment rather
+    // than "a plain blue pedestal" (r0) — and does so without bloom (none on the phone tier).
+    rimMat.emissive = new THREE.Color(PEDESTAL_GLOW);
+    rimMat.emissiveIntensity = PEDESTAL_GLOW_INTENSITY;
     const rimWall = new THREE.Mesh(
       new THREE.CylinderGeometry(1.21, 1.19, 0.06, 48, 1, true),
       rimMat,
@@ -1134,6 +1365,10 @@ class MenuCharacterStage implements CharacterStage {
       this.model.update({ dt, elapsed: this.elapsed, moveSpeed01: 0, health01: 1 });
     }
 
+    if (this.rays) this.rays.material.rotation = this.elapsed * RAYS_SPIN;
+    // `Stage.applyLook` sets `front` to the match's character fill on its first render and
+    // then only when its signature changes; re-asserting here keeps the portrait value.
+    this.stage.lighting.front.intensity = PORTRAIT_FRONT_INTENSITY;
     this.stage.render(dt);
   }
 

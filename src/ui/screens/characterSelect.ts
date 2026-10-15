@@ -592,6 +592,23 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
 }
 
 const CSS = `
+/* ── THE SCREEN'S OWN SET ─────────────────────────────────────────────────────
+   WAS the shell's global '.fa-bg' showing through: a flat orange gradient with a halftone.
+   r0, 6 of 6 select critics: "flat UI cards on a plain orange fill", "replace the flat
+   orange sunburst backdrop behind the grid with a lit, layered scene like the one behind
+   the hero". REVAMP 2.7 measured select's median luma at 0.58 against 0.15-0.40 on the
+   reference menus. So the screen continues the hero's set: the same deep blue as the
+   portrait cove, a pool of light behind the hero column, navy at the edges (a vignette
+   with depth, not a flat fill), and the halftone kept as texture. Cream panels and the
+   mustard CTA now sit on dark, which is the reference's figure/ground for chrome.
+   '.fa-screen' is a full-viewport box, so this covers '.fa-bg' for THIS screen only. */
+.fa-chars {
+  background:
+    radial-gradient(rgba(255,255,255,0.05) 2px, transparent 2px) 0 0 / 24px 24px,
+    radial-gradient(ellipse 42% 62% at 17% 52%, rgba(90,166,255,0.42) 0%, rgba(90,166,255,0) 70%),
+    radial-gradient(ellipse 110% 95% at 45% 42%, #2C56C4 0%, #1D3586 46%, #111A48 100%);
+  background-color: #111A48;
+}
 .fa-chars .chars-heading { flex: 0 1 auto; }
 
 /* The detail column's floor is 200 px and not 168: it now carries the ability KIT, and
@@ -979,7 +996,11 @@ const CSS = `
   gap: var(--ds-s3);
   min-width: 0;
   padding: 3px 4px 3px 8px;
-  background: var(--panel);
+  /* OPAQUE near-white, not 'var(--panel)': the panel colour is 94% opaque, and over the
+     screen's dark set it composited to rgb(241,231,216), where 'chars_metrics' measured the
+     green gain runs at 4.03-4.23:1 against a 4.5 floor at all three of its viewports. The
+     old in-column plate was 'rgba(255,255,255,0.5)' over cream, i.e. effectively this. */
+  background: #FFF9EE;
   border: var(--ds-stroke-2) solid var(--ink);
   border-radius: var(--ds-r-3);
   box-shadow: var(--ds-e3);
@@ -1026,7 +1047,11 @@ const CSS = `
 }
 /* The NEXT-level preview is green because it is a gain, and it is the one run on this
    panel that is not simply a fact. 2E7D32 on the panel's near-white plate is 5.4:1. */
-.fa-chars .chars-lv-gain { color: #2E7D32; }
+/* ⚠️ ONE STEP DARKER: WAS '#2E7D32'. On the slab's opaque #FFF9EE it computes to ~4.9:1 — a
+   pass, but a margin of 0.4 is the kind this file already learned not to trust (the
+   separator note below: "over the AA floor by 0.35, which is no headroom at all").
+   #26702A is ~5.8:1 on the same plate, same hue. */
+.fa-chars .chars-lv-gain { color: #26702A; }
 /* ── THE SEPARATOR WAS A MIDDLE DOT AT 0.45 OPACITY, AND PIXELS CAUGHT IT ────
    menu_accept passed it at all six viewports and in portrait; screen_metrics.mjs
    measured the two runs at 1.87:1 and 2.93:1 against a 4.5 floor. Exactly the
@@ -1541,6 +1566,14 @@ const CSS = `
     grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
     grid-template-rows: minmax(0, 1fr) auto;
     grid-template-areas: "hero detail" "roster roster";
+  }
+  /* The set's light pool follows the hero, which is top-left here. */
+  .fa-chars {
+    background:
+      radial-gradient(rgba(255,255,255,0.05) 2px, transparent 2px) 0 0 / 24px 24px,
+      radial-gradient(ellipse 70% 34% at 26% 28%, rgba(90,166,255,0.42) 0%, rgba(90,166,255,0) 70%),
+      radial-gradient(ellipse 120% 90% at 40% 30%, #2C56C4 0%, #1D3586 46%, #111A48 100%);
+    background-color: #111A48;
   }
   .fa-chars .chars-hero { grid-area: hero; }
   .fa-chars .chars-detail { grid-area: detail; align-self: stretch; max-height: none; }
