@@ -56,7 +56,14 @@ import { CHARACTER_HEIGHT } from '../units';
  * desaturation — scaling a warm off-white DOWN raises its chroma, which is the
  * direction `docs/LESSONS.md` records as falsified four times in the other one.
  */
-const SHELL = '#D8CAAB';            // was `PALETTE.egg` #FFF8EA (luma 0.973 -> 0.795).
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: ROBIN'S-EGG TEAL-BLUE (~185°) on the shell — a natural egg colour, and no other fighter's.
+const SHELL = '#33AFAF';            // was `PALETTE.egg` #FFF8EA (luma 0.973 -> 0.795).  // C1a: was #D8CAAB
 // TWO steps, because one was not enough and the reason is this character's shape:
 // egg is 93.7% head, i.e. the largest unbroken SPHERE in the cast, so it presents
 // more top-facing area to a 58deg camera than anything else and clips first. At
@@ -92,9 +99,9 @@ const SHELL = '#D8CAAB';            // was `PALETTE.egg` #FFF8EA (luma 0.973 -> 
 // 7 -> 5 against a gate of 6. The near-white fix had quietly deleted a rung of the
 // ladder the previous pass was run to build. SHELL comes back up to 0.795 and this
 // one goes down, so the pair is 0.128 apart instead of 0.005.
-const SHELL_BODY = '#C0A87E';       // the lower shell and the torso shell — one step down
-const SHELL_SHADOW = '#A08B5C';     // mid shell tone
-const BROW_SHADOW = '#6E5B33';      // the UNDERSIDE of the brow ridge. See the block at
+const SHELL_BODY = '#2C9599';       // the lower shell and the torso shell — one step down  // C1a: was #C0A87E
+const SHELL_SHADOW = '#286F77';     // mid shell tone  // C1a: was #A08B5C
+const BROW_SHADOW = '#1D454E';      // the UNDERSIDE of the brow ridge. See the block at  // C1a: was #6E5B33
                                      // the brow: one bar has no shadow side and reads as
                                      // a bar; a ridge is a lit top AND a dark under-edge.
 const CRACK_DARK = '#0E0916';       // the crack itself — needs real value contrast against

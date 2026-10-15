@@ -24,9 +24,16 @@ import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, curl, knob, localBounds, massAnchor } from './appendages';
 
-const GLAZE = PALETTE.glaze;      // #FF9EC4
-const DOUGH = '#F5CE86';
-const DOUGH_DARK = '#D9A253';
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: VIOLET (~270°, an ube glaze) on the glaze — the glaze was `PALETTE.glaze` #FF9EC4, hue ~336°, the FLOOR's own hue.
+const GLAZE = '#A65FE5';  // C1a: was PALETTE.glaze (#FF9EC4, the floor's own hue) — local now
+const DOUGH = '#D8811F';  // C1a: was #F5CE86
+const DOUGH_DARK = '#A8611B';  // C1a: was #D9A253
 // Shoes deliberately break from the dough/glaze pair — a genuine dark value drop
 // ("chocolate-dipped feet") so the body doesn't read as one undifferentiated tan
 // mass. `DOUGH_DARK` above is too close in hue/value to `DOUGH` to do that job.
@@ -63,14 +70,14 @@ const POMPOM = '#FFF6E8';
 // reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
 // segment comes back UP, the lower segment holds the dark, and the boot takes its own
 // darkest tone instead of sharing the shin's.
-const LIMB_PINK = '#DE6491';       // upper arm / thigh — mid
+const LIMB_PINK = '#8E3BC6';       // upper arm / thigh — mid  // C1a: was #DE6491
 // #7E2340 -> #9A3455. `kneeL|footL` measured dL **0.0985** against the gate's 0.10 —
 // a 0.0015 miss, i.e. the cliff `docs/TOOLS.md` warns about, and it appeared because
 // the boot's own p50 rose 0.0599 -> 0.1000 when `taperedSegment` stopped degenerating
 // it into a sphere. Lifting the shin/forearm rung is the safe side of that pair to
 // move: `shoulderL|elbowL` has 0.29 of margin and `p05` is 0.08 against a 0.180 cap,
 // carried by the beanie and the boots, not by this tone.
-const LIMB_PINK_DARK = '#9A3455';  // thigh's partner — the shin, dark
+const LIMB_PINK_DARK = '#461B5C';  // thigh's partner — the shin, dark  // C1a: was #9A3455
 // ── THE SLEEVE IS DOUGH, AND THAT IS WHAT SEPARATES AN ARM FROM A LEG ────────
 // See the `dressLimbs` note: arms and legs were byte-identical masses in identical
 // tones and the character read as four-legged. Every VALUE on this model is spoken
@@ -83,7 +90,7 @@ const LIMB_PINK_DARK = '#9A3455';  // thigh's partner — the shin, dark
 //   sleeve 0.32      ->  cuff 0.16     `shoulderL|elbowL`
 //   cuff 0.16        ->  mitt 0.72     `elbowL|handL`, the glaze mitt unchanged
 // and the legs' three pairs are untouched because their three tones are untouched.
-const SLEEVE_DOUGH = '#C98A4E';    // upper arm — baked dough, one step under DOUGH
+const SLEEVE_DOUGH = '#9E6227';    // upper arm — baked dough, one step under DOUGH  // C1a: was #C98A4E
 const SLEEVE_DOUGH_DARK = '#8A5324'; // forearm — the same family, one rung down
 
 // ── The ATTACHMENT masses, and why they are DOUGH and not a fifth pink ───────
@@ -133,7 +140,7 @@ const SLEEVE_DOUGH_DARK = '#8A5324'; // forearm — the same family, one rung do
 // `dLcontact` **0.0315** on HEAD, the weakest boundary on the character, because a
 // mid-pink arm meets a light-pink ring with no value at the join, and a dark band at
 // the top of the sleeve is the one shape that sits exactly where that is measured.
-const HIP_BERRY = '#6B1B36';
+const HIP_BERRY = '#371343';  // C1a: was #6B1B36
 
 // ── The MOUTH INTERIOR ───────────────────────────────────────────────────────
 // Uri: *"the mouth is deeper than burger but still missing details."* The old mouth

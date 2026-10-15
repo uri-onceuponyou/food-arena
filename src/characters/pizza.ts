@@ -60,12 +60,19 @@ import { CHARACTER_HEIGHT } from '../units';
 // every pixel darkened is paid for by one lightened. Slice up, torso up, limbs down.
 // Measured at pot_south, shipped framing: range 0.536 -> 0.733, p05 0.313 -> 0.171,
 // figure/ground 0.267 -> 0.259 (-0.008, i.e. essentially nothing).
-const CRUST = '#F7CE86';       // baked dough slab — the light rung, lifted to pay for LIMB_CHAR
-const CRUST_RIM = '#CE8A2E';   // puffier crust roll along the base — noticeably deeper/toastier
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: GOLDEN ORANGE (~35°) on the crust and the dough body.
+const CRUST = '#BD7F15';       // baked dough slab — the light rung, lifted to pay for LIMB_CHAR  // C1a: was #F7CE86
+const CRUST_RIM = '#9D5E16';   // puffier crust roll along the base — noticeably deeper/toastier  // C1a: was #CE8A2E
 /** The torso barrel. Was `CRUST_RIM`, i.e. the crust roll at 16.7% of the character
  *  sitting at luma 0.45 — the single biggest mid-value mass on the model. Flour-dusted
  *  dough instead: it is the light step the dark limbs are read against. */
-const TORSO_DOUGH = '#E8CC96';
+const TORSO_DOUGH = '#C98F2B';  // C1a: was #E8CC96
 /** Arms and legs. Was `CRUST` — the identical constant as the slice itself, which is
  *  exactly the "tan-on-tan" the critics named. A charred crust edge, and the dark rung
  *  of the whole character at 13% of its pixels. */
@@ -91,7 +98,7 @@ const LIMB_CHAR = '#331C0D';
 /** Upper arm / thigh, and every joint ball. `LIMB_CHAR` stays on forearm and shin. */
 const LIMB_MID = '#6B3A16';
 const SAUCE = PALETTE.tomato;  // '#E63946' — thin margin peeking past the cheese
-const CHEESE = '#FFDE73';      // melted top layer — pushed brighter than the dough so it pops
+const CHEESE = '#E2AF06';      // melted top layer — pushed brighter than the dough so it pops  // C1a: was #FFDE73
 const PEPPERONI = '#A8301E';   // wet cured meat — the MITT, a step lighter than the cuff above it
 // ⚠️ THE SENTENCE BELOW IS KEPT BECAUSE IT WAS TRUE AND THEN THE FRAME MOVED UNDER IT.
 // WAS: *"Feet deliberately break from the crust family altogether — a charred-crust-
@@ -125,7 +132,7 @@ const SATCHEL_LEATHER = '#221304';   // near-black worn leather — part of the 
 const SATCHEL_TRIM = '#120802';
 const SATCHEL_BUCKLE = '#D9B458';
 const MITT_RED = '#7A2014';
-const MITT_CREAM = '#F7EFE0';
+const MITT_CREAM = '#D5B482';  // C1a: was #F7EFE0
 const FLOUR_DUST = '#F7ECD3';
 
 // ── The FACE palette, and the one number the whole pass is steered on ─────────
@@ -157,11 +164,11 @@ const TONGUE = '#C4414C';
  *  brightest value anywhere on the character, which is what the spec asks for. */
 const TOOTH = '#FFF6E4';
 /** The melt shadow under the grin, which doubles as the lower lip. */
-const CHEESE_SHADE = '#E0AF3C';
+const CHEESE_SHADE = '#BE8A0F';  // C1a: was #E0AF3C
 /** Kneaded-dough crease on the torso. A shade under `TORSO_DOUGH`, not a new hue —
  *  the torso's job in the value ladder (the light step the dark limbs read against)
  *  is measured and must not move. */
-const DOUGH_FOLD = '#D3B27A';
+const DOUGH_FOLD = '#A8752A';  // C1a: was #D3B27A
 
 /** Soft tapered barrel — the same visual language as the rig's own default torso
  * (fuller belly, narrower neck) but built locally so each character can own its

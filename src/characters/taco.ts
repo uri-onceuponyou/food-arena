@@ -70,8 +70,15 @@ import { aim, blade as leafBlade, localBounds, massAnchor } from './appendages';
 // framing: range 0.544 -> 0.730, p05 0.236 -> 0.140, steps@0.10 6 -> 7 — and
 // figure/ground goes UP, 0.164 -> 0.175, because the darkening is paid for by the
 // lift on the shell and the pale serape stripe.
-const SHELL = '#F8BE62';       // toasted hard-shell gold — bright, saturated
-const SHELL_DARK = '#D07F1E';  // shadow / crease tone
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: YELLOW (~45°, corn) on the shell.
+const SHELL = '#BA9400';       // toasted hard-shell gold — bright, saturated  // C1a: was #F8BE62
+const SHELL_DARK = '#C07900';  // shadow / crease tone  // C1a: was #D07F1E
 /**
  * ── TRIED AND REVERTED: a darker TORSO fold, `#E09A3A`. A gate killed it. ──────
  *
@@ -104,7 +111,7 @@ const SHELL_DARK = '#D07F1E';  // shadow / crease tone
 // bigger gap the pad stopped reading as a swelling in the wall and started
 // reading as a separate pale ball sitting inside a container, which put the
 // character's identity back on the wrong object again.
-const POD = '#FBD79A';
+const POD = '#DCB800';  // C1a: was #FBD79A
 const MEAT = PALETTE.patty;        // '#6B3E26'
 /** Local, not `PALETTE.pattyDark`: this is Taco's dark rung and it is per-character. */
 const MEAT_DARK = '#1C0E07';
@@ -123,7 +130,7 @@ const ONION = '#AD82D6';       // ties visually to the Onion Bomb projectile col
 // #F0C070 is one step down (luma ~0.79) and 20 pp MORE saturated, which is the
 // direction `CLAUDE.md` records as the scarce budget on this frame (warm chroma
 // measured 0.053 against a 0.072 floor) rather than the falsified one.
-const MITT_MASA = '#F0C070';   // soft masa mitts — the ARM chain's light terminal
+const MITT_MASA = '#BD9D00';   // soft masa mitts — the ARM chain's light terminal  // C1a: was #F0C070
 // Limb-only rust family. A second independent art-director pass found Hamburger's
 // bun-amber, Donut's dough-tan and Taco's own shell-gold all sitting in the same
 // golden-orange hue band despite different heads — the "one templated body" read
@@ -143,7 +150,7 @@ const MITT_MASA = '#F0C070';   // soft masa mitts — the ARM chain's light term
 // reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
 // segment comes back UP, the lower segment holds the dark, and the boot takes its own
 // darkest tone instead of sharing the shin's.
-const LIMB_SHELL = '#C25A28';      // upper arm / thigh — mid
+const LIMB_SHELL = '#DA5318';      // upper arm / thigh — mid  // C1a: was #C25A28
 const LIMB_SHELL_DARK = '#4A1608'; // forearm / shin — dark
 // PASS 3: a near-black boot under a near-black shin is not two shapes — measured
 // `kneeL|footL` 0.028 across 41 px. The boot goes the OTHER way instead: this
@@ -159,7 +166,7 @@ const LIMB_SHELL_DARK = '#4A1608'; // forearm / shin — dark
 // half a hat) and thinned the dark forearms to separate arms from legs, and
 // `valuescan` measured the cost as p05 0.16 -> 0.20 against a 0.180 cap. The boots
 // are the largest remaining mass that can carry dark without touching either fix.
-const BOOT_CHAR = '#8A4C1E';       // boots — still a step LIGHTER than the shin above them
+const BOOT_CHAR = '#89480F';       // boots — still a step LIGHTER than the shin above them  // C1a: was #8A4C1E
 /**
  * The serape's own light rung. The stripe used to be `#C1432B`, a red a few units off
  * `TOMATO` and only 0.09 of luma from the limbs it sits above — one more mid tone on a

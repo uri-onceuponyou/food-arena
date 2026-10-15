@@ -109,10 +109,17 @@ import { CHARACTER_HEIGHT } from '../units';
 // Hue and saturation are held: `WATER` goes 0.816 -> 0.792 HSL saturation while its
 // luma goes 0.409 -> 0.522, so this spends nothing from the colour budget
 // `arena-scan` guards (`docs/LESSONS.md` §7).
-const PLASTIC = '#BDEDFA';
-const WATER = '#4FB0E8';            // richer, saturated liquid fill
-const WATER_DEEP = '#3A87BE';       // shaded underside tone, and the fill-line ring
-const CAP = '#3E6EA3';              // matte navy — still the darkest area, no longer near-black
+// ── C1a, graphics revamp 2026-10-15: RE-KEYED from pastel to SATURATED MID-VALUES ──────────
+// for the 58° match camera (`docs/REVAMP.md` §2.1/§2.6, DECISIONS §91c — saturation UP, never
+// down). Every constant changed here keeps its old hex in a trailing `C1a: was` note; numbers
+// quoted in the older comments around them describe the OLD values. The measurements (median
+// luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
+// (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
+// Signature hue: BLUE (~212°) on the glass shell and the water.
+const PLASTIC = '#65B5F2';  // C1a: was #BDEDFA
+const WATER = '#388AE9';            // richer, saturated liquid fill  // C1a: was #4FB0E8
+const WATER_DEEP = '#2D67B4';       // shaded underside tone, and the fill-line ring  // C1a: was #3A87BE
+const CAP = '#3C64B3';              // matte navy — still the darkest area, no longer near-black  // C1a: was #3E6EA3
 // Held DOWN deliberately while the rest of the family came up. Lifting every blue
 // by the same amount would have bought figure/ground by compressing this character's
 // own internal value ladder, which is the cast's next known defect — measured, the
