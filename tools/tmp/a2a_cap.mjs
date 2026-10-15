@@ -310,6 +310,23 @@ try {
       await page.close();
     }
   }
+  if (ONLY.includes('drape')) {
+    // A1's leftover, as a STATION: the patch nearest the hub at the RIGHT EDGE of a shipped
+    // match frame (camera 230 wu west of it) — where the w1 capture showed the table's drape
+    // near-black: that side faces away from the key and R1's form ramp takes it x0.78.
+    // Full passes (id + normal), so a2a_values.py can measure the canopy's side faces alone.
+    const { page, errors } = await openMatch(browser, Q_6);
+    await step(page, 400);
+    await pause(page);
+    const okN = await page.evaluate(INSTALL_NORMAL_MAT);
+    if (!okN) { console.log('  no normal material prototype'); fails++; }
+    const st = { x: PATCH.x - 230, y: PATCH.y };
+    if (coverAt({ cover: A.cover }, st.x, st.y)) console.log(`  (drape station ${st.x},${st.y} is inside a CoverBox — the camera target only, no fighter stands there)`);
+    const res = await page.evaluate(PAGE_PASSES, { x: st.x, y: st.y, pitch: 58 });
+    if (!writeShot('drape', res, { tag: 'drape', query: Q_6, station: st, patch: PATCH })) fails++;
+    if (errors.length) { fails++; console.log('  JS:', errors.slice(0, 3).join(' | ')); }
+    await page.close();
+  }
   if (ONLY.includes('tris')) {
     // PER-PIECE TRIANGLES on the UNBATCHED graph: `preview.html` keeps every `cover:<kind>`
     // group (kitchen.ts skips the static merge there). Outline hulls excluded — they are a

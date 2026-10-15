@@ -120,6 +120,17 @@ def analyse_arrays(can, nos, idt, ido, nrm, roles):
     return res
 
 
+def canopy_stats(can, idt, nrm, meta):
+    """The concealment canopy (mesh `conceal_canopy`): its DRAPE (|n.y| < 0.35) and its TOP
+    (n.y > 0.8), median luma each. None when the frame holds no canopy (refused upstream)."""
+    ids = [m['id'] for m in meta['meshes'] if m.get('id') and (m['name'] or '') == 'conceal_canopy']
+    if not ids:
+        return None
+    mk = np.isin(idt, ids)
+    ny = nrm[..., 1] * 2.0 - 1.0
+    return {'drape': stats(can, mk & (np.abs(ny) < 0.35)), 'top': stats(can, mk & (ny > 0.8))}
+
+
 def analyse(base):
     meta = json.load(open(base + '.json'))
     can = rgbf(base + '.canvas.png')
@@ -128,6 +139,7 @@ def analyse(base):
     ido = decode_ids(np.asarray(Image.open(base + '.idopaque.png').convert('RGB')))
     nrm = rgbf(base + '.normal.png')
     res = analyse_arrays(can, nos, idt, ido, nrm, role_table(meta))
+    res['canopy'] = canopy_stats(can, idt, nrm, meta)
     res['shot'] = os.path.basename(base)
     res['controls'] = meta.get('controls')
     return res
@@ -193,6 +205,8 @@ if __name__ == '__main__':
         for k in ('ground', 'litGround', 'structure', 'top', 'side', 'fighter'):
             print(f"  {k:10s} {fmt(r[k])}")
         print(f"  side/top luma {r.get('sideOverTop')}   controls {r['controls']}")
+        if r.get('canopy'):
+            print(f"  canopy drape {fmt(r['canopy']['drape'])}  | canopy top {fmt(r['canopy']['top'])}")
     if not rows:
         print('a2a_values: NO shots analysed — wrong directory?'); sys.exit(2)
     bad = [r['shot'] for r in rows if not r['ground'] or not r['structure']]
@@ -200,3 +214,18 @@ if __name__ == '__main__':
         print(f'a2a_values: shots with an EMPTY ground or structure set: {bad}'); sys.exit(2)
     if '--json' in sys.argv:
         json.dump(rows, open(sys.argv[sys.argv.index('--json') + 1], 'w'), indent=1)
+    if '--drape-gate' in sys.argv:
+        # A1's leftover as a pass/fail, criterion fixed BEFORE either tree was measured: a
+        # drape is a side of the cloth a step darker, not a hole — median luma >= 0.20 and
+        # >= 0.40 x the canopy's own top. A frame with no canopy is REFUSED, not passed.
+        with_c = [r for r in rows if r.get('canopy') and r['canopy']['drape'] and r['canopy']['top']]
+        if not with_c:
+            print('a2a_values --drape-gate: no shot holds a canopy drape AND top — nothing to judge'); sys.exit(2)
+        bad = []
+        for r in with_c:
+            d, t = r['canopy']['drape']['luma'], r['canopy']['top']['luma']
+            ok = d >= 0.20 and d >= 0.40 * t
+            print(f"  drape-gate {r['shot']}: drape {d:.3f}  top {t:.3f}  ratio {d / t:.3f}  -> {'PASS' if ok else 'FAIL'}")
+            if not ok:
+                bad.append(r['shot'])
+        sys.exit(1 if bad else 0)
