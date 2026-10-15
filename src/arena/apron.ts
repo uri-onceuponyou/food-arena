@@ -968,7 +968,8 @@ function buildKerb(): THREE.Group {
     [ringBand(KERB_W, KERB_W + 13, FLOOR_Y, FLOOR_Y + 0.012), APAL.kerbFoot, 0.98, 'apron_kerb_foot'],
   ];
   for (const [geo, color, roughness, name] of bands) {
-    const m = new THREE.Mesh(geo, toonMat({ color, roughness, metalness: 0.22 }));
+    // A1: a flat kerb declines the Fresnel rim (see `shared.ts`, the A1 rim note).
+    const m = new THREE.Mesh(geo, toonMat({ color, roughness, metalness: 0.22, rim: false }));
     m.name = name;
     m.castShadow = false;
     m.receiveShadow = true;
@@ -1441,7 +1442,7 @@ function buildBackOfHouse(): THREE.Group {
   const build = (items: Item[], geo: THREE.BufferGeometry, name: string, cast: boolean) => {
     const mesh = new THREE.InstancedMesh(
       geo,
-      toonMat({ color: 0xffffff, roughness: 0.82 }),
+      toonMat({ color: 0xffffff, roughness: 0.82, rim: false }), // A1: flat apron furniture
       items.length
     );
     mesh.name = name;

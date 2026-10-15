@@ -32,7 +32,7 @@ import { addCoverPlinth, addRoundCoverPlinth, addCoverSides, addCoverCap, tinted
  */
 let herbCrateSkirtMat: THREE.Material | null = null;
 function herbSkirt(): THREE.Material {
-  if (!herbCrateSkirtMat) herbCrateSkirtMat = toonMat({ color: '#0D3327', roughness: 0.78 });
+  if (!herbCrateSkirtMat) herbCrateSkirtMat = toonMat({ color: '#0D3327', roughness: 0.78, rim: false }); // A1: flat skirt, see shared.ts
   return herbCrateSkirtMat;
 }
 

@@ -35,7 +35,7 @@ import { addCoverPlinth, addRoundCoverPlinth, addCoverSides, addCoverCap, COVER_
  */
 let cartSkirtMat: THREE.Material | null = null;
 function cartSkirt(): THREE.Material {
-  if (!cartSkirtMat) cartSkirtMat = toonMat({ color: '#2B1F47', roughness: 0.6 });
+  if (!cartSkirtMat) cartSkirtMat = toonMat({ color: '#2B1F47', roughness: 0.6, rim: false }); // A1: flat skirt, see shared.ts
   return cartSkirtMat;
 }
 

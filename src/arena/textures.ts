@@ -135,10 +135,46 @@ function grey(v: number, a = 1): string {
 // tooth, never as clutter competing with a character silhouette.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function makeTileWearTexture(seed: number): THREE.CanvasTexture {
+/**
+ * ── A1 (graphics revamp, 2026-10-15): THE STONE FIELD ASKS FOR LESS OF THIS ──────────
+ * Options, so the two callers that want different things can both have them. The
+ * DEFAULTS are this generator exactly as it was — the utility mats and the concealment
+ * cloth (`utilityMatTex`) still get 520 flecks, the inset frame and full tooth.
+ *
+ * The stone field (`tileWearA/B` in `shared.ts`) asks for `TILE_WEAR_CALM`, because the
+ * arena audit measured what this map DOES on the stones at the shipped camera: lit-ground
+ * windows dead-flat in 10-15.5% of pixels (plates 40-93%) and a micro-gradient of
+ * 0.0076-0.0084 (plate median 0.0025) — "the busy end of the range", re-confirmed. The
+ * three bands, separately:
+ *   * `flecks`  520 -> 173 (÷3). The brief's number; they are the pebble speckle.
+ *   * `edge`    off. The inset frame was "the tile's own bevel reading as worn", drawn
+ *               on the stone's UV BOUNDING BOX — on a Voronoi cell that box is not the
+ *               stone, so it darkened arbitrary stretches of some edges. The stone's
+ *               joint is one vertex-colour band now (`floor.ts` `emitStone`).
+ *   * `tooth`   26 -> 0. ±13/255 per texel, minified ~2.3x onto the stone: it is the
+ *               main thing standing between a lit stone and a flat one.
+ * The header's frequency contract is unchanged — HIGH belongs here — this is HIGH at a
+ * third of the amplitude.
+ */
+export interface TileWearOptions {
+  /** Pebble/aggregate flecks per 256 map. Default 520. */
+  flecks?: number;
+  /** The soft inset frame on all four sides. Default true. */
+  edge?: boolean;
+  /** Per-texel tooth, peak-to-peak in 8-bit levels. Default 26. */
+  tooth?: number;
+}
+
+/** The stone field's settings — see the note above. */
+export const TILE_WEAR_CALM: Readonly<TileWearOptions> = { flecks: 173, edge: false, tooth: 0 };
+
+export function makeTileWearTexture(seed: number, opts: TileWearOptions = {}): THREE.CanvasTexture {
   const size = 256;
   const { canvas, ctx } = newCanvas(size);
   const rand = makeRng(seed);
+  const fleckCount = opts.flecks ?? 520;
+  const drawEdge = opts.edge ?? true;
+  const tooth = opts.tooth ?? 26;
 
   ctx.fillStyle = grey(0.88);
   ctx.fillRect(0, 0, size, size);
@@ -149,7 +185,7 @@ export function makeTileWearTexture(seed: number): THREE.CanvasTexture {
   // noise (below) averages to flat grey the moment a mip kicks in, so it cannot be
   // the only carrier — these flecks are what still reads at gameplay distance.
   // Drawn with wrap-around copies so the map still tiles seamlessly.
-  const flecks = 520;
+  const flecks = fleckCount;
   for (let i = 0; i < flecks; i++) {
     const fx = rand() * size;
     const fy = rand() * size;
@@ -185,7 +221,7 @@ export function makeTileWearTexture(seed: number): THREE.CanvasTexture {
   const edge = ctx.createLinearGradient(0, 0, 0, inset);
   edge.addColorStop(0, grey(0.58, 0.42));
   edge.addColorStop(1, grey(0.58, 0));
-  for (let side = 0; side < 4; side++) {
+  for (let side = 0; drawEdge && side < 4; side++) {
     ctx.save();
     ctx.translate(size / 2, size / 2);
     ctx.rotate((side * Math.PI) / 2);
@@ -200,10 +236,11 @@ export function makeTileWearTexture(seed: number): THREE.CanvasTexture {
   // correct behaviour rather than a defect — it keeps distant floor calm while
   // near floor has surface. Applied last so it also breaks up the gradient banding
   // in the edge shading above.
+  if (tooth <= 0) return finishTexture(canvas);
   const img = ctx.getImageData(0, 0, size, size);
   const d = img.data;
   for (let i = 0; i < d.length; i += 4) {
-    const n = (rand() - 0.5) * 26;
+    const n = (rand() - 0.5) * tooth;
     d[i] = THREE.MathUtils.clamp(d[i] + n, 0, 255);
     d[i + 1] = THREE.MathUtils.clamp(d[i + 1] + n, 0, 255);
     d[i + 2] = THREE.MathUtils.clamp(d[i + 2] + n, 0, 255);

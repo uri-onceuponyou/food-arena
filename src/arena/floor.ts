@@ -400,452 +400,26 @@ function buildDebrisMats(M: Materials): THREE.Material[] {
 }
 
 /**
- * Scattered loose ingredients ringing the hub — small, deterministic (seeded RNG,
- * not `Math.random()`) so the arena is identical across rebuilds/hot-reloads. Kept
- * purely decorative (no CoverBox) at a radius that never reaches an existing prop,
- * so it adds visual density without touching collision.
+ * ── 🚨 A1 (graphics revamp, 2026-10-15): NINE BUILDERS WERE DELETED FROM HERE ──
+ * `buildHubDebris` (8 produce spheres ringing the pot), `buildStainShape`,
+ * `buildStainCluster`, `buildSpeckles`, `buildGreaseSplat`, `buildPathStrip`,
+ * `buildLaneWear`, `buildHazardSplatterApron` — every translucent stain, tidemark,
+ * speck, worn path and splatter this floor drew — and `buildMatEdgeWear` below. They
+ * had no caller left once the floor stopped drawing smudges (see the A1 block in
+ * `buildFloor`), and a builder with no caller whose header explains why it exists reads
+ * as live code to the next owner. `git show 2b2e792:src/arena/floor.ts` has them, and
+ * their headers record twelve rounds of critique worth reading before any of them comes
+ * back: the tidemark-area fix (a stack of 0.16-alpha rims compounding to Δ +0.158 luma,
+ * 81% of a character's own step) and the "a smooth radial gradient is exactly what a
+ * lighting bug looks like" finding are both still true of any translucent ground mark.
  */
-function buildHubDebris(mats: THREE.Material[]): THREE.Group {
-  const g = new THREE.Group();
-  noOutline(g);
-  let seed = 733;
-  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  // Count and size both pulled down (12 -> 8, 0.11-0.19 -> 0.08-0.13) for the same
-  // reason as the recolour above — this is set dressing, not a pickup ring.
-  const count = 8;
-  for (let i = 0; i < count; i++) {
-    const ang = rand() * Math.PI * 2;
-    const r = 104 + rand() * 30; // 104..134 wu — clear of the hazard glow and every hub prop
-    const wx = CENTER.x + Math.cos(ang) * r;
-    const wy = CENTER.y + Math.sin(ang) * r;
-    const s = 0.08 + rand() * 0.05;
-    // 12x8 segments, not 8x6 — at this radius (~0.11-0.19m) the old low-poly sphere
-    // read as a faceted hexagonal blob rather than a round piece of produce, exactly
-    // the "faceted artifact" trap this file has hit before with under-segmented decal
-    // geometry (see the flour-circle note further down).
-    const item = mesh(new THREE.SphereGeometry(s, 12, 8), mats[i % mats.length], 'hub_debris_veg');
-    const p = groundPos(wx, wy);
-    item.position.set(p.x, s * 0.7, p.z);
-    item.scale.y = 0.7;
-    item.rotation.y = rand() * Math.PI * 2;
-    g.add(item);
-  }
-  return g;
-}
 
 /**
- * Small loose-produce pile anywhere on the map — same bold sphere language as
- * `buildHubDebris`, generalised so a prop cluster can visibly spill its own mess
- * instead of the corner nooks looking like staged furniture. Used to tie the flour
- * sacks to an actual flour spill and give the pantry corners a "someone was just
- * working here" story beat.
+ * Small loose-produce pile anywhere on the map — a prop cluster visibly spilling its
+ * own mess instead of the corner nooks looking like staged furniture. Ties the flour
+ * sacks and the barrel lane to a "someone was just working here" story beat. (It was
+ * written as a generalisation of `buildHubDebris`, deleted above.)
  */
-/**
- * A hard-edged, irregular organic silhouette — a "graphic shape" in this file's own
- * stated language ("big flat graphic shapes, not fine repeating texture"), not a
- * smooth circular gradient. Built as a `THREE.Shape` with `points` vertices at
- * randomised radii around `baseR`, so the outline reads as an actual stain/spill
- * mark instead of a perfect circle.
- *
- * Round-3 rewrite: two straight rounds of fresh critics independently read the
- * previous approach (several soft-edged translucent circles layered for a gradient)
- * as unintentional — "a lighting artifact" in round 1, "an unresolved compositing/
- * DOF artifact" in round 2 — specifically BECAUSE a smooth radial gradient with no
- * defined boundary is exactly what a lighting/blur bug also looks like. A flat fill
- * bounded by a genuinely irregular, hard edge cannot be mistaken for either: it's
- * unambiguously an authored mark, the same way the hazard's own scorch decal or the
- * flour-spill circles already read as intentional, not incidental.
- */
-/**
- * `holeFactor` — 0 for a solid mark, or a fraction in (0,1) to punch the SAME
- * silhouette scaled down out of the middle, turning the mark into an irregular
- * annulus. Added round 1 (loop 3) for the pale tidemark rims, and it is an area fix,
- * not a styling one. Every rim was a solid disc drawn UNDER its cluster at 1.16x the
- * radius, so the pale footprint was the whole cluster; wherever two clusters or a
- * cluster and a spill overlapped, two 0.16-alpha fills compounded to 0.29 and three
- * to 0.41. Measured at `west_choke`, that stack was luma 0.494 against a 0.336 tile —
- * Δ +0.158, which is 81% of a mid-value character's own step against the same floor,
- * over far more area. A real evaporated spill leaves a tidemark at its EDGE, so the
- * ring is also the more accurate shape; it keeps the one property that matters (a
- * LIGHTER outer edge, which no cast shadow can have, and which is why these stopped
- * being mistaken for enemy drop shadows) while cutting the pale area by ~70%.
- */
-function buildStainShape(mat: THREE.Material, cx: number, cy: number, seed: number, baseR: number, points = 9, holeFactor = 0): THREE.Mesh {
-  let s = seed;
-  const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-  // Round-1 (loop 3) rewrite. The previous version picked an INDEPENDENT random
-  // radius per vertex at only 7-9 vertices, which does not produce an organic
-  // outline — it produces a spiky heptagon. The isolated `piece=floor` render made
-  // that unmistakable: every stain in the frame read as a hard-edged translucent
-  // PENTAGON sitting on the tile, i.e. a debug overlay, not grime. Neither reference
-  // plate (`bs_01`'s flagstones, `bs_04`'s worn turf) contains a single straight
-  // ground-decal edge anywhere.
-  //
-  // The fix is to keep the hard, unambiguous boundary the previous rounds correctly
-  // fought for (a soft radial gradient reads as a lighting bug — that finding still
-  // holds) while making the boundary CURVED and irregular. The radius is now a sum
-  // of a few low-order angular harmonics with random phase, sampled at 64 vertices:
-  // continuous by construction (so it closes seamlessly and never shows a facet),
-  // low-order (so the silhouette is a lobed amoeba, not a starburst), and still a
-  // flat hard-edged fill.
-  const harmonics = [
-    { k: 2, a: 0.14 + rand() * 0.12, p: rand() * Math.PI * 2 },
-    { k: 3, a: 0.09 + rand() * 0.09, p: rand() * Math.PI * 2 },
-    { k: Math.max(4, Math.min(7, points - 4)), a: 0.04 + rand() * 0.06, p: rand() * Math.PI * 2 },
-  ];
-  const shape = new THREE.Shape();
-  const VERTS = 64;
-  for (let i = 0; i < VERTS; i++) {
-    const ang = (i / VERTS) * Math.PI * 2;
-    let f = 1;
-    for (const h of harmonics) f += Math.sin(ang * h.k + h.p) * h.a;
-    const r = wu(baseR) * f;
-    const x = Math.cos(ang) * r;
-    const y = Math.sin(ang) * r;
-    if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
-  }
-  shape.closePath();
-  if (holeFactor > 0) {
-    // The same silhouette, scaled — so the band has an even width all the way round
-    // and the ring reads as one mark rather than two unrelated outlines. Wound in the
-    // opposite direction, which is what `ShapeUtils` triangulation wants of a hole.
-    const hole = new THREE.Path();
-    for (let i = VERTS - 1; i >= 0; i--) {
-      const ang = (i / VERTS) * Math.PI * 2;
-      let f = 1;
-      for (const h of harmonics) f += Math.sin(ang * h.k + h.p) * h.a;
-      const r = wu(baseR) * f * holeFactor;
-      const x = Math.cos(ang) * r;
-      const y = Math.sin(ang) * r;
-      if (i === VERTS - 1) hole.moveTo(x, y); else hole.lineTo(x, y);
-    }
-    hole.closePath();
-    shape.holes.push(hole);
-  }
-  const m = mesh(new THREE.ShapeGeometry(shape, 4), mat, 'floor_stain');
-  m.rotation.x = -Math.PI / 2;
-  m.rotation.z = rand() * Math.PI * 2;
-  m.position.set(wu(cx), DECAL_Y, wu(cy));
-  m.castShadow = false;
-  m.receiveShadow = false;
-  noOutline(m);
-  return m;
-}
-
-/**
- * A confident ground stain built from several DIFFERENTLY-shaped irregular blobs —
- * a big outer patch, a smaller off-centre core (a fresh random silhouette, not a
- * scaled copy, so it doesn't read as a neat concentric target), and a couple of
- * small "drip" satellites breaking the outline further out. This is the graphic-
- * shape equivalent of a real spill's messy, asymmetric footprint, built entirely
- * from hard-edged `buildStainShape` calls so the whole cluster keeps a crisp,
- * unambiguous silhouette rather than blurring into one soft mass.
- */
-function buildStainCluster(mat: THREE.Material, cx: number, cy: number, seed: number, baseR: number, rimMat?: THREE.Material): THREE.Group {
-  const g = new THREE.Group();
-  noOutline(g);
-  let s = seed;
-  const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-  // ── Dried tidemark rim — round-3 (loop 3) ───────────────────────────────────
-  //
-  // A critic's single most damaging finding on the previous pass, and it was a
-  // GAMEPLAY finding, not an aesthetic one: "the grime decals are indistinguishable
-  // from character drop shadows... I read them as characters before I read them as
-  // dirt. In a top-down brawler where the player scans the floor for enemy shadows
-  // and AoE telegraphs, this is a functional failure." It was right — a soft-edged,
-  // uniform-opacity dark blob roughly one tile across IS the shape language of a blob
-  // shadow, and no amount of tuning the blob itself escapes that.
-  //
-  // The escape is a feature a shadow can never have: a LIGHTER outer edge. Every
-  // evaporated spill leaves a pale mineral/residue tidemark just outside its dark
-  // core, and nothing lit can produce a bright ring around a dark centre. So each
-  // cluster now sits inside a slightly larger pale silhouette, drawn a hair lower so
-  // it never z-fights the core. One glance tells you this is a stain, not a shadow.
-  // Round 1 (loop 3): an ANNULUS, not a disc. See the `holeFactor` note on
-  // `buildStainShape` — the pale footprint was the whole cluster and it compounded
-  // wherever two marks overlapped. 0.84 puts the band's inner edge at 0.97x baseR,
-  // i.e. hugging the dark outer silhouette it is supposed to ring.
-  // Round 12: 0.72 -> 0.82. The band ran 0.835..1.16 of baseR, i.e. 0.325*baseR wide,
-  // which is wide enough that two neighbouring clusters' rims and their satellites'
-  // rims routinely land on the same tile and compound — the +0.152 stack measured on
-  // the `stainRim` note in `buildFloor`. 0.82 halves the band to 0.16*baseR, so it
-  // reads as an EDGE rather than as a broad warm lobe around a cool one, which is the
-  // specific thing two critics independently called bloom. Area, not opacity: the two
-  // levers do different work and only one of them can be pushed without weakening the
-  // rim where it is actually doing its job.
-  if (rimMat) {
-    const rim = buildStainShape(rimMat, cx, cy, seed + 5, baseR * 1.16, 9, 0.82);
-    rim.position.y -= 0.004;
-    g.add(rim);
-  }
-  // ── Round-4: real internal density variation ────────────────────────────────
-  //
-  // A close crop of the previous pass proved the two critics who called these "flat
-  // constant-alpha multiply blobs... one brown hue, no internal density variation"
-  // exactly right — the stacked cores below were supposed to build a denser centre,
-  // but every layer used the SAME material at the SAME opacity, so a 4x overlap of
-  // identical 0.22 alpha reads as one slightly-darker flat region with a hard step at
-  // each silhouette edge, not as a gradient of grime. A drop shadow is also a flat
-  // constant-alpha blob; that shared property is precisely why they were confusable.
-  //
-  // Cloning the material once per cluster and running the inner cores at a higher
-  // opacity gives a genuine light-fringe -> dark-core falloff with an irregular,
-  // non-concentric boundary, which is a thing no cast shadow ever has.
-  const coreMat = mat.clone();
-  coreMat.opacity = Math.min(1, ((mat as THREE.Material & { opacity: number }).opacity ?? 0.22) * 1.3);
-  // Big outer silhouette — defines the overall irregular footprint, lightest layer.
-  g.add(buildStainShape(mat, cx, cy, seed, baseR, 9));
-  // Round-4: three EXTRA differently-shaped cores, all roughly centred (small offset
-  // only), stacked directly on top of the outer silhouette and each other. Round 1-3
-  // critics all independently flagged this exact spot as reading like an ambiguous
-  // render artifact rather than authored grime — the arena's own post-processing
-  // stack (SSAO + Bloom + Vignette, `render/stage.ts`, outside this file's scope) adds
-  // a soft, large, faceted light/dark wash across this same open floor that a single
-  // 0.22-opacity flat fill simply can't compete with for attention. Compounding 3-4
-  // overlapping flat layers in the CENTRE (each still individually flat/hard-edged,
-  // never a gradient) pushes the core to a real ~0.55-0.65 effective opacity — dark
-  // and solid enough to read as an unmistakable stain against that background, while
-  // the single-layer outer ring still tapers the edge softly.
-  for (let i = 0; i < 2; i++) {
-    const ox = (rand() - 0.5) * baseR * 0.22;
-    const oy = (rand() - 0.5) * baseR * 0.22;
-    g.add(buildStainShape(coreMat, cx + ox, cy + oy, seed + 11 + i * 13, baseR * (0.42 + rand() * 0.16), 8));
-  }
-  for (let i = 0; i < 2; i++) {
-    const ang = rand() * Math.PI * 2;
-    const dist = baseR * (0.72 + rand() * 0.32);
-    g.add(buildStainShape(mat, cx + Math.cos(ang) * dist, cy + Math.sin(ang) * dist, seed + 23 + i * 7, baseR * (0.2 + rand() * 0.14), 7));
-  }
-  return g;
-}
-
-/** Small scattered flat specks ON TOP of a stain (see `buildGreaseSplat`) — sits at
- * `FINE_Y`, a layer above the blob's own `DECAL_Y`, so it reads as
- * discrete debris/highlight caught inside the mess rather than z-fighting with it.
- * The bright fleck against a dark grime pool is the "two-tone splatter" read the
- * round-1 pass was missing — real grease spatter always throws a few lighter flecks,
- * not just a single flat-value dark patch. */
-function buildSpeckles(mat: THREE.Material, cx: number, cy: number, seed: number, count: number, spreadWu: number, minR: number, maxR: number): THREE.Group {
-  const g = new THREE.Group();
-  noOutline(g);
-  let s = seed;
-  const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-  for (let i = 0; i < count; i++) {
-    const ang = rand() * Math.PI * 2;
-    const r = rand() * spreadWu;
-    const wx = cx + Math.cos(ang) * r;
-    const wy = cy + Math.sin(ang) * r;
-    const sr = minR + rand() * (maxR - minR);
-    // 20 segments, not 8 — an 8-gon speck reads as an octagon, not a fleck.
-    const speck = mesh(new THREE.CircleGeometry(wu(sr), 20), mat, 'floor_speck');
-    speck.rotation.x = -Math.PI / 2;
-    speck.position.set(wu(wx), FINE_Y, wu(wy));
-    noOutline(speck);
-    g.add(speck);
-  }
-  return g;
-}
-
-/**
- * A confident, storytelling-forward grease splat — the round-2 critic named this
- * exact gap ("no grease spatter near the hot-dog counter"). A dense dark
- * `buildStainCluster` core plus a few pale `flour` flecks scattered inside it (real
- * spatter always has a lighter fleck or two caught in the dark pool), used at every
- * stove island and the service counters.
- */
-function buildGreaseSplat(M: Materials, rimMat: THREE.Material, cx: number, cy: number, seed: number, baseR: number): THREE.Group {
-  const g = new THREE.Group();
-  noOutline(g);
-  g.add(buildStainCluster(M.floorGrime, cx, cy, seed, baseR, rimMat));
-  g.add(buildSpeckles(M.flour, cx, cy, seed + 41, 3, baseR * 0.75, baseR * 0.08, baseR * 0.15));
-  return g;
-}
-
-/**
- * Worn foot-traffic path down the two flank corridors (spawn <-> hub, either side
- * of the prep-station pairs) — the same "open lane" the kitchen.ts layout comments
- * already call out as the map's straightest, most-walked sightline. Reference
- * frames (`bs_04`) get a lot of ground read almost for free from exactly this: a
- * lighter/darker band tracing the well-trodden route across an otherwise uniform
- * field. Ours reads as accumulated kitchen grime rather than mowed grass, but the
- * idea is the same — value variation that follows GAMEPLAY geometry (the route
- * players actually run) instead of a uniform texture applied blindly everywhere.
- * Placed only in the gaps between existing cover (barrels, spice-cart rugs, prep
- * counters) so nothing here reads as new collidable terrain.
- */
-/**
- * An elongated, wavy "worn path" ribbon along a straight line from (x0,y0) to
- * (x1,y1) — ONE continuous graphic shape rather than several separate stains, so a
- * well-trodden corridor reads as a single coherent trail (the way every curated
- * reference draws its dirt path / mowed-stripe road) instead of a few disconnected
- * dabs. Round-5 rewrite: round-4's critic still read the corridor as "a flat tan
- * fill... one isolated stain blob" next to references with "a visible worn dirt
- * trail cutting [continuously] toward" a landmark — the fix wasn't more dabs, it was
- * ONE shape confident enough to read as a path. Segments that fall UNDER an opaque
- * cover prop (the barrels sitting in this exact corridor) are simply hidden behind
- * that prop's own geometry — harmless, since this is a flat floor decal and never
- * new collidable terrain — so the ribbon can run the whole corridor length without
- * threading around every obstacle in its way.
- */
-function buildPathStrip(mat: THREE.Material, x0: number, y0: number, x1: number, y1: number, seed: number, width: number, segments = 7): THREE.Mesh {
-  let s = seed;
-  const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-  const dx = x1 - x0, dy = y1 - y0;
-  const len = Math.hypot(dx, dy) || 1;
-  const nx = -dy / len, ny = dx / len; // unit normal to the path direction
-  const shape = new THREE.Shape();
-  let first = true;
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments;
-    const halfW = width / 2 + (rand() - 0.5) * width * 0.6;
-    const ox = x0 + dx * t + nx * halfW, oy = y0 + dy * t + ny * halfW;
-    const lx = wu(ox), ly = -wu(oy); // local-shape Y is inverted by the mesh's -X90 rotation
-    if (first) { shape.moveTo(lx, ly); first = false; } else shape.lineTo(lx, ly);
-  }
-  for (let i = segments; i >= 0; i--) {
-    const t = i / segments;
-    const halfW = width / 2 + (rand() - 0.5) * width * 0.6;
-    const ox = x0 + dx * t - nx * halfW, oy = y0 + dy * t - ny * halfW;
-    shape.lineTo(wu(ox), -wu(oy));
-  }
-  shape.closePath();
-  const m = mesh(new THREE.ShapeGeometry(shape, 4), mat, 'floor_path_strip');
-  m.rotation.x = -Math.PI / 2;
-  // A hair below the rest of the decal layer so the denser stain clusters (added on
-  // top, at the ordinary `DECAL_Y`) never z-fight with this wide base ribbon.
-  m.position.set(0, DECAL_Y - 0.002, 0);
-  m.castShadow = false;
-  m.receiveShadow = false;
-  noOutline(m);
-  return m;
-}
-
-function buildLaneWear(M: Materials, rimMat: THREE.Material): THREE.Group {
-  const g = new THREE.Group();
-  noOutline(g);
-  // One continuous worn-path ribbon down the full open corridor (spawn side up to
-  // the hub's spice-cart rug), plus denser stain clusters layered on top at the
-  // spots actually visible between cover (the gaps around the two barrels) so the
-  // path reads as worn EVERYWHERE, not just at three isolated dots.
-  //
-  // ⚠️ RE-ANCHORED FOR THE ×4 ARENA (`DECISIONS §48`), not scaled. The 1400×1000 ribbon
-  // ran 172,500 -> 483,500, which was that map's spawn->hub running line. On this map the
-  // west bay sits at (300,810) and the open lane out of it runs EAST along y≈1000 — the
-  // only unobstructed straight line between the bay and the hub clearing — so that is
-  // where the wear goes. A path strip left on the old coordinates would have been a worn
-  // route to nowhere, which is `docs/LESSONS.md` §1 with the props moving instead of the
-  // decal.
-  g.add(buildPathStrip(M.floorGrime, 380, 1000, 720, 1000, 6191, 36));
-  g.add(buildPathStrip(M.floorGrime, ARENA_W - 380, ARENA_H - 1000, ARENA_W - 720, ARENA_H - 1000, 6197, 36));
-
-  // [cx, cy, baseR, seed] — west-side sites; mirrored 180° for the east side below.
-  const sites: Array<[number, number, number, number]> = [
-    [400, 1000, 22, 6101], // the bay mouth, where the lane opens out of the prep counter
-    [560, 1003, 44, 6131], // the open middle of the lane
-    [700, 1000, 20, 6151], // the last clear floor before the hub's own service mat
-  ];
-  for (const [cx, cy, r, seed] of sites) {
-    g.add(buildStainCluster(M.floorGrime, cx, cy, seed, r, rimMat));
-    g.add(buildStainCluster(M.floorGrime, ARENA_W - cx, ARENA_H - cy, seed + 17, r, rimMat));
-  }
-  return g;
-}
-
-/**
- * A ring of small splatter marks just outside the pot hazard's own danger radius
- * (`POT.dangerRadius` = 95wu) — a bubbling pot throwing broth/grease onto the
- * surrounding floor is the obvious "someone's cooking here" story for the single
- * busiest tile on the map, and this exact band is what the isolated `piece=floor`
- * shot's DEFAULT framing (tx/ty = CENTER) actually shows — see the file header.
- * Scattered at a full 360°, not just the four cardinal lane mouths the existing
- * `buildHubDebris` ring favours, so it reads as one continuous worn apron from any
- * camera angle rather than four disconnected dabs. Radius band (100-142wu) sits
- * just past the hazard's own radius and overlaps `buildHubDebris`'s 104-134wu band
- * on purpose — a splatter mark and a bounced loose ingredient belong in the same
- * footprint, not on top of each other, and both are cheap hard-edged flat decals so
- * neither reads as more "important" than the other.
- *
- * Round-3 fix: a critic read the marks as "pasted... sitting awkwardly centered in
- * tiles rather than pooling at corners/seams where real grime would collect." Real
- * spilled liquid runs into the nearest grout crevice and pools at the corner where
- * four tiles meet, it doesn't sit in the middle of a flat tile face — so each mark's
- * centre is now snapped to the nearest grid intersection (a multiple of `tile`) with
- * only a small jitter, instead of floating at a free continuous radius.
- *
- * 🚨 ROUND 13 VOIDED THE ARGUMENT ABOVE WITHOUT MOVING ONE LINE OF THIS FUNCTION, AND
- * THAT IS RECORDED HERE RATHER THAN LEFT FOR THE NEXT READER TO TRIP OVER. There is no
- * grid of tile intersections any more — the ground is a Voronoi tessellation, so
- * `Math.round(freeX / tile) * tile` now lands on an arbitrary point that is as likely to
- * be the middle of a stone as a joint. The CALL IS DELIBERATELY UNCHANGED: it still
- * produces the same spatial distribution it always did, and moving it would have put a
- * second pixel change into a round whose whole value is a clean paired A/B on ONE
- * property. Snapping to a real cell vertex needs the tessellation handed to this
- * function — **routed as follow-up, not silently half-done.**
- */
-function buildHazardSplatterApron(M: Materials, tile: number): THREE.Group {
-  const g = new THREE.Group();
-  noOutline(g);
-  let seed = 9137;
-  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
-  const count = 16;
-  const rInner = 100, rOuter = 148; // just past the pot's own 95wu danger radius
-  for (let i = 0; i < count; i++) {
-    const ang = (i / count) * Math.PI * 2 + (rand() - 0.5) * 0.5;
-    // t=0 at the hazard boundary, t=1 at the apron's outer edge. `rand() ** 1.6`, not
-    // a flat `rand()`, biases samples toward the inner edge — a round-1 critic
-    // specifically read the old evenly-distributed ring as "a few floating stain
-    // decals... not grime" because nothing about their placement was spatially
-    // motivated. Splatter from a real source is always DENSER close to that source
-    // and thins out with distance, so this bias is what makes the ring read as one
-    // continuous, motivated spill radiating from the pot rather than random dots at
-    // a fixed radius.
-    const t = Math.pow(rand(), 1.6);
-    const r = rInner + t * (rOuter - rInner);
-    const freeX = CENTER.x + Math.cos(ang) * r;
-    const freeY = CENTER.y + Math.sin(ang) * r;
-    // Snap to the nearest grout intersection, then re-centre with a small jitter
-    // (up to a fifth of a tile) so the whole apron doesn't look like it was pasted
-    // onto a rigid dot grid — a pool of spilled liquid settles IN the crevice, not
-    // dead-centre on the intersection point every time.
-    const gx = Math.round(freeX / tile) * tile + (rand() - 0.5) * tile * 0.2;
-    const gy = Math.round(freeY / tile) * tile + (rand() - 0.5) * tile * 0.2;
-    const cx = gx, cy = gy;
-    // Size AND opacity both fall off with distance from the source — the same
-    // "denser near the pot, fading out" gradient carried into value, not just count.
-    // Own material clone per mark (not the shared `M.floorGrime`/`M.floorWet`
-    // instance) so this opacity ramp never leaks into every OTHER stain drawn with
-    // that shared material elsewhere in this file.
-    const baseR = 10 - t * 4 + rand() * 5;
-    const wet = rand() < 0.28; // occasional lighter wet sheen for two-tone variety
-    const mat = (wet ? M.floorWet : M.floorGrime).clone();
-    const alpha = (wet ? 0.28 : 0.5) * (1 - t * 0.6);
-    mat.opacity = alpha;
-    // ── Round-4: three layers per mark, not one flat silhouette ────────────────
-    //
-    // These apron marks — not the lane-wear clusters — are the grime that actually
-    // fills the judged frame, and a close crop showed them to be exactly what three
-    // separate critics described: "flat constant-alpha multiply blobs, one brown hue,
-    // no internal density variation," roughly one tile across. That is the same shape
-    // language as a character's blob shadow, which one critic called a functional
-    // failure rather than an aesthetic one ("I read them as characters before I read
-    // them as dirt") in a game where players scan the floor for enemy shadows.
-    //
-    // A pale residue rim OUTSIDE a dark core is the one structure a cast shadow can
-    // never have — nothing lit produces a bright ring around a dark centre — and the
-    // denser inner core gives the falloff a flat fill cannot. Both are still hard-
-    // edged flat fills, so the round-3 finding that soft radial gradients read as
-    // lighting bugs still holds.
-    const rimMat = M.flour.clone();
-    rimMat.opacity = alpha * 0.14;
-    g.add(buildStainShape(rimMat, cx, cy, seed + i * 31 + 3, baseR * 1.18, 8, 0.70));
-    g.add(buildStainShape(mat, cx, cy, seed + i * 31, baseR, 7));
-    const coreMat = mat.clone();
-    coreMat.opacity = Math.min(1, alpha * 1.35);
-    g.add(buildStainShape(coreMat, cx + (rand() - 0.5) * baseR * 0.3, cy + (rand() - 0.5) * baseR * 0.3, seed + i * 31 + 7, baseR * 0.5, 7));
-  }
-  return g;
-}
-
 function buildDebrisPile(mats: THREE.Material[], cx: number, cy: number, seed: number, count = 5, spreadWu = 22): THREE.Group {
   const g = new THREE.Group();
   noOutline(g);
@@ -868,6 +442,33 @@ function buildDebrisPile(mats: THREE.Material[], cx: number, cy: number, seed: n
   return g;
 }
 
+/**
+ * ── 🚨 A1 (graphics revamp, 2026-10-15): THE CHIPS ARE NOW FLAT, GROUND-HUED CRUMBS ──
+ *
+ * The block below argued this layer IN, and its measurement was real: `featShare` and
+ * `groundFeat` sat below the plates. What the shipped frames say about the answer is
+ * the other half (`shots/rv/audit/arena`, D3; `gap`, GX-05): **16 of 16 blind critics**
+ * described the match floor as "a big flat pink floor covered in confetti-like specks";
+ * the faceted chips caught the key and the front fill on separate facets and sparkled;
+ * 300 of the 1,418 sat on the pot apron, i.e. **1.3-1.6% of every six-seat hub fight
+ * frame**, exactly where fights converge; and the floor's fine band measured 3.06x the
+ * plate median. The "objects, not surface" argument below holds for a reference whose
+ * litter is a few soft leaves; ours had become the loudest texture in the frame.
+ *
+ * So, and each is a separate lever:
+ *   * FLAT. A hexagon lying on the stone (`CRUMB_Y`), one up normal — no facets, no
+ *     sparkle, no shadow. Lit by a rim-less clone of the stone's own material, so it
+ *     darkens in a shadow exactly as the ground under it does.
+ *   * GROUND-HUED. Its colour is the stone's own tint at that point (`tintFrom`, the
+ *     field the stones are built from) times a `CRUMB_TONES` step of <= ~8% in sRGB value
+ *     — the rule this package sets for anything left on the floor.
+ *   * FEWER. No pot-apron zone at all, and `CRUMB_KEEP` thins the rest: 1,418 -> 427
+ *     (30%, <= 1/3), priced on an offline replica of this exact loop (which reproduces
+ *     the documented 1,418 first, as its control).
+ * The scatter itself — the seeded LCG, the 12 draws per cell, the wall/corner zones and
+ * the density modulator — is unchanged, so the replica in this file's history still
+ * reproduces it.
+ */
 /**
  * ── GROUND DEBRIS — THE REFERENCE'S GROUND DETAIL IS *OBJECTS*, NOT SURFACE ──
  *
@@ -1005,6 +606,20 @@ const CHIP_R_MAX = 3.9;
  * is why the flatten factor below bottoms out at 0.45 rather than going flatter.
  */
 const CHIP_Y = 0.020;
+/**
+ * A1: the crumb's height. 2 mm over the stone top (`FLOOR_Y.tile + 0.015`) and under the
+ * props' contact decals (0.019), so a prop's grounding band darkens a crumb exactly as it
+ * darkens the stone. A flat decal, so `CHIP_Y`'s "a chip is a SOLID" note above no longer
+ * applies; it is kept for the record of where the solids stood.
+ */
+const CRUMB_Y = FLOOR_Y.tile + 0.017;
+/** A1: wu, before the per-axis 0.80-1.40 scale. Smaller than the chips' 2.2-3.9: a crumb
+ * is texture now, not an object, and it has no facets to carry it at a larger size. */
+const CRUMB_R_MIN = 1.6;
+const CRUMB_R_MAX = 3.0;
+/** A1: global thinning on the zone probability. 1,118 non-apron chips at 0.40 -> 427 placed
+ * (replica; 0.33 would place 353). The browser count is the check — see `a1_ground.py`. */
+const CRUMB_KEEP = 0.40;
 
 /**
  * ── THE THREE ZONES, ALL DERIVED FROM `shared.ts`, NONE RETYPED ─────────────
@@ -1036,8 +651,11 @@ const CHIP_CORNER_REACH = 440;
  */
 function chipZone(wx: number, wy: number): number {
   const clamp01 = (v: number) => THREE.MathUtils.clamp(v, 0, 1);
-  const dPot = Math.hypot(wx - CENTER.x, wy - CENTER.y);
-  const apron = 1 - clamp01(Math.abs(dPot - CHIP_APRON_R) / CHIP_APRON_W);
+  // ⚠️ A1: THE POT-APRON ZONE IS GONE. It read *"chips gather where the spill is"*, and
+  // the spill is where every six-seat endgame happens: 300 chips, 1.3-1.6% of a hub fight
+  // frame, the noisiest thing behind the action (audit D3/GX-05). `CHIP_APRON_R/W` are
+  // kept above as the record of where it was.
+  const apron = 0;
   const dEdge = Math.min(wx, ARENA_W - wx, wy, ARENA_H - wy);
   const wall = 1 - clamp01(dEdge / CHIP_WALL_REACH);
   const cx = wx < ARENA_W / 2 ? 0 : ARENA_W;
@@ -1068,190 +686,57 @@ type ChipRow = {
  * setting `vertexColors` additionally enables the per-VERTEX `USE_COLOR` path against a
  * `color` attribute this geometry does not have, which renders every instance BLACK.
  */
-function buildGroundChips(): THREE.Group {
+function buildGroundChips(
+  tileMat: THREE.Material,
+  tintAt: (wx: number, wy: number, out: THREE.Color) => void,
+): THREE.Group {
   const g = new THREE.Group();
   noOutline(g);
 
-  // ── ROUND 2: THE FIRST PALETTE RENDERED AS CONFETTI, AND THE FILE ALREADY SAID SO ──
+  // ── THE NINE ROUNDS OF NOTES THAT USED TO OPEN THIS FUNCTION ───────────────────
+  // They are in `git show 2b2e792:src/arena/floor.ts` and they argued a CHIP — a lit
+  // solid with facets, a hue family and (until round 9) a shadow. Two of their findings
+  // still bind on anything drawn here and are restated rather than lost:
+  //   * Round 5: **price a colour in LINEAR luma**. Diffuse light multiplies linear
+  //     albedo; sRGB luma understated a yellow-on-rose chip by 1.31x vs 1.75x and four
+  //     palettes came back twice as bright as authored. `CRUMB_TONES` below are LINEAR
+  //     multipliers for exactly that reason.
+  //   * Round 4: `flatShading: true` on a rimmed `toonMat` NEVER LINKS (`vNormal` is not
+  //     declared under FLAT_SHADED) and draws nothing while the shadow pass keeps drawing
+  //     its shadow. The crumb material declines the rim outright (`{ rim: false }`), so
+  //     neither the trap nor the rim's pale wash on a flat face can reach it.
   //
-  // r1 authored five hues at HSV saturation 0.43-0.69, holding only luma inside the value
-  // contract. Read on the rendered PNG (`shots/floorprobe/arena3_r1/west_choke.png`) that
-  // is hot pink, bright orange, bright green and cyan sprinkled over a rose floor: **the
-  // universal read for COLLECTIBLE PICKUP**, which is the exact failure `buildDebrisMats`
-  // above was rewritten to fix, at a hundred times the count. Its note carries the
-  // mechanism and r1 ignored it: `render/stage.ts` runs a global
-  // `HueSaturationEffect({ saturation: 0.32 })`, so anything authored as "already a bit
-  // muted" arrives on screen vivid.
-  //
-  // ⚠️ This is NOT the falsified "fix it by desaturating" move (`docs/LESSONS.md` §8),
-  // and the distinction matters because that one has been falsified four times. That
-  // finding is about the FRAME's total chroma — measured under-reference at meanSat 0.483
-  // against 0.493 — and nothing here touches any existing surface. This is one NEW element
-  // being authored into set-dressing chroma instead of hero chroma, at the same HSV
-  // saturation band (0.18-0.30) the three loose-produce colours above were already
-  // measured onto for the same reason. The frame gains chroma either way; the question was
-  // only whether the gain arrives as litter or as sweets.
-  //
-  // Two of the four are the FLOOR'S OWN HUE, which is what makes them read as chipped tile
-  // rather than as dropped objects, and it is what `bs_01` does — its litter is one
-  // family (teal leaves off the teal bushes), never a rainbow. Authored luma beside each,
-  // against the tile field's own #8A5F6F = 105; every one is inside 88-118, i.e. within
-  // one value step of the surface it lies on. Weights are out of 100.
-  //
-  // ── ROUND 3: THE VALUE WINDOW IS WIDER FOR A CHIP THAN FOR A MARK, AND WHY ─────
-  // r2 held every colour inside 88-118 (±0.06 luma of the tile) and the render shows the
-  // cost: the chips read as tiny dark flecks, barely present, and the paired station
-  // measurement agreed — `groundFeat` moved +0.25pp against r1's +1.00pp.
-  //
-  // The ±0.06 bound in this file's header is not a general law, and its own sentence says
-  // what it is for: *"a character standing on a mark that bright loses his own outline —
-  // and marks are large enough to stand inside"*. A chip is **3.4-6.2wu across against a
-  // 42wu character**; nobody can stand on one, and the failure mode the bound exists to
-  // prevent cannot occur. What DOES still bind is `floorprobe`'s R, and that is checked
-  // rather than assumed: its binding station (`pantry_ne`) has charEdge 0.132 against a
-  // floor edge p99.9 of 0.0922, so there is real headroom and the probe is what spends it.
-  //
-  // So the window widens to roughly ±0.12 in authored luma (75-134 against the tile's
-  // 105), and the mix is skewed LIGHT: this file's other standing rule is that on a
-  // top-down floor DARK means "something is above me", so a field of dark specks reads as
-  // grime or as insects, while a lighter chip reads as an object lying there.
-  //
-  // ── ROUND 4: AT 12px A CHIP READS BY *HUE*. VALUE CANNOT CARRY IT. ─────────────
-  // Three rounds of rendered PNGs say this and they are consistent:
-  //
-  //   r1  5 hues, HSV sat 0.43-0.69, luma held inside ±0.06   -> plainly visible,
-  //       and plainly CONFETTI. `groundFeat` +1.00pp (paired).
-  //   r2  4 hues, sat 0.21-0.28, luma inside ±0.06            -> nearly invisible;
-  //       what the eye finds is the chip's own SHADOW. +0.25pp.
-  //   r3  5 hues, sat 0.24-0.29, luma widened to ±0.12        -> still nearly
-  //       invisible. Widening VALUE bought almost nothing.
-  //
-  // r1 and r3 differ in chroma, not in size or count, and only r1 registered. That is
-  // the reference's own answer read back: `bs_01`'s litter is teal on a rose paver —
-  // a large HUE step at a small value step — and it is **one family**, leaves off the
-  // teal bushes, never a rainbow. r1's defect was five unrelated bright hues, which is
-  // the grammar of a pickup; it was never the chroma itself.
-  //
-  // So: ONE family at real chroma, plus the floor's own rose so a fifth of the litter
-  // reads as chipped tile. The family is WARM (hue 38-80), which is chosen off
-  // `arena-scan`'s failing rail rather than off the plate — whole-frame warm chroma is
-  // 0.053 against a band minimum of 0.072 (FAIL) while cool is 0.427 against a 0.343
-  // target (PASS), and ENV hue occupancy is 0.34 in the 180deg bin. Copying `bs_01`'s
-  // teal would have spent the one budget this frame has none of. It is also the right
-  // read: crumbs, grated cheese, herb and onion skin on a kitchen floor.
-  //
-  // Held 30-60deg off the cast's own 30deg hue bin, and checked: `arena-scan`'s
-  // `ENV chroma in cast band` and `cast/env hue overlap` are both re-run after this.
-  // Authored luma beside each against the tile field's 105; `floorprobe` is the guard on
-  // the value half and is run every round.
-  //
-  // 🚨 ROUND 5: PRICED IN **LINEAR** LUMA, BECAUSE sRGB LUMA IS THE WRONG RULER.
-  // Rounds 1-4 all computed "authored luma" as 0.2126R + 0.7152G + 0.0722B on the sRGB
-  // triple, held it inside ±0.12 of the tile's 105, and every single render came back
-  // with the chips far brighter than intended (r5 measured `floorprobe` paleDL 0.168 ->
-  // **0.293**, i.e. the litter became the brightest thing on the floor by a factor of two).
-  //
-  // Diffuse lighting multiplies LINEAR albedo, so the ratio that reaches the screen is the
-  // linear one, and sRGB understates it badly wherever the two colours differ in GREEN —
-  // which is exactly our case, because the tile is rose (G=95) and kitchen litter is
-  // yellow-olive (G=138). #9C8A4A over #8A5F6F is **1.31x in sRGB luma and 1.75x in
-  // linear**. Four rounds of palettes were derived off the 1.31.
-  //
-  // Every entry below is now solved for a target LINEAR-luma ratio against the tile field
-  // at a fixed hue and HSV saturation (`0.2126*lin(R) + 0.7152*lin(G) + 0.0722*lin(B)`,
-  // tile = 0.1474). Ratios, not absolutes, so this survives a re-key of the tile.
-  //
-  // ── ROUND 6: ONE FAMILY, AND THE CHROMA COMES DOWN. ─────────────────────────
-  // r5's linear pricing fixed the VALUE (paleDL 0.293 -> 0.211) and the render still read
-  // as confetti, for the other reason: three hue families at HSV sat 0.30-0.46 — gold,
-  // lime and a bright rose shard — arrive through `stage.ts`'s global
-  // `HueSaturationEffect({ saturation: 0.32 })` as sweets. `buildDebrisMats` above hit
-  // exactly this and landed its three produce colours at sat 0.18-0.30; this is the same
-  // finding on a layer a hundred times more numerous, so it lands lower still.
-  //
-  // The rose shard is dropped outright rather than dimmed. It was the single loudest thing
-  // in the frame — a bright pink dot — and it was also the one entry doing two jobs:
-  // "chipped tile" is told better by a warm-neutral flour/bone chip that reads as spilled
-  // dry goods, which is what a kitchen floor actually carries. So: ONE family, hue 36-78,
-  // varied by VALUE (0.73x .. 1.31x of the tile in linear luma) rather than by hue. That
-  // is `bs_01`'s own structure — its litter is all one thing, leaves off the teal bushes.
-  //
-  // ── ROUND 8: THE VALUE SPREAD WIDENS, THE CHROMA DOES NOT. ──────────────────
-  // Round 7's spread was 0.73x .. 1.31x of the tile in linear luma and the paired A/B put
-  // `groundFeat` +0.0048 on a measured 0.0028 floor — real, and a fifth of the gap to the
-  // reference band. That metric's threshold is a LUMA departure of 0.035, so what buys
-  // registering pixels is VALUE spread, not chroma; and this file's own guard on value
-  // spread is `floorprobe`'s R, which sat at 0.734 of its 1.0 limit with a quarter of its
-  // range unspent. So the spread goes to **0.55x .. 1.55x** and the HSV saturations stay
-  // exactly where round 6 put them — chroma is what made rounds 1 and 5 read as confetti,
-  // and it is not what the metric counts.
-  const CHIP_COLOURS: Array<[string, number]> = [
-    ['#827A5B', 26], // lin 0.194  1.32x  crumb / grated cheese — hue 48, HSV sat 0.30
-    ['#697252', 20], // lin 0.157  1.06x  herb scrap — hue 78, sat 0.28
-    ['#7D7262', 18], // lin 0.173  1.17x  onion skin — hue 36, sat 0.22
-    ['#57503B', 16], // lin 0.081  0.55x  the family in shade — the dark member
-    ['#888377', 20], // lin 0.228  1.55x  flour / dry goods — hue 40, sat 0.13, the pale one
+  // ── THE CRUMB, A1 ────────────────────────────────────────────────────────────
+  // Tones are LINEAR multipliers on the stone's own tint at the crumb's position, so a
+  // crumb is the ground's hue one small value step away: 0.84 lands ~-7.6% in sRGB value,
+  // 1.16 ~+7%. Two darker, two paler-and-warmer, weighted toward dark so the layer reads
+  // as worn ground rather than as dropped objects. Weights are out of 100.
+  const CRUMB_TONES: Array<[number, number, number, number]> = [
+    [0.84, 0.84, 0.85, 35],
+    [0.90, 0.90, 0.90, 25],
+    [1.10, 1.08, 1.02, 25],
+    [1.16, 1.13, 1.04, 15],
   ];
-  const wheel: THREE.Color[] = [];
-  for (const [hex, weight] of CHIP_COLOURS) {
-    for (let i = 0; i < weight; i++) wheel.push(new THREE.Color(hex));
+  const wheel: Array<[number, number, number]> = [];
+  for (const [r, gg, b, weight] of CRUMB_TONES) {
+    for (let i = 0; i < weight; i++) wheel.push([r, gg, b]);
   }
 
-  // ONE material for both meshes: two draw calls, one compiled program, one rim patch.
-  // White albedo so `instanceColor` carries the whole colour rather than tinting a base
-  // (instanceColor MULTIPLIES `material.color`).
-  //
-  // 🚨 `flatShading: true` HERE IS A BROKEN SHADER, AND IT FAILS SILENTLY.
-  //
-  // Rounds 2-4 of this layer set it, because flat facets are exactly what a 12px chip
-  // needs (see the geometry note below). Three rendered PNGs later, a **magenta known-bad
-  // probe** — every chip colour forced to #FF00FF — produced a **byte-identical** PNG, and
-  // the browser console had been saying why the whole time:
-  //
-  //     THREE.WebGLProgram: Shader Error 0 - VALIDATE_STATUS false
-  //     Material Name: ground_chip
-  //     ERROR: 0:1863: 'vNormal' : undeclared identifier
-  //
-  // `applyRimLight` (`render/toon.ts`, applied by `toonMat` unless `rim: false`) injects a
-  // Fresnel term that reads `vNormal`. Under `FLAT_SHADED` three does not declare that
-  // varying at all — the fragment shader derives the normal with `dFdx`/`dFdy` instead —
-  // so the program fails to link and **every chip draws nothing**. `toon.ts` already
-  // records the sibling case ("a rim on a MeshBasicMaterial ... reads `vNormal`, and a
-  // basic shader has neither"); this is the second trigger for the same hazard.
-  //
-  // What made it survive three rounds is worth writing down: the SHADOW-depth program
-  // carries no rim patch, compiles fine, and kept drawing each chip's little contact
-  // shadow. So the floor rendered a field of small dark specks that looked exactly like
-  // low-contrast litter — `docs/LESSONS.md` §1's "rendering PLAUSIBLY and wrongly", with
-  // the object's own shadow standing in for the object.
-  //
-  // The rim stays (`toon.ts` calls it "the single largest material lever in the frame")
-  // and the facets are bought from the GEOMETRY instead — see `faceted()` below.
-  const chipMat = toonMat({ color: 0xffffff, roughness: 0.68 });
-  chipMat.name = 'ground_chip';
-
-  // Two silhouettes, because one repeated outline at ~12px is a stamp however it is
-  // rotated. The pebble is crumb/produce; the shard is a chipped piece of the tile
-  // itself. 20 and 4 triangles.
-  //
-  // ⚠️ Round 2: the shard was a hexagonal prism (`CylinderGeometry(1, 0.72, 0.5, 6)`) and
-  // that is the WRONG geometry for the job this layer exists to do. Its top face is a
-  // single horizontal plane, so every shard rendered as ONE flat fill — a flat tinted
-  // hexagon, i.e. a smaller version of the polka dot this file already deleted. A
-  // tetrahedron has no horizontal face at any rotation, so it always presents at least
-  // two facets at different angles to the key and carries its own lit/shaded step. That
-  // step IS the "each with its own shading" property measured off `bs_01`, and it is what
-  // `groundFeat` (a LUMA contrast count) actually registers.
-  //
-  // `faceted()` is `flatShading` bought from the geometry instead of the material, for the
-  // reason in the material note above. `PolyhedronGeometry` builds a NON-INDEXED buffer
-  // and then sets each vertex normal to its normalised POSITION — i.e. spherical, smooth —
-  // so an icosahedron shades as a ball. Recomputing normals on a non-indexed geometry
-  // gives one normal per FACE, which is flat shading, with `vNormal` still declared and
-  // the rim still compiling.
-  const faceted = (geo: THREE.BufferGeometry) => { geo.computeVertexNormals(); return geo; };
-  const pebbleGeo = faceted(new THREE.IcosahedronGeometry(1, 0));
-  const shardGeo = faceted(new THREE.TetrahedronGeometry(1.25, 0));
+  // The stone's own material, rim declined, map dropped (a crumb is one value), no vertex
+  // colours (an `InstancedMesh` has no `color` attribute — the `vertexColors` trap this
+  // file records at `tileLightInst`), roughness 1 (no specular glint to sparkle).
+  // `liftArenaValue` lifts it exactly as it lifts the stone, because it starts from the
+  // stone's own colour; `instanceColor` then carries the tint x tone.
+  const crumbMat = cloneToon(tileMat, { rim: false }) as THREE.MeshStandardMaterial;
+  crumbMat.map = null;
+  crumbMat.vertexColors = false;
+  crumbMat.roughness = 1;
+  crumbMat.name = 'ground_crumb';
+  crumbMat.needsUpdate = true;
+  // A hexagon lying on the ground; the per-instance non-uniform scale and yaw make every
+  // outline different. One up normal: nothing for the key or the front fill to pick out.
+  const crumbGeo = new THREE.CircleGeometry(1, 6);
+  crumbGeo.rotateX(-Math.PI / 2);
 
   let seed = 91_711;
   const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
@@ -1274,101 +759,71 @@ function buildGroundChips(): THREE.Group {
 
   const cols = Math.floor(ARENA_W / CHIP_CELL);
   const rows = Math.floor(ARENA_H / CHIP_CELL);
-  const pebbles: ChipRow[] = [];
-  const shards: ChipRow[] = [];
+  const crumbs: ChipRow[] = [];
   for (let cy = 0; cy < rows; cy++) {
     for (let cx = 0; cx < cols; cx++) {
+      // ⚠️ ALL TWELVE DRAWS STAY, IN ORDER, although a flat crumb uses only seven of them
+      // (`flat`, the two tilts and `toShard` are dead). Dropping a draw would reshuffle
+      // every cell after it, and the replica that prices `CRUMB_KEEP` would stop
+      // describing the field the browser builds.
       const wx = (cx + 0.15 + rand() * 0.7) * CHIP_CELL;
       const wy = (cy + 0.15 + rand() * 0.7) * CHIP_CELL;
       const keep = rand();
-      const r = CHIP_R_MIN + rand() * (CHIP_R_MAX - CHIP_R_MIN);
+      const r = CRUMB_R_MIN + rand() * (CRUMB_R_MAX - CRUMB_R_MIN);
       const flat = 0.45 + rand() * 0.3;
       const rot = rand() * Math.PI * 2;
-      // ±0.55 rad (32 deg), not ±0.25. A chip lying dead flat presents its top face square
-      // to the key and renders as one fill; the tilt is what puts two facets at different
-      // angles, which is the whole difference between "an object" and "a tinted spot".
       const tiltX = (rand() - 0.5) * 1.1;
       const tiltZ = (rand() - 0.5) * 1.1;
-      // 0.80-1.40 independently on the two ground axes, so one geometry yields long chips,
-      // stubby chips and everything between — `map` cannot vary per instance, the MATRIX
-      // can. Narrower than round 7's 0.6-1.7: that spread put a real share of the layer
-      // under 4wu, where a chip contributes nothing to the metric and nothing to the eye.
       const sx = 0.80 + rand() * 0.6;
       const sz = 0.80 + rand() * 0.6;
       const ci = Math.floor(rand() * wheel.length);
-      const toShard = rand() < 0.45;
-      // Inset from the playfield edge so no chip straddles the painted kerb (EDGE_BAND)
+      void rand(); // was `toShard`
+      // Inset from the playfield edge so no crumb straddles the painted kerb (EDGE_BAND)
       // or is clipped by the apron's own boundary geometry.
       if (wx < 14 || wx > ARENA_W - 14 || wy < 14 || wy > ARENA_H - 14) continue;
-      // Clear of the boiling pot: its CoverBox is r=73 and its burn ring r=95, so a chip
-      // inside 80 would be either buried in the prop or sitting in the hazard's own
-      // scorch decal, where it would read as a hazard token rather than as litter.
+      // Clear of the boiling pot: its CoverBox is r=73 and its burn ring r=95.
       if (Math.hypot(wx - CENTER.x, wy - CENTER.y) < 80) continue;
-      // ── ZONE x MODULATOR, in that order. ──────────────────────────────────
-      // `density` is no longer the field; it is the thing that keeps a zone from
-      // reading as a painted band, so it multiplies INSIDE the zone and has no reach
-      // outside one. The 0.45 floor is what stops the modulator carving holes in a
-      // drift that is supposed to be continuous.
+      // ── ZONE x MODULATOR, in that order — unchanged; then `CRUMB_KEEP` thins it.
       const z = THREE.MathUtils.clamp(chipZone(wx, wy) * (0.45 + density(wx, wy)), 0, 1);
-      if (keep > CHIP_P_OPEN + (CHIP_P_ZONE - CHIP_P_OPEN) * z) continue;
-      (toShard ? shards : pebbles).push({ wx, wy, r, flat, rot, tiltX, tiltZ, sx, sz, ci });
+      if (keep > (CHIP_P_OPEN + (CHIP_P_ZONE - CHIP_P_OPEN) * z) * CRUMB_KEEP) continue;
+      crumbs.push({ wx, wy, r, flat, rot, tiltX, tiltZ, sx, sz, ci });
     }
   }
+  // 🚨 Rule 6: a filter that empties its own input builds an invisible layer that every
+  // instrument reads as "the crumbs are quiet". Zero is a bug, not a calm floor.
+  if (!crumbs.length) throw new Error('floor: the crumb scatter placed nothing — the zone or keep test is broken');
 
-  const build = (geo: THREE.BufferGeometry, list: ChipRow[], name: string) => {
-    if (!list.length) return;
-    const im = new THREE.InstancedMesh(geo, chipMat, list.length);
-    im.name = name;
-    // ── ROUND 9: THIS WAS `im.castShadow = true` AND THE REASON IT WAS TRUE IS BELOW ──
-    //
-    // THE OLD RULE, kept verbatim because it was right about the mechanism and wrong
-    // about the price (`flattenDecor` carried its twin):
-    //
-    //   > "`ground_chip_*` is exempt for the same reason as `_veg`: they are real solids
-    //   >  resting ON the tile, and the small offset shadow under each is the only thing
-    //   >  that stops ~700 of them reading as printed spots. It is also what makes them
-    //   >  register on `groundFeat`, which counts LUMA contrast — an unshadowed chip held
-    //   >  inside +/-0.06 luma of the tile by this file's value contract would contribute
-    //   >  almost nothing to the metric it exists to move."
-    //
-    // Three things moved under it. (1) The count was never ~700; it was **7,185**, so the
-    // exemption was buying 7,185 individual contact shadows, **92,100 shadow-map triangles
-    // — 20.6% of every triangle in the depth pass** at two fighters, measured. (2) The
-    // value contract widened in round 8 to 0.55x..1.55x of the tile in LINEAR luma, so a
-    // chip is no longer "inside +/-0.06" and no longer needs a borrowed shadow to
-    // register. (3) Uri named the shadows specifically — *"kill or drastically reduce
-    // per-debris shadow casting"* — looking at the shipped frame, which is the instrument
-    // that outranks `groundFeat`.
-    //
-    // `receiveShadow` stays: a chip standing in a prop's shadow must go dark with the
-    // ground under it, or it lights up as a bright speck inside every shadow in the arena.
-    im.castShadow = false;
-    im.receiveShadow = true;
-    noOutline(im);
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const e = new THREE.Euler();
-    const pos = new THREE.Vector3();
-    const scl = new THREE.Vector3();
-    list.forEach((c, i) => {
-      const rw = wu(c.r);
-      const p = groundPos(c.wx, c.wy);
-      pos.set(p.x, CHIP_Y + rw * c.flat, p.z);
-      // Non-uniform scale, so one geometry produces many outlines: elongated chips,
-      // stubby chips, and every rotation of both.
-      scl.set(rw * c.sx, rw * c.flat, rw * c.sz);
-      e.set(c.tiltX, c.rot, c.tiltZ);
-      q.setFromEuler(e);
-      m.compose(pos, q, scl);
-      im.setMatrixAt(i, m);
-      im.setColorAt(i, wheel[c.ci]);
-    });
-    im.instanceMatrix.needsUpdate = true;
-    im.instanceColor!.needsUpdate = true;
-    g.add(im);
-  };
-  build(pebbleGeo, pebbles, 'ground_chip_pebble');
-  build(shardGeo, shards, 'ground_chip_shard');
+  const im = new THREE.InstancedMesh(crumbGeo, crumbMat, crumbs.length);
+  im.name = 'ground_crumb';
+  // A flat decal casts nothing (round 9 already took the chips' shadows away, for the
+  // depth-pass cost and because Uri named them). It RECEIVES, or a crumb inside a prop's
+  // shadow would light up as a bright speck.
+  im.castShadow = false;
+  im.receiveShadow = true;
+  noOutline(im);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const e = new THREE.Euler();
+  const pos = new THREE.Vector3();
+  const scl = new THREE.Vector3();
+  const tint = new THREE.Color();
+  crumbs.forEach((c, i) => {
+    const rw = wu(c.r);
+    const p = groundPos(c.wx, c.wy);
+    pos.set(p.x, CRUMB_Y, p.z);
+    scl.set(rw * c.sx, 1, rw * c.sz);
+    e.set(0, c.rot, 0);
+    q.setFromEuler(e);
+    m.compose(pos, q, scl);
+    im.setMatrixAt(i, m);
+    tintAt(c.wx, c.wy, tint);
+    const [tr, tg, tb] = wheel[c.ci];
+    tint.setRGB(tint.r * tr, tint.g * tg, tint.b * tb);
+    im.setColorAt(i, tint);
+  });
+  im.instanceMatrix.needsUpdate = true;
+  im.instanceColor!.needsUpdate = true;
+  g.add(im);
   return g;
 }
 
@@ -1558,90 +1013,8 @@ function buildMatCrease(
   return m;
 }
 
-function buildMatEdgeWear(
-  grimeMat: THREE.Material,
-  dustMat: THREE.Material,
-  rects: Array<[number, number, number, number]>,
-  seed: number,
-): THREE.Group {
-  const g = new THREE.Group();
-  noOutline(g);
-  let s = seed;
-  const rand = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
-
-  const shapes: [THREE.Shape[], THREE.Shape[]] = [[], []];
-
-  /** Irregular lobed blob, same harmonic outline as `buildStainShape` (a spiky polygon
-   * reads as a debug overlay — that finding is in that function's note), authored at
-   * an absolute layout position and anisotropically scaled along the edge. */
-  const blob = (into: THREE.Shape[], cxWu: number, cyWu: number, rWu: number, ax: number, ay: number) => {
-    const harmonics = [
-      { k: 2, a: 0.16 + rand() * 0.14, p: rand() * Math.PI * 2 },
-      { k: 3, a: 0.10 + rand() * 0.10, p: rand() * Math.PI * 2 },
-      { k: 5, a: 0.05 + rand() * 0.07, p: rand() * Math.PI * 2 },
-    ];
-    const VERTS = 40;
-    const shape = new THREE.Shape();
-    for (let i = 0; i < VERTS; i++) {
-      const ang = (i / VERTS) * Math.PI * 2;
-      let f = 1;
-      for (const h of harmonics) f += Math.sin(ang * h.k + h.p) * h.a;
-      const r = wu(rWu) * f;
-      // Layout y runs into the screen (world +z); a mesh rotated -90 deg about X maps
-      // shape +y to world -z, so the layout offset is negated on the shape's y.
-      const x = wu(cxWu) + Math.cos(ang) * r * ax;
-      const y = -(wu(cyWu) + Math.sin(ang) * r * ay);
-      if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
-    }
-    shape.closePath();
-    into.push(shape);
-  };
-
-  for (const [cx, cy, w, h] of rects) {
-    // The visible tile/mat boundary is the KERB's outer edge, not the fill's.
-    const bw = w + EDGE_BAND * 2;
-    const bh = h + EDGE_BAND * 2;
-    const perim = 2 * (bw + bh);
-    const stations = Math.max(14, Math.round(perim / 28));
-    for (let i = 0; i < stations; i++) {
-      if (rand() > 0.55) continue;
-      // Jittered arc-length walk, then mapped onto the rectangle's perimeter.
-      let t = ((i + 0.5 + (rand() - 0.5) * 0.8) / stations) * perim;
-      t = ((t % perim) + perim) % perim;
-      let px: number;
-      let py: number;
-      let alongX: boolean;
-      if (t < bw) { px = cx - bw / 2 + t; py = cy - bh / 2; alongX = true; }
-      else if (t < bw + bh) { px = cx + bw / 2; py = cy - bh / 2 + (t - bw); alongX = false; }
-      else if (t < 2 * bw + bh) { px = cx + bw / 2 - (t - bw - bh); py = cy + bh / 2; alongX = true; }
-      else { px = cx - bw / 2; py = cy + bh / 2 - (t - 2 * bw - bh); alongX = false; }
-      // Sit ON the line, with a small bias either way so the fringe is not a bead
-      // chain threaded on a wire.
-      const bias = (rand() - 0.5) * 9;
-      if (alongX) py += bias; else px += bias;
-      // 4-9 wu, i.e. 11-25 px at shipped framing and 22-50 px along the edge after the
-      // stretch. A first pass at 6-14 wu put 85 px lobes on the line and they read as
-      // SPILLS, not scuffs — `docs/LESSONS.md` §6, a mark the size of a tile reads as
-      // a feature rather than as grain.
-      const r = 4 + rand() * 5;
-      const ax = alongX ? 2.0 : 0.62;
-      const ay = alongX ? 0.62 : 2.0;
-      blob(shapes[rand() < 0.58 ? 0 : 1], px, py, r, ax, ay);
-    }
-  }
-
-  for (const [k, mat] of [[0, grimeMat], [1, dustMat]] as const) {
-    if (!shapes[k].length) continue;
-    const m = mesh(new THREE.ShapeGeometry(shapes[k], 4), mat, 'floor_mat_edge_wear');
-    m.rotation.x = -Math.PI / 2;
-    m.position.y = MAT_WEAR_Y;
-    m.castShadow = false;
-    m.receiveShadow = false;
-    noOutline(m);
-    g.add(m);
-  }
-  return g;
-}
+// [A1: `buildMatEdgeWear` was here — deleted with the other translucent ground marks;
+//  see the note above `buildDebrisPile`. Its header, above `roundRectOutline`, is kept.]
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AN IRREGULAR TESSELLATION — convex-polygon helpers
@@ -1778,63 +1151,147 @@ function polyInset(p: GPt[], d: number): GPt[] | null {
   return out;
 }
 
+/**
+ * Erode a CONVEX polygon by `d`, keeping ONE inner vertex per outer vertex (A1).
+ *
+ * `polyInset` above answers "is there a clean inset?" and refuses when an edge would
+ * vanish; the old stone needed exactly that, because its rings were real geometry. The
+ * soft joint needs something different — an inner ring for every stone, index-aligned with
+ * the UNCLEANED cell, so neighbours share their outer edge exactly:
+ *
+ * ⚠️ WHY THE OUTER RING MAY NOT GO THROUGH `polyClean` ANY MORE. `polyClean` cuts a corner
+ * off ONE cell; its neighbour keeps the original edge. Under a 1.6 wu gap that only "widened
+ * a joint locally" (its own note). With no gap it opens a sliver to the subfloor — rendered
+ * at A1's first pass as a 2 px SATURATED RED LINE along whole joints, rgb(204,101,129)
+ * against the band's (181,104,132), because the subfloor is a different material 11 cm
+ * down. So the outer ring is the raw clipped cell, and short edges are handled here:
+ *
+ * Each inner vertex is the meet of two neighbouring offset lines (the miter). Where an edge
+ * is too short to survive the erosion its two miters cross; that edge VANISHES, and both
+ * of its inner vertices collapse onto the meet of the surviving neighbours' offset lines —
+ * the true eroded vertex. Repeated until stable. A collapsed edge is a zero-length inner
+ * edge: its fan triangle has zero area and its band quad becomes a triangle. Returns null
+ * when the erosion is empty or the result fails the definition (every inner vertex on the
+ * inner side of EVERY offset line — `polyInset`'s own lesson about folded insets).
+ */
+function insetConvex(p: GPt[], d: number): GPt[] | null {
+  const n = p.length;
+  if (n < 3) return null;
+  const nx: number[] = [], ny: number[] = [], off: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = p[i], b = p[(i + 1) % n];
+    const L = Math.hypot(b.x - a.x, b.y - a.y);
+    if (L < 1e-9) return null;
+    nx.push(-(b.y - a.y) / L); ny.push((b.x - a.x) / L);
+    off.push(nx[i] * a.x + ny[i] * a.y + d);
+  }
+  const meet = (e1: number, e2: number): GPt | null => {
+    const det = nx[e1] * ny[e2] - ny[e1] * nx[e2];
+    if (Math.abs(det) < 1e-12) return null;
+    return { x: (off[e1] * ny[e2] - off[e2] * ny[e1]) / det, y: (nx[e1] * off[e2] - nx[e2] * off[e1]) / det };
+  };
+  const alive = new Array<boolean>(n).fill(true);
+  const q: GPt[] = new Array(n);
+  for (let pass = 0; pass <= n; pass++) {
+    // vertex i sits between edge i-1 and edge i; skip vanished edges on both sides
+    for (let i = 0; i < n; i++) {
+      let e0 = (i - 1 + n) % n, k = 0;
+      while (!alive[e0] && k++ < n) e0 = (e0 - 1 + n) % n;
+      let e1 = i; k = 0;
+      while (!alive[e1] && k++ < n) e1 = (e1 + 1) % n;
+      const m = meet(e0, e1);
+      if (!m) return null;
+      q[i] = m;
+    }
+    let changed = false;
+    for (let i = 0; i < n; i++) {
+      if (!alive[i]) continue;
+      const a = q[i], b = q[(i + 1) % n];
+      const ex = p[(i + 1) % n].x - p[i].x, ey = p[(i + 1) % n].y - p[i].y;
+      if ((b.x - a.x) * ex + (b.y - a.y) * ey < -1e-9) { alive[i] = false; changed = true; }
+    }
+    if (alive.filter(Boolean).length < 3) return null;
+    if (!changed) break;
+  }
+  for (let i = 0; i < n; i++) {
+    for (let e = 0; e < n; e++) {
+      if (nx[e] * q[i].x + ny[e] * q[i].y < off[e] - 1e-6) return null;
+    }
+  }
+  if (polyArea(q) <= 0) return null;
+  return q;
+}
+
+/** Merge vertices that coincide (closer than `eps`, default 1e-6 wu) — numerical
+ * duplicates from clipping, NOT short edges. Unlike `polyClean` it cannot move an edge a
+ * neighbour also owns, because it only ever merges points that are already the same. */
+function polyDedupe(p: GPt[], eps = 1e-6): GPt[] {
+  const out: GPt[] = [];
+  for (const a of p) {
+    const b = out.length ? out[out.length - 1] : null;
+    if (!b || Math.hypot(a.x - b.x, a.y - b.y) > eps) out.push(a);
+  }
+  while (out.length >= 2 && Math.hypot(out[0].x - out[out.length - 1].x, out[0].y - out[out.length - 1].y) <= eps) out.pop();
+  return out;
+}
+
 /** Accumulator for one merged stone field. One per shade, so it stays 2 draw calls. */
 interface StoneBuf { pos: number[]; nrm: number[]; uv: number[]; col: number[]; idx: number[]; v: number; cells: number }
 
 function newStoneBuf(): StoneBuf { return { pos: [], nrm: [], uv: [], col: [], idx: [], v: 0, cells: 0 }; }
 
 /**
- * One stone: a flat top face, a shallow rolled bevel, and a short skirt.
+ * One stone: a FLAT face whose last `JOINT_SOFT` wu darken toward its edge — one soft
+ * joint band, drawn in vertex colour, and nothing else.
  *
- * `outline` is the stone's widest silhouette (the cell inset by half the joint width);
- * `top` is `outline` inset again by the bevel. Both arrive CCW and are emitted CW,
- * because world (x, y) maps to three (x, ·, z) and a CCW ground polygon in (x, y)
- * produces a DOWNWARD face normal there — verified by hand on a unit triangle rather
- * than discovered by rendering an invisible floor.
+ * `outline` is the stone's full cell (no gap); `inner` is `outline` inset by the band.
+ * Both arrive CCW and are emitted CW, because world (x, y) maps to three (x, ·, z) and a
+ * CCW ground polygon in (x, y) produces a DOWNWARD face normal there — verified by hand on
+ * a unit triangle rather than discovered by rendering an invisible floor.
+ *
+ * ── 🚨 A1 (graphics revamp, 2026-10-15): THE BEVEL, THE SKIRT AND THE GAP ARE GONE ──
+ * This function used to read *"a flat top face, a shallow rolled bevel, and a short
+ * skirt"*, with the stone inset by half a 1.6 wu `JOINT_W` so the subfloor showed through
+ * a gap. Kept here per the reversal rule, with what it measured to be: at the shipped
+ * 58° camera every joint rendered as a MULTI-BAND seam — a bevel ring lit or dark by
+ * its orientation, a saturated gap line, and a 1-px dotted hairline (the 0.014 m skirt
+ * is a sub-pixel vertical face, i.e. an aliasing generator) — against a reference joint
+ * that is one soft dark band ~10 px wide (`shots/rv/audit/arena/sheets/joint_8x.png`).
+ * The floor's fine band measured 3.06x the plate median (`hf 0.0132`), and lit-ground
+ * windows were dead-flat in 10-15.5% of pixels against 40-93% on the plates.
+ *
+ * Now: ring 0 (`inner`) carries the face colour, ring 1 (`outline`) the face colour
+ * x `edgeMul`, everything at one height with an UP normal. Two neighbours share the cell
+ * edge, so the joint is a V-shaped value dip `2 x JOINT_SOFT` wide whose floor sits on
+ * the true edge — no geometry between them, nothing for the lights to pick out, nothing
+ * sub-pixel. The subfloor plane below still fills any `polyClean` sliver, and it is keyed
+ * at the joint's own ratio (see `subfloorDark`), so a sliver reads as joint.
  */
 function emitStone(
-  buf: StoneBuf, outline: GPt[], top: GPt[], yTop: number, yBev: number, yBot: number,
-  bevelUp: number, bevelOut: number, r: number, g: number, b: number
+  buf: StoneBuf, outline: GPt[], inner: GPt[], y: number,
+  r: number, g: number, b: number, edgeMul: number
 ): void {
   const n = outline.length;
   const o: GPt[] = [], t: GPt[] = [];
-  for (let i = n - 1; i >= 0; i--) { o.push(outline[i]); t.push(top[i]); }
-  // Per-vertex outward direction: the bisector of the two adjacent edge normals. For a
-  // CW polygon the interior is to the RIGHT of each edge, so the outward normal is the
-  // LEFT one.
-  const out: GPt[] = [];
-  for (let i = 0; i < n; i++) {
-    const a = o[(i - 1 + n) % n], c = o[i], e = o[(i + 1) % n];
-    const e1x = c.x - a.x, e1y = c.y - a.y, L1 = Math.hypot(e1x, e1y) || 1;
-    const e2x = e.x - c.x, e2y = e.y - c.y, L2 = Math.hypot(e2x, e2y) || 1;
-    let vx = -e1y / L1 + -e2y / L2, vy = e1x / L1 + e2x / L2;
-    const L = Math.hypot(vx, vy);
-    if (L < 1e-6) { vx = 0; vy = 1; } else { vx /= L; vy /= L; }
-    out.push({ x: vx, y: vy });
-  }
+  for (let i = n - 1; i >= 0; i--) { o.push(outline[i]); t.push(inner[i]); }
   let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
   for (const q of o) { if (q.x < minx) minx = q.x; if (q.x > maxx) maxx = q.x; if (q.y < miny) miny = q.y; if (q.y > maxy) maxy = q.y; }
   const sxw = Math.max(1e-6, maxx - minx), syw = Math.max(1e-6, maxy - miny);
   const base = buf.v;
-  const push = (q: GPt, y: number, nx: number, ny: number, nz: number) => {
+  const push = (q: GPt, k: number) => {
     buf.pos.push(wu(q.x), y, wu(q.y));
-    buf.nrm.push(nx, ny, nz);
+    buf.nrm.push(0, 1, 0);
     buf.uv.push((q.x - minx) / sxw, (q.y - miny) / syw);
-    buf.col.push(r, g, b);
+    buf.col.push(r * k, g * k, b * k);
     buf.v++;
   };
-  for (let i = 0; i < n; i++) push(t[i], yTop, 0, 1, 0);                                  // ring 0 — top face
-  for (let i = 0; i < n; i++) push(t[i], yTop, out[i].x * bevelOut, bevelUp, out[i].y * bevelOut); // ring 1
-  for (let i = 0; i < n; i++) push(o[i], yBev, out[i].x * bevelOut, bevelUp, out[i].y * bevelOut); // ring 2
-  for (let i = 0; i < n; i++) push(o[i], yBev, out[i].x, 0, out[i].y);                    // ring 3 — skirt
-  for (let i = 0; i < n; i++) push(o[i], yBot, out[i].x, 0, out[i].y);                    // ring 4
+  for (let i = 0; i < n; i++) push(t[i], 1);        // ring 0 — the face, face colour
+  for (let i = 0; i < n; i++) push(o[i], edgeMul);  // ring 1 — the cell edge, the joint's floor
   for (let i = 1; i < n - 1; i++) buf.idx.push(base, base + i, base + i + 1);
-  for (let ring = 1; ring <= 3; ring += 2) {
-    const U = base + ring * n, L = base + (ring + 1) * n;
-    for (let i = 0; i < n; i++) {
-      const j = (i + 1) % n;
-      buf.idx.push(U + i, L + i, L + j, U + i, L + j, U + j);
-    }
+  const U = base, L = base + n;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    buf.idx.push(U + i, L + i, L + j, U + i, L + j, U + j);
   }
   buf.cells++;
 }
@@ -2011,8 +1468,10 @@ export function buildFloor(M: Materials): THREE.Group {
   // That distinction is the whole lesson from the previous round of this argument: the
   // rim was ADDED to fix the drop-shadow read and became the next defect. Cutting a
   // magnitude cannot introduce a third thing. Swapping the hue, or the sign, could.
-  const stainRim = M.flour.clone();
-  stainRim.opacity = 0.05;
+  // [A1: `const stainRim = M.flour.clone(); stainRim.opacity = 0.05;` was built here for
+  //  the stain clusters, which are deleted (see the A1 block above `buildGroundChips`).
+  //  The note above is kept: "the rim was ADDED to fix the drop-shadow read and became the
+  //  next defect" is the history of every translucent mark this floor ever carried.]
 
   // Subfloor — extends past the playfield edge so nothing reads as a table-edge cliff.
   //
@@ -2211,18 +1670,35 @@ export function buildFloor(M: Materials): THREE.Group {
    * size of its neighbours and reads as a missing tile rather than a big flagstone.
    */
   const TILE_DROP_P = 0.40;
+  // ── A1 (graphics revamp, 2026-10-15): ONE SOFT JOINT ─────────────────────────
+  // ⚠️ THE THREE CONSTANTS THAT USED TO OPEN THIS BLOCK ARE GONE, AND THEIR NOTES ARE
+  // KEPT, because the argument they made is the one this package reverses:
+  //   > `JOINT_W = 1.6` — *"wu. The mortar gap, applied as a half-width inset on each
+  //   > stone ... the reference plate's joints are measurably WIDER in area share than
+  //   > ours (jointShare 0.167 against our 0.078) and far lower in contrast, so this goes
+  //   > up while the contrast comes down."*
+  //   > `BEVEL_IN = 2.2` — *"wu. Horizontal roll on the stone's top edge"*.
+  //   > `BEVEL_DROP = 0.012` — *"m. Vertical drop across that roll: 16.4 deg, a soft ramp."*
+  // The width half of that note was right and survives as `JOINT_SOFT`; the construction
+  // was not. A gap + a roll + a skirt rendered as three or four bands per joint at 58°
+  // (see `emitStone`), the "light ridge + dotted hairline" the arena audit photographed
+  // at 8x. The joint is now one value dip in vertex colour: `JOINT_SOFT` wu of each stone
+  // ramp from the face colour down to `JOINT_EDGE` x it on the shared edge, so a joint is
+  // `2 x JOINT_SOFT` wide, darkest on the true boundary, with no geometry in it.
   /**
-   * wu. The mortar gap, applied as a half-width inset on each stone. The lattice it
-   * replaces ran `wu(TILE) * 0.962`, i.e. 1.52wu; the reference plate's joints are
-   * measurably WIDER in area share than ours (jointShare 0.167 against our 0.078) and
-   * far lower in contrast, so this goes up while the contrast comes down. Those two
-   * move together on purpose: a wide DARK joint is a lattice with thicker lines.
+   * wu. How far in from the cell edge the face colour starts. 3 wu a side puts the band's
+   * half-depth width at ~3 wu ≈ 8 px at the shipped camera (0.362 wu/px), against the
+   * reference's ~10 px soft band; the audit's remedy named "an inner ring ~3 wu in".
    */
-  const JOINT_W = 1.6;
-  /** wu. Horizontal roll on the stone's top edge — see `TILE_BEVEL`'s history below. */
-  const BEVEL_IN = 2.2;
-  /** m. Vertical drop across that roll: atan(0.014 / wu(0.95)) = 16.4 deg, a soft ramp. */
-  const BEVEL_DROP = 0.012;
+  const JOINT_SOFT = 3.0;
+  /**
+   * Vertex-colour multiplier on the cell edge (LINEAR — vertex colours multiply the
+   * linear albedo, so 0.80 arrives ~0.90x in sRGB before lighting and the grade). The
+   * reference transect is 101 -> 89 -> 101 luma (0.88x); the subfloor below sits at the
+   * same ratio (#694D57 against #785864 is 0.875x in sRGB) so a `polyClean` sliver that
+   * shows it reads as part of the joint, not as a hole.
+   */
+  const JOINT_EDGE = 0.80;
   /**
    * wu. Vertices closer together than this are merged before the insets — see
    * `polyClean`. Swept offline on `tools/tmp/v1_tess.mjs` rather than guessed:
@@ -2275,16 +1751,12 @@ export function buildFloor(M: Materials): THREE.Group {
   // stone into a pillow. It is now 16.4 deg off horizontal rather than a quarter-round,
   // which is *softer* than what it replaces — deliberately, because the joint it ramps
   // into is no longer a dark line that needs a hard lip to be read as a groove.
-  const TILE_H = 0.026;
+  // A1: `TILE_H` (0.026 m, the stone's thickness) went with the skirt — a stone is one
+  // flat face now, so it has no thickness to declare.
   // The top face still sits at exactly +0.015: `shared.ts` places every prop's contact
   // shadow at y = 0.019 on that assumption, and raising it would re-bury every contact
   // shadow in the arena. Unchanged from the instanced field, and the reason is unchanged.
   const Y_TOP = FLOOR_Y.tile + 0.015;
-  const Y_BOT = Y_TOP - TILE_H;
-  // The bevel-band normal: `bevelOut` horizontal, `bevelUp` vertical, normalised.
-  const bevLen = Math.hypot(wu(BEVEL_IN), BEVEL_DROP);
-  const BEV_UP = wu(BEVEL_IN) / bevLen;
-  const BEV_OUT = BEVEL_DROP / bevLen;
   // Capacity is the full tile count on BOTH meshes (not half each) — the noise-driven
   // split below is never exactly 50/50, and allocating each InstancedMesh generously
   // is free (a few unused instance slots) versus silently dropping tiles once a
@@ -2774,6 +2246,83 @@ export function buildFloor(M: Materials): THREE.Group {
       if (!near) alive[j * SITE_COLS + i] = 0;
     }
   }
+  // ── The per-stone tint, as a FUNCTION OF PLACE (A1) ────────────────────────────
+  // Lifted out of the cell loop unchanged so `buildGroundChips` can tint a crumb from
+  // the same macro field as the stone it lies on (`micro` 0, `odd` 1). The loop passes
+  // its own per-tile draws, so the field it builds is bit-identical to before the move.
+  const tintFrom = (wx: number, wy: number, micro: number, odd: number, out: THREE.Color): void => {
+    const b = blotch(wx, wy);
+    const wear = wearAt(wx, wy);
+    const edge = Math.min(1, Math.hypot(wx - CENTER.x, wy - CENTER.y) / halfDiag);
+    // ── Baked lighting: the dominant term, by design ──────────────────────────
+    // `litness` is 0 in deep shade and 1 in full sun. Its inputs, in order of
+    // weight: the big soft `shadeField` masses; a directional ramp along the key
+    // light's own world axis, which gives the whole arena ONE consistent sun
+    // direction; ambient occlusion pooling toward the perimeter; and traffic wear.
+    // The `blotch` mottling is folded in last at a fraction of the weight — it is
+    // material variation, not lighting, and it must not compete with the light.
+    //
+    // KEY AZIMUTH — and it has moved twice, the second time changing SIGN.
+    //
+    // This ramp is the whole arena's "one sun direction". It has to point at the
+    // only real light in the scene, or a floor lit from one direction sits under
+    // props shaded from another and the frame reads as lit by nothing in particular.
+    //
+    // History, because the number looks arbitrary: retiring the baked cast-shadow
+    // ovals freed the key and it swung 38.08 -> 16.0 deg off +X, and these
+    // coefficients were brought to (0.961, 0.276) then. `086ff5f` then swung it to
+    // **-31 deg** — +Z is the camera's own side, and a key there throws every shadow
+    // behind its own caster — and all three baked copies were left behind. That is
+    // 47 deg of disagreement, but the sign is the part that matters: the real key
+    // now comes from -Z and this ramp still brightened toward +Z, so the arena's
+    // baked "sun" was on the opposite side of the camera axis from the real one.
+    //
+    // The live rig, read off `window.__stage.lighting.key` by `tools/tmp/aoband.mjs`
+    // at three stations: offset (29.98, 28.32, -18.01), so the ground direction the
+    // light comes FROM is (29.98, -18.01) / 34.97 = (0.857, -0.515).
+    //
+    // `shared.ts`'s `SHADOW_DIR` and `apron.ts`'s `SHADOW_X`/`SHADOW_Y` are the other
+    // two copies. IF THE KEY MOVES AGAIN, ALL THREE MOVE TOGETHER —
+    // `tools/tmp/bakedaz.mjs` fails if one of them drifts.
+    const along = ((wx - CENTER.x) * 0.857 + (wy - CENTER.y) * -0.515) / 700;
+    const litness = THREE.MathUtils.clamp(
+      0.5 + shadeField(wx, wy) * 0.46 + along * 0.16 + b * 0.1 - wear * 0.3 - edge * edge * 0.38,
+      0,
+      1
+    );
+    // r3's exact expression (see `MACRO_STRENGTH` at the top of this file): a macro
+    // field and a per-tile micro jitter blended 70/30, then scaled by ONE amplitude.
+    // `litness` supplies the macro term, so the sun direction, the wear bias and the
+    // edge falloff that loop 2 added all survive — only the amplitude goes back.
+    const macro = litness * 2 - 1; // -1..1
+    const noise = THREE.MathUtils.clamp(macro * 0.7 + micro * 0.3, -1, 1);
+    let mult = MACRO_MEAN * (1 + noise * MACRO_STRENGTH);
+    // ~3% of tiles are visibly off-tone — a replaced tile, a bad batch, one that got
+    // a lot more traffic. Real laid floors always have a few and a generated one
+    // never does unless you ask for it; the critic's phrasing was "no chipped corner,
+    // no single odd tile." Kept rare enough to read as an event, not as noise, and
+    // pulled in to ±10% so one stray tile cannot punch outside the band the whole
+    // field is now deliberately held inside.
+    mult *= odd;
+    // Hue drift, not just value: the field swings between a cool grey-tan and a warm
+    // ochre. A surface that varies only in brightness still reads as one flat colour
+    // dimmed, which is most of why this floor has been called "very yellow" — the
+    // yellow never let up anywhere. Driven by `hueField` plus wear/edge, NOT by the
+    // same `blotch` that drives value, so the two sets of patches interleave.
+    // Shaded ground also goes cooler, not just darker — the single cheapest way to
+    // stop a baked gradient reading as "the same colour, dimmed".
+    const cool = THREE.MathUtils.clamp(
+      0.3 + hueField(wx, wy) * 0.45 + wear * 0.4 + (1 - litness) * 0.4,
+      0,
+      1
+    );
+    out.setRGB(
+      mult * (1 - cool * 0.07),
+      mult * (1 - cool * 0.03),
+      mult * (1 + cool * 0.08)
+    );
+  };
+
   // Every cell starts as the whole playfield and is clipped down, so the stones stop
   // exactly at the arena edge with no partial-tile fringe — the property the old
   // "exact divisor of ARENA_W" argument was buying, kept without the divisor.
@@ -2781,6 +2330,7 @@ export function buildFloor(M: Materials): THREE.Group {
     { x: 0, y: 0 }, { x: ARENA_W, y: 0 }, { x: ARENA_W, y: ARENA_H }, { x: 0, y: ARENA_H },
   ];
   let cellsSkipped = 0;
+  let bandless = 0;
   for (let j = 0; j < SITE_ROWS; j++) {
     for (let i = 0; i < SITE_COLS; i++) {
       const k = j * SITE_COLS + i;
@@ -2803,20 +2353,19 @@ export function buildFloor(M: Materials): THREE.Group {
           if (poly.length < 3) break;
         }
       }
-      if (poly.length >= 3) poly = polyClean(poly, TILE_CLEAN);
-      const outline = poly.length >= 3 ? polyInset(poly, JOINT_W / 2) : null;
+      // A1: the RAW cell is the stone now — no `JOINT_W / 2` inset (no gap) and no
+      // `polyClean` (see `insetConvex` for the red sliver line that step opened between
+      // neighbours once the gap was gone). `TILE_CLEAN` is unused by the stones.
+      if (poly.length >= 3) poly = polyDedupe(poly);
+      const outline = poly.length >= 3 && polyArea(poly) > 1 ? poly : null;
       if (!outline) { cellsSkipped++; continue; }
-      // ⚠️ A FAILED BEVEL MUST NOT COST THE STONE. `BEVEL_IN` is wide enough that the
-      // smallest cells cannot take it, and the first version of this line skipped those
-      // cells outright — 47 to 167 of them depending on the width, i.e. 47 to 167 HOLES
-      // in the floor with the subfloor showing through. Measured on `v1_tess`, and the
-      // whole point of that replica: the parameter that makes the joint softest is also
-      // the one that punches the most holes, and nothing in the render says which.
-      // A stone with a narrower roll is correct; a missing stone is not.
-      let top = polyInset(outline, BEVEL_IN);
-      if (!top) top = polyInset(outline, BEVEL_IN * 0.45);
-      if (!top) top = outline; // no roll at all — the ring quads collapse to zero area
-      const bevelDrop = top === outline ? 0 : BEVEL_DROP;
+      // ⚠️ A FAILED BAND MUST NOT COST THE STONE — the rule the bevel learned, kept. The
+      // smallest cells cannot take a full `JOINT_SOFT` erosion; the first bevel version
+      // skipped them outright and punched 47-167 HOLES in the floor (`v1_tess`). A stone
+      // with a narrower band is correct; a missing stone is not.
+      let inner = insetConvex(outline, JOINT_SOFT);
+      if (!inner) inner = insetConvex(outline, JOINT_SOFT * 0.45);
+      if (!inner) { inner = outline; bandless++; } // no band — the ring quads collapse to zero area
       // Every field below was written against a grid cell's CENTRE. The stone's own
       // centroid is the same quantity for an irregular cell, and using the SITE instead
       // would put the sample off-centre by up to the jitter.
@@ -2845,77 +2394,17 @@ export function buildFloor(M: Materials): THREE.Group {
       const pDark = THREE.MathUtils.clamp(0.5 + b * 1.15 + wear * 0.55, 0.02, 0.97);
       const isDark = tileRand() < pDark;
 
-      // ── Baked lighting: the dominant term, by design ──────────────────────────
-      // `litness` is 0 in deep shade and 1 in full sun. Its inputs, in order of
-      // weight: the big soft `shadeField` masses; a directional ramp along the key
-      // light's own world axis, which gives the whole arena ONE consistent sun
-      // direction; ambient occlusion pooling toward the perimeter; and traffic wear.
-      // The `blotch` mottling is folded in last at a fraction of the weight — it is
-      // material variation, not lighting, and it must not compete with the light.
-      //
-      // KEY AZIMUTH — and it has moved twice, the second time changing SIGN.
-      //
-      // This ramp is the whole arena's "one sun direction". It has to point at the
-      // only real light in the scene, or a floor lit from one direction sits under
-      // props shaded from another and the frame reads as lit by nothing in particular.
-      //
-      // History, because the number looks arbitrary: retiring the baked cast-shadow
-      // ovals freed the key and it swung 38.08 -> 16.0 deg off +X, and these
-      // coefficients were brought to (0.961, 0.276) then. `086ff5f` then swung it to
-      // **-31 deg** — +Z is the camera's own side, and a key there throws every shadow
-      // behind its own caster — and all three baked copies were left behind. That is
-      // 47 deg of disagreement, but the sign is the part that matters: the real key
-      // now comes from -Z and this ramp still brightened toward +Z, so the arena's
-      // baked "sun" was on the opposite side of the camera axis from the real one.
-      //
-      // The live rig, read off `window.__stage.lighting.key` by `tools/tmp/aoband.mjs`
-      // at three stations: offset (29.98, 28.32, -18.01), so the ground direction the
-      // light comes FROM is (29.98, -18.01) / 34.97 = (0.857, -0.515).
-      //
-      // `shared.ts`'s `SHADOW_DIR` and `apron.ts`'s `SHADOW_X`/`SHADOW_Y` are the other
-      // two copies. IF THE KEY MOVES AGAIN, ALL THREE MOVE TOGETHER —
-      // `tools/tmp/bakedaz.mjs` fails if one of them drifts.
-      const along = ((wx - CENTER.x) * 0.857 + (wy - CENTER.y) * -0.515) / 700;
-      const litness = THREE.MathUtils.clamp(
-        0.5 + shadeField(wx, wy) * 0.46 + along * 0.16 + b * 0.1 - wear * 0.3 - edge * edge * 0.38,
-        0,
-        1
-      );
-      // r3's exact expression (see `MACRO_STRENGTH` at the top of this file): a macro
-      // field and a per-tile micro jitter blended 70/30, then scaled by ONE amplitude.
-      // `litness` supplies the macro term, so the sun direction, the wear bias and the
-      // edge falloff that loop 2 added all survive — only the amplitude goes back.
-      const macro = litness * 2 - 1; // -1..1
+      // A1: the per-stone tint is `tintFrom` (defined above the site field) so the crumb
+      // layer can read the SAME macro field at any point — see `buildGroundChips`. The
+      // two `tileRand()` draws stay here, in their original order, so the tessellation
+      // and every stone's tint are bit-identical to before the move.
       const micro = tileRand() * 2 - 1; // -1..1, independent per tile
-      const noise = THREE.MathUtils.clamp(macro * 0.7 + micro * 0.3, -1, 1);
-      let mult = MACRO_MEAN * (1 + noise * MACRO_STRENGTH);
-      // ~3% of tiles are visibly off-tone — a replaced tile, a bad batch, one that got
-      // a lot more traffic. Real laid floors always have a few and a generated one
-      // never does unless you ask for it; the critic's phrasing was "no chipped corner,
-      // no single odd tile." Kept rare enough to read as an event, not as noise, and
-      // pulled in to ±10% so one stray tile cannot punch outside the band the whole
-      // field is now deliberately held inside.
-      if (tileRand() < 0.03) mult *= tileRand() < 0.5 ? 0.90 : 1.08;
-      // Hue drift, not just value: the field swings between a cool grey-tan and a warm
-      // ochre. A surface that varies only in brightness still reads as one flat colour
-      // dimmed, which is most of why this floor has been called "very yellow" — the
-      // yellow never let up anywhere. Driven by `hueField` plus wear/edge, NOT by the
-      // same `blotch` that drives value, so the two sets of patches interleave.
-      // Shaded ground also goes cooler, not just darker — the single cheapest way to
-      // stop a baked gradient reading as "the same colour, dimmed".
-      const cool = THREE.MathUtils.clamp(
-        0.3 + hueField(wx, wy) * 0.45 + wear * 0.4 + (1 - litness) * 0.4,
-        0,
-        1
-      );
-      noiseColor.setRGB(
-        mult * (1 - cool * 0.07),
-        mult * (1 - cool * 0.03),
-        mult * (1 + cool * 0.08)
-      );
+      let odd = 1;
+      if (tileRand() < 0.03) odd = tileRand() < 0.5 ? 0.90 : 1.08;
+      tintFrom(wx, wy, micro, odd, noiseColor);
       emitStone(
-        isDark ? darkBuf : lightBuf, outline, top, Y_TOP, Y_TOP - bevelDrop, Y_BOT,
-        BEV_UP, BEV_OUT, noiseColor.r, noiseColor.g, noiseColor.b
+        isDark ? darkBuf : lightBuf, outline, inner, Y_TOP,
+        noiseColor.r, noiseColor.g, noiseColor.b, JOINT_EDGE
       );
     }
   }
@@ -2929,6 +2418,17 @@ export function buildFloor(M: Materials): THREE.Group {
   }
   if (cellsSkipped > nSites * 0.15) {
     console.warn(`floor: ${cellsSkipped} of ${nSites} stone cells were degenerate and skipped`);
+  }
+  // A1: a stone with no band is a stone whose joint is missing on all sides — rare by
+  // construction (only cells under 2.7 wu of inradius), and loud if it is not.
+  if (bandless > nSites * 0.02) {
+    console.warn(`floor: ${bandless} of ${nSites} stones could take no joint band`);
+  }
+  // QA-only read-out (a probe reads it; nothing in the game does).
+  if (typeof window !== 'undefined') {
+    (window as unknown as { __a1FloorStats?: unknown }).__a1FloorStats = {
+      sites: nSites, stones: lightBuf.cells + darkBuf.cells, skipped: cellsSkipped, bandless,
+    };
   }
   const lightMesh = stoneMesh(lightBuf, tileLightInst, 'floor_stones_light');
   const darkMesh = stoneMesh(darkBuf, tileDarkInst, 'floor_stones_dark');
@@ -3079,32 +2579,34 @@ export function buildFloor(M: Materials): THREE.Group {
     g.add(patch);
   }
 
-  // Scattered ingredients + floor wear around the hub — the empty tan floor in the
-  // lane gaps was the single biggest "this feels empty" tell at gameplay framing.
-  // Radius band (104-134wu) sits just past the hazard ring and stays clear of every
-  // hub prop (nearest is the stove islands' inner corner at ~138wu), so it's safe
-  // regardless of angle.
-  g.add(buildHubDebris(debrisMats));
+  // ── 🚨 A1 (graphics revamp, 2026-10-15): THE SMUDGES, THE CONFETTI AND THE HUB LITTER ──
+  //
+  // Six things used to be added here and below, each with a critique behind it. The
+  // notes are condensed rather than deleted, because each was an answer to a real
+  // complaint and the next owner should see what is being given up:
+  //   * `buildHubDebris` — 8 produce spheres at r 104-134 around the pot, for "the empty
+  //     tan floor in the lane gaps was the single biggest 'this feels empty' tell".
+  //   * `buildHazardSplatterApron` — 16 translucent stains ringing the pot, so the
+  //     isolated `piece=floor` shot "showed more than flat tile" at CENTER.
+  //   * `buildLaneWear` — worn path strips + three stain clusters per flank corridor.
+  //   * four barrel-lane oil drips, eight stove-island grease splats, the fryer grease
+  //     pool and the sink's wet-sheen pool (+ satellites) — "grease near the stoves".
+  //   * `buildMatEdgeWear` — translucent grime/dust blobs crossing every mat edge.
+  //   * the two pale flour circles by the sack piles.
+  // What they measured to be, on the shipped frames (`shots/rv/audit/arena`, D2/D3/GX-05):
+  // the translucent stains read as **render garbage** — blue-grey blobs with peach rims
+  // and orange dots — in every critic's frame, and the hub's litter covered 1.3-1.6% of
+  // a six-seat fight frame **exactly where fights converge**. 16 of 16 blind critics
+  // described the match floor as "a big flat pink floor covered in confetti-like specks".
+  // The "empty floor" critiques they answered are the ones the density null (`fd76ef0`,
+  // footprint 13% -> 24.9%, score +0.00) says are not the lever. The rule that replaces
+  // them: **any storytelling on this floor is OPAQUE, in the ground's own hue, at <= 8%
+  // value step** — which is what `buildGroundChips` now draws, and nothing else is.
 
-  // ── Arena-wide ground debris — see `buildGroundChips` for the measurement ─────
-  // This is the answer to `featShare` / `groundFeat`, the only two ground numbers
-  // `ac08dbf` found outside the reference band, and it is deliberately the LAST thing
-  // added to the ground so it lies over every mark above rather than under them.
-  g.add(buildGroundChips());
-
-  // Splatter apron ringing the hazard — see `buildHazardSplatterApron`. This is the
-  // single highest-leverage addition in this file for the isolated `piece=floor`
-  // diagnostic shot specifically: its default framing centres on CENTER, where the
-  // pot hazard's own decal is never drawn (that's `hazards.ts`, not this module), so
-  // without this the default clean render showed almost nothing but flat tile in the
-  // exact area the camera frames.
-  g.add(buildHazardSplatterApron(M, TILE));
-
-  // Worn foot-traffic path down both flank corridors (see `buildLaneWear`) — the
-  // single most-walked straight sightline on the map (spawn <-> hub) had nothing
-  // marking it as such; every other landmark on the floor is a discrete patch tied
-  // to a specific prop, none of them following the ROUTE a player actually runs.
-  g.add(buildLaneWear(M, stainRim));
+  // ── Arena-wide ground crumbs — see `buildGroundChips` for the measurement ─────
+  // Deliberately the LAST thing added to the ground so it lies over every mark above
+  // rather than under them.
+  g.add(buildGroundChips(tileLightInst, (wx, wy, out) => tintFrom(wx, wy, 0, 1, out)));
 
   // Small dropped-produce piles beside the barrel lane on both sides — the barrels
   // are supply crates in transit; a couple of loose pieces having rolled free off
@@ -3114,16 +2616,9 @@ export function buildFloor(M: Materials): THREE.Group {
   g.add(buildDebrisPile(debrisMats, 250, 760, 6301, 4, 14));
   g.add(buildDebrisPile(debrisMats, ARENA_W - 250, ARENA_H - 760, 6317, 4, 14));
 
-  // Small oil-drip stains hugging the base of the barrel lane's two barrels — a
-  // second, visibly SEPARATE mark inside the same frame as the bigger lane-wear
-  // patch, so the wear reads as a recurring condition of this stretch of floor
-  // rather than one isolated smudge (a critic's exact phrasing for what was
-  // missing: "doesn't repeat or vary anywhere else in the room").
-  g.add(buildStainShape(M.floorGrime, 110, 330, 6401, 14, 8));
-  g.add(buildStainShape(M.floorGrime, 240, 760, 6409, 12, 7));
-  g.add(buildStainShape(M.floorGrime, ARENA_W - 110, ARENA_H - 330, 6421, 14, 8));
-  g.add(buildStainShape(M.floorGrime, ARENA_W - 240, ARENA_H - 760, 6429, 12, 7));
-
+  // ⚠️ A1: the barrel-lane oil drips, the stove grease and the service-counter pools that
+  // were added below are deleted (see the A1 block above). Their placement notes are kept
+  // because they record what the hub's geometry was when they were written.
   // Round-2: grease spatter at the actual cooking surfaces — a critic scored the
   // floor 3/10 and named this precisely ("no grease spatter near the hot-dog
   // counter... the absence of grease stains... near the hot-dog stand is a missed,
@@ -3155,27 +2650,12 @@ export function buildFloor(M: Materials): THREE.Group {
   // the failure the 2026-08-05 note above records. Each now sits 40 wu outboard of its
   // island's away-from-hub face, so it cannot be buried by a ±40 wu nudge in either
   // direction, and it moves with the hub instead of with a remembered coordinate.
-  const stoveGrease: Array<[number, number]> = [
-    [CENTER.x - 320, CENTER.y - 325], [CENTER.x + 320, CENTER.y - 325], // the four hub islands
-    [CENTER.x - 320, CENTER.y + 325], [CENTER.x + 320, CENTER.y + 325],
-    [2230, 590], [ARENA_W - 2230, ARENA_H - 590],         // the east / west cook lines
-    [1520, 380], [ARENA_W - 1520, ARENA_H - 380],         // the north / south lane islands
-  ];
-  stoveGrease.forEach(([sx, sy], i) => g.add(buildGreaseSplat(M, stainRim, sx, sy, 7401 + i * 53, 30)));
+  // [A1: the eight `stoveGrease` splats — four hub islands at CENTER ±320/±325, the two
+  // cook lines and the two lane islands — were added here. Deleted; see above.]
 
-  // Worn-floor marks near the service counters — a confident grease pool behind the
-  // fryer (south), a cool wet-sheen pool behind the sink (north), each with a
-  // smaller trailing satellite stain further out (the mess spreading, not a single
-  // isolated dot). Placed on the OUTER side of each counter, clear of both the
-  // counter's own CoverBox and the hub service mat that sits on its inner side.
-  // ⚠️ Written against CENTER now rather than as literals, because these follow the two
-  // service counters and those are HUB props — `kitchen.ts` places them at CENTER.y ± 330
-  // at every arena size. The 1400×1000 literals (705,895)/(705,105) were the same points
-  // expressed against a centre that has since moved.
-  g.add(buildGreaseSplat(M, stainRim, CENTER.x, CENTER.y + 400, 7201, 34));
-  g.add(buildStainShape(M.floorGrime, CENTER.x + 70, CENTER.y + 445, 7219, 16, 8));
-  g.add(buildStainCluster(M.floorWet, CENTER.x, CENTER.y - 400, 7241, 30, stainRim));
-  g.add(buildStainShape(M.floorWet, CENTER.x - 70, CENTER.y - 445, 7259, 15, 8));
+  // [A1: and here, "worn-floor marks near the service counters — a confident grease pool
+  // behind the fryer (south), a cool wet-sheen pool behind the sink (north), each with a
+  // smaller trailing satellite stain", written against CENTER.y ± 400. Deleted.]
 
   // ── Wood pantry pads (NE + SW) — the worst blocking-vs-walkable read left ───
   //
@@ -3287,7 +2767,15 @@ export function buildFloor(M: Materials): THREE.Group {
     [ARENA_W - 300, ARENA_H - 445, 380, 580],
     [2450, 745, 340, 380],
     [ARENA_W - 2450, ARENA_H - 745, 340, 380],
-    [CENTER.x, CENTER.y, 400, 280],
+    // ⚠️ A1 (graphics revamp, 2026-10-15): THE THIRD-ENTRY POT MAT IS GONE — `[CENTER.x,
+    // CENTER.y, 400, 280]`. The note above argued it in for **0.018 of mean saturation**
+    // (and it was right that the pot ring had gone bare). What it measured to be, in the
+    // frames that are scored: a hard-edged saturated blue rectangle under the one place
+    // every six-seat endgame happens — "a picture-in-picture window" (`DECISIONS §18`'s
+    // critic, still present at the audit) — carrying the densest chip confetti on the map.
+    // The caution ring `hazards.ts` draws already marks the danger; the floor around the
+    // pot is now the stage's own stone. Mean saturation is re-checked by `arena-scan
+    // --gate` (band 0.370-0.694), not assumed.
   ];
   for (const [px, py, pw, ph] of utilityPads) {
     // Same painted kerb as the hub set — these had no border at all, which is most of
@@ -3318,17 +2806,10 @@ export function buildFloor(M: Materials): THREE.Group {
   // of the language, not of a footprint. `depthWrite: false` on both clones: these are
   // transparent and sit above the pads, and a transparent material that writes depth
   // silently occludes whatever is drawn after it (`docs/LESSONS.md` §1, corollary).
-  const edgeGrime = M.floorGrime.clone() as THREE.MeshBasicMaterial;
-  edgeGrime.opacity = 0.20;
-  edgeGrime.depthWrite = false;
-  // 0.09, not `M.dust`'s own 0.5 and not the 0.13 first tried: at 0.13 a mark straddling
-  // the line came out as a pale CREAM lobe over the pink half, which is the tidemark
-  // grammar `buildStainCluster` uses for an evaporated spill. These have to read as
-  // scuff, so they stay under the threshold where the eye assigns them a source.
-  const edgeDust = M.dust.clone() as THREE.MeshBasicMaterial;
-  edgeDust.opacity = 0.09;
-  edgeDust.depthWrite = false;
-  g.add(buildMatEdgeWear(edgeGrime, edgeDust, [...hubMatZones, ...utilityPads], 90210));
+  // ⚠️ A1: `buildMatEdgeWear`'s translucent grime (0.20) and dust (0.09) blobs across
+  // every mat edge are deleted with the other smudges (see the A1 block above) — a
+  // translucent mark is exactly the class the audit photographed as render garbage. The
+  // crease below is kept: it is a soft contact band hugging the mat, i.e. grounding.
   // The contact crease — see `buildMatCrease`. Drawn AFTER the fringe so the two read
   // as one treatment; both sit at `MAT_WEAR_Y`, outside the mat, on the tile.
   const crease = buildMatCrease([...hubMatZones, ...utilityPads], 0x2A1B24);
@@ -3404,9 +2885,12 @@ export function buildFloor(M: Materials): THREE.Group {
   // Shrinking below character width would make these marks tokens; lowering the value
   // is the fix. Target: every pale mark Δ <= +0.05 luma against the tile field, so a
   // character standing dead centre on one still keeps ~0.12 of separation.
-  const flourPale = M.flour.clone();
-  flourPale.opacity = (M.flour as THREE.Material & { opacity: number }).opacity * 0.32;
-
+  // ⚠️ A1 (graphics revamp, 2026-10-15): THE FLOUR CIRCLE IS DELETED, THE PRODUCE PILE IS
+  // KEPT. The spill was `flourPale` — `M.flour` at 0.32 of its 0.26 opacity — a pale
+  // TRANSLUCENT disc, which is the class this package removes from the floor (see the A1
+  // block above buildGroundChips). The note above survives because its argument does:
+  // a ground mark earns its place by being caused by something in frame, and the pile
+  // beside each sack still is.
   // Flour spill actually AT the flour-sack props (NE + SW pantry) — the sacks
   // themselves had nothing spilling out of them, which is exactly the "corner props
   // don't cohere into a story" gap: a produce crate with no dropped produce, a flour
@@ -3414,16 +2898,7 @@ export function buildFloor(M: Materials): THREE.Group {
   // the hub debris ring at pantry scale.
   const sackSpills: Array<[number, number]> = [[2295, 425], [ARENA_W - 2295, ARENA_H - 425]];
   sackSpills.forEach(([sx, sy], i) => {
-    // `flourPale`, not `M.flour` — same argument as the lane spill above. In the
-    // `pantry_ne` scan frame this mark was the second brightest mass in shot after
-    // the plank pad, and both of them are floor.
-    const spill = mesh(new THREE.CircleGeometry(wu(28), 48), flourPale, 'floor_flour');
-    spill.rotation.x = -Math.PI / 2;
-    spill.scale.set(1.25, 1, 1);
     const dy = i === 0 ? 95 : -95; // mirrored offset, clear of the sack CoverBox's own footprint
-    spill.position.set(wu(sx), DECAL_Y, wu(sy + dy));
-    noOutline(spill);
-    g.add(spill);
     g.add(buildDebrisPile(debrisMats, sx + (i === 0 ? 30 : -30), sy + dy, 5101 + i * 97, 5, 20));
   });
 
