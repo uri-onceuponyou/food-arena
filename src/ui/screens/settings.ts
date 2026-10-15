@@ -233,6 +233,9 @@ type MoveBindings = Partial<Record<MoveDirection, string>>;
  * The digits are the subtle ones. `input.ts:onKeyDown` reads `Number(e.key)` — the
  * CHARACTER, not the code — so both the number row and the numpad select a weapon, and
  * both have to be reserved even though only one of them is a `Digit*` code.
+ * ⚠️ Since F4 it is the character FIRST and the physical `Digit*` / `Numpad*` code as the
+ * fallback (`input.ts:weaponSlotForKey`), so "picks a weapon" is now true of these codes on
+ * an AZERTY row too, where it used to be true only on QWERTY. The list did not change.
  *
  * 🚨 **THE ITEM KEYS WERE MISSING, AND ONCE ITEMS WORKED THAT WAS A KEY THAT DID TWO THINGS
  * (F8).** `input.ts:ITEM_KEYS` (Q, E) press an equip slot; its own header called this list's

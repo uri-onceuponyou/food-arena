@@ -91,8 +91,41 @@ export const MUTE_KEY = 'KeyM';
  * number is one of the few places where what is printed on the key is the thing the
  * player means. No character in `rules.ts` carries more than 4 weapons, and the extra
  * headroom costs nothing; `setWeaponCount()` is what actually bounds it at runtime.
+ *
+ * ⚠️ **THE CHARACTER ALONE LOCKED OUT EVERY NON-QWERTY NUMBER ROW (F4)**, so it is now the
+ * character FIRST and the physical code as the fallback — see `weaponSlotForKey`.
  */
 export const MAX_WEAPON_SLOT_KEY = 9;
+
+/**
+ * ── WHICH WEAPON SLOT (0-based) A KEY PRESS PICKS, OR NULL ───────────────────
+ *
+ * 🚨 **ON AZERTY THE NUMBER ROW DID NOT SWITCH WEAPONS (F4).** Unshifted, the French row
+ * types `& é " ' ( - è _ ç à` — no digits — so `Number(e.key)` was NaN for every key on it
+ * and the only way to pick weapon 2 was Shift+é. Belgian AZERTY, Czech, Slovak and
+ * Lithuanian rows are the same shape. `settings.ts` has always REFUSED `Digit1`-`Digit9` as
+ * movement keys "because they pick a weapon" — true only on a QWERTY row. Measured by
+ * `tools/tmp/b2_input.mjs` §F4 on `8586f00`: code `Digit2` / key `é` left slot 3 selected.
+ *
+ * So: the CHARACTER first, exactly as before (QWERTY, the numpad with NumLock on and every
+ * Shift+digit layout are bit-identical), then the PHYSICAL CODE — `Digit1`-`Digit9` /
+ * `Numpad1`-`Numpad9` — which is the same position on every layout, the binding model the
+ * rest of this file already uses (`MOVE_KEYS` is codes for the same reason).
+ *
+ * ⚠️ The fallback is skipped under Ctrl / Meta / Alt (AltGr reports Ctrl+Alt on Windows):
+ * those are shortcuts and dead-key compositions, not a weapon pick — the same modifier gate
+ * mute and the item keys use. Exported for `tools/tmp/b2_logic.mjs`, which pins this table
+ * without a browser.
+ */
+export function weaponSlotForKey(
+  e: Pick<KeyboardEvent, 'key' | 'code' | 'ctrlKey' | 'metaKey' | 'altKey'>,
+): number | null {
+  const n = Number(e.key);
+  if (Number.isInteger(n) && n >= 1 && n <= MAX_WEAPON_SLOT_KEY) return n - 1;
+  if (e.ctrlKey || e.metaKey || e.altKey) return null;
+  const m = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  return m && Number(m[1]) <= MAX_WEAPON_SLOT_KEY ? Number(m[1]) - 1 : null;
+}
 
 /**
  * ── ONE KEY PER EQUIP SLOT, AND THE PRESS NAMES ITS OWN SLOT ────────────────
@@ -493,11 +526,9 @@ export class InputController {
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     this.keys.add(e.code);
-    const n = Number(e.key);
-    if (Number.isInteger(n) && n >= 1 && n <= MAX_WEAPON_SLOT_KEY) {
-      const idx = n - 1;
-      if (idx < this.weaponCount) this.weaponIndex = idx;
-    }
+    // The character first, the physical code as the fallback — see `weaponSlotForKey` (F4).
+    const idx = weaponSlotForKey(e);
+    if (idx !== null && idx < this.weaponCount) this.weaponIndex = idx;
     // Items, on the KEYDOWN EDGE and gated on `repeat` for the same reason mute is:
     // the OS repeats a held key at ~30 Hz, and an item press is an EDGE (see
     // `takeItemPress`). Without `!e.repeat` a leaned-on Q would re-arm the item on the
