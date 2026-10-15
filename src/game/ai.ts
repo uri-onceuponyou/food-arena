@@ -84,9 +84,16 @@
  * from a match-wide `aiSighting`. Proven bit-identical at N=2 over state AND events; see the
  * acceptance runs in the two commit messages.
  *
- * ⚠️ NOTHING IN THIS FILE IS A SEARCH BEHAVIOUR, AND THE CAP COMING OFF DID NOT ADD ONE.
+ * ~~⚠️ NOTHING IN THIS FILE IS A SEARCH BEHAVIOUR, AND THE CAP COMING OFF DID NOT ADD ONE.
  * `stepAI` walks to where it last saw its target and stops (the claim is at
- * `src/arena/types.ts:95`, not at `rules.ts:1034`).
+ * `src/arena/types.ts:95`, not at `rules.ts:1034`).~~
+ *
+ * ⚠️ **SUPERSEDED BY AI-B3 (B5, 2026-10-15), AND THE CITATION HAD DRIFTED TOO.** Kept above
+ * per house style. `stepAI` still walks to where it last saw its target — and then, if the
+ * target is still hidden and that spot is at a concealment patch inside the 168 wu contract,
+ * `searchStep` sweeps the patch along its axis. Regions wider than the contract still get no
+ * search. The size claim lives on `ArenaDefinition.concealment` in `src/arena/types.ts` — cite
+ * the SYMBOL: `:95` had become `:138` (found by the AI bug hunt) and will move again.
  *
  * WAS: *"…which `DECISIONS §48` measures as the binding constraint on the ×4 arena — 12.00 s
  * to first contact at 27 props, 21.09 s at 108, monotone in prop count."* The prop-count
@@ -325,11 +332,17 @@ export interface CastThreat {
  *
  * ── WHAT THIS DELIBERATELY OVER-APPROXIMATES, AND IN WHICH DIRECTION ──────
  *
- *   * **A cast hits ONE fighter — `nearestLivingOpponent` AT THE RESOLVE** — so at N>2
+ *   * ~~**A cast hits ONE fighter — `nearestLivingOpponent` AT THE RESOLVE** — so at N>2
  *     everyone else inside the set is fleeing a shot that was never theirs. That is
  *     already true of the melee term and is left alone deliberately: predicting who will
  *     be nearest 1.1 s from now is a second, quieter statement of the target rule, and at
- *     N=2 — every corpus in this repo — the two answers are identical.
+ *     N=2 — every corpus in this repo — the two answers are identical.~~
+ *     ⚠️ **STALE, and the conclusion survives it** (found by the AI bug hunt, 2026-10-15): a
+ *     swing has hit EVERY opponent in its arc since `3483d23` and a projectile strikes
+ *     WHOEVER it touches since `5c11427`, so at N>2 a fighter inside the set is in real danger
+ *     whoever the caster was aiming at. Everyone in the set fleeing is therefore the RIGHT
+ *     behaviour now, not a tolerated over-approximation; the bullet is kept because the
+ *     reasoning it records is quoted elsewhere. Comment only — nothing here changed.
  *   * **A melee `cone` is treated as the whole disc**, unchanged from the line above.
  *   * **A fan is bounded at `range + hitRadius` along the beam**, which is the homing
  *     bound; a straight pellet chasing a receding target drifts off its own axis and dies
