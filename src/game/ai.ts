@@ -695,8 +695,13 @@ type WeaponRank = (state: MatchState, self: Fighter, w: Weapon, index: number, a
  *     that defect into the ranking, so it was left exact and the aim was fixed instead).
  *     With the aim correct in both branches the cone check is a no-op wherever this key
  *     is consulted, so the key is exact.
- *   * Donut's `trailBoosted` Candy Barrage. Donut has exactly one offensive weapon, so
- *     the boost cannot re-order a kit of one.
+ *   * Donut's `trailBoosted` Candy Barrage. ~~Donut has exactly one offensive weapon, so
+ *     the boost cannot re-order a kit of one.~~
+ *     ⚠️ **STALE since the 2026-08-24 kit pass, found by B3b (2026-10-15).** Donut has FOUR
+ *     weapons (Ring, Sprinkles, Candy, Glaze) and Candy is the only boosted one (B3b took
+ *     the never-applied flag off Ring), so the reason this was safe is gone: standing on
+ *     its own trail, the unpriced boost CAN re-order Candy against the other three. Whether
+ *     it does in practice is unmeasured — the AI package's question, not settled here.
  *
  * ── ⚠️ WHAT THIS KEY STILL DOES NOT PRICE: THE TARGET IS MOVING ─────────────
  *
