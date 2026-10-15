@@ -79,8 +79,11 @@ import { curl } from './appendages';
 // luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
 // (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
 // Signature hue: MINT-TEAL (~160°) on the disc; the swirl keeps its red/sun/teal bands.
-const CANDY_WHITE = '#48B990';  // luma 0.993 -> 0.842  // C1a: was #DED6C6
-// ── DISC_WHITE — CANDY_WHITE x 0.93, and it is a PROBE RESULT, not a taste choice ──
+// C1b: `CANDY_MINT`/`DISC_MINT` were `CANDY_WHITE`/`DISC_WHITE` — renamed at C1a's request: C1a
+// re-keyed both to mint, so the old names described a colour nothing wore. The history
+// notes below keep their old hex values; only the NAMES moved.
+const CANDY_MINT = '#48B990';  // luma 0.993 -> 0.842  // C1a: was #DED6C6
+// ── DISC_MINT — CANDY_MINT x 0.93, and it is a PROBE RESULT, not a taste choice ──
 // The candy disc's own ground. `sepscan --mode chars --ids lollipop` put `clipShare` at
 // **0.1233** after this pass's rebuild, against the six-plate Brawl Stars band of
 // 0.0072-0.0929 — outside it, on the exact number `e6fed57` spent a round winning
@@ -96,11 +99,11 @@ const CANDY_WHITE = '#48B990';  // luma 0.993 -> 0.842  // C1a: was #DED6C6
 // specular and not the twist. The same probe's luma histogram says the fix is small:
 // scaling that albedo by 0.95 takes its measured share 0.0171 -> 0.0002, by 0.93 -> 0.0000.
 //
-// So the disc alone steps down 7%; CANDY_WHITE keeps its value everywhere else (hands,
+// So the disc alone steps down 7%; CANDY_MINT keeps its value everywhere else (hands,
 // wrapper petals, twist cone), and the disc getting darker is a second win for the face —
 // `rules.ts` wants the #FFFFFF sclera to be the brightest value on the character, and the
 // thing it is drawn against just moved further away.
-const DISC_WHITE = '#17A069';   // luma 0.842 -> 0.782  // C1a: was #CEC7B8
+const DISC_MINT = '#17A069';   // luma 0.842 -> 0.782  // C1a: was #CEC7B8
 const CANDY_RED = '#E63946';
 const STICK = '#B7A788';       // matte paper stick (luma 0.969 -> 0.860)  // C1a: was #E2DBCC
 const CYBER = RARITY_COLORS.Cyber; // '#00E5B0' — restrained trim accent only
@@ -136,7 +139,7 @@ const SWIRL_RED = CANDY_RED;    // the disc's ribbon, both faces
 // §41). Any hue that lands INSIDE 0.40–0.48 is colour that costs separation.
 //
 // So both new arms are chosen ABOVE the ground band, not merely "different":
-//   CANDY_WHITE  #DED6C6  luma 0.842   the ground between the arms (unchanged)
+//   CANDY_MINT  #DED6C6  luma 0.842   the ground between the arms (unchanged)
 //   CANDY_SUN    #FFC53D  luma ~0.80   warm, high-key
 //   CANDY_TEAL   #3FD3B8  luma ~0.73   COOL chroma — `docs/LESSONS.md` records that
 //                                      adding cool chroma is cheaper than removing warm,
@@ -160,17 +163,17 @@ const CANDY_SUN = '#E9AC06';  // C1a: was #FFC53D
 const CANDY_RED_DEEP = '#A81E31';   // shin — one rung under CANDY_RED
 // The cellophane twist above the disc. Pale and cool rather than near-black — see
 // `buildSilhouetteEvents` for the render that reversed that, and note it is a HALF-STEP
-// above CANDY_WHITE so the twist separates from the candy's own top edge instead of
+// above CANDY_MINT so the twist separates from the candy's own top edge instead of
 // disappearing into it.
 // ── ⚠️ #EFF9F4 -> #DCEBE3, AND IT IS A MEASURED REVERSAL ─────────────────────
-// The first pale value was picked to sit a half-step ABOVE CANDY_WHITE so the twist would
+// The first pale value was picked to sit a half-step ABOVE CANDY_MINT so the twist would
 // separate from the candy's own top edge. Measured with `sepscan --mode chars --ids
 // lollipop`, that plus the domed glossy candy took `clipShare` at the shipped facing from
 // **0.0211 to 0.1233**, against a six-plate Brawl Stars band of 0.0072-0.0929 — i.e. OUT
 // of the band, on the exact number `e6fed57` spent a whole round winning (0.1610 ->
 // 0.0175). A near-white glossy tube with a Fresnel rim, at the TOP of the character where
 // the key light lands hardest, is about the worst shape to hand that budget to.
-// #DCEBE3 sits just BELOW CANDY_WHITE instead, and the separation is bought at the base
+// #DCEBE3 sits just BELOW CANDY_MINT instead, and the separation is bought at the base
 // with the near-black cinch ring rather than at the top with luma.
 const CELLO = '#89C0A9';  // C1a: was #DCEBE3
 const BOOT = '#0C0814';        // near-ink boots — grounds the pale/red palette
@@ -407,7 +410,7 @@ export class LollipopCharacter extends BaseCharacter {
         // PASS 3: red mitts measured 0.35 against a boot at 0.37 — `handL|footL` 0.014.
         // White candy mitts are also the reference's own grammar (light extremities on a
         // mid body) and this character already owns that white.
-        hand: CANDY_WHITE,
+        hand: CANDY_MINT,
         foot: BOOT,
         torso: STICK,
         // ── The rig's new pelvis, recoloured OFF its default ──────────────────────
@@ -697,10 +700,10 @@ export class LollipopCharacter extends BaseCharacter {
     // `rim: false`, on the theory that a DOME has a grazing ring around its whole
     // circumference where a flat plate had none. Measured, together with DOME_SAG 0.10R ->
     // 0.085R, it moved `clipShare` **0.1233 -> 0.1192** — 0.0041, for the glossiest surface
-    // in the cast going matte. Reverted; the cause was the disc's ALBEDO (see DISC_WHITE),
+    // in the cast going matte. Reverted; the cause was the disc's ALBEDO (see DISC_MINT),
     // which is where the fix went instead. This is the single hardest shading surface in
     // the game on purpose — hard sugar candy.
-    const candyMat = glossyMat({ color: DISC_WHITE, roughness: 0.12, rim: true });
+    const candyMat = glossyMat({ color: DISC_MINT, roughness: 0.12, rim: true });
     // Everything that belongs to the candy — base, three swirl arms front and back, edge
     // ring, Cyber trim — hangs off ONE group centred on the disc, so every disc-local
     // coordinate below is literally disc-local and the back-face swirl can be a plain
@@ -784,7 +787,7 @@ export class LollipopCharacter extends BaseCharacter {
     // `valuescan` measures this character at 39 px wide by 126 tall — so the rim is most
     // of what the arena metric ever sees of the disc, while the faces are what the LOBBY
     // camera sees and what Uri judges. Every candy hue available is DARKER than
-    // CANDY_WHITE's 0.842, so striping the rim would have spent `figureLuma` (0.513
+    // CANDY_MINT's 0.842, so striping the rim would have spent `figureLuma` (0.513
     // against a ground of 0.40–0.48) to buy colour at the one camera where the colour
     // does not show. Colour goes where the eye is; value stays where the metric is.
     const edgeRing = new THREE.Mesh(
@@ -866,7 +869,7 @@ export class LollipopCharacter extends BaseCharacter {
     // delivered 0.006 of a 1,426 px footprint with the cuff reaching 0.44 m).
     const petalGeo = new THREE.ConeGeometry(stickR * 0.55, R * 0.18, 3, 1, true);
     const petalMatA = toonMat({ color: WRAPPER_INK, roughness: 0.68 });
-    const petalMatB = toonMat({ color: CANDY_WHITE, roughness: 0.68 });
+    const petalMatB = toonMat({ color: CANDY_MINT, roughness: 0.68 });
     for (let i = 0; i < 6; i++) {
       const a = (i / 6) * Math.PI * 2;
       const petal = new THREE.Mesh(petalGeo, i % 2 === 0 ? petalMatA : petalMatB);
@@ -933,7 +936,7 @@ export class LollipopCharacter extends BaseCharacter {
     capeAnchor.position.y = discBottomY;
     head.add(capeAnchor);
     const neck = capeAnchor;
-    const twistMat = glossyMat({ color: CANDY_WHITE, roughness: 0.14, rim: true });
+    const twistMat = glossyMat({ color: CANDY_MINT, roughness: 0.14, rim: true });
 
     // ── 🔴 THE CAPE IS DELETED — AND SO IS THE REASON I FIRST GAVE FOR IT ──────
     // What it was: a `curvedPanel` of WRAPPER_INK at 0.6 opacity wrapped round the back of
@@ -1145,7 +1148,7 @@ export class LollipopCharacter extends BaseCharacter {
    * rather than reinvented, then taken past:
    *
    *   sclera  #FFFFFF, and it is the BRIGHTEST ALBEDO ON THE CHARACTER by construction —
-   *           above CANDY_WHITE (0.842), the stick (0.860) and the limbs (0.83). Egg's
+   *           above CANDY_MINT (0.842), the stick (0.860) and the limbs (0.83). Egg's
    *           eye is a white sphere too, but egg's SHELL is near-white, so its sclera
    *           does not separate from its own head. Here the candy behind it is a step
    *           down, so the same construction delivers more.

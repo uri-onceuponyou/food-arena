@@ -123,7 +123,7 @@ import { aim, blade as peelBlade, localBounds, massAnchor } from './appendages';
 // quoted in the older comments around them describe the OLD values. The measurements (median
 // luma, share above 0.8, signature hue, at BOTH cameras) are in the commit that made the change
 // (`git log -S 'C1a: was'`), taken with `tools/tmp/c1a_probe.mjs`.
-// Signature hue: GREEN at 58° — the filling seen from above is guacamole (`RICE` carries it) and the limbs are avocado; the tortilla stays a toasted tan (a green tortilla was tried and read as a pickle).
+// Signature hue: GREEN at 58° — the filling seen from above is guacamole (`GUAC` carries it) and the limbs are avocado; the tortilla stays a toasted tan (a green tortilla was tried and read as a pickle).
 const TORTILLA = '#C08A2D';        // griddled flour wrap  // C1a: was #E5C795
 const TORTILLA_SHADE = '#926725';  // genuine toast/shadow tone — brow creases, lower lip  // C1a: was #C99C5B
 // ── AND A SECOND, MUCH QUIETER STEP, BECAUSE ONE STEP WAS DOING TWO JOBS ─────
@@ -153,7 +153,9 @@ const BOOT = '#180E05';            // near-black toasted-tortilla boots, grounds
 // luma 0.816 against the wrap's 0.791 — still lighter, as cooked rice is against a
 // griddled tortilla, but no longer a different material. The rest of that read is
 // COVERAGE, handled by the piece table below.
-const RICE = '#5E9222';  // C1a: was #E3CFA4
+// C1b: `GUAC` was `RICE` — renamed at C1a's request: C1a made it the guacamole green that
+// carries the burrito's signature hue from above, so "rice" had gone misleading.
+const GUAC = '#5E9222';  // C1a: was #E3CFA4
 // ── THE DARK RUNG ────────────────────────────────────────────────────────────
 // Measured against 18 Brawl Stars plates: their P05 is 0.097 and every one of the
 // eighteen puts 5% of the character below 0.18. Burrito's was 0.285, and 53.3% of its
@@ -583,7 +585,7 @@ export class BurritoCharacter extends BaseCharacter {
       // A dome cap (theta 0..~0.48π from the +Y pole) rather than a full sphere —
       // just the top bulge, like donut's proud-glaze trick.
       new THREE.SphereGeometry(domeR, 24, 12, 0, Math.PI * 2, 0, Math.PI * 0.48),
-      toonMat({ color: RICE, roughness: 0.62 })
+      toonMat({ color: GUAC, roughness: 0.62 })
     );
     mound.name = 'burrito_rice';
     mound.position.y = domeCenterY;

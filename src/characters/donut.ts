@@ -70,14 +70,16 @@ const POMPOM = '#FFF6E8';
 // reference's grammar is alternation: mid sleeve, dark cuff, light glove. So the upper
 // segment comes back UP, the lower segment holds the dark, and the boot takes its own
 // darkest tone instead of sharing the shin's.
-const LIMB_PINK = '#8E3BC6';       // upper arm / thigh — mid  // C1a: was #DE6491
+// C1b: `LIMB_VIOLET`/`LIMB_VIOLET_DARK` were `LIMB_PINK`/`LIMB_PINK_DARK` — renamed at C1a's
+// request, because C1a moved both from pink to violet and the names had gone misleading.
+const LIMB_VIOLET = '#8E3BC6';       // upper arm / thigh — mid  // C1a: was #DE6491
 // #7E2340 -> #9A3455. `kneeL|footL` measured dL **0.0985** against the gate's 0.10 —
 // a 0.0015 miss, i.e. the cliff `docs/TOOLS.md` warns about, and it appeared because
 // the boot's own p50 rose 0.0599 -> 0.1000 when `taperedSegment` stopped degenerating
 // it into a sphere. Lifting the shin/forearm rung is the safe side of that pair to
 // move: `shoulderL|elbowL` has 0.29 of margin and `p05` is 0.08 against a 0.180 cap,
 // carried by the beanie and the boots, not by this tone.
-const LIMB_PINK_DARK = '#461B5C';  // thigh's partner — the shin, dark  // C1a: was #9A3455
+const LIMB_VIOLET_DARK = '#461B5C';  // thigh's partner — the shin, dark  // C1a: was #9A3455
 // ── THE SLEEVE IS DOUGH, AND THAT IS WHAT SEPARATES AN ARM FROM A LEG ────────
 // See the `dressLimbs` note: arms and legs were byte-identical masses in identical
 // tones and the character read as four-legged. Every VALUE on this model is spoken
@@ -301,7 +303,7 @@ export class DonutCharacter extends BaseCharacter {
 
     this.rig = new ChibiRig({
       palette: {
-        limb: LIMB_PINK,
+        limb: LIMB_VIOLET,
         hand: GLAZE,
         foot: CHOC_DIP,
         torso: DOUGH,
@@ -675,8 +677,8 @@ export class DonutCharacter extends BaseCharacter {
     // her own material story: glaze-dipped glossy hands that end in a drip, and
     // chocolate-dipped glossy feet, both a deliberate step up in gloss from the
     // matte dough limbs, echoing the head's own matte-dough/glossy-glaze contrast.
-    const limbPinkMat = toonMat({ color: LIMB_PINK, roughness: 0.7 });
-    const limbPinkDarkMat = toonMat({ color: LIMB_PINK_DARK, roughness: 0.7 });
+    const limbVioletMat = toonMat({ color: LIMB_VIOLET, roughness: 0.7 });
+    const limbVioletDarkMat = toonMat({ color: LIMB_VIOLET_DARK, roughness: 0.7 });
     const sleeveDoughMat = toonMat({ color: SLEEVE_DOUGH, roughness: 0.7 });
     const sleeveDoughDarkMat = toonMat({ color: SLEEVE_DOUGH_DARK, roughness: 0.7 });
     const glazeHandMat = glossyMat({ rim: true, color: GLAZE, roughness: 0.16 });
@@ -694,7 +696,7 @@ export class DonutCharacter extends BaseCharacter {
     // convention there is, and the one that keeps the shoe off the floor's value (the
     // chocolate boot was the darkest thing on the character, standing on a dark floor).
     this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
-      arm: sleeveDoughMat, leg: limbPinkMat, hand: glazeHandMat, shoe: glazeHandMat,
+      arm: sleeveDoughMat, leg: limbVioletMat, hand: glazeHandMat, shoe: glazeHandMat,
     }));
 
     this.buildAttachments();
