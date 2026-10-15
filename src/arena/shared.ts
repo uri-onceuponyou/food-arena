@@ -1062,25 +1062,42 @@ export const KPAL = {
   // good idea (`buildPuddleVisual`: "a hard, opaque rim traced exactly on its real
   // radius") without borrowing its hue: a player has to know exactly where concealment
   // starts, because standing 5 wu outside it is the difference between hidden and shot.
-  concealCloth: '#E9DCC0',
-  /** Traced on the region's true edge. Tan, not amber — well clear of `greaseRim`. */
-  concealClothRim: '#C29A5E',
-  /**
-   * The pot rack's STRUCTURE — rails, slats, poles, feet, hanger stems.
-   *
-   * ⚠️ **IT STARTS ON THE RIM'S EXACT VALUE AND IS A SEPARATE ENTRY ANYWAY.** The two
-   * objects want opposite things from the renderer, so sharing one entry would mean a
-   * future retune of either silently moved the other — and the rim is a gameplay
-   * legibility surface (`DECISIONS §29a`: standing 5 wu outside the bound is the
-   * difference between hidden and shot), while the rack is set dressing. Keeping the
-   * value identical for now is what makes this round's A/B single-variable: the ONLY
-   * thing that changed about the canopy is which material class draws it.
-   */
-  concealRack: '#C29A5E',
-  /** Stacked plates. The brightest thing in the family, so the cluster reads at 58°. */
-  concealPlate: '#F7F1E4',
-  /** The band around a plate stack and the trays — the family's warm chroma. */
-  concealTrayWarm: '#C9552F',
+  //
+  // ── 🚨 A1 (graphics revamp, 2026-10-15): ONE MID-VALUE SATURATED ACCENT FAMILY ──────
+  // The paragraph above chose "the LOW-CHROMA warm — a high-value linen" and it rendered
+  // as the BRIGHTEST masses in every frame that held a patch: the cloth at #E9DCC0 and the
+  // plates at #F7F1E4 arrive at V 0.94-0.98 after the lift, above the fighters' own
+  // median — see-through gold cages over cream cloth (audit D1; `value_squint.png`: the
+  // lightest masses in our frame were furniture, never the action). Two of its three
+  // constraints still hold and are kept: it may not read as a HAZARD (no saturated amber,
+  // no hot orange, not the water rim's blue-teal) and it may not read as BLOCKING (no
+  // near-black plum, and still NO outline). The third — "warm, because warm chroma FAILS
+  // LOW" — had been retired by `DECISIONS §73` (warm PASSES since the re-baseline)...
+  //
+  // ⚠️ ...AND A1 MEASURED IT BACK INTO FORCE. The first canopy was ONE TEAL family (hue
+  // ~172, #2E5C56 — the genre's "hide here" hue, the rose stage's complement) and it ran
+  // `arena-scan --gate` RED on two rails: **warm chroma 0.0855 -> 0.0536** (floor 0.0725)
+  // and **warm share 0.167 -> 0.101** (floor 0.120), the drop concentrated at the eleven
+  // stations that hold a patch (west_lane -0.082, west_choke -0.054, freezer_se -0.053).
+  // The cream cloth and gold rack were most of the arena's warm chroma — what the third
+  // constraint was really saying. So the family stays ONE family and turns WARM, which
+  // the reference's own concealment vocabulary also uses (one plate's cover masses are a
+  // saturated straw-gold): a mid-value OCHRE at hue ~37, DARKER than every warm prop
+  // surface it could be read as — crate wood #C2842C, crate lids #FFCB73, prep cap
+  // #EDC277 and the hazard amber #FFB300 all arrive light — and checked, draped and
+  // legged, with no ink line, so it is a tablecloth and not a crate. Authored dark
+  // (S 0.73, V 0.42): the teal's first render at #1E9183 arrived as a neon mint at
+  // luma 0.65-0.70 / HSV S 0.97 — the lift, the key and the grade's saturation 1.19 push
+  // hard. Every part is a tone of this one colour (`buildConcealPatch`'s `T_*`
+  // multipliers); the old `concealRack` #C29A5E, `concealPlate` #F7F1E4 and
+  // `concealTrayWarm` #C9552F are retired with the rack.
+  // The old line: `concealCloth: '#E9DCC0',` (and the teal attempt, `'#2E5C56'`).
+  concealCloth: '#6B4D1D',
+  /** Traced on the region's true edge — the family's darkest tone, unlit. (Was tan
+   * #C29A5E, "well clear of `greaseRim`" #8A6A22; this is darker than both.) */
+  concealClothRim: '#3A2A10',
+  // [A1: `concealRack` #C29A5E, `concealPlate` #F7F1E4 and `concealTrayWarm` #C9552F were
+  //  here — the rack's structure, the plates, the trays. Retired with the rack; see above.]
 } as const;
 
 /**
@@ -1499,7 +1516,13 @@ export function buildMaterials() {
     // and reusing the instance costs nothing. `concealPlate` is glossier than anything
     // else on the floor on purpose — a plate stack has to catch a highlight to read as
     // crockery rather than as another pale decal.
-    concealCloth: toonMat({ color: KPAL.concealCloth, ramp: RAMP_SOFT(), roughness: 0.72, map: utilityMatTex }),
+    // ⚠️ A1: the notes above describe the cream ground cloth and are kept for the record.
+    // `concealCloth` is now the CANOPY's one material — the draped table's cloth, legs and
+    // dishes all ride it as vertex-colour tones (`buildConcealPatch`), and it carries the
+    // self-reveal cut (`concealCanopyMaterial`). No `map`: the utility mat's tile-wear
+    // weave drew a grid on a tablecloth. No rim: a flat cloth face is the pale-wash case
+    // (see the A1 rim note above `mats`). Roughness 0.84: cloth, not plastic.
+    concealCloth: toonMat({ color: KPAL.concealCloth, roughness: 0.84, rim: false }),
     // ── 🚨 THE RIM STAYS UNLIT. THE RACK NEVER SHOULD HAVE BEEN. ─────────────
     // The rim is `flatMat` for the same reason `greaseRim`/`waterRim` above are: a
     // boundary the player reads "hidden or shot" off has to hold ONE value rather than
@@ -1516,9 +1539,8 @@ export function buildMaterials() {
     // A rack is a lit solid: no top-vs-side value break, no shadow onto its own legs and
     // no falloff along a rail is not a style, it is a missing material.
     concealClothRim: flatMat(KPAL.concealClothRim),
-    concealRack: toonMat({ color: KPAL.concealRack, roughness: 0.45 }),
-    concealPlate: toonMat({ color: KPAL.concealPlate, roughness: 0.28 }),
-    concealTrayWarm: toonMat({ color: KPAL.concealTrayWarm, roughness: 0.5 }),
+    // [A1: `concealRack`, `concealPlate`, `concealTrayWarm` were here — retired with the
+    //  rack; the canopy is one material now. The note above about a lit solid holds for it.]
 
     // Fake ambient occlusion — a soft dark radial decal dropped under ROUND props
     // (the pot) so they read as sitting ON the floor with real contact darkening,
@@ -2325,7 +2347,32 @@ export function addConceal(
 }
 
 /**
- * A service table's linen with plates and trays stacked on it — the thing you duck under.
+ * A draped prep table — the thing you hide under. (Until A1: "a service table's linen with
+ * plates and trays stacked on it", then a pot rack over it; the history is below.)
+ *
+ * ── 🚨 A1 (graphics revamp, 2026-10-15): A SOLID CANOPY FROM ABOVE ─────────────────
+ * Uri's fourth report on this object was *"the bushes are to transparent, players are
+ * visible through them"*; the rack below answered with 36 hanging strands and he looked
+ * again: *"still see through"*. The review measured why it could not work (audit D1):
+ * a rack is OPEN from above, so at 58 deg the camera sees the fighter, the cloth and the
+ * plates THROUGH it — see-through gold cages over cream cloth, the **brightest masses in
+ * every frame that held one** (cloth and plates at V 0.94-0.98 after the lift) — and the
+ * slats threw lattice shadows. So the object changes kind:
+ *   * SOLID FROM ABOVE: a tabletop covering the whole `INSET` footprint at
+ *     `CHARACTER_HEIGHT + DUCK_CLEAR_M`, a folded drape down to the old strands' hem on
+ *     all four sides, legs showing beneath it. At 58 deg the top hides whoever is under.
+ *   * ONE MID-VALUE SATURATED ACCENT FAMILY: every part is a tone of `KPAL.concealCloth`
+ *     (ochre — see its note in `KPAL` for why it is warm), the dishes included; nothing
+ *     in the near-white band.
+ *   * NON-CASTING, with one soft shade decal under it instead of a lattice.
+ *   * ONE MATERIAL, so a patch is 3 draws (canopy, rim, shade) where it was 5.
+ *   * AND A SELF-REVEAL: the canopy cuts a soft dithered hole in front of any fighter the
+ *     renderer is SHOWING (`updateSelfReveal`), so the local player never vanishes under his
+ *     own hiding place and only a concealed opponent — whose model `match.ts` removes
+ *     anyway — stays covered. Without it a solid canopy would hide the player from himself.
+ * UNCHANGED: the footprints and the region list (`addConceal`), the 168 wu AI ceiling
+ * (`DECISIONS §29a`, a footprint constraint), break-on-attack (sim-side, `combat.ts`), the
+ * rim on the true bound, and every height derived from `CHARACTER_HEIGHT`.
  *
  * ── 🚨 "EVERYTHING HERE IS UNDER 0.80 m ON PURPOSE" — REVERSED BY THE OWNER ──
  * The old header is kept verbatim below the reversal, per `CLAUDE.md`'s rule about an
@@ -2446,22 +2493,14 @@ export function addConceal(
 export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.Group {
   const g = new THREE.Group();
 
-  // The linen. Rounded, and inset a hair below the rim so the rim reads as an edge
-  // rather than as a stripe painted on the cloth.
+  // ── THE PLAN EXTENTS AND THE RIM — unchanged ────────────────────────────────
+  // Everything stays inside the cloth's old `INSET`, so the hiding place is read off ONE
+  // edge (see "THE CANOPY MUST NOT OVERHANG THE RIM" above), and the rim stays on the
+  // true bound, to the world unit.
   const INSET = 0.985;
-  const clothParts: THREE.BufferGeometry[] = [
-    roundedBox(wM * INSET, 0.02, dM * INSET, Math.min(wM, dM) * 0.09).translate(0, FLOOR_Y.decal, 0),
-  ];
-
-  // The rim, ON the true bound: a thin frame of four bars rather than a scaled quad, so
-  // the line width is absolute and does not thicken with the patch. Merged into ONE
-  // geometry — see the draw-call note below.
+  const rW = wM * INSET, rD = dM * INSET;
   const RIM = 0.09;
-  // `frameParts` is the RIM ONLY from here on — four bars on the true bound, unlit.
-  // The canopy's structure goes to `rackParts`, which is a lit material and therefore a
-  // second mesh; the two cannot share a buffer. That is the one draw this round spends.
   const frameParts: THREE.BufferGeometry[] = [];
-  const rackParts: THREE.BufferGeometry[] = [];
   for (const [sx, sz, w, d] of [
     [0, dM / 2 - RIM / 2, wM, RIM],
     [0, -(dM / 2 - RIM / 2), wM, RIM],
@@ -2472,371 +2511,315 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
     b.translate(sx, FLOOR_Y.fine, sz);
     frameParts.push(b);
   }
-
-  // Plate stacks and trays. `u`/`v` are fractions of the half-extent, `r` a fraction of
-  // the smaller extent, `h` a height in metres, `plates` the number of discs.
-  //
-  // ⚠️ **THE RADII WERE HALVED AFTER LOOKING AT THE FIRST RENDER**, and the number that
-  // settled it came out of the same frame: at `r` 0.075..0.130 of a 130 wu patch the
-  // discs were **1.0 to 1.7 m ACROSS — as wide as the character is** (`shots/ap`, first
-  // pass), so six of them read as giant coins on a mat rather than as a cluttered service
-  // table. At 0.042..0.070 they are 0.55..0.91 m, which is crockery, and there are eleven
-  // instead of six so the density carries the read that the size no longer does.
-  // `docs/LESSONS.md` on judging the image and not the description: the first table
-  // looked entirely reasonable as numbers.
-  const CLUTTER: ReadonlyArray<readonly [number, number, number, number, number]> = [
-    [-0.60, -0.55, 0.058, 0.40, 5],
-    [-0.44, -0.34, 0.048, 0.24, 3],
-    [-0.14, -0.66, 0.043, 0.18, 2],
-    [0.16, -0.50, 0.066, 0.52, 6],
-    [0.52, -0.62, 0.050, 0.30, 4],
-    [0.63, -0.20, 0.070, 0.62, 7],
-    [0.40, 0.16, 0.045, 0.22, 3],
-    [0.60, 0.55, 0.056, 0.38, 5],
-    [0.12, 0.63, 0.042, 0.18, 2],
-    [-0.28, 0.48, 0.062, 0.46, 6],
-    [-0.62, 0.24, 0.049, 0.28, 4],
-  ];
-  //
-  // ── ⚠️ MERGED PER MATERIAL, AND THE FIRST DRAFT WAS NOT ─────────────────────
-  // Eleven stacks of 2-7 discs is 47 meshes per patch. Measured on the unmerged draft
-  // with `tools/perf.mjs --mode counts`: **draw calls 868 -> 1,177, i.e. +309 — a 36%
-  // rise for one feature**, on a game whose owner plays it on a phone.
-  // ⚠️ **THE TWO COUNTS THAT USED TO FOLLOW HERE WERE STALE AND ARE KEPT FOR THE REASON:**
-  // *"six patches is 282 [meshes] ... merging takes each patch to FOUR draws and the whole
-  // feature to 24."* Both were true when written and the arena has since gone to **20**
-  // patches (`grep -c 'addConceal(concealGroup' src/arena/kitchen.ts`, re-derived
-  // 2026-08-22 — ten sites plus their point-symmetric partners), and each patch is now
-  // FIVE meshes, not four. Today: 20 x 5 = **100 meshes for the feature**, of which only a
-  // handful are ever in frustum — the measured draw delta is at the bottom of this
-  // function, where it can be checked. It is safe to merge here for
-  // the same reason `kitchen.ts`'s `outlineGroup(..., { merge: true })` is: every part
-  // going into one buffer already shares one material, so nothing about the shading
-  // changes. The discs keep their world positions because each geometry is `translate`d
-  // into patch-local space before the merge, exactly as `apron.ts` does for the kerb.
-  const short = Math.min(wM, dM);
-  const plateParts: THREE.BufferGeometry[] = [];
-  const trayParts: THREE.BufferGeometry[] = [];
-  for (const [u, v, r, h, plates] of CLUTTER) {
-    const x = u * (wM / 2), z = v * (dM / 2);
-    const rad = r * short;
-    const step = h / plates;
-    for (let i = 0; i < plates; i++) {
-      // Alternating plate / warm tray, so a stack reads as crockery rather than as one
-      // extruded cylinder — the same "silhouette variety inside a cluster" instinct the
-      // pantry crates carry, at a tenth of the scale.
-      const isTray = i % 2 === 1;
-      const disc = puck(rad * (isTray ? 0.94 : 1), step * 0.86, 16);
-      disc.translate(x, FLOOR_Y.fine + step * (i + 0.5), z);
-      (isTray ? trayParts : plateParts).push(disc);
-    }
-  }
-
-  // ───────────────────────────────────────────────────────────────────────────
-  // THE CANOPY — the half that answers "hide BELOW them"
-  // ───────────────────────────────────────────────────────────────────────────
-  //
-  // ⚠️ EVERY VERTICAL NUMBER HERE IS DERIVED FROM `CHARACTER_HEIGHT`. Retyping 2.1
-  // would survive `tsc`, survive every gate, and go stale the next time the cast is
-  // rescaled — which has already happened once (2.35 -> 2.10, `units.ts`).
-  //
-  //   RACK_Y is the UNDERSIDE of the rack, i.e. the ceiling of the space you stand in.
-  //   HANG_MAX is the deepest anything is allowed to swing below it.
-  //   => lowest hanging pan sits at CHARACTER_HEIGHT + DUCK_CLEAR_M, by construction.
-  //
-  // `DUCK_CLEAR_M` is deliberately generous. The alternative — clearing the head by a
-  // few centimetres — reads better in a still and is a bug in motion: characters bob,
-  // `rig.ts` animates the whole body, and a pan grazing a head at one phase of the run
-  // cycle is the interpenetration defect `CLAUDE.md` rule 3 is entirely about.
-  const DUCK_CLEAR_M = 0.45;
-  const HANG_MAX = 0.44;
-  const RACK_Y = CHARACTER_HEIGHT + DUCK_CLEAR_M + HANG_MAX;
-  const RACK_T = 0.16;               // rail / slat thickness, absolute (see RIM's note)
-  const RAIL = 0.14;                 // perimeter rail width
-  const SLAT = 0.13;                 // cross-slat width
-  const POST = 0.21;                 // corner pole side
-  const VAL_DROP = 0.52;             // valance drop below the rack
-  const VAL_T = 0.07;                // valance thickness
-
-  // Plan extents of the rack. `INSET`, the CLOTH's own inset — the rack may never be the
-  // outermost thing, or the player reads the hiding place off the wrong edge.
-  const rW = wM * INSET, rD = dM * INSET;
-  // The valance takes the OUTER plane and the rails sit just inside it. First draft had
-  // them concentric with `RAIL` (0.20) wider than `VAL_T` (0.07), which put the cloth
-  // entirely inside the rail's own footprint — rendered, invisible, and indistinguishable
-  // from not having built it. `CLAUDE.md` rule 4, in its smallest possible form.
-  const valX = rW / 2 - VAL_T / 2, valZ = rD / 2 - VAL_T / 2;
-  const railX = valX - VAL_T / 2 - RAIL / 2, railZ = valZ - VAL_T / 2 - RAIL / 2;
-  const railY = RACK_Y + RACK_T / 2;
-
-  // ── Perimeter rails + TWO cross bars, and the count came down after looking ──
-  // The first draft ran three slats one way and two the other. It rendered as a CAGE —
-  // a regular orange lattice that says scaffolding, not kitchen — and the fix was not to
-  // thin the bars but to delete most of them: the overhead mass belongs to the hanging
-  // cookware below, which is the thing that says what this is. Plan coverage of the
-  // frame is now
-  //     (4·RAIL·rW + 2·SLAT·rD + 4·POST² − overlaps) / (rW·rD)
-  // = **15.2 / 13.9 / 12.9%** at the shipped 110 / 120 / 130 wu sizes, and the nine
-  // hanging pots add **11.1%** at every size (they scale with the patch), so the canopy
-  // blocks **at most a quarter of its own footprint** and the fighter, the ground
-  // crockery and the floor all read THROUGH it. The old builder's objection to a canopy
-  // was that it would hide the ground; it is answered by OPENNESS, not by lowness.
-  for (const [sx, sz, w, d] of [
-    [0, railZ, rW, RAIL],
-    [0, -railZ, rW, RAIL],
-    [railX, 0, RAIL, rD],
-    [-railX, 0, RAIL, rD],
-  ] as const) {
-    rackParts.push(new THREE.BoxGeometry(w, RACK_T, d).translate(sx, railY, sz));
-  }
-  for (const u of [-0.34, 0.34]) {
-    rackParts.push(new THREE.BoxGeometry(SLAT, RACK_T, rD).translate(u * (rW / 2), railY, 0));
-  }
-
-  // ── Four poles, at the corners and NOT in the middle ────────────────────────
-  // A concealment region is walk-through by definition (`addConceal`'s header), so every
-  // solid-looking thing in it is something a fighter passes through. Corners are where a
-  // fighter crossing the patch is least likely to be, and a slim pole reads as a prop you
-  // brush past rather than as structure you ought to collide with. This is the one place
-  // the build knowingly trades a little honesty for the read; it is called out here so
-  // the next owner is deciding rather than discovering.
-  for (const sx of [-railX, railX]) {
-    for (const sz of [-railZ, railZ]) {
-      const h = railY + RACK_T / 2 - FLOOR_Y.decal;
-      rackParts.push(roundedBox(POST, h, POST, 0.05).translate(sx, FLOOR_Y.decal + h / 2, sz));
-      rackParts.push(puck(POST * 0.85, 0.10, 12).translate(sx, FLOOR_Y.fine + 0.05, sz));
-    }
-  }
-
-  // ── Hanging cookware — the part that crosses the fighter's silhouette ───────
-  // A rack alone is a grid seen from above and foreshortens to almost nothing at 58°.
-  // What actually says "this is over your head" is an object hanging INTO the space
-  // between the camera and the fighter. Same fixed-table discipline as `CLUTTER`, same
-  // reason: the point-symmetric partner patch must be identical under 180°.
-  //
-  // ⚠️ THESE ARE POTS, NOT PLATES — the `h` column is a HEIGHT, and the first draft's
-  // 0.14 m pucks were the bug. Seen from a 58° camera a flat disc hanging at 2.6 m and a
-  // flat disc lying on the floor at 0.2 m are the same shape at nearly the same screen
-  // size, so the hangers merged into the ground crockery and the overhead read vanished.
-  // A pot shows its side as well as its rim, which is what makes it obviously a solid at
-  // a height. They hang on the two cross bars (`u = ±0.34`) and on the centre line.
-  //   [u, v, warm, r (fraction of `short`), h (m), drop (m, rack underside -> pot bottom)]
-  const HANGERS: ReadonlyArray<readonly [number, number, boolean, number, number, number]> = [
-    [-0.34, -0.44, true, 0.070, 0.34, HANG_MAX],
-    [-0.34, 0.06, false, 0.055, 0.24, 0.30],
-    [-0.34, 0.56, true, 0.062, 0.30, 0.38],
-    [0.00, -0.62, false, 0.050, 0.20, 0.26],
-    [0.00, -0.10, true, 0.078, 0.38, HANG_MAX],
-    [0.00, 0.44, false, 0.058, 0.26, 0.32],
-    [0.34, -0.50, false, 0.052, 0.22, 0.28],
-    [0.34, 0.00, true, 0.066, 0.32, 0.40],
-    [0.34, 0.52, true, 0.058, 0.26, 0.32],
-  ];
-  for (const [u, v, warm, r, h, drop] of HANGERS) {
-    const x = u * (rW / 2), z = v * (rD / 2);
-    const pot = puck(r * short, h, 16).translate(x, RACK_Y - drop + h / 2, z);
-    (warm ? trayParts : plateParts).push(pot);
-    const stemH = Math.max(0.02, drop - h);
-    rackParts.push(new THREE.BoxGeometry(0.05, stemH, 0.05).translate(x, RACK_Y - stemH / 2, z));
-  }
-
-  // ── The valance — a continuous roofline, which is what a silhouette needs ───
-  // The rack read as a grid; the grid read as a grid. A skirt of cloth on all four sides
-  // gives the structure ONE unbroken top edge, which is the thing the eye segments an
-  // object by. It hangs from the rack underside, so its lowest point is
-  // `RACK_Y - VAL_DROP` — still above a standing fighter by construction.
-  for (const [sx, sz, w, d] of [
-    [0, valZ, rW, VAL_T],
-    [0, -valZ, rW, VAL_T],
-    [valX, 0, VAL_T, rD],
-    [-valX, 0, VAL_T, rD],
-  ] as const) {
-    clothParts.push(roundedBox(w, VAL_DROP, d, 0.03).translate(sx, RACK_Y - VAL_DROP / 2, sz));
-  }
-
-  // ── FIVE MESHES PER PATCH, AND THE FIFTH IS THIS ROUND'S WHOLE COST ────────
-  // ⚠️ **KEPT, BECAUSE IT WAS TRUE AND IS NOT ANY MORE.** This block was headed *"FOUR
-  // DRAWS PER PATCH, EXACTLY AS BEFORE"* and said the canopy added *"not one new MESH,
-  // because every part was authored into one of the four material buckets that already
-  // existed"*. That is exactly what made the rack unlit: the only bucket whose colour
-  // suited a rack was `concealClothRim`, and that bucket is `flatMat`. Buying a lit
-  // material costs a fifth buffer, because a mesh has ONE material.
-  //
-  // Measured this round on detached worktrees of `0b8caec` (before) and the commit this
-  // comment ships in (after), `tools/perf.mjs --mode counts`, four arms:
-  //
-  //     --device mobile, 2 seats    429 -> 431 draws  (+2, +0.47%)   773,684 -> 773,300 tris
-  //     --device mobile, 6 seats    429 -> 431 draws  (+2, +0.47%)   773,684 -> 773,300 tris
-  //     desktop,         2 seats    492 -> 493 draws  (+1, +0.20%)   993,503 -> 993,071 tris
-  //     desktop,         6 seats    492 -> 493 draws  (+1, +0.20%)   993,503 -> 993,071 tris
-  //
-  // **+20 MESHES BUT ONLY +2 DRAWS**, because 18 of the 20 patches are frustum-culled at
-  // shipped framing. **TRIANGLES WENT DOWN**, and the number says why rather than being
-  // asserted: the rim stopped casting (below), and 4 bars x 12 tris = 48 tris/patch, so
-  // -384 is exactly 8 patches in the mobile shadow frustum and -432 exactly 9 on desktop.
-  // **Zero new shader programs** — `programs.created` is 28 mobile / 35 desktop in BOTH
-  // arms, because `applyRimLight` gives every rim-patched standard material one shared
-  // `customProgramCacheKey`, so a new `toonMat` bucket links nothing new at boot.
-  // `CLAUDE.md` rule 10 — draw counts are EXACT, and Uri plays on a phone that `5aa4655`
-  // took from 928 draws to 423.
-  //
-  // ⚠️ **THE CANOPY ITSELF WAS NOT FREE EITHER.** `c701f70` measured, `--device mobile`,
-  // the tier the phone actually gets: **423 -> 431 draws (+8, +1.89%)** and
-  // **755,292 -> 773,796 triangles (+2.45%)**, identical at 2 and at 6 seats; desktop
-  // 484 -> 494 (+10, +2.07%). ⚠️ **Those four numbers are a RECORD OF THAT COMMIT, not a
-  // baseline for this file** — the tree has moved (`d16fcec` added a `ContactAO` pass, so
-  // the same mobile scene now starts from 429, not 423) and re-quoting them as "before"
-  // would manufacture a regression out of somebody else's work. The split between frustum
-  // and shadow is ablated at `cloth.castShadow` below.
-  const cloth = mesh(mergeGeometries(clothParts, false)!, M.concealCloth, 'conceal_cloth');
-  // Still `false`, and now for a second reason. It was false because a 0.02 m linen lying
-  // on the floor casts nothing; the valance merged into the same buffer DOES hang at
-  // 2.47 m and would. THE SPLIT WAS MEASURED, not reasoned — `tools/perf.mjs --mode
-  // counts`, desktop, `match`, on a detached worktree of `c471efe`:
-  //
-  //     484   before (the flat mats)
-  //     486   canopy, NEITHER new mesh casting     -> +2 is pure FRUSTUM: a 3 m pole has
-  //                                                   a far bigger bounding sphere than a
-  //                                                   0.02 m mat, so meshes that used to
-  //                                                   be culled are now in frame
-  //     494   canopy, FRAME casting                -> +8, the shadow-map pass
-  //     502   canopy, frame AND cloth casting      -> +8 again, for a second shadow band
-  //                                                   drawn inside the first
-  //
-  // The frame carries the poles and the rails, and its ground shadow is most of what says
-  // "this is off the floor" at 58°. The valance's is a duplicate. **8 draws for a
-  // duplicate is not a trade to make on the owner's phone**, so this stays false.
-  // ⚠️ `renderer.shadowMap.autoUpdate` is `false` here, which reads like "shadow casters
-  // are free per frame" and is not: the map is re-rendered when the light re-focuses, and
-  // `perf.mjs` attributes those draws to `0:RenderPass`. The ablation above is how that
-  // was established rather than assumed.
-  cloth.castShadow = false;
-  g.add(cloth);
-  // ── THE RIM — still one flat bar-frame on the true bound, and no longer a CASTER ──
-  // It was `castShadow = true` only because it shared a buffer with the poles. Four
-  // 0.02 m bars lying on the floor cast nothing a player can see (the same argument
-  // `cloth.castShadow` makes above), and every caster is a draw in the shadow pass.
   const frame = mesh(mergeGeometries(frameParts, false)!, M.concealClothRim, 'conceal_rim');
   frame.castShadow = false;
-  // ⚠️ **KEPT AND CORRECTED.** This line used to sit on the MERGED rim+canopy mesh, and
-  // there it was **vacuous** — a `MeshBasicMaterial` cannot receive a shadow whatever it
-  // says, so an assertion about the rack's shading was being made by a line that could
-  // not be false. It stays `false` here for a reason that CAN be false: this mesh is
-  // still unlit, and the rim's job is one steady value on the region's exact bound.
   frame.receiveShadow = false;
   g.add(frame);
 
-  // ── THE RACK — the lit half, and the whole of this round's change ────────────
-  // `castShadow` carries the poles and rails, whose ground shadow is most of what says
-  // "this is off the floor" at 58° (see the ablation under `cloth.castShadow`).
-  // `receiveShadow` is the half that was IMPOSSIBLE before: the rack takes the shadow of
-  // its own rails and pots across its own legs, which is exactly the cue measured as
-  // absent — no top-vs-side value break on any pole, no shadow from the rack onto its
-  // own legs, no key-light falloff along a rail.
-  // ───────────────────────────────────────────────────────────────────────────
-  // THE HANGING STRANDS — the half that answers "players are visible through them"
-  // ───────────────────────────────────────────────────────────────────────────
-  //
-  // Uri, FOURTH report, then again after the rack shipped: *"yep, looked at it, still
-  // see through"*. `DECISIONS §29a` authorises this; the header above has the numbers.
-  //
-  // Braided onions, dried herbs and cloth ties hung off the rack, down INTO the body
-  // band. Everything above this point in the function is on the floor (<= 0.620 m) or
-  // above a 2.100 m head (>= 2.470 m); this is the only geometry between them, and the
-  // band is 70.5% of the character.
-  //
-  // ── 🚨 THE DESIGN IS RADIAL DENSITY, AND IT IS WHAT MAKES THE TRADE SURVIVABLE ──
-  //
-  // The original header's objection to body-band mass was that it "would also hide the
-  // floor the fighter stands on", and that objection is TRUE of a wall. It is not true
-  // of this, because the strands are not uniform: `RINGS` puts them THICK AROUND THE
-  // PERIMETER AND LEAVES THE MIDDLE OPEN. Three different lines of sight, three
-  // different answers, from one piece of geometry:
-  //
-  //   * LOOKING IN from outside, at the match camera's oblique angle, a sightline to a
-  //     fighter standing in the middle crosses the FAR perimeter, and at 58 degrees it
-  //     crosses several strands' worth of lateral extent. That is the occlusion Uri is
-  //     asking for.
-  //   * LOOKING OUT from inside, you are standing in the OPEN middle, so you see through
-  //     one perimeter rather than two, and you are close enough to it that the gaps
-  //     subtend more angle than the strands. You can still fight from in here.
-  //   * LOOKING DOWN, the middle is empty, so the floor, the rim and the ground crockery
-  //     all still read — which is the original objection, answered by ARRANGEMENT rather
-  //     than by absence.
-  //
-  // Thin verticals are also the shape that FORGIVES INTERPENETRATION, and that matters
-  // because a concealment region is walk-through by definition (`addConceal`'s header)
-  // and `DUCK_CLEAR_M` above exists precisely so nothing can pass through a head. It
-  // cannot hold here — mass in the body band is mass a body walks through, and that is
-  // the trade §29a authorises. A character overlapping a 0.09 m strand reads as pushing
-  // THROUGH hanging cordage; the same character overlapping a slab reads as the
-  // interpenetration defect `CLAUDE.md` rule 3 is about. Narrow and many, never wide.
-  //
-  // ── HEIGHTS DERIVED, NEVER TYPED, for the same reason as everything above ──
-  // The bottom sits above the tallest ground clutter so a strand never ends inside a
-  // stack of plates, and the top is the rack itself, so if `CHARACTER_HEIGHT` moves the
-  // whole curtain moves with it instead of becoming a fringe.
-  const STRAND_BOT = CHARACTER_HEIGHT * 0.36;   // 0.756 m — above CLUTTER's tallest 0.620
-  const STRAND_TOP = RACK_Y;                    // hangs from the rack, not from nothing
-  const STRAND_H = STRAND_TOP - STRAND_BOT;
-  const STRAND_W = 0.09;                        // narrower than POST (0.21), deliberately
-  //
-  // ⚠️ A FIXED TABLE, NOT AN RNG, and the header says why: every patch ships with a
-  // point-symmetric partner that `kitchen.ts` generates by transform, so the two must be
-  // identical under 180 degrees or the map is not fair. Fractions of the patch's own
-  // half-extent, so one table serves 110, 120 and 130 wu alike.
-  //
-  // `u`/`v` in -1..1, `drop` scales the strand's length so the curtain has a broken
-  // hemline rather than a fence line.
-  //
-  // 🚨 THE FIRST TABLE HERE WAS WRONG AND THE RENDER SHOWED IT. Kept as the lesson,
-  // because it is the exact failure this file's rule 3 is about — the numbers looked
-  // reasonable and the picture did not. It ran 16 outer strands at `drop` 0.68..1.00 and
-  // four inner at 0.46..0.52, and:
-  //   * `STRAND_H` is 2.234 m, so **a drop of 0.46 ends at 1.96 m — head height.** The
-  //     four inner strands did not reach the body band AT ALL. They were decoration in
-  //     the one place the whole change exists to put mass.
-  //   * 16 strands of 0.09 m around a ~6.5 m perimeter is **~5% lateral coverage**. At a
-  //     glancing angle that is a few pixels of cord, which is what the frame showed:
-  //     a fighter standing at a rack's edge, fully readable, through it.
-  // So: every drop now reaches the band, and the perimeter is dense enough to read as a
-  // MASS rather than as a handful of wires.
-  //
-  // ⚠️ AND THE TARGET IS "READS AS A HIDING PLACE", NOT "PHYSICALLY OCCLUDES FROM EVERY
-  // ANGLE". The mechanic already hides a fighter 92.7% of the time at six seats
-  // (`cn_reveal`); the model, the pill and the blip all go. What Uri is describing is
-  // that the GEOMETRY does not look like somewhere that would do that. Chasing true
-  // occlusion at 58 degrees means a wall, and a wall is what the original header
-  // correctly refused. Visual density is the target.
-  const RINGS: ReadonlyArray<readonly [number, number, number]> = [
-    [-0.88, -0.88, 1.0], [-0.88, 0.88, 0.93], [-0.59, -0.88, 0.93], [-0.59, 0.88, 1.0],
-    [-0.29, -0.88, 1.0], [-0.29, 0.88, 0.93], [0.0, -0.88, 0.93], [0.0, 0.88, 1.0],
-    [0.29, -0.88, 1.0], [0.29, 0.88, 0.93], [0.59, -0.88, 0.93], [0.59, 0.88, 1.0],
-    [0.88, -0.88, 1.0], [0.88, 0.88, 0.93], [-0.88, -0.59, 1.0], [0.88, -0.59, 0.96],
-    [-0.88, -0.29, 0.96], [0.88, -0.29, 1.0], [-0.88, 0.0, 1.0], [0.88, 0.0, 0.96],
-    [-0.88, 0.29, 0.96], [0.88, 0.29, 1.0], [-0.88, 0.59, 1.0], [0.88, 0.59, 0.96],
-    [-0.55, -0.55, 0.82], [0.55, -0.55, 0.82], [-0.55, 0.55, 0.82], [0.55, 0.55, 0.82],
-    [0.0, -0.6, 0.82], [0.0, 0.6, 0.82], [-0.6, 0.0, 0.82], [0.6, 0.0, 0.82],
-    [-0.22, -0.2, 0.76], [0.24, -0.16, 0.76], [-0.18, 0.24, 0.76], [0.2, 0.22, 0.76],
-  ];
-  for (const [u, v, drop] of RINGS) {
-    const x = u * (rW / 2), z = v * (rD / 2);
-    const h = STRAND_H * drop;
-    // The cord, top-anchored so the broken hemline is at the BOTTOM where it is read.
-    rackParts.push(roundedBox(STRAND_W, h, STRAND_W, STRAND_W * 0.4)
-      .translate(x, STRAND_TOP - h / 2, z));
-    // One bulb near the bottom. It is what makes a strand read as produce rather than as
-    // a hanging wire, and it is the widest thing down here — so it is capped at twice the
-    // cord and no more, for the interpenetration reason above.
-    plateParts.push(puck(STRAND_W * 2.0, STRAND_W * 1.5, 8)
-      .translate(x, STRAND_TOP - h + STRAND_W * 1.6, z));
+  // ── THE HEIGHTS, DERIVED FROM `CHARACTER_HEIGHT`, NEVER TYPED ───────────────
+  // The table's underside is the ceiling of the space you stand in: a standing fighter's
+  // head clears it by `DUCK_CLEAR_M`, the same generous margin the rack used, for the
+  // same reason (characters bob; a tabletop grazing a head at one phase of the run cycle
+  // is the interpenetration defect `CLAUDE.md` rule 3 is about). The hem sits at the old
+  // strands' bottom, `CHARACTER_HEIGHT * 0.36`, so the drape crosses the fighter's whole
+  // upper body and the table's legs still show beneath it — which is what says TABLE.
+  const DUCK_CLEAR_M = 0.45;
+  const UNDER_Y = CHARACTER_HEIGHT + DUCK_CLEAR_M;      // 2.55 m
+  const TOP_T = 0.14;                                    // the tabletop slab
+  const TOP_Y = UNDER_Y + TOP_T;                         // 2.69 m
+  const HEM_Y = CHARACTER_HEIGHT * 0.36;                 // 0.756 m
+  const HEM_BAND = 0.14;                                 // the darker hem trim, metres
+  const FOLD_AMP = 0.09;                                 // how far a fold billows out, metres
+  const FOLD_P = 0.62;                                   // fold period along an edge, metres
+  const LEG = 0.16;
+  const short = Math.min(rW, rD);
+
+  // Vertex-colour TONES: multipliers on `M.concealCloth`, the ONE family (see its note
+  // in `KPAL`). Linear, so 0.62 arrives ~0.80x in sRGB value before lighting.
+  const T_CLOTH = 1.0, T_CHECK = 0.80, T_BORDER = 0.66, T_HEM = 0.62, T_LEG = 0.40, T_DISH = 1.32, T_DISH_RIM = 0.86;
+  const tone = (geo: THREE.BufferGeometry, k: number): THREE.BufferGeometry => {
+    const n = geo.getAttribute('position').count;
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(k), 3));
+    return geo;
+  };
+  const parts: THREE.BufferGeometry[] = [];
+
+  // The tabletop: a slab in the BORDER tone with the cloth's top laid 6 mm proud of it as a
+  // big two-tone CHECK — the one pattern that says "tablecloth" at any distance. Large
+  // (~1.1 m checks, ~55 px at the match camera) and low-contrast (`T_CHECK`), so it is a
+  // low-frequency read on the accent object, not texture on the frame. First render was a
+  // single flat panel and read at 58 deg as "a big box" (the teal attempt; see `KPAL`).
+  parts.push(tone(roundedBox(rW, TOP_T, rD, 0.05).translate(0, UNDER_Y + TOP_T / 2, 0), T_BORDER));
+  const PANEL = Math.min(0.34, short * 0.12);
+  {
+    const pw = rW - PANEL * 2, pd = rD - PANEL * 2;
+    const nx = Math.max(3, Math.round(pw / 1.1)), nz = Math.max(3, Math.round(pd / 1.1));
+    const pos: number[] = [], nrm: number[] = [], uv: number[] = [], col: number[] = [];
+    const y = TOP_Y + 0.006;
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) {
+        const x0 = -pw / 2 + (pw * i) / nx, x1 = -pw / 2 + (pw * (i + 1)) / nx;
+        const z0 = -pd / 2 + (pd * j) / nz, z1 = -pd / 2 + (pd * (j + 1)) / nz;
+        const k = (i + j) % 2 ? T_CHECK : T_CLOTH;
+        // two triangles, wound to face +Y: (x0,z0) (x0,z1) (x1,z0) and (x1,z0) (x0,z1) (x1,z1)
+        for (const [x, z] of [[x0, z0], [x0, z1], [x1, z0], [x1, z0], [x0, z1], [x1, z1]] as const) {
+          pos.push(x, y, z); nrm.push(0, 1, 0); uv.push((x + pw / 2) / pw, (z + pd / 2) / pd); col.push(k, k, k);
+        }
+      }
+    }
+    const top = new THREE.BufferGeometry();
+    top.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    top.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3));
+    top.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    top.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    parts.push(top);
   }
 
-  const rack = mesh(mergeGeometries(rackParts, false)!, M.concealRack, 'conceal_rack');
-  rack.castShadow = true;
-  rack.receiveShadow = true;
-  g.add(rack);
-  g.add(mesh(mergeGeometries(plateParts, false)!, M.concealPlate, 'conceal_plates'));
-  g.add(mesh(mergeGeometries(trayParts, false)!, M.concealTrayWarm, 'conceal_trays'));
+  // ── THE DRAPE — four sides, folded, hemmed ─────────────────────────────────
+  // Each side is a strip from the slab's mid-edge down to `HEM_Y`, billowing OUTWARD by a
+  // fold wave that opens toward the hem and tapers to nothing at the corners, so the four
+  // strips meet exactly on the corner lines. The base line is inset by `FOLD_AMP`, so the
+  // widest fold lands ON the `INSET` extent and nothing overhangs the rim. The folds are
+  // the drape's FORM: a flat curtain is one value at 58 deg; folds put a lit and a shaded
+  // flank on every pleat at both cameras.
+  const drape = (len: number, along: 'x' | 'z', sign: 1 | -1, half: number, phase: number) => {
+    const SEG = Math.max(8, Math.round(len / (FOLD_P / 6)));
+    const ROWS = 5;
+    const pos: number[] = [], col: number[] = [], uv: number[] = [], idx: number[] = [];
+    const yTop = UNDER_Y + TOP_T * 0.5;
+    for (let r = 0; r <= ROWS; r++) {
+      const t = r / ROWS;
+      const y = yTop + (HEM_Y - yTop) * t;
+      const k = y < HEM_Y + HEM_BAND ? T_HEM : T_CLOTH;
+      for (let i = 0; i <= SEG; i++) {
+        const a = -len / 2 + (len * i) / SEG;
+        const corner = Math.min(1, (len / 2 - Math.abs(a)) / 0.25);
+        const fold = (0.5 + 0.5 * Math.sin((a / FOLD_P) * Math.PI * 2 + phase)) * Math.pow(t, 0.7) * corner;
+        const outward = half - FOLD_AMP + FOLD_AMP * fold + FOLD_AMP * (1 - corner);
+        const x = along === 'x' ? a : sign * outward;
+        const z = along === 'x' ? sign * outward : a;
+        pos.push(x, y, z);
+        col.push(k, k, k);
+        uv.push(i / SEG, t);
+      }
+    }
+    const W = SEG + 1;
+    for (let r = 0; r < ROWS; r++) {
+      for (let i = 0; i < SEG; i++) {
+        const a = r * W + i, b = a + 1, c = a + W, d = c + 1;
+        idx.push(a, c, b, b, c, d);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    return geo;
+  };
+  parts.push(drape(rW, 'x', 1, rD / 2, 0.0));
+  parts.push(drape(rW, 'x', -1, rD / 2, 1.7));
+  parts.push(drape(rD, 'z', 1, rW / 2, 0.9));
+  parts.push(drape(rD, 'z', -1, rW / 2, 2.6));
+
+  // ── THE LEGS — visible under the hem, the cue that this is a TABLE ─────────
+  const legX = rW / 2 - FOLD_AMP - LEG, legZ = rD / 2 - FOLD_AMP - LEG;
+  for (const sx of [-legX, legX]) {
+    for (const sz of [-legZ, legZ]) {
+      parts.push(tone(roundedBox(LEG, UNDER_Y, LEG, 0.04).translate(sx, UNDER_Y / 2, sz), T_LEG));
+    }
+  }
+
+  // ── ON THE TABLE — a few dishes, IN the family, out of the near-white band ─────
+  // The old plates were #F7F1E4 and the brightest thing in any frame that held one. These
+  // are the cloth's own hue, lighter (`T_DISH`), with a darker rim, and few: the top is a
+  // surface, not a second cluster. A FIXED TABLE, not an RNG — every patch has a point-
+  // symmetric partner built by transform (`kitchen.ts`), so the two must be identical.
+  //   [u, v (fractions of the half-extent), r (fraction of `short`), discs]
+  const DISHES: ReadonlyArray<readonly [number, number, number, number]> = [
+    [-0.46, -0.34, 0.062, 3],
+    [0.42, -0.40, 0.050, 2],
+    [0.12, 0.44, 0.070, 4],
+  ];
+  for (const [u, v, rf, n] of DISHES) {
+    const x = u * (rW / 2), z = v * (rD / 2), rad = rf * short;
+    for (let i = 0; i < n; i++) {
+      parts.push(tone(puck(rad * (i % 2 ? 0.92 : 1), 0.045, 16).translate(x, TOP_Y + 0.012 + 0.045 * (i + 0.5), z), i % 2 ? T_DISH_RIM : T_DISH));
+    }
+  }
+
+  for (const geoPart of parts) {
+    // `mergeGeometries` needs ONE attribute set: position, normal, uv, color — every part
+    // above carries all four (the drape builds its own, the primitives get `tone`).
+    if (!geoPart.getAttribute('normal')) geoPart.computeVertexNormals();
+  }
+  const canopy = mesh(mergeGeometries(parts.map((p) => (p.index ? p.toNonIndexed() : p)), false)!, concealCanopyMaterial(M), 'conceal_canopy');
+  // ⚠️ NON-CASTING. The rack's lattice threw "lattice shadows" (audit D9) and a 6.5 m
+  // table would throw a 6.5 m dark slab offset from itself — the shadow class the review
+  // measured as the most salient world shape (GX-06). The shade it should leave is the
+  // soft decal below, directly under it.
+  canopy.castShadow = false;
+  canopy.receiveShadow = true;
+  // The self-reveal's per-frame update rides the canopy's own draw (see below): the first
+  // canopy drawn in a frame projects the visible fighters, the rest reuse it.
+  canopy.onBeforeRender = (renderer, scene, camera) => updateSelfReveal(renderer, scene, camera);
+  g.add(canopy);
+
+  // ── THE SHADE UNDER IT — one soft decal, the "one soft canopy shadow" ──────────
+  g.add(buildCanopyShade(M, rW, rD));
   return g;
+}
+
+/**
+ * ── THE SELF-REVEAL: A CANOPY NEVER HIDES A FIGHTER THE RENDERER IS SHOWING ──────
+ *
+ * A solid canopy hides whoever stands under it from the 58 deg camera — which is the
+ * point for a CONCEALED opponent (and `match.ts` removes that model outright anyway,
+ * `fighterVisibleTo`), and a bug for everybody else: the local player under his own
+ * hiding place, a revealed opponent, a fighter walking past behind one. `match.ts` never
+ * hides `LOCAL_SLOT` ("vanishing your own character reads as a crash"), and the canopy
+ * must not do it for him.
+ *
+ * So the canopy material cuts a dithered hole wherever it stands IN FRONT of a fighter
+ * whose root is VISIBLE: a fighter's root is a `scene.children` entry named
+ * `character:<id>`, and `visible` is exactly `match.ts`'s presentation verdict, so the
+ * hole follows the game's own rule with no second copy of it. Concealed opponents are
+ * `visible = false` and get no hole; the canopy stays solid over them.
+ *
+ * ⚠️ `docs/AGENT-BRIEF` §3 said a "local player's dither while inside" existed and was to
+ * be KEPT — it did not exist (no dither, fade or occluder cut anywhere in `src/`, checked
+ * 2026-10-15). The open rack never needed one; this is the first canopy that does.
+ *
+ * Per frame, on the first canopy draw: each visible fighter's body centre is projected
+ * once (NDC x/y, view depth, angular radius of `SELF_REVEAL_R_M`). Per fragment: inside
+ * the radius AND nearer the camera than the fighter, the fragment is discarded through
+ * a 4x4 ordered dither whose threshold ramps from 0.55 R (all cut) to R (none), so the
+ * hole has a soft edge instead of a hard cookie-cutter rim. Shadow and id passes are
+ * untouched (a non-perspective camera skips the update; the canopy casts no shadow).
+ */
+const SELF_REVEAL_MAX = 6;
+const SELF_REVEAL_R_M = 1.5;
+const selfRevealUniforms = {
+  uA1Holes: { value: Array.from({ length: SELF_REVEAL_MAX }, () => new THREE.Vector4()) },
+  uA1HoleCount: { value: 0 },
+  uA1Aspect: { value: 1 },
+};
+let selfRevealFrame = -1;
+let selfRevealCam: THREE.Camera | null = null;
+const _srV = new THREE.Vector3();
+
+function updateSelfReveal(renderer: THREE.WebGLRenderer, scene: THREE.Object3D, camera: THREE.Camera): void {
+  const cam = camera as THREE.PerspectiveCamera;
+  if (!cam.isPerspectiveCamera) return;
+  const frame = renderer.info.render.frame;
+  if (frame === selfRevealFrame && cam === selfRevealCam) return;
+  selfRevealFrame = frame;
+  selfRevealCam = cam;
+  let root: THREE.Object3D = scene;
+  while (root.parent) root = root.parent;
+  const tanHalf = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
+  let n = 0;
+  // QA-only switch (`tools/tmp/a1_cap.mjs`'s known-bad arm): with it set, no hole is cut,
+  // which is what a solid canopy WITHOUT this feature would draw. Nothing in the game sets it.
+  const off = typeof window !== 'undefined' && (window as unknown as { __a1SelfRevealOff?: boolean }).__a1SelfRevealOff === true;
+  for (const o of off ? [] : root.children) {
+    if (n >= SELF_REVEAL_MAX) break;
+    if (!o.visible || !o.name.startsWith('character:')) continue;
+    _srV.setFromMatrixPosition(o.matrixWorld);
+    _srV.y += CHARACTER_HEIGHT * 0.5;
+    _srV.applyMatrix4(cam.matrixWorldInverse);
+    const depth = -_srV.z;
+    if (depth <= 0.01) continue;
+    _srV.applyMatrix4(cam.projectionMatrix);
+    selfRevealUniforms.uA1Holes.value[n].set(_srV.x, _srV.y, depth, SELF_REVEAL_R_M / (depth * tanHalf));
+    n++;
+  }
+  selfRevealUniforms.uA1HoleCount.value = n;
+  selfRevealUniforms.uA1Aspect.value = cam.aspect;
+}
+
+const concealCanopyMats = new WeakMap<Materials, THREE.MeshStandardMaterial>();
+/** ONE material for every canopy part of every patch: one program, one draw per patch. */
+function concealCanopyMaterial(M: Materials): THREE.MeshStandardMaterial {
+  const hit = concealCanopyMats.get(M);
+  if (hit) return hit;
+  const m = M.concealCloth as THREE.MeshStandardMaterial;
+  m.vertexColors = true;
+  m.side = THREE.DoubleSide; // the far drape is seen from inside, under the near hem
+  const prev = m.onBeforeCompile;
+  m.onBeforeCompile = (shader, renderer) => {
+    prev.call(m, shader, renderer);
+    Object.assign(shader.uniforms, selfRevealUniforms);
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec4 vA1Clip;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\n\tvA1Clip = gl_Position;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+varying vec4 vA1Clip;
+uniform vec4 uA1Holes[${SELF_REVEAL_MAX}];
+uniform int uA1HoleCount;
+uniform float uA1Aspect;
+const float A1_BAYER[16] = float[16](0.0, 8.0, 2.0, 10.0, 12.0, 4.0, 14.0, 6.0, 3.0, 11.0, 1.0, 9.0, 15.0, 7.0, 13.0, 5.0);
+void a1SelfReveal() {
+  vec2 ndc = vA1Clip.xy / vA1Clip.w;
+  float keep = 1.0;
+  for (int i = 0; i < ${SELF_REVEAL_MAX}; i++) {
+    if (i >= uA1HoleCount) break;
+    vec4 h = uA1Holes[i];
+    if (vA1Clip.w >= h.z) continue;
+    vec2 d = ndc - h.xy;
+    d.x *= uA1Aspect;
+    keep = min(keep, smoothstep(0.55, 1.0, length(d) / h.w));
+  }
+  if (keep < 1.0) {
+    ivec2 q = ivec2(mod(floor(gl_FragCoord.xy), 4.0));
+    if ((A1_BAYER[q.x + q.y * 4] + 0.5) / 16.0 >= keep) discard;
+  }
+}`)
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n\ta1SelfReveal();');
+  };
+  const prevKey = m.customProgramCacheKey.bind(m);
+  m.customProgramCacheKey = () => `${prevKey()}|a1-self-reveal-v1`;
+  m.needsUpdate = true;
+  concealCanopyMats.set(M, m);
+  return m;
+}
+
+/** The soft shade under a canopy: one decal, alpha `SHADE_A` over the inner 70%, falling
+ * to zero at the footprint. Lies at `BAKED_SHADOW_Y` with the props' contact decals and
+ * uses their material (`groundedShadow`: the ground-hue tint, vertex alpha), so it adds a
+ * draw but no program. */
+function buildCanopyShade(M: Materials, rW: number, rD: number): THREE.Mesh {
+  const SHADE_A = 0.34;
+  const hw = rW / 2, hd = rD / 2;
+  const iw = hw * 0.7, id = hd * 0.7;
+  const pos = new Float32Array([
+    -iw, id, 0, iw, id, 0, iw, -id, 0, -iw, -id, 0,
+    -hw, hd, 0, hw, hd, 0, hw, -hd, 0, -hw, -hd, 0,
+  ]);
+  const col = new Float32Array([
+    1, 1, 1, SHADE_A, 1, 1, 1, SHADE_A, 1, 1, 1, SHADE_A, 1, 1, 1, SHADE_A,
+    1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0,
+  ]);
+  // Plane XY, rotated -90 deg about X (local +Y -> world -Z). Wound so the faces point
+  // UP after the rotation — `buildContactRing`'s note is about exactly this trap.
+  const idx = [0, 3, 1, 1, 3, 2];
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4;
+    idx.push(4 + i, i, 4 + j, 4 + j, i, j);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 4));
+  geo.setIndex(idx);
+  const m = new THREE.Mesh(geo, M.groundedShadow);
+  m.rotation.x = -Math.PI / 2;
+  m.position.y = BAKED_SHADOW_Y;
+  m.renderOrder = 1;
+  m.name = 'conceal_shade__no_outline';
+  m.castShadow = false;
+  m.receiveShadow = false;
+  noOutline(m);
+  return m;
 }
