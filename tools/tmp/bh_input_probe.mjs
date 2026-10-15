@@ -340,9 +340,11 @@ if (ONLY.includes(3)) {
   await touch('touchStart', slots[0].x, slots[0].y); await waitFrames(page, 2); await touch('touchEnd'); await waitFrames(page, 2);
 
   // I — the aim half, clear of the weapon cluster.
-  const tapPt = { x: 600, y: 140 };
+  // CSS pixels on the canvas, NOT world units (al_guard read the old { x, y } as a map point
+  // inside supply_barrel, 2026-10-15) — so the keys say what the numbers are.
+  const tapPt = { clientX: 600, clientY: 140 };
   await waitReady(page); await reset(page);
-  await page.evaluate(({ x, y }) => {
+  await page.evaluate(({ clientX: x, clientY: y }) => {
     const c = document.querySelector('#game canvas');
     const t = new Touch({ identifier: 901, target: c, clientX: x, clientY: y });
     c.dispatchEvent(new TouchEvent('touchstart', { touches: [t], targetTouches: [t], changedTouches: [t], bubbles: true, cancelable: true }));
@@ -355,13 +357,13 @@ if (ONLY.includes(3)) {
   const taps = [];
   for (let k = 0; k < 4; k++) {
     await waitReady(page); await waitFrames(page, 2); await reset(page);
-    await page.touchscreen.tap(tapPt.x, tapPt.y);
+    await page.touchscreen.tap(tapPt.clientX, tapPt.clientY);
     await waitFrames(page, 8);
     taps.push((await rec(page)).attackFrames);
   }
   row('S3.I real CDP taps (Playwright touchscreen.tap) fire every time', taps.every((a) => a > 0), `attackFrames per tap: ${taps.join(',')}`);
   await waitReady(page); await reset(page);
-  await touch('touchStart', tapPt.x, tapPt.y);
+  await touch('touchStart', tapPt.clientX, tapPt.clientY);
   let held = true;
   try { await page.waitForFunction(() => window.__bhRec.attackFrames >= 1, null, { timeout: 60000, polling: 40 }); } catch { held = false; }
   await touch('touchEnd'); await waitFrames(page, 3);

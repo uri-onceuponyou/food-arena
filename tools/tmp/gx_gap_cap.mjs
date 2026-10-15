@@ -68,7 +68,9 @@ const ring = (cx, cy, r, ids, a0 = 15) => ids.map((id, i) => {
 const SCENES = [
   { id: 'D1', kind: 'duel', q: { player: 'hamburger', enemy: 'donut', px: 1560, py: 1000 }, note: 'hub, 160 wu east of the pot' },
   { id: 'D2', kind: 'duel', q: { player: 'taco', enemy: 'sushi', px: 860, py: 500 }, note: 'the baseline_capture anchor (a 1x-map literal)' },
-  { id: 'D3', kind: 'duel', q: { player: 'pizza', enemy: 'burrito', px: 1700, py: 400 }, note: 'north, open floor near props' },
+  // D3 was (1700,400) — ON produce_crate_tall's west edge, so the 'checked clear' above was
+  // false for it; al_guard caught it 2026-10-15. 60 wu west is clear at pad 26.
+  { id: 'D3', kind: 'duel', q: { player: 'pizza', enemy: 'burrito', px: 1640, py: 400 }, note: 'north, open floor near props' },
   // D2/D3 found no engagement in 300 s on the first run (the AI never closed on screen);
   // D1 worked because the player stood on the enemy's route. D4/D5 stand on the route out
   // of the enemy spawn (2500,1190), clear of cover (pad 32 wu, and +-40 wu around).

@@ -133,7 +133,7 @@ try {
   // ── 1. OVERVIEW — the whole 2800x2000 map, plan and match pitch, HUD hidden ────────────
   if (ONLY.includes('overview')) {
     console.log('\n[overview]');
-    const { page, errors } = await openMatch(browser, 'screen=match&player=hamburger&enemy=donut&px=1400&py=650&simSpeed=0&pointerLock=0');
+    const { page, errors } = await openMatch(browser, 'screen=match&player=hamburger&enemy=donut&px=1400&py=600&simSpeed=0&pointerLock=0');
     await step(page, 400);
     await pause(page);
     await hud(page, false);
@@ -154,7 +154,7 @@ try {
   // ── 2. LOBBY PITCH — 20° up close on prop clusters (diagnose geometry) ──────────────────
   if (ONLY.includes('lobby')) {
     console.log('\n[lobby pitch 20]');
-    const { page, errors } = await openMatch(browser, 'screen=match&player=hamburger&enemy=donut&px=1400&py=650&simSpeed=0&pointerLock=0');
+    const { page, errors } = await openMatch(browser, 'screen=match&player=hamburger&enemy=donut&px=1400&py=600&simSpeed=0&pointerLock=0');
     await step(page, 400);
     await pause(page);
     await hud(page, false);
@@ -186,7 +186,7 @@ try {
   // (only letterboxing and character contact decals do), so prop pixels are comparable.
   if (ONLY.includes('lobby2')) {
     console.log('\n[lobby pitch 20, ground framing]');
-    const { page, errors } = await openMatch(browser, 'screen=match&player=hamburger&enemy=donut&px=1400&py=650&simSpeed=0&pointerLock=0');
+    const { page, errors } = await openMatch(browser, 'screen=match&player=hamburger&enemy=donut&px=1400&py=600&simSpeed=0&pointerLock=0');
     await step(page, 400);
     await pause(page);
     await hud(page, false);
