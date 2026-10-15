@@ -54,8 +54,12 @@ export interface OddsRow {
    * reads `CHARACTERS['squid_ink'].name` at runtime, which is a TypeError inside a
    * screen render. Both of those filter on `pool`, so an item row is simply skipped by
    * a renderer that has not been taught about items — the safe direction.
-   * 🔴 REPORTED: `trophyRoad.ts:showOdds` names the character pools and not the item
-   * pools; `shop.ts` (this file set's) names both.
+   * ~~🔴 REPORTED: `trophyRoad.ts:showOdds` names the character pools and not the item
+   * pools; `shop.ts` (this file set's) names both.~~
+   * ✅ FIXED (META-07): `showOdds` names both now, each list keyed by its row's own label
+   * ("Epic item: …" / "Epic fighter: …") so two lists of one rarity cannot read as one.
+   * Struck rather than deleted: the report sat here unrouted for about six weeks, because a
+   * source comment is the one place no handover document reads.
    */
   itemPool?: ItemId[];
 }
