@@ -48,6 +48,11 @@ import { CHARACTERS, HIT_RADIUS_VS_PLAYER, PLAYER_SPEED, TRAIL } from '../game/r
 //    ------------------------------------
 //    = 165.2 wu
 //
+//    ⚠️ (K1, 2026-10-16) STALE: `rules.ts` now DERIVES `REACH.ultimateSlam` =
+//    `GUARANTEED_VISIBLE_RADIUS - BODY_LENGTH` = 157.2 wu, so the slam's reach (182.4 with the
+//    hit radius) sits INSIDE this radius and the exclusion below no longer excludes anything.
+//    Under the shipped aim it still lands from off screen — see `QA_CAMERA`. Old note kept:
+//
 //    EXCLUDED: Lollipop's Giant Lollipop (`giantSlam`, range 400, cone 360°). It is
 //    an 8 s-cooldown map-scale ultimate whose screen-filling slam visual tells you what
 //    hit you and roughly where it came from, without needing the caster in frame.
@@ -259,7 +264,7 @@ function groundReachPerMetreAt(pitchDeg: number, fovDeg: number): { near: number
 /** The `frameMode: 'fair'` distance solve. `fairRadiusM` is in METRES; see
  *  `CameraRig.computeFairDistance` for the derivation this implements. */
 function fairSolveAt(
-  aspect: number, pitchDeg: number, fovDeg: number, fairRadiusM: number,
+  aspect: number, pitchDeg: number, fovDeg: number, fairRadiusM: number, aim: CameraAim = 'past',
 ): { dist: number; lookAhead: number } {
   const vFov = THREE.MathUtils.degToRad(fovDeg);
   const cosP = Math.cos(THREE.MathUtils.degToRad(pitchDeg));
@@ -271,7 +276,11 @@ function fairSolveAt(
   // lookAhead = lookAheadPerMetre * distance; folded into the width solve below.
   const lookAheadPerMetre = (kFar - kNear) / 2;
   const shrink = THREE.MathUtils.clamp(lookAheadPerMetre * cosP, 0, 0.5);
-  const distForWidth = (fairRadiusM * (1 / tanHalfH + cosP)) / (1 - shrink);
+  // `'centred'` (QA): the aim sits toward the camera, so the square's near edge is
+  // `R - lookAhead` from it and the term changes sign. `'past'` is the shipped line, verbatim.
+  const distForWidth = aim === 'centred'
+    ? (fairRadiusM * (1 / tanHalfH + cosP)) / (1 + shrink)
+    : (fairRadiusM * (1 / tanHalfH + cosP)) / (1 - shrink);
 
   const dist = Math.max(distForDepth, distForWidth);
   return { dist, lookAhead: lookAheadPerMetre * dist };
@@ -289,14 +298,19 @@ function fairSolveAt(
  * would pump the camera on and off, and it would make the feel depend on the display.
  */
 export function visibleGroundRadiusUnits(
-  aspect: number, pitchDeg: number, fovDeg: number, fairRadiusUnits: number,
+  aspect: number, pitchDeg: number, fovDeg: number, fairRadiusUnits: number, aim: CameraAim = 'past',
 ): number {
   const cosP = Math.cos(THREE.MathUtils.degToRad(pitchDeg));
   const tanHalfH = Math.tan(THREE.MathUtils.degToRad(fovDeg) / 2) * aspect;
   const { near: kNear, far: kFar } = groundReachPerMetreAt(pitchDeg, fovDeg);
-  const { dist, lookAhead } = fairSolveAt(aspect, pitchDeg, fovDeg, wu(fairRadiusUnits));
+  const { dist, lookAhead } = fairSolveAt(aspect, pitchDeg, fovDeg, wu(fairRadiusUnits), aim);
   // `kNear`/`kFar` are measured from the AIM point; the corners wanted here are offsets
   // from the TARGET, which sits `lookAhead` back down-screen from it.
+  // ⚠️ (K1) The two lines below are the CENTRED aim's arithmetic: under the shipped `'past'`
+  // aim the target sits `lookAhead` UP-screen of the aim, so the far corner is
+  // `reachFar + lookAhead` and this under-reads the fade radius by 2 x lookAhead (~76 wu at
+  // 58°). Left verbatim — it feeds the shipped shake / hit-stop / hand-off radius — and
+  // routed; see `QA_CAMERA`.
   const reachNear = dist * kNear;
   const reachFar = dist * kFar;
   const halfWidthFar = (dist + reachFar * cosP) * tanHalfH;
@@ -579,9 +593,86 @@ export function resolveViewSubject(input: ViewSubjectInput): ViewSubject {
   return decide(current, 'stranded');
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// QA-ONLY: `?camPitch=` AND `?camAim=` — THE MATCH CAMERA, FOR THE K1 EXPERIMENT
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `DECISIONS-FOR-URI.md §91e`: *"the reference's blocks imply a camera ~48-52° steep; ours
+// is 58° — unchanged — an experiment only after the cast work, gated by `aspect.mjs`
+// fairness."* These are that experiment's two handles and NOTHING ELSE. Absent or refused,
+// `match.ts` passes exactly what it always passed (pitch 58, aim `'past'`), so every shipped
+// frame is reached through the same constructor arguments as before — proved byte-identical
+// by `tools/tmp/k1_fair.mjs` (camera matrices, every aspect) and by `rv_capture --compare`
+// (the canonical frames). Read at ONE construction site, `match.ts`'s `new Stage({ camera })`,
+// so the lobby (`charStage.ts`, pitch 20), the roster thumbnails (12) and `preview.html` (its
+// own `?pitch=`, deliberately a different name) cannot reach them.
+//
+// ── 🚨 WHY THERE IS AN AIM HANDLE AT ALL: THE FAIR WINDOW IS NOT CENTRED ON THE PLAYER ──
+//
+// `apply()` puts the look-at point `lookAhead` PAST the player (away from the camera), and
+// the field comment says that "re-centres the visible ground ON the player". It does the
+// opposite. The far half of a pitched frustum is already the longer one (11.86 m against
+// 8.06 m at 58° / 16:9), so aiming past the player lengthens the far side further and cuts
+// the near side: measured through the real camera at 58° / 16:9, the ground visible BELOW
+// the player (toward the camera) ends at **123 wu, not 199.2**, and above it reaches 275.
+// `groundWindow()` and the depth solve add `lookAhead` to the near reach — the arithmetic of
+// an aim on the CAMERA side — so `__fairView()` reports 199.2 in every direction and
+// `aspect.mjs` passes at 0.00 wu while every weapon in the 123-165 wu band can hit you from
+// below the bottom edge of your screen. `np_nfighter`'s long-standing red row ("a seat
+// inside the radius but off-screen at N=5") is this: the hidden seat stands 143 wu SOUTH of
+// the observer. Since `ac69eea` (2026-08-03), at every pitch, not a pitch effect.
+//
+// `'centred'` is the geometry the solve and `groundWindow()` already describe: the aim sits
+// `lookAhead` toward the camera, the width solve's `shrink` changes sign (the square's near
+// edge is now `R - lookAhead` from the aim, not `R + lookAhead`), and the guaranteed disc
+// holds by projection at every accepted pitch and aspect (`k1_fair.mjs` §B). Making it the
+// default moves the player up the screen and is a call for Uri — NOT made here.
+//
+// ⚠️ A shipped build honours both, like `?simSpeed=` / `?fighters=` / `?items=`. Any accepted
+// pitch keeps the guaranteed radius, but the BLEED differs by pitch, so a future online mode
+// must not take either from the URL.
+export type CameraAim = 'past' | 'centred';
+
+export const QA_CAMERA = {
+  pitchParam: 'camPitch',
+  /**
+   * The band `k1_fair.mjs` §B proves: the guaranteed disc inside the frame (aim `'centred'`)
+   * AND `lighting.ts:MATCH_SHADOW_RADIUS_M` still holding the farthest visible ground corner
+   * plus its caster reach, at 33 aspects across `SUPPORTED_ASPECT`, every 0.25°. Under the
+   * shipped aim that headroom crosses zero at ~46.2° (the 4:3 top corner leaves the 34 m box,
+   * so shadows would clip along the top of an iPad's frame): 47° keeps ~1.0 m of it. The
+   * centred aim keeps >8 m at 45°. The steep end is bounded only so a typo cannot reach a
+   * top-down view.
+   */
+  minPitchDeg: 47,
+  maxPitchDeg: 70,
+  aimParam: 'camAim',
+} as const;
+
+/** `?camPitch=<deg>` -> degrees, or null (absent, empty, not a finite number, outside the
+ * proven band). Null means "the shipped pitch" — the caller's own literal. */
+export function qaPitchFromSearch(search: string): number | null {
+  const raw = new URLSearchParams(search).get(QA_CAMERA.pitchParam);
+  if (raw === null || raw.trim() === '') return null;
+  const deg = Number(raw);
+  return Number.isFinite(deg) && deg >= QA_CAMERA.minPitchDeg && deg <= QA_CAMERA.maxPitchDeg ? deg : null;
+}
+
+/** `?camAim=centred` -> `'centred'`; anything else -> null ("the shipped aim"). */
+export function qaAimFromSearch(search: string): CameraAim | null {
+  return new URLSearchParams(search).get(QA_CAMERA.aimParam) === 'centred' ? 'centred' : null;
+}
+
 export interface CameraRigOptions {
   /** Downward pitch in degrees. 90 = straight down. Brawl Stars sits around 55-62. */
   pitchDeg?: number;
+  /**
+   * 'fair' mode only: which side of the player the look-at point sits. `'past'` (the
+   * default, and what every shipped match uses) aims `lookAhead` beyond the player;
+   * `'centred'` aims toward the camera, which is the geometry `groundWindow()` and the
+   * depth solve describe. QA-only today — see `QA_CAMERA` above for why both exist.
+   */
+  aim?: CameraAim;
   /** Rotation around Y in degrees. Small non-zero values add life. */
   yawDeg?: number;
   /** Vertical field of view. Narrow = less distortion at the frame edges. */
@@ -644,6 +735,8 @@ export class CameraRig {
   subjectFill: number;
   targetHeight: number;
   fairRadiusUnits: number;
+  /** 'fair' mode: which side of the player the look-at point sits. See `QA_CAMERA`. */
+  aim: CameraAim;
 
   /** Look-at point on the ground plane, in metres. */
   private target = new THREE.Vector3(0, 0, 0);
@@ -674,6 +767,7 @@ export class CameraRig {
     this.subjectFill = opts.subjectFill ?? 0.62;
     this.targetHeight = opts.targetHeight ?? 0;
     this.fairRadiusUnits = opts.fairRadiusUnits ?? FAIR_PLAY.radiusUnits;
+    this.aim = opts.aim ?? 'past';
     // Far plane must clear the fair framing: the camera sits ~31 m out at 4:3 (the
     // widest-binding aspect) and the far edge of the ground window is further again.
     this.camera = new THREE.PerspectiveCamera(opts.fov ?? 34, this.aspect, 0.5, 300);
@@ -756,7 +850,7 @@ export class CameraRig {
     // The solve itself lives at module scope (`fairSolveAt`) so `shakeFadeRadiusUnits()`
     // can evaluate it for an aspect this rig is not at. Same arithmetic, one copy.
     const { dist, lookAhead } = fairSolveAt(
-      this.aspect, this.pitchDeg, this.camera.fov, wu(this.fairRadiusUnits),
+      this.aspect, this.pitchDeg, this.camera.fov, wu(this.fairRadiusUnits), this.aim,
     );
     this.lookAhead = lookAhead;
     return dist;
@@ -778,7 +872,7 @@ export class CameraRig {
     let max = 0;
     for (let i = 0; i <= STEPS; i++) {
       const a = SUPPORTED_ASPECT.min + (SUPPORTED_ASPECT.max - SUPPORTED_ASPECT.min) * (i / STEPS);
-      const r = visibleGroundRadiusUnits(a, this.pitchDeg, this.camera.fov, this.fairRadiusUnits);
+      const r = visibleGroundRadiusUnits(a, this.pitchDeg, this.camera.fov, this.fairRadiusUnits, this.aim);
       if (r > max) max = r;
     }
     return max;
@@ -800,10 +894,17 @@ export class CameraRig {
     const dist = this.computeDistance();
     const R = wu(this.fairRadiusUnits);
 
+    // ⚠️ (K1) `near`/`far` are the CENTRED aim's arithmetic and are WRONG under the shipped
+    // `'past'` aim, where the bottom edge is `dist * kNear - lookAhead` from the player (123 wu
+    // at 58° / 16:9, not 199.2). Left verbatim on that path because `aspect.mjs` — a gate —
+    // reads them; correcting the report would turn it red on the shipped tree, which is the
+    // orchestrator's call, not a QA override's. See `QA_CAMERA`.
     const near = dist * kNear + this.lookAhead;
     const far = dist * kFar - this.lookAhead;
     const halfWidth = dist * tanHalfH;
-    const halfWidthAtEdge = (dist - (R + this.lookAhead) * cosP) * tanHalfH;
+    const halfWidthAtEdge = this.aim === 'centred'
+      ? (dist - (R - this.lookAhead) * cosP) * tanHalfH
+      : (dist - (R + this.lookAhead) * cosP) * tanHalfH;
 
     let binding: GroundWindow['binding'] = 'n/a';
     if (this.frameMode === 'fair') {
@@ -841,9 +942,17 @@ export class CameraRig {
     c.y += this.targetHeight;
     // Aim past the player, directly away from the camera, so the visible ground is
     // centred on the player even though the frustum is not (see `lookAhead`).
+    // ⚠️ (K1) That sentence is the bug: past the player LENGTHENS the already-longer far
+    // half. `'centred'` (QA-only, `QA_CAMERA`) aims toward the camera instead; the `else`
+    // is the shipped code, verbatim.
     if (this.lookAhead !== 0) {
-      c.x -= Math.sin(yaw) * this.lookAhead;
-      c.z -= Math.cos(yaw) * this.lookAhead;
+      if (this.aim === 'centred') {
+        c.x += Math.sin(yaw) * this.lookAhead;
+        c.z += Math.cos(yaw) * this.lookAhead;
+      } else {
+        c.x -= Math.sin(yaw) * this.lookAhead;
+        c.z -= Math.cos(yaw) * this.lookAhead;
+      }
     }
     this.camera.position.copy(c).add(offset);
     this.camera.lookAt(c);
