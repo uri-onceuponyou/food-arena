@@ -48,7 +48,7 @@ import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 // `shakeProximityScale` for the same reason that one does: `camera.ts` is importable from
 // a `.mjs` tool and this file never will be (it imports `ui/hud.ts`). A camera rule whose
 // failure mode only appears at six seats has to be drivable without a GPU.
-import { resolveViewSubject, shakeProximityScale, type ViewSubjectReason } from '../render/camera';
+import { onAnyScreen, resolveViewSubject, shakeProximityScale, type ViewSubjectReason } from '../render/camera';
 import { InputController } from './input';
 import { createPointerLock, type PointerLockController } from './pointerLock';
 import { VfxLayer } from './vfx';
@@ -1665,6 +1665,24 @@ export class GameSession {
   }
 
   /**
+   * CAN ANY DISPLAY SHOW THE GROUND AT `(xWU, yWU)` FROM WHERE THE CAMERA IS? The yes/no twin
+   * of `shakeProximity`, same centre (`viewObserver()`), same fade radius — see
+   * `camera.ts:onAnyScreen` for why hit-stop and the slam flash need a gate where the kick
+   * needed a curve, and for the float trap the obvious gate falls into.
+   *
+   * ⚠️ Byte-identical for everything on or near YOUR fighter: a hit on the local seat is at
+   * distance 0, and a slam that can reach you is cast from inside `REACH.ultimateSlam` =
+   * 157.22 wu — inside even the 199.22 wu full-strength disc, let alone the 510.04 wu fade
+   * radius (both measured off the live rig, not copied) — so no event that can touch the local
+   * player loses its freeze or its flash.
+   */
+  private eventOnAnyScreen(xWU: number, yWU: number): boolean {
+    if (this.shakeFadeUnits < 0) this.shakeFadeUnits = this.stage.rig.shakeFadeRadiusUnits();
+    const me = this.viewObserver();
+    return onAnyScreen(Math.hypot(xWU - me.x, yWU - me.y), this.shakeFadeUnits);
+  }
+
+  /**
    * THE FIGHTER THE CAMERA IS WATCHING — the local seat while it lives, a spectated one
    * after it dies. See `camera.ts:resolveViewSubject` for the ladder.
    *
@@ -1833,11 +1851,19 @@ export class GameSession {
             this.feel.responses.vfx++;
             if (weapon.giantSlam) {
               // Everything a giant slam does that is NOT this layer's to draw.
+              // The two CAST counters stay outside the gate below: they count slams, not
+              // flashes, and a far slam is still a slam.
               this.feel.events['weapon-fired:giantSlam']++;
-              this.hud.flashScreen(weapon.color);
-              this.feel.responses.screenFlash++;
+              // 🚨 THE FLASH AND THE FREEZE ARE GATED ON "CAN ANY SCREEN SEE IT"; THE KICK
+              // ALREADY ATTENUATES. They used to fire at any range, so a slam 2,241 wu away —
+              // off every display — washed the frame red and froze the local player for
+              // 120 ms (B3). See `eventOnAnyScreen`.
+              if (this.eventOnAnyScreen(fighter.x, fighter.y)) {
+                this.hud.flashScreen(weapon.color);
+                this.feel.responses.screenFlash++;
+                this.triggerHitStop(120);
+              }
               this.kick(0.55, this.shakeProximity(fighter.x, fighter.y), 2.6);
-              this.triggerHitStop(120);
               window.__vfxDebugGiantSlamCount = (window.__vfxDebugGiantSlamCount ?? 0) + 1;
             }
           }
@@ -1953,7 +1979,9 @@ export class GameSession {
             this.shakeProximity(victim.x, victim.y),
           );
 
-          if (isWeaponHit) {
+          // Gated on the same "can any screen see it" as the slam's freeze — see
+          // `eventOnAnyScreen`. At six seats this was the bulk of B3's 53% off-screen freezes.
+          if (isWeaponHit && this.eventOnAnyScreen(victim.x, victim.y)) {
             this.triggerHitStop(THREE.MathUtils.clamp(10 + ev.amount * 4.6, 16, 105));
           }
 
@@ -2036,7 +2064,9 @@ export class GameSession {
           this.vfx.spawnDeathBurst(fighter.x, fighter.y, color);
           this.feel.responses.vfx++;
           this.kick(0.42, this.shakeProximity(fighter.x, fighter.y), 3);
-          this.triggerHitStop(90);
+          // Same gate as the hit and the slam. Your OWN death is at distance 0 from the
+          // camera's subject (the dwell holds the camera on you), so it always freezes.
+          if (this.eventOnAnyScreen(fighter.x, fighter.y)) this.triggerHitStop(90);
           break;
         }
         // ── THE WIND-UP, DRAWN — `cast-started` / `cast-cancelled` ───────────────

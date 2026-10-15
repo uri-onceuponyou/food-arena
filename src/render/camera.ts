@@ -387,6 +387,34 @@ export function shakeProximityScale(
   return 1 - (1 - floor) * t;
 }
 
+/**
+ * IS AN EVENT `distanceUnits` FROM THE WATCHED FIGHTER ON ANY SCREEN AT ALL?
+ *
+ * The same FADE radius as `shakeProximityScale` — `CameraRig.shakeFadeRadiusUnits()`, *"the
+ * farthest ground point ANY supported aspect can show"* — asked as a yes/no, for the two feel
+ * channels that cannot be attenuated because they are not amplitudes: **hit-stop**, which
+ * freezes the WHOLE sim including the local player's own movement, and **`hud.flashScreen`**,
+ * which washes the whole frame.
+ *
+ * 🚨 BOTH FIRED FOR EVENTS NO DISPLAY CAN SHOW (B3, `shots/rv/bugs`). `d0a42ea` gave the kick
+ * a distance term after Uri's *"make sure that the shake only happens when the proximity is
+ * close"* and left these two out, so at six seats **53.0% of the local player's frozen frames
+ * belonged to events off every screen**, and a giant slam 2,241 wu away washed the frame red.
+ * At two seats every weapon hit is inside `MAX_THREAT_REACH` of one of the two fighters, so
+ * the omission could not express itself — the same vacuity `SHAKE_PROXIMITY`'s header records.
+ *
+ * ⚠️ **A DISTANCE TEST, NOT `shakeProximityScale(d) > SHAKE_PROXIMITY.floor`, AND THAT IS NOT
+ * STYLE.** The curve bottoms out at `1 - (1 - 0.15) * 1` = **0.15000000000000002**, which is
+ * `> 0.15`, so the obvious gate is TRUE at every distance and gates nothing. Both review
+ * verifiers measured that trap independently; `tools/tmp/b1_camera.mjs` asserts it.
+ *
+ * Strict `<`: at exactly the fade radius the kick is already at its floor, i.e. the curve
+ * has declared the point off every screen, and the two rules must not disagree at the seam.
+ */
+export function onAnyScreen(distanceUnits: number, fadeRadiusUnits: number): boolean {
+  return distanceUnits < fadeRadiusUnits;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // WHO THE CAMERA IS WATCHING — and what happens when that is a corpse
 // ─────────────────────────────────────────────────────────────────────────────
