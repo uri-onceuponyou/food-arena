@@ -80,6 +80,8 @@ import { GroundMarkBatch, linAtLC } from '../vfx/groundMarks';
 import { VFX_SIGNATURE, effectColor } from '../vfx/palette';
 // Blue Cheese's stink cloud, drawn from state (graphics campaign V1).
 import { BlueCheeseClouds } from '../vfx/blueCheese';
+// One shared, velocity-aligned ribbon behind every projectile (graphics campaign V1).
+import { RibbonBatch, type RibbonPoint } from '../vfx/ribbons';
 
 declare global {
   interface Window {
@@ -759,6 +761,21 @@ const CHEESE_HAZE = linAtLC(CHEESE_HAZE_HEX, 0.62, 0.05);
 const CHEESE_EDGE = linAtLC(CHEESE_HAZE_HEX, 0.80, 0.06);
 const CHEESE_HAZE_A = 0.13;
 const CHEESE_EDGE_A = 0.34;
+
+// ── PROJECTILE RIBBONS — see `src/vfx/ribbons.ts` ─────────────────────────────────
+/** How much of a shot's recent path the streak shows, in sim ms. Long enough to state a
+ *  direction at the slowest speed, short enough not to read as a beam at the fastest. */
+const RIBBON_LIFE_MS = 120;
+/** Points per ribbon (a frame at 60 fps is ~16.7 ms, so 8 covers RIBBON_LIFE_MS). */
+const RIBBON_POINTS = 8;
+/** Live projectiles drawn with a ribbon; past this a shot simply has none (six seats of
+ *  five-pellet sprays is 30). */
+const RIBBON_MAX = 128;
+const RIBBON_WIDTH_M = 0.34;
+const RIBBON_ALPHA = 0.62;
+/** How far the streak's colour is lifted toward white: a transient clears the cast's value
+ *  UPWARD (hue contract rule 1). */
+const RIBBON_WHITE = 0.35;
 
 const WHITE = new THREE.Color('#ffffff');
 /** Deep desaturated ink, matching `render/toon.ts`'s outline colour (kept as a local
@@ -2961,6 +2978,9 @@ export class VfxLayer {
   private readonly markColors = new Map<string, { body: [number, number, number]; rim: [number, number, number] }>();
   /** Blue Cheese: one cloud per living wearer, one draw for all of them. Above the marks so a
    *  wearer walking through goo still shows his boundary. */
+  private readonly ribbons = new RibbonBatch(RIBBON_MAX, RIBBON_POINTS);
+  /** Linear ribbon colour per weapon colour (after the identity re-key), memoised. */
+  private readonly ribbonRgb = new Map<string, [number, number, number]>();
   private readonly cheeseClouds = new BlueCheeseClouds(TRAIL_Y + 0.03, MAX_FIGHTERS, CHEESE_HAZE, CHEESE_EDGE, CHEESE_HAZE_A, CHEESE_EDGE_A);
 
   /** The (linear) body and rim a mark keyed to `hex` draws in — `hex`'s hue at this file's
@@ -3056,6 +3076,8 @@ export class VfxLayer {
     // First child: the ground-mark union draws under everything else this layer owns.
     this.group.add(this.groundMarks.mesh);
     this.group.add(this.cheeseClouds.mesh);
+    this.group.add(this.ribbons.mesh);
+    preserveDestinationAlpha(this.ribbons.material);
 
     // Pre-built at the old two-seat sizes; `alloc*` grows each pool to `poolCaps`.
     for (let i = 0; i < PARTICLE_POOL_SIZE; i++) this.buildParticleSlot();
@@ -3444,6 +3466,30 @@ export class VfxLayer {
         obj.scale.multiplyScalar(k);
       },
     );
+
+    // ── PROJECTILE RIBBONS — one draw for every live shot (see `src/vfx/ribbons.ts`) ──
+    // Each shot's recent positions live on its pooled object, so they die with it.
+    this.ribbons.begin();
+    for (const p of state.projectiles) {
+      const obj = this.projectilePool.get(p.id);
+      if (!obj) continue;
+      const hist = ((obj.userData.ribbon as (RibbonPoint & { t: number })[] | undefined) ??= []);
+      const head = hist[0];
+      const px = obj.position.x; const py = obj.position.y; const pz = obj.position.z;
+      if (!head || head.x !== px || head.y !== py || head.z !== pz) hist.unshift({ x: px, y: py, z: pz, t: state.elapsed });
+      while (hist.length > RIBBON_POINTS || (hist.length > 2 && state.elapsed - hist[hist.length - 1]!.t > RIBBON_LIFE_MS)) hist.pop();
+      if (hist.length < 2) continue;
+      const owner = fighterOf(state, p.ownerId, p.ownerRole);
+      const hex = effectColor(owner.characterId, p.color);
+      let rgb = this.ribbonRgb.get(hex);
+      if (!rgb) {
+        const c = new THREE.Color(hex).lerp(WHITE, RIBBON_WHITE);
+        rgb = [c.r, c.g, c.b];
+        this.ribbonRgb.set(hex, rgb);
+      }
+      this.ribbons.add(hist, rgb, RIBBON_WIDTH_M, RIBBON_ALPHA);
+    }
+    this.ribbons.end();
 
     // ── THE PROJECTILE LEGIBILITY SHELL ────────────────────────────────────────
     //
@@ -5783,6 +5829,8 @@ export class VfxLayer {
     this.groundMarks.end(0);
     this.cheeseClouds.begin();
     this.cheeseClouds.end(0);
+    this.ribbons.begin();
+    this.ribbons.end();
     for (const p of this.particles) { p.active = false; p.sprite.visible = false; }
     for (const w of this.wedges) { w.active = false; w.mesh.visible = false; }
     for (const r of this.rings) { r.active = false; r.mesh.visible = false; }
@@ -5842,6 +5890,7 @@ export class VfxLayer {
     this.medikitCrossMat.dispose();
     this.groundMarks.dispose();
     this.cheeseClouds.dispose();
+    this.ribbons.dispose();
     this.materialCache.forEach((m) => m.dispose());
     this.materialCache.clear();
 
