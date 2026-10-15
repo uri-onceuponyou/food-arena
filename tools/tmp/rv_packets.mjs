@@ -95,8 +95,26 @@ export const ZB_HOME_REDACT = [
   { role: 'status-bubble', x: 925, y: 405, w: 270, h: 105 },
 ];
 
+/**
+ * 🚨 `bs_home` CARRIES AN IDENTITY STRING TOO, and until 2026-10-15 this file blurred only
+ * `zb_home`. Found by the revamp's menu package (U1), which read the plate rather than this
+ * file's header. In PLATE pixels (2556x1179), roles only:
+ *   identity-name   the profile-name label under the avatar, top-left
+ * Generous on purpose (the label is ~45x31 px inside this box). The other menu plates —
+ * `menus_select/{bs_character_detail,bs_roster_grid,zb_character_detail}` — were LOOKED AT the
+ * same day: game content and currency/trophy counts only, no identity string.
+ */
+export const BS_HOME_REDACT = [
+  { role: 'identity-name', x: 200, y: 112, w: 140, h: 62 },
+];
+
+/** Every plate that needs blurring, by file name. A plate absent here is composited as-is. */
+export const PLATE_REDACT = { 'zb_home.png': ZB_HOME_REDACT, 'bs_home.png': BS_HOME_REDACT };
+
 /** Map plate-space boxes onto the sheet, given which slot the plate occupies. */
 export async function redactionBoxes(sheetMeta, { oursPath, refPath, refSlot }) {
+  const plateBoxes = PLATE_REDACT[basename(refPath)];
+  if (!plateBoxes) throw new Error(`rv_packets: no redaction table for ${basename(refPath)}`);
   const widthAt = async (p) => (await sharp(p).resize({ height: LAYOUT.HEIGHT, fit: 'contain', background: { r: 22, g: 16, b: 31, alpha: 1 } }).png().toBuffer({ resolveWithObject: true })).info.width;
   const [wOurs, wRef] = await Promise.all([widthAt(oursPath), widthAt(refPath)]);
   const wA = refSlot === 'A' ? wRef : wOurs;
@@ -108,7 +126,7 @@ export async function redactionBoxes(sheetMeta, { oursPath, refPath, refSlot }) 
   if (sheetMeta.width !== expectW || sheetMeta.height !== LAYOUT.HEIGHT + LAYOUT.LABEL_H + LAYOUT.GAP * 2) {
     throw new Error(`rv_packets: sheet is ${sheetMeta.width}x${sheetMeta.height}, layout predicts ${expectW}x${LAYOUT.HEIGHT + LAYOUT.LABEL_H + LAYOUT.GAP * 2} — compare.mjs changed; refusing to guess where the plate is`);
   }
-  return ZB_HOME_REDACT.map((b) => ({
+  return plateBoxes.map((b) => ({
     role: b.role,
     left: Math.max(0, Math.floor(left + b.x * scale)),
     top: Math.max(0, Math.floor(top + b.y * scale)),
@@ -268,11 +286,11 @@ async function build(args) {
       if (oursSlot !== design[i]) throw new Error(`rv_packets: compare.mjs never landed ${design[i]} for ${el.element} c${i + 1} in ${tries} tries`);
       const built = join(dir, 'sheet_1.png');
       let redaction = null;
-      if (plate === 'zb_home.png') {
+      if (PLATE_REDACT[plate]) {
         const meta = await sharp(built).metadata();
         const boxes = await redactionBoxes(meta, { oursPath: el.ours, refPath: join(CURATED, el.category, plate), refSlot: oursSlot === 'A' ? 'B' : 'A' });
         await blurBoxes(built, boxes);
-        redaction = { plate, boxesPlatePx: ZB_HOME_REDACT, boxesSheetPx: boxes, sigma: 14, why: 'CLAUDE.md: zb_home account strings must never appear in a packet' };
+        redaction = { plate, boxesPlatePx: PLATE_REDACT[plate], boxesSheetPx: boxes, sigma: 14, why: 'CLAUDE.md: a menu plate\'s identity strings must never appear in a packet' };
       }
       const pub = join(PACK, `${id}.png`);
       copyFileSync(built, pub);
@@ -383,8 +401,15 @@ export function verify(ROUND) {
   add(drift.length === 8 && drift.every((s) => s.sha256 === s.sourceSha256 && existsSync(s.source) && sha256File(s.source) === s.sha256),
     'drift sheets are byte-identical to their 2026-08-05 sources', '');
   add(drift.every((s) => s.byteIdenticalToQ1Record === true), 'drift sheets match the sha256 q1 recorded on 2026-08-12', drift.map((s) => s.byteIdenticalToQ1Record).join(','));
-  const zb = man.sheets.filter((s) => /zb_home/.test(s.refPlate));
-  add(zb.every((s) => s.redaction && s.redaction.boxesSheetPx?.length === 3), 'every zb_home sheet carries its 3 redactions', `${zb.length} zb_home sheets`);
+  // Per redacted plate. A home element round-robins over BOTH home plates, so when the
+  // manifest has home sheets, each plate's set must be NON-EMPTY before `every` is believed
+  // (an empty set passes `every` — CLAUDE.md rule 6's vacuity).
+  const hasHome = man.sheets.some((s) => /^menus_home\//.test(s.refPlate));
+  for (const [plate, boxes] of Object.entries(PLATE_REDACT)) {
+    const ss = man.sheets.filter((s) => basename(s.refPlate) === plate);
+    add((!hasHome || ss.length > 0) && ss.every((s) => s.redaction && s.redaction.boxesSheetPx?.length === boxes.length),
+      `every ${plate.replace('.png', '')} sheet carries its ${boxes.length} redaction(s)`, `${ss.length} sheets`);
+  }
   const rubric = readFileSync(join(ROOT, 'tools/review.rubric.txt'));
   add(readFileSync(join(PACK, 'RUBRIC.txt')).subarray(0, rubric.length).equals(rubric), 'packets/RUBRIC.txt is the canonical rubric byte-for-byte', '');
   add(man.sheets.filter((s) => s.arm === 'new' || s.arm === 'ctl_low').every((s) => s.verified === true), 'every NEW/ctl_low sheet was VERIFIED by review.mjs\'s capture gate', '');
@@ -436,43 +461,70 @@ async function selftest() {
   // redaction geometry on a synthetic sheet laid out exactly like compare.mjs's
   const tmp = join(ROOT, 'shots/rv/r0/.selftest_packets');
   mkdirSync(tmp, { recursive: true });
+  // Every home plate must have been LOOKED AT for identity strings: both carry one today, and
+  // a plate added later would otherwise be composited raw without anyone deciding it is clean.
+  const homePlates = platesOf('menus_home');
+  add(homePlates.length > 0 && homePlates.every((f) => PLATE_REDACT[f]), 'every menus_home plate has a redaction table', `${homePlates.join(', ')}`);
+  let threwNoTable = false;
+  try { await redactionBoxes({ width: 0, height: 0 }, { oursPath: '', refPath: join(CURATED, 'menus_select/bs_roster_grid.png'), refSlot: 'A' }); } catch { threwNoTable = true; }
+  add(threwNoTable, 'KNOWN-BAD: a plate with no table refuses rather than returning no boxes', '');
   try {
-    const plate = join(CURATED, 'menus_home/zb_home.png');
-    const pm = await sharp(plate).metadata();
-    add(ZB_HOME_REDACT.every((b) => b.x >= 0 && b.y >= 0 && b.x + b.w <= pm.width && b.y + b.h <= pm.height), 'redaction boxes lie inside the 2556x1179 plate', `${pm.width}x${pm.height}`);
     const ours = join(tmp, 'ours.png');
     await sharp({ create: { width: 1600, height: 900, channels: 3, background: { r: 10, g: 200, b: 10 } } }).png().toFile(ours);
     const sheet = join(tmp, 'sheet.png');
     const key = join(tmp, 'sheet.key.json');
-    execFileSync('node', ['tools/compare.mjs', '--ours', ours, '--ref', plate, '--out', sheet, '--key', key, '--height', '1000'], { cwd: ROOT, stdio: 'ignore' });
-    const k = JSON.parse(readFileSync(key, 'utf8'));
-    const refSlot = k.A === 'reference' ? 'A' : 'B';
-    const meta = await sharp(sheet).metadata();
-    const boxes = await redactionBoxes(meta, { oursPath: ours, refPath: plate, refSlot });
-    // The boxes must land on the PLATE (not on our green panel): sample each box centre.
-    const raw = await sharp(sheet).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    const px = (x, y) => { const i = (y * raw.info.width + x) * raw.info.channels; return [raw.data[i], raw.data[i + 1], raw.data[i + 2]]; };
-    const onOurs = boxes.filter((b) => { const [r, g, bb] = px(b.left + (b.width >> 1), b.top + (b.height >> 1)); return r === 10 && g === 200 && bb === 10; });
-    add(onOurs.length === 0, 'redaction boxes land on the reference panel, not on ours', `${boxes.length} boxes, ${onOurs.length} on ours (ref in ${refSlot})`);
-    // KNOWN-BAD: the wrong slot puts them on OUR panel — proves the check can fail.
-    const wrong = await redactionBoxes(meta, { oursPath: ours, refPath: plate, refSlot: refSlot === 'A' ? 'B' : 'A' });
-    const wrongOnOurs = wrong.filter((b) => { const [r, g, bb] = px(b.left + (b.width >> 1), b.top + (b.height >> 1)); return r === 10 && g === 200 && bb === 10; });
-    // ≥1, not all: the panels differ in width, so a mirrored box can straddle the gutter.
-    // What matters is that the check above WOULD fire on a mirrored mapping.
-    add(wrongOnOurs.length >= 1, 'KNOWN-BAD: the mirrored slot puts boxes on OUR panel, so the check above fires', `${wrongOnOurs.length}/${wrong.length}`);
-    // the blur changes the boxes and nothing else
-    const before = readFileSync(sheet);
-    await blurBoxes(sheet, boxes);
-    const a = await sharp(before).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    const b2 = await sharp(sheet).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    let inside = 0; let outside = 0;
-    const inBox = (x, y) => boxes.some((bx) => x >= bx.left && x < bx.left + bx.width && y >= bx.top && y < bx.top + bx.height);
-    for (let y = 0; y < a.info.height; y += 2) for (let x = 0; x < a.info.width; x += 2) {
-      const i = (y * a.info.width + x) * a.info.channels;
-      const d = Math.abs(a.data[i] - b2.data[i]) + Math.abs(a.data[i + 1] - b2.data[i + 1]) + Math.abs(a.data[i + 2] - b2.data[i + 2]);
-      if (d) { if (inBox(x, y)) inside++; else outside++; }
+    // compare.mjs flips its own coin for the slot, so a check run on "whichever side it
+    // landed" covers ONE side per run and its known-bad can be blind by chance: bs_home's only
+    // box sits at the plate's LEFT edge, and with the reference in A a mirrored mapping still
+    // lands on the reference panel. So each plate is built with the reference in A AND in B
+    // (re-flipping, as the builder does), and the mirror known-bad runs where it can fire.
+    const buildWithRefIn = (want) => {
+      for (let t = 0; t < 40; t++) {
+        execFileSync('node', ['tools/compare.mjs', '--ours', ours, '--ref', CUR_PLATE, '--out', sheet, '--key', key, '--height', '1000'], { cwd: ROOT, stdio: 'ignore' });
+        const k = JSON.parse(readFileSync(key, 'utf8'));
+        if ((k.A === 'reference' ? 'A' : 'B') === want) return true;
+      }
+      return false;
+    };
+    let CUR_PLATE = '';
+    for (const [plateName, plateBoxes] of Object.entries(PLATE_REDACT)) {
+      const plate = join(CURATED, 'menus_home', plateName);
+      CUR_PLATE = plate;
+      const tag = plateName.replace('.png', '');
+      const pm = await sharp(plate).metadata();
+      add(plateBoxes.length > 0 && plateBoxes.every((b) => b.x >= 0 && b.y >= 0 && b.x + b.w <= pm.width && b.y + b.h <= pm.height), `${tag}: redaction boxes lie inside the 2556x1179 plate`, `${pm.width}x${pm.height}`);
+      for (const refSlot of ['A', 'B']) {
+        const landed = buildWithRefIn(refSlot);
+        const meta = await sharp(sheet).metadata();
+        const boxes = landed ? await redactionBoxes(meta, { oursPath: ours, refPath: plate, refSlot }) : [];
+        // The boxes must land on the PLATE (not on our green panel): sample each box centre.
+        const raw = await sharp(sheet).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+        const px = (x, y) => { const i = (y * raw.info.width + x) * raw.info.channels; return [raw.data[i], raw.data[i + 1], raw.data[i + 2]]; };
+        const isOurs = (b) => { const [r, g, bb] = px(b.left + (b.width >> 1), b.top + (b.height >> 1)); return r === 10 && g === 200 && bb === 10; };
+        const onOurs = boxes.filter(isOurs);
+        add(landed && boxes.length > 0 && onOurs.length === 0, `${tag}, reference in ${refSlot}: redaction boxes land on the reference panel, not on ours`, `${boxes.length} boxes, ${onOurs.length} on ours`);
+        if (refSlot === 'B') {
+          // KNOWN-BAD: the mirrored slot (A) maps every box onto OUR panel, which spans the left
+          // of the sheet — proves the check above can fail. Deterministic with the plate in B.
+          const wrong = await redactionBoxes(meta, { oursPath: ours, refPath: plate, refSlot: 'A' });
+          const wrongOnOurs = wrong.filter(isOurs);
+          add(wrong.length > 0 && wrongOnOurs.length === wrong.length, `${tag}: KNOWN-BAD: the mirrored slot puts every box on OUR panel, so the check above fires`, `${wrongOnOurs.length}/${wrong.length}`);
+          // the blur changes the boxes and nothing else
+          const before = readFileSync(sheet);
+          await blurBoxes(sheet, boxes);
+          const a = await sharp(before).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+          const b2 = await sharp(sheet).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+          let inside = 0; let outside = 0;
+          const inBox = (x, y) => boxes.some((bx) => x >= bx.left && x < bx.left + bx.width && y >= bx.top && y < bx.top + bx.height);
+          for (let y = 0; y < a.info.height; y += 2) for (let x = 0; x < a.info.width; x += 2) {
+            const i = (y * a.info.width + x) * a.info.channels;
+            const d = Math.abs(a.data[i] - b2.data[i]) + Math.abs(a.data[i + 1] - b2.data[i + 1]) + Math.abs(a.data[i + 2] - b2.data[i + 2]);
+            if (d) { if (inBox(x, y)) inside++; else outside++; }
+          }
+          add(inside > 0 && outside === 0, `${tag}: blur moves pixels INSIDE the boxes and none outside`, `${inside} inside, ${outside} outside (2px lattice)`);
+        }
+      }
     }
-    add(inside > 0 && outside === 0, 'blur moves pixels INSIDE the boxes and none outside', `${inside} inside, ${outside} outside (2px lattice)`);
   } finally { rmSync(tmp, { recursive: true, force: true }); }
   // balanced design
   const td8 = cycle(['p1', 'p2', 'p3', 'p4', 'p5', 'p6'], 8);
