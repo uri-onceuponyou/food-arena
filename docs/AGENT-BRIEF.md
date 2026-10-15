@@ -214,6 +214,14 @@ node tools/tmp/gatecount.mjs     # ← EXPECTED COUNTS LIVE ONLY IN docs/TOOLS.m
 node tools/verify-head.mjs       # the COMMITTED tree — run before EVERY push
 ```
 
+⚠️ **`gatecount` is the gate that sees instruments which depend on your files WITHOUT importing
+them**, and skipping it is how they break silently. 2026-10-15: the revamp's district package (A2b)
+ran every gate its brief listed — that list (the orchestrator's) omitted `gatecount` — and its merge
+(`d1b2621`) turned three green instruments red: `arena-scan`'s inlined copy of the layout (111 vs
+117 boxes) and the `60c5b92` pot-pin fixture in `sp_place` + `sp_gate`, planted on a centre line the
+new pass counter now blocks. Caught by the merge battery, repaired in `4bed2d1`. A brief's gate list
+does not replace this section.
+
 🔴 **Do not write an expected count anywhere but that table.** `gatecount` refuses a second copy
 **even one that agrees** — today's agreeing copy is next month's stale one.
 ⚠️ **But "refuses" is not "cannot happen".** It reads exactly two documents, `CLAUDE.md` and
