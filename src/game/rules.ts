@@ -2763,6 +2763,10 @@ export type WeaponType = 'melee' | 'ranged' | 'self';
  *   * **Donut is now dominant at six seats** — placement **1.381** and an **83.1% win
  *     rate**, from LAST in the roster (4.425) before. It gained three weapons, and two of
  *     its four carry `trailBoosted` on the one character with `hasTrail`.
+ *     ⚠️ (B3b, 2026-10-15) Only ONE of those two ever applied: the melee path ignored the
+ *     flag, so `Ring` landed unboosted in every match behind these numbers (BH-03). The
+ *     flag is now removed from `Ring` — see the Donut kit — so the shipped game matches
+ *     what was measured here.
  *   * **Water Bottle reads 0.0% on the 1v1 ladder but 4.492 places at six** — weakest,
  *     not absent. `DECISIONS §81` established that win rate and placement are different
  *     quantities that can move in opposite directions, and this is the same lesson: a
@@ -4636,8 +4640,20 @@ export const CHARACTERS: Record<CharacterId, CharacterDef> = {
     // ignore it. `Ring` and `Candy` both carry `trailBoosted`; the Super deliberately
     // does not, because a super that is conditional on terrain is a super you cannot
     // plan around.
+    //
+    // ⚠️ **THAT SENTENCE WAS HALF FALSE FROM THE DAY IT WAS WRITTEN, AND IS KEPT FOR THAT.**
+    // `Ring` carried `trailBoosted: true` but `combat.ts:deliverWeapon`'s MELEE branch never
+    // read the flag — only the ranged one did — so every Ring Spin on the trail landed 9 where
+    // the declaration promised 14 (BH-03). Every balance number measured since this kit
+    // shipped, including "Donut is now dominant at six seats" in "WHAT THE SHAPE COST, AT SIX SEATS" above, was
+    // measured with an UNBOOSTED Ring. B3b (2026-10-15) made the swing honour the flag
+    // (`combat.ts:trailBoostedDamage`) and REMOVED it from `Ring` in the same change, so the
+    // shipped game does not move: a verifier measured the boost taking Donut — already the
+    // six-seat outlier — from 20 to 26 wins of 30. **Only `Candy` is trail-boosted.** Whether
+    // Ring SHOULD be is parked for Uri; restoring it is one field, and `sim.test.mjs` §46(c)
+    // will then require the 14 to land.
     weapons: [
-      { key: 'Ring', name: 'Ring Spin', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 9, cooldown: 900, cone: 160, color: '#FF6FA5', effect: null, trailBoosted: true, emoji: '🍩' },
+      { key: 'Ring', name: 'Ring Spin', type: 'melee', slot: 'melee', range: REACH.meleeStrong, damage: 9, cooldown: 900, cone: 160, color: '#FF6FA5', effect: null, emoji: '🍩' },
       // ⚠️ `pellets` IS 5 AND MUST STAY ODD. It was authored 4 and `sim.test.mjs` §50b
       // caught it inside the hour: `hasAxisShot` is `homing || (!comboParts && (!pellets ||
       // pellets % 2 === 1))`, so an EVEN fan has no pellet on the firing axis and cannot

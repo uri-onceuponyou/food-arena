@@ -12736,6 +12736,113 @@ console.log('\n46. Combat + items, the second half — why a press is refused, t
         st2.projectiles.length > 0 && st2.projectiles.every((p) => p.targetId === 1), `→ [${st2.projectiles.map((p) => p.targetId)}]`);
     }
   }
+
+  // ── (c) BH-03: A DECLARED TRAIL BOOST IS A BOOST THAT LANDS — FOR A SWING TOO ──
+  //
+  // `donut.Ring` declared `trailBoosted` and the melee branch of `combat.ts:deliverWeapon`
+  // never read the flag (only the ranged branch did), so every Ring Spin on the trail landed
+  // 9 where the card promised round(9 × `TRAIL.damageBoost`) = 14. Two defects in one: a
+  // promise the sim did not keep, and a melee path that ignores a field every weapon may set.
+  //
+  // The fix is both halves, chosen so SHIPPED BALANCE DOES NOT MOVE: the melee loop honours
+  // the flag, and the flag is REMOVED from Ring (a verifier measured the boost taking Donut —
+  // already dominant at six seats — from 20 to 26 wins of 30). Whether Ring SHOULD be boosted
+  // is parked for Uri; these rows pin both halves so neither can drift alone.
+  //
+  // ⚠️ (c)'s known-bad lever is the roster object itself: a row sets `trailBoosted` on Ring
+  // for ONE swing and restores it in `finally`, so it can ask "does the swing path honour
+  // the flag" independently of what the roster ships.
+  {
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+    const CX = arena.center.x, CY = arena.center.y;
+    const KIT = CHARACTERS.donut.weapons;
+    const RING_I = KIT.findIndex((w) => w.key === 'Ring');
+    const RING = KIT[RING_I];
+    /** Donut (slot 0, facing east) with `victims` opponents inside Ring's arc and the rest
+     *  parked far behind; optionally standing on a live mark of its own trail. Returns what
+     *  each press LANDED: hit-landed amounts for a swing, spawned pellet damage for a shot. */
+    const press = (wi, { onTrail, declare, victims = 1, seats = 2 }) => {
+      const st = createMatch(arena, [
+        { characterId: 'donut', spawn: { x: CX, y: CY }, controller: 'human' },
+        ...Array.from({ length: seats - 1 }, (_, i) => ({
+          characterId: 'hamburger', controller: 'human',
+          spawn: i < victims
+            ? { x: CX + RING.range * 0.6 * Math.cos((i - (victims - 1) / 2) * 0.5), y: CY + RING.range * 0.6 * Math.sin((i - (victims - 1) / 2) * 0.5) }
+            : { x: CX - 900 - i * 150, y: CY + 700 },
+        })),
+      ]);
+      st.phase = 'playing';
+      st.elapsed = 20_000;
+      st.fighters[0].facing = { x: 1, y: 0 };
+      for (const f of st.fighters) { f.hp = 1e6; f.maxHp = 1e6; }
+      if (onTrail) {
+        st.trailMarks.push({ id: st.nextId++, ownerId: 0, ownerRole: st.fighters[0].role, x: CX, y: CY,
+          expiresAt: st.elapsed + TRAIL.durationMs, damagedMask: 0, damaged: false });
+      }
+      const w = KIT[wi];
+      const had = Object.prototype.hasOwnProperty.call(w, 'trailBoosted');
+      const old = w.trailBoosted;
+      if (declare !== undefined) w.trailBoosted = declare;
+      try {
+        const ev = [];
+        const trail = isOnOwnTrail(st, st.fighters[0]);
+        attemptAttack(st, st.fighters[0], wi, ev);
+        const landed = w.type === 'melee'
+          ? ev.filter((e) => e.type === 'hit-landed' && e.source?.kind === 'weapon').map((e) => e.amount)
+          : st.projectiles.map((p) => p.damage);
+        return { landed, trail, declared: !!w.trailBoosted };
+      } finally {
+        if (had) w.trailBoosted = old; else delete w.trailBoosted;
+      }
+    };
+    const boosted = (d) => Math.round(d * TRAIL.damageBoost);
+    const onArm = press(RING_I, { onTrail: true });
+    const offArm = press(RING_I, { onTrail: false });
+    check('(c) NON-VACUITY: Donut really stands on its own live mark (and off it in the control), Ring connects in both, and the boost is not 1',
+      onArm.trail === true && offArm.trail === false && onArm.landed.length === 1 && offArm.landed.length === 1 && TRAIL.damageBoost !== 1
+      && boosted(RING.damage) !== RING.damage,
+      `on ${onArm.trail} [${onArm.landed}], off ${offArm.trail} [${offArm.landed}], boost ×${TRAIL.damageBoost}`);
+
+    // (c1) DECLARED == APPLIED, for every weapon of every character that has a trail.
+    const trailChars = CHARACTER_IDS.filter((id) => CHARACTERS[id].hasTrail);
+    const broken = [];
+    let rowsSeen = 0;
+    for (const id of trailChars) {
+      if (id !== 'donut') { broken.push(`${id}: a second trail character — extend (c)'s fixture`); continue; }
+      KIT.forEach((w, wi) => {
+        if (w.type === 'self') return;
+        const r = press(wi, { onTrail: true });
+        rowsSeen++;
+        const want = r.declared ? boosted(w.damage) : w.damage;
+        if (r.landed.length === 0 || r.landed.some((d) => d !== want)) broken.push(`${w.key}: declared ${r.declared}, landed [${r.landed}], want ${want}`);
+      });
+    }
+    check('(c) 🔴 on its own trail, every weapon lands EXACTLY what it declares — boosted iff `trailBoosted`',
+      trailChars.length > 0 && rowsSeen >= 3 && broken.length === 0,
+      broken.join(' · ') || `${rowsSeen} weapons agree (pre-fix: Ring declared, landed [9], want 14)`);
+    const strays = CHARACTER_IDS.filter((id) => !CHARACTERS[id].hasTrail)
+      .flatMap((id) => CHARACTERS[id].weapons.filter((w) => w.trailBoosted).map((w) => `${id}.${w.key}`));
+    check('(c) CONTROL: no character WITHOUT a trail declares a trail-boosted weapon (it could never land)',
+      strays.length === 0, strays.join(', ') || 'none');
+
+    // (c2) THE SWING PATH HONOURS THE FLAG — Ring declared for one swing, at SIX seats with
+    // THREE opponents in the arc, because a swing hits everyone in it (§35) and the boost is
+    // one fact about the swing, not about the first victim.
+    const decl = press(RING_I, { onTrail: true, declare: true, victims: 3, seats: 6 });
+    const declOff = press(RING_I, { onTrail: false, declare: true, victims: 3, seats: 6 });
+    check('(c) 🔴 a SWING declared trail-boosted lands the boost on EVERY victim in its arc while on the trail',
+      decl.trail && decl.landed.length === 3 && decl.landed.every((d) => d === boosted(RING.damage)),
+      `landed [${decl.landed}] vs ${boosted(RING.damage)} (pre-fix: [9,9,9])`);
+    check('(c) CONTROL: …and the same declared swing OFF the trail lands its plain damage on all three',
+      !declOff.trail && declOff.landed.length === 3 && declOff.landed.every((d) => d === RING.damage),
+      `landed [${declOff.landed}] vs ${RING.damage}`);
+
+    // (c3) BALANCE PINNED: the SHIPPED Ring is not boosted — the flag was removed in the same
+    // change that made it work, so a fix that only applied the flag would show up HERE.
+    check('(c) CONTROL: the SHIPPED Ring lands its base damage on the trail — Ring\'s boost is parked for Uri, not shipped',
+      onArm.landed.length > 0 && onArm.landed.every((d) => d === RING.damage) && offArm.landed.every((d) => d === RING.damage),
+      `Ring declares ${!!RING.trailBoosted}; on [${onArm.landed}], off [${offArm.landed}] vs ${RING.damage}`);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

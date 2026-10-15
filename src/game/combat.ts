@@ -63,12 +63,34 @@ const MELEE_COINCIDENT_EPS = 1e-6;
  * True if `fighter`'s character has a live Sticky Trail mark of its own underneath it.
  * Used both for the ranged trail-damage boost here and for the movement speed boost
  * in `sim.ts` (kept here so both call sites share one definition).
+ *
+ * ⚠️ (B3b, BH-03) "the RANGED trail-damage boost" above was the whole truth and the bug: the
+ * damage boost is `trailBoostedDamage` below now, read by the SWING and the SHOT alike, and
+ * the speed boost has a third reader in `ai.ts`'s speed model. One predicate, every reader.
  */
 export function isOnOwnTrail(state: MatchState, fighter: Fighter): boolean {
   if (!CHARACTERS[fighter.characterId].hasTrail) return false;
   return state.trailMarks.some(
     (mark) => mark.ownerId === fighter.id && Math.hypot(fighter.x - mark.x, fighter.y - mark.y) < TRAIL.radius,
   );
+}
+
+/**
+ * WHAT `w` DEALS FROM `attacker` RIGHT NOW — boosted by `TRAIL.damageBoost` (rounded) iff
+ * the weapon declares `trailBoosted` AND its owner stands on its own trail. (BH-03, B3b.)
+ *
+ * 🚨 **ONE RULE FOR THE SWING AND THE SHOT, BECAUSE THE SWING NEVER HAD IT.** The boost
+ * lived inline in `deliverWeapon`'s RANGED branch; the melee branch passed `w.damage`
+ * straight to `applyDamage`, so `donut.Ring` — declared `trailBoosted` — landed 9 on the
+ * trail where its own declaration promised 14 (`sim.test.mjs` §46(c), red on `d46f750`). A
+ * flag every weapon may set, read by half the weapon types, is this file's named defect
+ * shape: one rule, two implementations, and one of them missing.
+ *
+ * ⚠️ `isOnOwnTrail` is asked only when the flag is set — the `&&` short-circuits — so an
+ * undeclared weapon does exactly the work it did before and the stream is bit-identical.
+ */
+function trailBoostedDamage(state: MatchState, attacker: Fighter, w: Weapon): number {
+  return w.trailBoosted && isOnOwnTrail(state, attacker) ? Math.round(w.damage * TRAIL.damageBoost) : w.damage;
 }
 
 /**
@@ -1535,6 +1557,12 @@ function deliverWeapon(
     // above the epsilon everything is continuous: approach from inside the cone and
     // the swing lands right up to the last representable distance, approach from
     // outside and it misses.
+    //
+    // ── THE TRAIL BOOST APPLIES TO A SWING TOO (BH-03) ──────────────────────────
+    // The call below read `applyDamage(state, victim, w.damage, …)`: the melee path never
+    // asked `trailBoosted`. Computed ONCE, before the loop — the boost is a fact about the
+    // swing (where its owner stands), so every victim in the arc gets the same number.
+    const swingDamage = trailBoostedDamage(state, attacker, w);
     for (const victim of state.fighters) {
       if (!isLivingOpponentOf(victim, attacker)) continue;
       const toVictimX = victim.x - attacker.x;
@@ -1549,7 +1577,7 @@ function deliverWeapon(
         if (angleTo > cone / 2) continue; // "wrong direction"
       }
 
-      applyDamage(state, victim, w.damage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: attacker.id }, events);
+      applyDamage(state, victim, swingDamage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: attacker.id }, events);
     }
     return true;
   }
@@ -1580,8 +1608,11 @@ function deliverWeapon(
     return true;
   }
 
-  const boosted = !!w.trailBoosted && isOnOwnTrail(state, attacker);
-  const dmg = boosted ? Math.round(w.damage * TRAIL.damageBoost) : w.damage;
+  // WAS, inline and in this branch only (BH-03 — the swing never got it):
+  //   > `const boosted = !!w.trailBoosted && isOnOwnTrail(state, attacker);`
+  //   > `const dmg = boosted ? Math.round(w.damage * TRAIL.damageBoost) : w.damage;`
+  // The same arithmetic, now stated once for both branches.
+  const dmg = trailBoostedDamage(state, attacker, w);
 
   if (w.pellets && w.pellets > 1) {
     const spread = w.spreadDeg ?? 0;
