@@ -1,0 +1,31 @@
+<!doctype html>
+<!--
+  F1_HUD_HARNESS — a bare page that loads the REAL hud.ts / sim.ts / arena modules through the
+  snapshot's Vite server, for tools/tmp/f1_hud_logic.mjs. Nothing here is a copy of game logic:
+  the page only exposes the modules on window.__f1 so the test can build a MatchState with the
+  real createMatch and drive the real createHud. `box-sizing: border-box` is set globally
+  because index.html sets it, and hud_accept.mjs records what a harness without it did to
+  every geometry number taken through it (a 196px plate measured as 220px).
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>F1 HUD harness</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; background: #b85a78; overflow: hidden; }
+    #hud { position: fixed; inset: 0; }
+  </style>
+</head>
+<body>
+  <div id="hud"></div>
+  <script type="module">
+    import { createHud } from '/src/ui/hud.ts';
+    import { createMatch } from '/src/game/sim.ts';
+    import { createKitchenArena } from '/src/arena/kitchen.ts';
+    import * as thumbs from '/src/ui/screens/thumbs.ts';
+    window.__f1 = { createHud, createMatch, createKitchenArena, thumbs };
+    window.__f1ready = true;
+  </script>
+</body>
+</html>
