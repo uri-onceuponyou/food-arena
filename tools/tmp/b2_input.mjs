@@ -425,7 +425,11 @@ try {
         row('F6', 'BUG: the chip labelled Pause OPENS THE PAUSE SHEET (paused, mouse not re-captured)', after.open && after.paused && after.locked === false, after);
         row('F6', 'the scrim is not drawn under the open sheet (one PAUSED card, not two)', after.open && after.scrim === 'none', after);
         if (after.open) {
-          await page.click('.match-sheet [data-el="resume"]');
+          // By coordinates, like a player: the primary button idles in a CSS animation, so
+          // Playwright's "stable" actionability check never passes on it (`page.click` timed
+          // out at 30 s on a correct tree — "element is not stable").
+          const res0 = await centre(page, '.match-sheet [data-el="resume"]');
+          await page.mouse.click(res0.x, res0.y);
           await frames(page, 2);
           const res = { open: await sheetOpen(page), paused: (await dbg(page)).paused, ...(await plock(page)) };
           row('F6', "the sheet's Resume re-captures the mouse and runs the match", !res.open && !res.paused && res.locked === true && res.state !== 'lost', res);
