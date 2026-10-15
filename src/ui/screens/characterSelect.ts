@@ -31,7 +31,7 @@ import {
   REACH, abilityCards, levelDamageMultiplier, maxHpFor,
   type CharacterId, type Weapon,
 } from '../../game/rules';
-import type { Screen, ScreenContext } from './types';
+import type { Route, Screen, ScreenContext } from './types';
 import { injectStyles, rgba } from './theme';
 import { burstConfetti, el } from './fx';
 import { getCharacterStage, PORTRAIT_BG_CSS } from './charStage';
@@ -108,7 +108,7 @@ function pickOpponent(player: CharacterId): CharacterId {
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
-export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
+export function createCharacterSelectScreen(ctx: ScreenContext, route: Route = { name: 'characters' }): Screen {
   injectStyles('fa-chars-styles', CSS);
   ensureIconStyles();
 
@@ -116,9 +116,32 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
   const stage = getCharacterStage();
   let viewed: CharacterId = ctx.profile.selected;
 
+  /**
+   * ── 🚨 OPENED FROM THE LOBBY, THIS SCREEN HANDS THE PLAYER BACK TO IT (META-03) ──
+   *
+   * The lobby's "Change your fighter" and a six-seat match's "Change Fighter" both landed
+   * here as the plain roster, whose Fight! starts the DUEL — so a six-player lobby came back
+   * as a 1v1 and nothing said so (sim 2 after lobby 6, `tools/tmp/b6_screens.mjs` §M3 on
+   * `f65af2c`), and Back went home, where the lobby re-mounted at 2.
+   *
+   * With `returnTo: 'lobby'` both exits go back to the lobby instead: the hero button equips
+   * and returns, Back returns without equipping. The lobby still holds its seat count and
+   * re-shows the field it will start with the new fighter in seat 1 — so "the field it SHOWS
+   * is the field it starts" (`lobby.ts`, `lb_accept` H5) survives the change of fighter. The
+   * alternative, carrying the count on into a match from here, would start a field the
+   * player never saw: a fresh opponent and four bots re-derived from the new fighter.
+   *
+   * ⚠️ The button says what it does. "Fight!" over a button that goes to the lobby would be
+   * the UI-asserts-what-the-model-does-not-do class (`lobby.ts` §1); it reads "Choose", the
+   * verb of this screen's own title. Same element, same `data-el`, same slot — U1's layout
+   * (`DECISIONS §91r`) is untouched, and the plain roster (home's Start Game) is byte-for-byte
+   * the screen it was, which is what `journey.mjs` and `match-play.mjs` click through.
+   */
+  const forLobby = route.name === 'characters' && route.returnTo === 'lobby';
+
   root.innerHTML = `
     <header class="fa-topbar">
-      <button class="fa-iconbtn" type="button" data-el="back" aria-label="Back to home">${icon('back')} Back</button>
+      <button class="fa-iconbtn" type="button" data-el="back" aria-label="${forLobby ? 'Back to the lobby' : 'Back to home'}">${icon('back')} Back</button>
       <h1 class="fa-title chars-heading">Choose Your Fighter</h1>
       <div class="fa-topbar-spacer"></div>
       <!-- ADOPTED: '.ds-chip' plus '.ds-chip-val' on the numerals. The chip's shape is
@@ -166,7 +189,7 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
          Measured: tools/tmp/u1_clip.mjs, C1 and C2. -->
     <footer class="chars-bottom">
       <div class="chars-level" data-el="level"></div>
-      <button class="fa-btn fa-btn--primary fa-btn--hero" type="button" data-el="fight">${icon('play')} Fight!</button>
+      <button class="fa-btn fa-btn--primary fa-btn--hero" type="button" data-el="fight">${forLobby ? `${icon('swap')} Choose` : `${icon('play')} Fight!`}</button>
     </footer>
 
     <div class="fa-confetti-layer" data-el="confetti"></div>
@@ -508,7 +531,8 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
   // passive), proven by rendering both arms — `tools/tmp/wj_render.mjs`. (That tool
   // renders the RETIRED row markup; `renderKit` above reads the same `abilityCards()`.)
 
-  q<HTMLButtonElement>('back').addEventListener('click', () => ctx.navigate({ name: 'home' }));
+  q<HTMLButtonElement>('back').addEventListener('click',
+    () => ctx.navigate(forLobby ? { name: 'lobby' } : { name: 'home' }));
 
   selectBtn.addEventListener('click', () => {
     ctx.profile.select(viewed);
@@ -521,6 +545,9 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     // FIGHT implies equipping — nobody expects to fight as someone other than the
     // character they were just looking at.
     ctx.profile.select(viewed);
+    // From the lobby, "Choose" — back to the lobby, which seats `profile.selected` in slot 0
+    // at the count it still holds (META-03; see `forLobby`).
+    if (forLobby) { ctx.navigate({ name: 'lobby' }); return; }
     ctx.navigate({ name: 'match', player: viewed, enemy: pickOpponent(viewed) });
   });
 

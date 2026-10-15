@@ -26,7 +26,28 @@ export type Route =
    */
   | { name: 'opening' }
   | { name: 'home' }
-  | { name: 'characters' }
+  /**
+   * The roster — and, with `returnTo: 'lobby'`, the LOBBY'S fighter picker (META-03).
+   *
+   * 🚨 **A SIX-PLAYER LOBBY USED TO COME BACK FROM HERE AS A 1v1.** The lobby's "Change your
+   * fighter" and a six-seat match's pause-sheet "Change Fighter" both navigated to a bare
+   * `{ name: 'characters' }`, whose Fight! starts the duel this screen has always started —
+   * so the count the player set was silently dropped: lobby `6` -> swap -> Fight! measured
+   * route `{ player, enemy }`, sim 2, two HUD plates (`tools/tmp/b6_screens.mjs` §M3 on
+   * `f65af2c`; invisible at two seats by construction, where the duel IS the configured count).
+   *
+   * `returnTo` is where this visit hands the player back, and it is NAVIGATION CONTEXT, not a
+   * copy of persisted state — the objection `lobby` and `admin` record below does not apply.
+   * With it set, Back and the hero button both return to the lobby, which still holds its seat
+   * count (`lobby.ts:rememberedSeatCount`) and re-shows the field it will start with the new
+   * fighter in seat 1. Absent — home's Start Game — the screen is exactly what it always was:
+   * Back goes home and Fight! starts the duel with `seats` absent, which is what
+   * `journey.mjs`, `match-play.mjs` and `np_identity`'s bit-identity stand on.
+   *
+   * ⚠️ It lives in `history.state` and NOT in the URL: `main.ts:bootRoute` reads only the URL,
+   * so a reload restores it from `history.state` instead (`shell.ts:withRestoredState`).
+   */
+  | { name: 'characters'; returnTo?: 'lobby' }
   | { name: 'trophies' }
   /**
    * Boxes, their prices and their published drop rates.
@@ -92,8 +113,11 @@ export type Route =
   /**
    * A live match.
    *
-   * `seats` is the `DECISIONS §66` flag and it is **default-off by being OPTIONAL**: every
-   * shipped navigation omits it (`characterSelect.ts:444` is the only one) and gets the
+   * `seats` is the `DECISIONS §66` flag and it is **default-off by being OPTIONAL**: ~~every
+   * shipped navigation omits it (`characterSelect.ts:444` is the only one)~~ — stale since the
+   * lobby's Start began setting it (`DECISIONS §74`, 2026-08-12), and the line number had
+   * drifted too; found by META-03's verifiers. Today exactly ONE screen sets it, the lobby's
+   * Start (`lobby.ts`, grep `seatCountFor(seats)`); every other navigation omits it and gets the
    * two-fighter duel this product has always played. Present and in
    * `MIN_FIGHTERS+1..MAX_FIGHTERS`, `matchScreen.ts` seats that many — `player` and `enemy`
    * keep their meaning as seats 0 and 1, and `screens/brawl.ts:brawlRoster` fills the rest.

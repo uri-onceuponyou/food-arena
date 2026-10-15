@@ -80,6 +80,10 @@
  *   * `characterSelect.ts` is not in the owned set either, so its FIGHT could not be
  *     re-pointed even if that were the better product answer (it probably is — see the
  *     handover note at the bottom).
+ *     ⚠️ No such note ever existed (found by META-03's verifiers). And it has since been
+ *     re-pointed — CONDITIONALLY: opened from this screen's swap (`returnTo: 'lobby'`), its
+ *     hero button reads "Choose" and returns here; opened from home it is the duel's Fight!,
+ *     untouched, so the two end-to-end tools above still pass through it (META-03, B6).
  *
  * So the lobby is reached from **the mode block in home's footer**, which is where the
  * reference plates put mode configuration (a wide tappable band immediately left of the
@@ -612,8 +616,18 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
    */
   const enemy: CharacterId = pickOpponent(player);
 
-  /** The chosen count. `MIN_FIGHTERS` — see the header §4: the default is the measured arm. */
-  let seats: number = SEAT_CHOICES[0];
+  /**
+   * The chosen count. `MIN_FIGHTERS` — see the header §4: the default is the measured arm.
+   *
+   * 🚨 ...BUT A COUNT THE PLAYER CHOSE IS NOT RESET BY LEAVING TO CHANGE FIGHTER (META-03).
+   * This was `SEAT_CHOICES[0]` on EVERY mount, so each way back here — the picker's Back, the
+   * Android Back button, home -> lobby — re-mounted at 2, and a six-player lobby could not
+   * survive its own "Change your fighter" control (measured: Android Back -> "2", pressed 2;
+   * `tools/tmp/b6_screens.mjs` §M3 C2 on `f65af2c`). The count now lives for the TAB SESSION
+   * (`rememberedSeatCount`): a new tab still lands on the measured default, so §4's rule that
+   * the unmeasured arm is reachable but never the default a player LANDS in still holds.
+   */
+  let seats: number = rememberedSeatCount();
 
   const root = el('div', 'fa-screen fa-lobby');
   root.innerHTML = `
@@ -1032,7 +1046,7 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
     const opt = node?.closest<HTMLElement>('.lobby-opt');
     if (opt) {
       const n = Number(opt.dataset.seats);
-      if (Number.isInteger(n) && n !== seats) { seats = n; render(); }
+      if (Number.isInteger(n) && n !== seats) { seats = n; rememberSeatCount(n); render(); }
       return;
     }
     // ── The loadout. Ordered before the generic handlers because the sheet sits on top
@@ -1063,7 +1077,9 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
       openSeat?.(Number(open.dataset.slot));
       return;
     }
-    if (node?.closest('[data-el="swap"]')) { ctx.navigate({ name: 'characters' }); return; }
+    // `returnTo` makes character select hand the player BACK here — "Choose" and Back both —
+    // instead of starting the duel from its own Fight! (META-03; `types.ts` says why).
+    if (node?.closest('[data-el="swap"]')) { ctx.navigate({ name: 'characters', returnTo: 'lobby' }); return; }
     if (node?.closest('[data-el="back"]')) ctx.navigate({ name: 'home' });
   };
   root.addEventListener('click', onClick);
@@ -1110,10 +1126,51 @@ export function createLobbyScreen(ctx: ScreenContext): Screen {
  * which point character select's FIGHT can navigate to `{ name: 'lobby' }` and the whole
  * duplicate disappears with it. Recorded in the handover so it is a scheduled removal
  * rather than a drift waiting to happen.
+ * ⚠️ That handover record never existed. META-03 (B6) re-pointed FIGHT only when the roster
+ * was opened FROM here; home's Start Game still reaches the duel's Fight!, which still rolls
+ * its own opponent — so both copies are still live, and the merge is still owed.
  */
 function pickOpponent(player: CharacterId): CharacterId {
   const pool = CHARACTER_IDS.filter((id) => id !== player);
   return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/**
+ * ── THE LOBBY'S SEAT COUNT, KEPT FOR THE TAB SESSION (META-03) ──────────────
+ *
+ * `sessionStorage`, not `localStorage` and not the route, and each refusal is a reason:
+ *   * NOT the route — `types.ts` records why `lobby` carries no arguments, and the count
+ *     changes WITHOUT a navigation, so a route copy would be stale the first time a chip is
+ *     tapped. `sessionStorage` survives exactly what the bug lived in: the picker's Back, the
+ *     Android Back button, and a reload or tab restore.
+ *   * NOT `localStorage` — that would make six seats the DEFAULT for every later visit on the
+ *     device, which header §4 refuses: six bots on a phone are unmeasured, so the lobby makes
+ *     that arm reachable and never the one a player lands in. A new tab lands on 2.
+ * Guarded both ways: a private window or a sandboxed frame can throw on any access, and the
+ * lobby must still mount at the default.
+ *
+ * Exported for `matchScreen.ts`, whose pause-sheet "Change Fighter" round-trips through this
+ * screen and writes the count of the match being left — one key, one format, one writer
+ * function, the rule `loadEquipped` already follows in this file.
+ */
+const SEATS_KEY = 'food-arena.lobby.seats.v1';
+
+export function rememberedSeatCount(): number {
+  try {
+    const n = Number(sessionStorage.getItem(SEATS_KEY));
+    return SEAT_CHOICES.includes(n) ? n : SEAT_CHOICES[0];
+  } catch {
+    return SEAT_CHOICES[0];
+  }
+}
+
+export function rememberSeatCount(n: number): void {
+  if (!SEAT_CHOICES.includes(n)) return;
+  try {
+    sessionStorage.setItem(SEATS_KEY, String(n));
+  } catch {
+    // Unwritable storage: the count simply does not outlive this mount, as before.
+  }
 }
 
 const CSS = `

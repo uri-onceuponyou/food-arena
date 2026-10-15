@@ -184,7 +184,33 @@ function parseRoute(raw: unknown): Route | null {
       ? { name, player, enemy, seats: seatsOf(seats) }
       : null;
   }
+  // META-03: the lobby's fighter picker. Dropping this field here is exactly `seats`' old
+  // failure one route over — Android Back onto a lobby-entered roster would bring back the
+  // plain roster, whose Fight! is a duel. Anything but the one legal value is ignored.
+  if (name === 'characters') {
+    return (raw as { returnTo?: unknown }).returnTo === 'lobby'
+      ? { name, returnTo: 'lobby' }
+      : { name };
+  }
   return { name } as Route;
+}
+
+/**
+ * The boot route, with what only `history.state` knows put back on it.
+ *
+ * A RELOAD keeps `history.state` but `main.ts:bootRoute` reads only the URL, so a route field
+ * that is deliberately NOT in the URL — `characters.returnTo` — would be lost by every reload
+ * (a phone evicting the tab is one): the lobby's fighter picker would come back as the plain
+ * roster and its Fight! would start a duel, META-03 again. The state is trusted only when it
+ * names the SAME screen the URL boots; an address-bar edit or a link creates a fresh entry
+ * whose state is `null`, so it cannot carry a stale field across.
+ */
+function withRestoredState(route: Route): Route {
+  if (route.name !== 'characters') return route;
+  let state: unknown = null;
+  try { state = window.history.state; } catch { return route; }
+  const prior = parseRoute((state as { route?: unknown } | null)?.route);
+  return prior !== null && prior.name === route.name ? prior : route;
 }
 
 /**
@@ -229,6 +255,9 @@ function sameRoute(a: Route, b: Route): boolean {
   if (a.name === 'match' && b.name === 'match') {
     return a.player === b.player && a.enemy === b.enemy && a.seats === b.seats;
   }
+  // The same rule for the lobby's fighter picker: the plain roster and the lobby's are two
+  // places, so Back between them must re-mount rather than be swallowed as a no-op.
+  if (a.name === 'characters' && b.name === 'characters') return a.returnTo === b.returnTo;
   return true;
 }
 
@@ -373,7 +402,7 @@ export function createShell(opts: ShellOptions): Shell {
     switch (route.name) {
       case 'opening': return createOpeningScreen(ctx);
       case 'home': return createHomeScreen(ctx);
-      case 'characters': return createCharacterSelectScreen(ctx);
+      case 'characters': return createCharacterSelectScreen(ctx, route);
       case 'trophies': return createTrophyRoadScreen(ctx);
       // Pure DOM, no WebGL: the shop defines no `update()`, so mounting it stops the
       // shell's rAF loop entirely rather than ticking an idle portrait behind it.
@@ -860,7 +889,7 @@ export function createShell(opts: ShellOptions): Shell {
         // "cold launch", `main.ts` already answers it with the title card, and writing
         // `?screen=opening` would make a refresh during the 4.5 s splash replay the
         // splash instead of getting on with it.
-        mount(route, route.name === 'opening' ? 'none' : 'replace');
+        mount(withRestoredState(route), route.name === 'opening' ? 'none' : 'replace');
         window.__screenReady = true;
         return;
       }
