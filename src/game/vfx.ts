@@ -48,8 +48,8 @@ import type {
 // The presentation-side seat rules, stated once for all four consumers of the event
 // stream — see `roster.ts` for why every resolver has a legacy-role fallback.
 import { fighterOf, fightersOf, slotOf } from './roster';
-import { MAX_FIGHTERS } from './state';
-import { SPLAT_RADIUS, SPLAT_DURATION_MS, TRAIL, REACH, MEDIKIT } from './rules';
+import { MAX_FIGHTERS, hasItem } from './state';
+import { SPLAT_RADIUS, SPLAT_DURATION_MS, TRAIL, REACH, MEDIKIT, ITEM_TUNING } from './rules';
 // The sim's own predicate for "may this status be applied yet", exported by
 // `combat.ts` specifically so this layer can render the shrug-off window without
 // re-deriving the arithmetic (see its doc comment). Importing it rather than copying
@@ -75,6 +75,8 @@ import type { WeaponVfx, WeaponVfxCtx } from '../vfx/weapons/types';
 // Persistent ground marks — one dark union, one draw (graphics campaign V1).
 import { GroundMarkBatch, linAtLC } from '../vfx/groundMarks';
 import { VFX_SIGNATURE } from '../vfx/palette';
+// Blue Cheese's stink cloud, drawn from state (graphics campaign V1).
+import { BlueCheeseClouds } from '../vfx/blueCheese';
 
 declare global {
   interface Window {
@@ -722,6 +724,18 @@ const MARK_SHRINK_MS = 700;
 /** Splats carry no owner (`state.ts:Splat`), so they keep one hue: tomato red-orange, the
  *  splatter weapons' family. */
 const SPLAT_HUE_HEX = '#EF5B2E';
+
+// ── BLUE CHEESE — see `src/vfx/blueCheese.ts` ──────────────────────────────────────
+// `ITEMS.blue_cheese.look`: a low, slowly-churning BLUE-GREEN haze, ON SCREEN CONSTANTLY, so
+// it "must NOT be loud ... read it by motion and by its boundary, not by chroma". Hence a
+// greyed blue-green at low alpha, and a slightly LIGHTER band at exactly the damage radius.
+// Both checked by `tools/tmp/v1_vfx_cheese.mjs` (chroma within +0.03 of the ground under it,
+// |dL| <= 0.08, the band at the radius, nothing drawn without the item).
+const CHEESE_HAZE_HEX = '#3FA59A';
+const CHEESE_HAZE = linAtLC(CHEESE_HAZE_HEX, 0.62, 0.05);
+const CHEESE_EDGE = linAtLC(CHEESE_HAZE_HEX, 0.80, 0.06);
+const CHEESE_HAZE_A = 0.13;
+const CHEESE_EDGE_A = 0.34;
 
 const WHITE = new THREE.Color('#ffffff');
 /** Deep desaturated ink, matching `render/toon.ts`'s outline colour (kept as a local
@@ -2802,6 +2816,9 @@ export class VfxLayer {
   /** Body/rim colours per hue source, memoised: an OKLab solve is cheap but not free, and
    *  it runs per mark per frame otherwise. */
   private readonly markColors = new Map<string, { body: [number, number, number]; rim: [number, number, number] }>();
+  /** Blue Cheese: one cloud per living wearer, one draw for all of them. Above the marks so a
+   *  wearer walking through goo still shows his boundary. */
+  private readonly cheeseClouds = new BlueCheeseClouds(TRAIL_Y + 0.03, MAX_FIGHTERS, CHEESE_HAZE, CHEESE_EDGE, CHEESE_HAZE_A, CHEESE_EDGE_A);
 
   /** The (linear) body and rim a mark keyed to `hex` draws in — `hex`'s hue at this file's
    *  mark VALUES. Public for QA: a probe reads the colour a character's trail resolves to
@@ -2891,6 +2908,7 @@ export class VfxLayer {
     scene.add(this.group);
     // First child: the ground-mark union draws under everything else this layer owns.
     this.group.add(this.groundMarks.mesh);
+    this.group.add(this.cheeseClouds.mesh);
 
     // Pre-built at the old two-seat sizes; `alloc*` grows each pool to `poolCaps`.
     for (let i = 0; i < PARTICLE_POOL_SIZE; i++) this.buildParticleSlot();
@@ -3437,6 +3455,18 @@ export class VfxLayer {
       }
     }
     this.groundMarks.end(state.elapsed / 1000);
+
+    // ── BLUE CHEESE — every LIVING fighter carrying it, at the sim's own radius ─────
+    // Read from state every frame rather than from an event: the aura is passive and
+    // permanent, there is no event that starts it, and a cloud that followed an event would
+    // be missing on a rejoin or a revive. `hasItem` is the sim's one statement of "carries".
+    this.cheeseClouds.begin();
+    roster.forEach((f, slot) => {
+      if (!f.alive || !hasItem(f, 'blue_cheese')) return;
+      const pos = groundPos(f.x, f.y);
+      this.cheeseClouds.push(pos.x, pos.z, wu(ITEM_TUNING.blue_cheese.radius), (slot * 0.37) % 1);
+    });
+    this.cheeseClouds.end(state.elapsed / 1000);
 
     // ── Status telegraphs: slow (character tint + ground ring + puddle splash) /
     // stun (orbiting stars) ────────────────────────────────────────────────────
@@ -5576,6 +5606,8 @@ export class VfxLayer {
     // Ground marks are rebuilt from `state` on every `sync()`; an empty batch is the reset.
     this.groundMarks.begin();
     this.groundMarks.end(0);
+    this.cheeseClouds.begin();
+    this.cheeseClouds.end(0);
     for (const p of this.particles) { p.active = false; p.sprite.visible = false; }
     for (const w of this.wedges) { w.active = false; w.mesh.visible = false; }
     for (const r of this.rings) { r.active = false; r.mesh.visible = false; }
@@ -5633,6 +5665,7 @@ export class VfxLayer {
     this.medikitBodyMat.dispose();
     this.medikitCrossMat.dispose();
     this.groundMarks.dispose();
+    this.cheeseClouds.dispose();
     this.materialCache.forEach((m) => m.dispose());
     this.materialCache.clear();
 
