@@ -45,7 +45,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
-import { ChibiRig, type LimbPart } from './rig';
+import { ChibiRig, type LimbPart, batchJoints } from './rig';
 import { bodyType, withoutNeck } from './bodies';
 // `loop` is deliberately no longer imported: it built the two torus arcs that read
 // as ears. See `buildSilhouetteEvents`.
@@ -990,6 +990,9 @@ export class SoupCharacter extends BaseCharacter {
     this.buildAccessories();
     this.buildSilhouetteEvents();
 
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();

@@ -36,7 +36,7 @@
  */
 
 import * as THREE from 'three';
-import { toonMat, roundedBox, cloneToon } from '../render/toon';
+import { toonMat, roundedBox, cloneToon, mergeStaticMeshes, MERGE_SKIP } from '../render/toon';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { CHARACTER_HEIGHT } from '../units';
 
@@ -2905,4 +2905,95 @@ export class ChibiRig {
 
     j.body.scale.set(sqX, sqY, sqX);
   }
+}
+
+/**
+ * C1b (`docs/REVAMP.md` §5 C1 "per-joint batching") — collapse each rig joint's STATIC
+ * meshes into one mesh per material, in that joint's own space, so the joint still moves
+ * them and every per-joint instrument (`limbcheck`, `limbmatch`, `gx_chars_yaw`) still
+ * isolates the same subtrees it did. Call it at the end of `build()`, immediately before
+ * `outlineCharacter(this.root)`, so the hulls and the R1 role patch are built on the merged
+ * meshes rather than on parts that no longer exist.
+ *
+ * ── Why per joint, and what that costs ────────────────────────────────────────
+ * §2.8: a six-seat phone frame was ~1,570 draws and each fighter ~143 of them; a draw is
+ * paid once in the main pass and again in the shadow pass for every caster. Per-material
+ * merging inside a joint is the largest cut that changes NO pixel: the merged mesh is handed
+ * the very material instance its sources shared (`mergeStaticMeshes` never clones one — a
+ * clone drops `onBeforeCompile`, which cost this project the rim on 54 sites), so the ramp,
+ * the rim, the C1a palette and the hit flash (`collectFlashTargets` runs after) are those of
+ * the sources exactly.
+ * ⚠️ **It cannot reach "≤25 draws per fighter" on its own, and that is arithmetic, not
+ * effort:** a fighter has 16-19 joints that carry geometry and every one is at least one main
+ * draw plus one shadow draw, so the floor of ANY per-joint scheme is ~32. Below that needs
+ * draws that span joints (a skinned mesh), which the per-joint instruments cannot see into —
+ * routed to P1 (`docs/REVAMP.md` §5) rather than done here.
+ *
+ * ── What is NEVER merged ──────────────────────────────────────────────────────
+ *  · anything the character HOLDS a reference to (an own field of `owner`, or an element of
+ *    an array / Map / Set / plain record in one), with its whole subtree — that is how every
+ *    animated part in the cast is driven (taco's fillings, burrito's toppings, soup's broth
+ *    and steam, the bottle's water and bubbles: `tools/tmp/c1b_census.mjs` found no other);
+ *    a merged mesh is frozen where it stood, so a held part stays a part;
+ *  · the `face` joint — eyes, brows and mouths are what the face/brow/eye diagnostics find
+ *    BY NAME (`AGENT-BRIEF` §3: an unnamed mesh is invisible to every one of them);
+ *  · transparent materials (a merged transparent mesh sorts as one object), hidden meshes,
+ *    meshes with children, and an existing `mergeSkip` subtree (`toon.ts`'s own rules);
+ *  · across the outline flag: `__no_outline` parts merge only with each other and the result
+ *    keeps the flag, so `outlineGroup` skips exactly what it skipped before.
+ */
+export function batchJoints(owner: object, joints: RigJoints): { before: number; after: number } {
+  const jointSet = new Set<THREE.Object3D>(Object.values(joints));
+  const isObj = (v: unknown): v is THREE.Object3D => !!v && (v as THREE.Object3D).isObject3D === true;
+  const containsJoint = (o: THREE.Object3D): boolean => {
+    let hit = false;
+    o.traverse((x) => { if (jointSet.has(x)) hit = true; });
+    return hit;
+  };
+  const held = new Set<THREE.Object3D>();
+  const take = (v: unknown, depth: number): void => {
+    if (isObj(v)) { if (!containsJoint(v)) held.add(v); return; }
+    if (depth <= 0 || !v || typeof v !== 'object') return;
+    if (Array.isArray(v)) { for (const x of v) take(x, depth - 1); return; }
+    if (v instanceof Map) { for (const x of v.values()) take(x, depth - 1); return; }
+    if (v instanceof Set) { for (const x of v) take(x, depth - 1); return; }
+    if (Object.getPrototypeOf(v) === Object.prototype) for (const x of Object.values(v)) take(x, depth - 1);
+  };
+  for (const k of Object.keys(owner)) take((owner as Record<string, unknown>)[k], 2);
+
+  const count = (): number => {
+    let n = 0;
+    joints.root.traverse((o) => { if ((o as THREE.Mesh).isMesh && !o.name.endsWith('__outline')) n++; });
+    return n;
+  };
+  const before = count();
+  const noOutline = (o: THREE.Object3D): boolean => !!o.userData?.noOutline || o.name.endsWith('__no_outline');
+  const transparent = (o: THREE.Object3D): boolean => {
+    const ms = (o as THREE.Mesh).material;
+    return (Array.isArray(ms) ? ms : [ms]).some((m) => !!m && m.transparent);
+  };
+  // Flags this function sets, so it removes exactly those and leaves a character's own.
+  const set: THREE.Object3D[] = [];
+  const flag = (o: THREE.Object3D): void => { if (!o.userData[MERGE_SKIP]) { o.userData[MERGE_SKIP] = true; set.push(o); } };
+  const unflagAll = (): void => { for (const o of set.splice(0)) delete o.userData[MERGE_SKIP]; };
+
+  for (const j of jointSet) {
+    if (j === joints.face) continue;
+    for (const pass of ['outlined', 'noOutline'] as const) {
+      for (const o of held) flag(o);
+      for (const k of jointSet) if (k !== j) flag(k);
+      j.traverse((o) => {
+        if (!(o as THREE.Mesh).isMesh || o === j) return;
+        if (transparent(o) || (pass === 'outlined') === noOutline(o)) flag(o);
+      });
+      const label = `batch:${j.name}`;
+      const had = new Set(j.children);
+      mergeStaticMeshes(j, label);
+      unflagAll();
+      if (pass === 'noOutline') {
+        for (const c of j.children) if (!had.has(c) && c.name.startsWith(`${label}:`)) c.userData.noOutline = true;
+      }
+    }
+  }
+  return { before, after: count() };
 }

@@ -57,7 +57,7 @@ import type { AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox, RAMP_CHARACTER } from '../render/toon';
-import { ChibiRig } from './rig';
+import { ChibiRig, batchJoints } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, blade as leafBlade, localBounds, massAnchor, rod } from './appendages';
@@ -2027,6 +2027,9 @@ export class HamburgerCharacter extends BaseCharacter {
 
     // Outline: a whisper, per render/toon.ts — the reference bar carries almost
     // no ink line.
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();

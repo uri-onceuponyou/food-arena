@@ -35,7 +35,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
-import { ChibiRig, type LimbPart } from './rig';
+import { ChibiRig, type LimbPart, batchJoints } from './rig';
 import { bodyType, withoutNeck } from './bodies';
 // `aim`, `rod` and `knob` went with the duplicate mustard bottle — see
 // `buildSilhouetteEvents`. `curl` is still the bandana tail's constructor.
@@ -923,6 +923,9 @@ export class HotDogCharacter extends BaseCharacter {
     this.buildAccessories(R, head, { LOBE_Y, LOBE_DZ, LOBE_TILT, LOBE_LEN, LOBE_D, LOBE_H });
     this.buildSilhouetteEvents(R, { LOBE_LEN }, SAUS_Y);
 
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();

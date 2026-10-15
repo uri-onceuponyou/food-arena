@@ -42,7 +42,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
-import { ChibiRig, type LimbPart } from './rig';
+import { ChibiRig, type LimbPart, batchJoints } from './rig';
 import { bodyType, withoutNeck } from './bodies';
 import { curl, knob, localBounds, massAnchor } from './appendages';
 import { CHARACTER_HEIGHT } from '../units';
@@ -1047,6 +1047,9 @@ export class PizzaCharacter extends BaseCharacter {
     this.buildAccessories(R, head);
     this.buildSilhouetteEvents(R);
 
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();

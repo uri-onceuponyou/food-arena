@@ -75,7 +75,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter } from '../render/toon';
-import { ChibiRig, taperedSegment } from './rig';
+import { ChibiRig, taperedSegment, batchJoints } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 import { aim, blade as peelBlade, localBounds, massAnchor } from './appendages';
@@ -926,6 +926,9 @@ export class BurritoCharacter extends BaseCharacter {
 
     this.buildSpill(R);
 
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();

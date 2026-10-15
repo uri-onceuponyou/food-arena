@@ -75,7 +75,7 @@ import type { CharacterDef } from '../game/rules';
 // `PALETTE` is no longer imported: the face's dark is now this character's own
 // `CAP_DARK` rung rather than the shared ink, so nothing here reads the global.
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
-import { ChibiRig, type LimbPart } from './rig';
+import { ChibiRig, type LimbPart, batchJoints } from './rig';
 import { bodyType } from './bodies';
 // `rod` and `knob` went with the deleted flip nozzle — see `buildSilhouetteEvents`.
 import { aim, blade as lidBlade, curl, localBounds, loop, massAnchor } from './appendages';
@@ -995,6 +995,9 @@ export class WaterBottleCharacter extends BaseCharacter {
     this.buildAccessories(R, shellSurface);
     this.buildSilhouetteEvents(R);
 
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();

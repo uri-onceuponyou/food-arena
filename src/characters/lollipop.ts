@@ -45,7 +45,7 @@ import { BaseCharacter, type AnimContext } from './types';
 import type { CharacterDef } from '../game/rules';
 import { PALETTE, RARITY_COLORS } from '../game/rules';
 import { toonMat, glossyMat, flatMat, outlineCharacter, roundedBox } from '../render/toon';
-import { ChibiRig, taperedSegment } from './rig';
+import { ChibiRig, taperedSegment, batchJoints } from './rig';
 import { bodyType } from './bodies';
 import { CHARACTER_HEIGHT } from '../units';
 // `localBounds`/`massAnchor` are gone with the two side tails they placed — the whole
@@ -1024,6 +1024,9 @@ export class LollipopCharacter extends BaseCharacter {
 
     this.buildSilhouetteEvents(R, discCenterY, discOuterR);
 
+    // C1b: per-joint batching (`batchJoints`, rig.ts) — before the ink, so the hulls and the
+    // R1 role patch are built on the merged meshes.
+    batchJoints(this, this.rig.joints);
     outlineCharacter(this.root);
     this.collectFlashTargets();
     this.rig.restPose();
