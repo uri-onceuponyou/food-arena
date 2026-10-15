@@ -1254,16 +1254,34 @@ export function buildMaterials() {
   utilityMatTex.repeat.set(6, 5);
   potMetalTex.repeat.set(1, 1);
 
+  // ── A1 (graphics revamp, 2026-10-15): FLAT ARCHITECTURE DECLINES THE FRESNEL RIM ──
+  // Every `toonMat` below marked `rim: false` is a FLAT architectural surface — counter
+  // and cabinet bodies, butcher-block and freezer tops, crate and cart panels, the plank
+  // pads and the floor mats — and every `tinted()` clone of one inherits the choice
+  // (`counters.ts`: `prepCap`, `stoveCap`, `coverBody`, `coverSkirt`; `storage.ts`:
+  // `roofMat`, `lidMat`, `deckMat`). Rounded props keep it: sacks, barrels, pots, produce,
+  // leaves, pottery.
+  // ⚠️ This REVERSES part of `counters.ts`'s "THIS FUNCTION RENDERED EVERY BIG PROP
+  // SURFACE IN THE ARENA WITH NO RIM" fix (`cloneToon` re-applying `userData.rim`), kept
+  // there verbatim. That fix was right about the MECHANISM — a clone silently dropped the
+  // rim — and the rim it restored is what the review then measured on the frames that are
+  // scored: `pow(1 - N.V, 2.6)` peaks across a whole flat face that tilts away from the
+  // camera, so on a counter it is a pale wash over the face, not an edge — counter face
+  // HSV S **0.654 -> 0.457**, 74 prop materials carrying it (`docs/REVAMP.md` §2.2). The
+  // rim is silhouette separation for rounded forms; a box has its silhouette from its
+  // value steps. `render/toon.ts`'s own `toonMat` note says the same: "set false for flat
+  // decals". The program cache is unchanged (a rim-less `toonMat` is the plain standard
+  // program).
   const mats = {
     // Roughness spread across the floor/cabinet/crate surfaces is deliberate: identical
     // mid-roughness everywhere is what makes a scene read as shadeless plastic even
     // under working lights, because nothing catches a distinct specular highlight.
     tileLight: toonMat({ color: KPAL.tileLight, ramp: RAMP_SOFT(), roughness: 0.55, map: tileWearA }),
     tileDark: toonMat({ color: KPAL.tileDark, ramp: RAMP_SOFT(), roughness: 0.55, map: tileWearB }),
-    subfloor: toonMat({ color: KPAL.subfloor, ramp: RAMP_SOFT(), roughness: 0.92 }),
-    border: toonMat({ color: KPAL.border, ramp: RAMP_SOFT(), roughness: 0.7 }),
-    woodPad: toonMat({ color: KPAL.woodPad, ramp: RAMP_SOFT(), roughness: 0.68, map: woodGrainWarm }),
-    woodSeam: toonMat({ color: KPAL.woodSeam, ramp: RAMP_SOFT(), roughness: 0.75 }),
+    subfloor: toonMat({ color: KPAL.subfloor, ramp: RAMP_SOFT(), roughness: 0.92, rim: false }),
+    border: toonMat({ color: KPAL.border, ramp: RAMP_SOFT(), roughness: 0.7, rim: false }),
+    woodPad: toonMat({ color: KPAL.woodPad, ramp: RAMP_SOFT(), roughness: 0.68, map: woodGrainWarm, rim: false }),
+    woodSeam: toonMat({ color: KPAL.woodSeam, ramp: RAMP_SOFT(), roughness: 0.75, rim: false }),
     // Unlit on purpose: a lit near-white toonMat disc this pale caught the same
     // key+fill overexposure as the counter tops and rendered as a hard white lump
     // instead of a soft dusting. flatMat can't blow out — it ignores scene lighting
@@ -1284,9 +1302,9 @@ export function buildMaterials() {
     floorGrime: flatMat('#2F2A26', { transparent: true, opacity: 0.22 }),
     floorWet: flatMat('#3E90BE', { transparent: true, opacity: 0.2 }),
 
-    cabinet: toonMat({ color: KPAL.cabinet, roughness: 0.62, map: woodGrainWarm }),
-    cabinetDark: toonMat({ color: KPAL.cabinetDark, roughness: 0.65, map: woodGrainWarm }),
-    butcherBlock: toonMat({ color: KPAL.butcherBlock, roughness: 0.5, map: butcherBlockTex }),
+    cabinet: toonMat({ color: KPAL.cabinet, roughness: 0.62, map: woodGrainWarm, rim: false }),
+    cabinetDark: toonMat({ color: KPAL.cabinetDark, roughness: 0.65, map: woodGrainWarm, rim: false }),
+    butcherBlock: toonMat({ color: KPAL.butcherBlock, roughness: 0.5, map: butcherBlockTex, rim: false }),
     // `steel`/`steelDark` also get the brushed texture as a `roughnessMap`, not just
     // `map` — the same streak pattern darkening the diffuse read also breaks up the
     // specular highlight into fine bands instead of one smooth glossy patch, which is
@@ -1303,8 +1321,8 @@ export function buildMaterials() {
     steelDark: glossyMat({ color: KPAL.steelDark, roughness: 0.46 }),
 
     freezerBody: glossyMat({ color: KPAL.freezerBody, roughness: 0.5 }),
-    freezerDoor: toonMat({ color: KPAL.freezerDoor, roughness: 0.45, map: brushedFreezer }),
-    freezerTrim: toonMat({ color: KPAL.freezerTrim, roughness: 0.5 }),
+    freezerDoor: toonMat({ color: KPAL.freezerDoor, roughness: 0.45, map: brushedFreezer, rim: false }),
+    freezerTrim: toonMat({ color: KPAL.freezerTrim, roughness: 0.5, rim: false }),
     // Frosty lid cap, noticeably lighter/cooler than the body — from the steep
     // top-down camera the freezer's flat top is almost the whole silhouette, so this
     // two-tone break (plus the bright rim trim ringing it) is what keeps its huge top
@@ -1315,18 +1333,18 @@ export function buildMaterials() {
     // material, not `freezerBody`, so `brushedFreezer` had to be wired here too.
     // Saturation contract: #7FD6EE -> #93BCC9. Still the frosty two-tone break that
     // keeps a freezer's huge flat top from reading as one slab, ~20 luma quieter.
-    freezerLid: toonMat({ color: '#79B4CA', roughness: 0.38, map: brushedFreezer }),
+    freezerLid: toonMat({ color: '#79B4CA', roughness: 0.38, map: brushedFreezer, rim: false }),
     // Cold ground light spilling out in front of each freezer door — unlit so it
     // reads as emitted light rather than a painted floor patch.
     freezerGlow: flatMat(KPAL.freezerGlow, { transparent: true, opacity: 0.28 }),
 
-    crateWood: toonMat({ color: KPAL.crateWood, roughness: 0.72, map: plankWarm }),
-    crateSlat: toonMat({ color: KPAL.crateSlat, roughness: 0.78, map: plankWarm }),
+    crateWood: toonMat({ color: KPAL.crateWood, roughness: 0.72, map: plankWarm, rim: false }),
+    crateSlat: toonMat({ color: KPAL.crateSlat, roughness: 0.78, map: plankWarm, rim: false }),
     burlap: toonMat({ color: KPAL.burlap, roughness: 0.85, map: burlapTex }),
     burlapDark: toonMat({ color: KPAL.burlapDark, roughness: 0.88, map: burlapTex }),
 
-    herbCrateWood: toonMat({ color: KPAL.herbCrateWood, roughness: 0.7, map: plankHerb }),
-    herbCrateSlat: toonMat({ color: KPAL.herbCrateSlat, roughness: 0.78, map: plankHerb }),
+    herbCrateWood: toonMat({ color: KPAL.herbCrateWood, roughness: 0.7, map: plankHerb, rim: false }),
+    herbCrateSlat: toonMat({ color: KPAL.herbCrateSlat, roughness: 0.78, map: plankHerb, rim: false }),
     herbLeafA: toonMat({ color: KPAL.herbLeafA, roughness: 0.58 }),
     herbLeafB: toonMat({ color: KPAL.herbLeafB, roughness: 0.6 }),
     potteryWarm: toonMat({ color: KPAL.potteryWarm, roughness: 0.65 }),
@@ -1335,8 +1353,8 @@ export function buildMaterials() {
     // a completely flat colour fill in the first review pass — a woven-mat texture
     // (reusing the burlap generator; hue comes entirely from the material colour)
     // gives them a fabric read instead of a painted rectangle.
-    tealTile: toonMat({ color: KPAL.tealTile, ramp: RAMP_SOFT(), roughness: 0.5, map: rugWeave }),
-    tealTileDark: toonMat({ color: KPAL.tealTileDark, ramp: RAMP_SOFT(), roughness: 0.55, map: rugWeave }),
+    tealTile: toonMat({ color: KPAL.tealTile, ramp: RAMP_SOFT(), roughness: 0.5, map: rugWeave, rim: false }),
+    tealTileDark: toonMat({ color: KPAL.tealTileDark, ramp: RAMP_SOFT(), roughness: 0.55, map: rugWeave, rim: false }),
 
     potMetal: glossyMat({ color: KPAL.potMetal, roughness: 0.3 }),
     potMetalDark: toonMat({ color: KPAL.potMetalDark, roughness: 0.4, map: potMetalTex }),
@@ -1469,11 +1487,11 @@ export function buildMaterials() {
     // both the cart body and the utility mats were still flat single-value fills —
     // a metal-panel texture on the cart (it's a wheeled trolley), a subtle worn-mat
     // texture (reusing the tile-wear generator) on the rubber utility pads.
-    spiceCartBody: toonMat({ color: KPAL.spiceCartBody, roughness: 0.5, map: cartMetal }),
-    spiceCartBodyDark: toonMat({ color: KPAL.spiceCartBodyDark, roughness: 0.6, map: cartMetal }),
+    spiceCartBody: toonMat({ color: KPAL.spiceCartBody, roughness: 0.5, map: cartMetal, rim: false }),
+    spiceCartBodyDark: toonMat({ color: KPAL.spiceCartBodyDark, roughness: 0.6, map: cartMetal, rim: false }),
     debrisBerry: toonMat({ color: KPAL.debrisBerry, roughness: 0.55 }),
-    utilityMat: toonMat({ color: KPAL.utilityMat, ramp: RAMP_SOFT(), roughness: 0.65, map: utilityMatTex }),
-    utilityMatDark: toonMat({ color: KPAL.utilityMatDark, ramp: RAMP_SOFT(), roughness: 0.68, map: utilityMatTex }),
+    utilityMat: toonMat({ color: KPAL.utilityMat, ramp: RAMP_SOFT(), roughness: 0.65, map: utilityMatTex, rim: false }),
+    utilityMatDark: toonMat({ color: KPAL.utilityMatDark, ramp: RAMP_SOFT(), roughness: 0.68, map: utilityMatTex, rim: false }),
 
     // ── Concealment. See the KPAL block for why the hue is what it is. ─────────
     // The cloth borrows `utilityMatTex` rather than growing a twelfth canvas: it is the
@@ -1805,10 +1823,29 @@ export function liftArenaValue(root: THREE.Object3D, gamma = ARENA_VALUE_GAMMA):
  * is the same physical argument one step further: what a contact shadow leaves behind
  * IS the sky's own colour, and this rig's sky is blue.
  */
-const SHADOW_TINT = (alpha: number) => `rgba(16,10,36,${alpha})`;
+/*
+ * ── 🚨 A1 (graphics revamp, 2026-10-15): THE INDIGO IS RETIRED — A DARKENED GROUND HUE ──
+ * The two notes above argued the tint cool, then cool-CHROMATIC (indigo rgb(16,10,36),
+ * hue ~255 deg), on a measurement of the frame's chroma budget and on "both reference
+ * plates shade with a saturated violet". The review measured the result on the frames
+ * that are scored (`shots/rv/audit/gap`, GX-06): shade on our rose tile lands **24 deg
+ * toward violet (337 -> 313)** against **1-3 deg** on the reference, and between 4 and 18
+ * of the 20 most salient world cells are ground in shadow — **the reference has zero**.
+ * A shadow in another hue is a SHAPE the eye segments; a shadow in the ground's own hue
+ * is just darker ground. So the tint is the tile's own hue (#785864: hue 337.5) taken
+ * down to the indigo's luma (12.4 vs 13.1 — the decal's darkening strength, alpha stops
+ * and falloff are all unchanged) at HSV saturation 0.50, so shade reads richer rather
+ * than greyer (never fix by desaturating). rgb(20,10,14): hue 336, luma 12.4.
+ * ⚠️ This is only the BAKED half. The real-time shadow's violet shift comes from the
+ * lights (the cool hemisphere sky, front fill and rim are all that reach shade) and
+ * belongs to `render/lighting.ts` (R1). The chroma this gives back is re-checked on
+ * `arena-scan --gate`, not assumed.
+ * The old line, kept: `const SHADOW_TINT = (alpha) => \`rgba(16,10,36,${alpha})\`;`
+ */
+const SHADOW_TINT = (alpha: number) => `rgba(20,10,14,${alpha})`;
 /** The same tint as a material colour, for the decals that get their alpha from
- * vertex colours rather than from a canvas gradient. rgb(16,10,36). */
-const SHADOW_TINT_HEX = 0x100a24;
+ * vertex colours rather than from a canvas gradient. rgb(20,10,14) (was 0x100a24). */
+const SHADOW_TINT_HEX = 0x140a0e;
 
 function makeContactShadowTexture(): THREE.CanvasTexture {
   const size = 128;
