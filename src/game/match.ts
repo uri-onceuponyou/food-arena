@@ -184,6 +184,15 @@ export interface FeelDebug {
    * anything above 1.0 is the banked time being repaid. */
   rawDtMs: number;
   stepDtMs: number;
+  /**
+   * HOW `stepDtMs` REACHED THE SIM THIS FRAME: the number of `stepMatch` calls, and the dt
+   * each one was handed (they are equal slices). `stepDtMs` alone could not say it once the
+   * hit-stop repayment was split — see `GameSession.stepSim` (BH-13). `maxStepCallMs >
+   * rawDtMs` on any frame is the defect that method exists to prevent. Written at the call
+   * site from the very argument passed, never derived afterwards.
+   */
+  stepCalls: number;
+  maxStepCallMs: number;
   /** Frames since the match began in each of the three dt regimes. `frozen +
    * repaying` over `frames` is the share of the match that is not running at 1x —
    * the number that says whether hit-stop reads as a punch or as a stutter. */
@@ -904,6 +913,7 @@ export class GameSession {
     events: Object.fromEntries(FEEL_EVENT_KEYS.map((k) => [k, 0])),
     responses: { vfx: 0, shake: 0, hitStop: 0, knockback: 0, damageNumber: 0, screenFlash: 0 },
     hitStopBudgetMs: 0, hitStopBankedMs: 0, lastHitStopMs: 0, rawDtMs: 0, stepDtMs: 0,
+    stepCalls: 0, maxStepCallMs: 0,
     frames: 0, frozenFrames: 0, repayingFrames: 0,
     peakHitAmount: 0, peakShakeM: 0,
     shakeSumM: 0, shakeRawSumM: 0, peakShakeRawM: 0,
@@ -2225,6 +2235,64 @@ export class GameSession {
   }
 
   /**
+   * 🚨 STEP THE SIM BY `stepDtMs` — BUT NEVER HAND ONE `stepMatch` CALL MORE THAN ONE FRAME'S
+   * OWN DT.
+   *
+   * The hit-stop REPAYMENT (`HITSTOP_CATCHUP_RATE` = 3 extra frames per frame) used to arrive
+   * as ONE call: `stepMatch(state, rawDtMs + catchUp)`, up to **4x a frame** — 66.7 ms at
+   * 60 fps, 133 ms at 30, 200 ms at 20 (BH-13). The sim's hit detection is point-vs-disc at
+   * the END of each step and its fog / pot / regen timers reset to 0 and drop the remainder,
+   * so every balance number in the repo — all measured at 16.667 ms — was only true of the
+   * frames that did NOT follow a freeze. Measured by the review's sweep: shots crossing a body
+   * missed 0% of the time at 16.7 ms, 0.3% at 66.7 ms, 22-82% at 200 ms; in six-seat play
+   * 4 / 13 / 15 shots per 12 matches passed through a living body at 60 / 30 / 20 fps.
+   *
+   * So the repayment is the SAME time in EQUAL SLICES, each no larger than this frame's raw
+   * dt: at 60 fps a repaying frame is four 16.667 ms ticks — exactly the corpus's dt — instead
+   * of one 66.7 ms one. `stepDtMs` summed over a match is unchanged (the borrow-back invariant
+   * above), and a frame that is not repaying is ONE call with the identical argument, so the
+   * shipped stepping is byte-identical outside catch-up.
+   *
+   * ⚠️ **WHAT THIS DOES NOT FIX, STATED SO NOBODY READS IT AS DONE:** a frame's OWN dt is still
+   * variable — a 30 fps phone still steps 33.3 ms and a 20 fps one 50 ms (the 1/20 s clamp),
+   * and at those steps the timers still drop their remainder (fog does ~10% less at 30 fps).
+   * That is the sim's reset-to-zero timers (`sim.ts`, another owner) or a true fixed-step
+   * accumulator here — the latter measured by the BH-13 verifier at +0.6 to +1.2 ms mean /
+   * +3.4 to +6.3 ms p99 of `stepMatch` time per frame on desktop, on a phone `DECISIONS §56`
+   * already measured as JS-bound. Not taken blind; routed.
+   *
+   * ⚠️ **THE ITEM PRESS RIDES THE FIRST SLICE ONLY.** `useItem` is one activation named by one
+   * press (`input.ts:takeItemPress`); `move`/`aim`/`attack` are levels and repeat, exactly as
+   * they would across four real 16.667 ms ticks.
+   *
+   * ⚠️ **AND THE WHISTLE ENDS THE FRAME.** A slice that decides the match is the ending tick
+   * and resolves in full (`DECISIONS §84`'s same-tick case is untouched); the slices after it
+   * are not run, because stepping a decided match is what `retireShotsAfterWhistle` exists to
+   * make harmless and there is no reason to give it more to do. A frame that STARTS decided
+   * runs all of its slices — the clock that drives the idle animation keeps going under the
+   * card.
+   */
+  private stepSim(stepDtMs: number, rawDtMs: number, input: MatchInput): GameEvent[] {
+    // `- 1e-9` so float dust in `raw + 3 * raw` cannot buy a fifth slice.
+    const slices = rawDtMs > 0 && stepDtMs > rawDtMs ? Math.ceil(stepDtMs / rawDtMs - 1e-9) : 1;
+    const sliceMs = stepDtMs / slices;
+    const endedAtStart = this.state.phase === 'ended';
+    const events = stepMatch(this.state, sliceMs, input);
+    let calls = 1;
+    if (slices > 1) {
+      const rest: MatchInput = input.useItem == null ? input : { ...input, useItem: null };
+      for (let k = 1; k < slices; k++) {
+        if (!endedAtStart && this.state.phase === 'ended') break;
+        for (const ev of stepMatch(this.state, sliceMs, rest)) events.push(ev);
+        calls++;
+      }
+    }
+    this.feel.stepCalls = calls;
+    this.feel.maxStepCallMs = sliceMs;
+    return events;
+  }
+
+  /**
    * 🚨 THE SHOTS IN THE AIR AT THE WHISTLE DO NOT LAND AFTER IT.
    *
    * `sim.ts` steps projectiles in every phase, deliberately (it reproduces the prototype), and
@@ -2475,7 +2543,7 @@ export class GameSession {
     const input = this.buildInput();
     // A tick that BEGINS with the match decided resolves no shot. See `retireShotsAfterWhistle`.
     if (this.state.phase === 'ended') this.retireShotsAfterWhistle();
-    const events = stepMatch(this.state, stepDtMs, input);
+    const events = this.stepSim(stepDtMs, rawDtMs, input);
     this.handleEvents(events);
     // Second consumer of the same tick's events (the first being `handleEvents`
     // above, which drives VFX/HUD/hit-stop). Order between the two is irrelevant —
