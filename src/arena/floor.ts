@@ -129,6 +129,38 @@ import { mesh, noOutline, FLOOR_Y, ARENA_W, ARENA_H, CENTER, type Materials } fr
  */
 export const GROUND_VALUE = 0.82;
 
+/**
+ * THE GROUND'S CHROMA, PUT BACK AT A2a's VALUE — graphics campaign A2b (wave 4).
+ *
+ * `GROUND_VALUE` was the right move and it stays: the canonical 1v1 frame's ground now sits at
+ * luma 0.390, the reference median. But a value scale moves OKLab L and C TOGETHER (the note
+ * above says so), so it also cut the rendered ground chroma 0.122 -> 0.103 — and round w3's
+ * critics read exactly that: *"low-contrast mauve tile floor"*, *"muddy maroon cell pattern"*,
+ * *"one dull mauve tone"* (`shots/rv/w3/scores.json`; "mauve" in 9 of 16 arena notes).
+ *
+ * So the two keys are re-keyed at the SAME delivered OKLab L and the same OKLab hue, with their
+ * chroma x1.30 — HSV saturation 0.267 -> 0.328, i.e. saturation UP (`CLAUDE.md`: never fix
+ * anything by desaturating). Solved in DELIVERED space (after `GROUND_VALUE` and
+ * `liftArenaValue`'s V^0.72), so the light/dark step and the value A2a chose are held:
+ *
+ *              authored   HSV h / S        delivered OKLab L    C        hue
+ *   light  was #785864   337.5 / 0.267    0.5221               0.0481   -5.4
+ *          now #805666   337.1 / 0.328    0.5219               0.0624   -5.1
+ *   dark   was #71535F   336.0 / 0.265    0.5070               0.0467   -6.9
+ *          now #795161   336.0 / 0.331    0.5068               0.0612   -6.2
+ *
+ * ⚠️ THE FACTOR WAS MEASURED, AND THE MODEL THAT FIRST CHOSE IT HALVED THE RISE. The
+ * ground's median irradiance on the canonical frames is strongly coloured (linear ratio R 1.62 /
+ * G 0.76 / B 1.08 on canonA), so the material's chroma is under half of what reaches the screen;
+ * a per-pixel `rendered = albedo x E` model fitted on `a2a_cap`'s base capture put x1.55 at C
+ * ~0.128. Captured, x1.55 rendered **0.153 / 0.148** (canonA / canon6) — something between the
+ * albedo and the screen (the per-cell tint, the post chain; not separated) adds chroma the model
+ * has no term for. Re-solved on the measured slope (+0.091 C per 1.0 of factor):
+ * x1.30 is the factor; its own capture is in the commit that introduced these two constants.
+ */
+export const GROUND_KEY_LIGHT = '#805666';
+export const GROUND_KEY_DARK = '#795161';
+
 /** Scale a colour's sRGB VALUE (every channel x k): hue and HSV saturation unchanged. */
 function scaleValue(c: THREE.Color, k: number): void {
   const o = { r: 0, g: 0, b: 0 };
@@ -1620,7 +1652,14 @@ export function buildFloor(M: Materials): THREE.Group {
   // against round 13's 1.147 and the plate's 1.126 — preserved to 0.3%. The one rule all
   // four critics agree on still holds by construction: k < 1 cannot make the joint
   // brighter than the tile.
-  subfloorDark.color.set('#694D57');
+  //
+  // ── A2b (wave 4): THE CONSTRUCTION AGAIN, ITS INPUT MOVED AGAIN ─────────────
+  // `GROUND_KEY_LIGHT` (#805666) x 0.871 = (111.5, 74.9, 88.8) -> #6F4B59. Nothing here is a
+  // new decision, exactly as round 14 said of itself. (Round 14's #694D57 kept above.)
+  //
+  //   #694D57  was   rgb(105, 77, 87)  -- round 14
+  //   #6F4B59  now   rgb(111, 75, 89)  hue 336.7  HSV 0.324
+  subfloorDark.color.set('#6F4B59');
   const base = mesh(
     new THREE.PlaneGeometry(wu(ARENA_W + 300), wu(ARENA_H + 300)),
     subfloorDark,
@@ -2096,8 +2135,11 @@ export function buildFloor(M: Materials): THREE.Group {
   //
   //   #785864  now   rgb(120, 88,100)  hue 337.5  HSV 0.267  luma  95.7
   //   #71535F  now   rgb(113, 83, 95)  hue 336.0  HSV 0.266  luma  90.2
-  tileLightInst.color.set('#785864');
-  tileDarkInst.color.set('#71535F');
+  // ⚠️ A2b (wave 4) re-keys both — `GROUND_KEY_LIGHT` / `GROUND_KEY_DARK` above `GROUND_VALUE`
+  // carry the same hue and step at 1.30x the chroma. The two lines here stay as round 14's
+  // record, per the reversal rule; the lines below are what ships.
+  tileLightInst.color.set(GROUND_KEY_LIGHT);
+  tileDarkInst.color.set(GROUND_KEY_DARK);
   // ── A2a (graphics revamp, wave 3): THE GROUND SITS BACK — a value move, nothing else ──
   // Both keys above are kept as the record of the hue and the light/dark step; the stage's
   // VALUE comes down by `GROUND_VALUE` on top of them (sRGB value: every channel x k, so hue
