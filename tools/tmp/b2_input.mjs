@@ -16,6 +16,7 @@
  *   §PL  after the whistle, a window blur raises no scrim and nothing can re-capture the mouse;
  *        Play Again still re-captures
  *   §M9  `?items=constructor` is not an item (match.ts's loadout gate, an own-property test)
+ *   §BC  a Blue Cheese aura tick (`itemId: 'blue_cheese'`) fires no hit-stop / kick / burst
  *
  * ── THE ONE INSTRUMENT MOST ROWS SHARE ──────────────────────────────────────
  * An init script wraps `requestAnimationFrame` and, after every callback that advanced
@@ -52,7 +53,7 @@ for (let i = 2; i < process.argv.length; i++) {
 }
 const BASE = String(A.url ?? process.env.PREVIEW_BASE ?? '').replace(/\/$/, '');
 if (!BASE || /:5173(\/|$)/.test(BASE)) { console.error('b2_input: --url must be a SNAPSHOT (sx_snap), never :5173'); process.exit(2); }
-const SECTIONS = String(A.sections ?? 'F2,F3,F4,F5,F6,F7,F8,PL,M9').split(',');
+const SECTIONS = String(A.sections ?? 'F2,F3,F4,F5,F6,F7,F8,PL,M9,BC').split(',');
 const OUT = String(A.out ?? '/tmp/b2_input');
 const PLANT = A.plant ? String(A.plant) : null;
 mkdirSync(OUT, { recursive: true });
@@ -662,6 +663,39 @@ try {
       } catch (e) { row('PL', 'again section completed', false, String(e).split('\n')[0]); }
       await ctx.close();
     }
+  }
+
+  // ── §BC THE BLUE CHEESE TICK IS QUIET ─────────────────────────────────────────
+  // B3 (merged on main after this package's base) built the Blue Cheese aura: once a second,
+  // each victim inside the wearer's radius takes a `hit-landed` whose source is
+  // `combat.ts:itemDamageSource` — `kind: 'weapon'` with `itemId: 'blue_cheese'`. That shape
+  // exists on 8586f00, so the feel path can be driven with it through `__feelEvent`
+  // (= `GameSession.handleEvents`), synchronously, and read off `__feelDebug.responses`.
+  // The victim is the LOCAL seat, which is always on screen, so the hit-stop / kick gates
+  // ("can any screen see it", proximity) cannot be what silences a row.
+  if (SECTIONS.includes('BC')) {
+    const { ctx, page, errors } = await open();
+    try {
+      await boot(page, `screen=match&${DUEL}&pointerLock=0&fogRadius=900`);
+      await frames(page, 2);
+      const feed = (source, amount) => page.evaluate(({ source, amount }) => {
+        const before = { ...window.__feelDebug.responses };
+        const me = window.__vfxDebugFighters.player;
+        window.__feelEvent({ type: 'hit-landed', targetRole: 'player', targetId: 0, amount, effect: null, x: me.x, y: me.y, source });
+        const after = { ...window.__feelDebug.responses };
+        const d = {};
+        for (const k of Object.keys(after)) d[k] = after[k] - before[k];
+        return d;
+      }, { source, amount });
+      const ctl = await feed({ kind: 'weapon', weaponKey: 'Ring', weaponName: 'Ring Spin', attackerId: 1 }, 9);
+      row('BC', 'CONTROL: a donut Ring Spin hit on the local seat bursts, kicks and freezes', ctl.vfx >= 1 && ctl.shake >= 1 && ctl.hitStop >= 1, ctl);
+      const tick = await feed({ kind: 'weapon', weaponKey: 'blue_cheese', weaponName: 'Blue Cheese', attackerId: 1, itemId: 'blue_cheese' }, 2);
+      row('BC', 'BUG: a Blue Cheese tick fires NO hit-stop, NO camera kick, NO burst and NO knockback',
+        tick.hitStop === 0 && tick.shake === 0 && tick.vfx === 0 && tick.knockback === 0, tick);
+      row('BC', '…and at most one (small) damage number', tick.damageNumber <= 1, tick);
+      row('BC', 'page errors', errors.length === 0, errors);
+    } catch (e) { row('BC', 'section completed', false, String(e).split('\n')[0]); }
+    await ctx.close();
   }
 
   // ── §M9 LOADOUT GATE ──────────────────────────────────────────────────────────

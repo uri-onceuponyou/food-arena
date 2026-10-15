@@ -1955,6 +1955,21 @@ export class GameSession {
         case 'hit-landed': {
           const targetSlot = slotOf(ev.targetId, ev.targetRole);
           const model = this.models[targetSlot];
+          // ── 🧀 THE BLUE CHEESE TICK IS QUIET ─────────────────────────────────────
+          // The aura (B3) hurts every victim inside the wearer's radius ONCE A SECOND through
+          // `combat.ts:itemDamageSource` — `kind: 'weapon'` with `itemId: 'blue_cheese'` — so
+          // it arrived here as a full weapon hit: burst, camera kick, knockback nudge, hit
+          // flash and a >= 16 ms hit-stop, per victim, every second, for as long as anyone
+          // stands near the wearer. `ITEMS.blue_cheese.look`: *"the one item that must NOT be
+          // loud"*. Measured by `tools/tmp/b2_input.mjs` §BC on `8586f00` (a synthetic tick
+          // on the local seat through `__feelEvent`): vfx 1, shake 1, hitStop 1, knockback 1.
+          // So it gets the fog's shape — an early branch out of the impact treatment below —
+          // and less than the fog: a small damage number and nothing else, not even the hit
+          // flash (this very comment's next paragraph measures the flash as the loudest
+          // channel in a hit). The cloud itself is the cause on screen; the HP bar and the
+          // number are the effect. `lastHitColor` / `lastHitBy` are still recorded below, so a
+          // tick that kills is still attributed to the wearer.
+          const quietTick = ev.source.kind === 'weapon' && ev.source.itemId === 'blue_cheese';
           // ⚠️ `intensity` is passed and is currently IGNORED — `CharacterModel.play`
           // declares `opts.intensity` (characters/types.ts) and `BaseCharacter.play`
           // does not read it. It is passed anyway, deliberately, because this is where
@@ -1965,7 +1980,7 @@ export class GameSession {
           // at least tries. Wiring it is one line in `applyHitFlash`, in a file this
           // owner does not have; see the report accompanying this commit. Until then
           // this call site is correct and inert rather than absent and forgotten.
-          model?.play('hit', { intensity: THREE.MathUtils.clamp(ev.amount / 12, 0.25, 1) });
+          if (!quietTick) model?.play('hit', { intensity: THREE.MathUtils.clamp(ev.amount / 12, 0.25, 1) });
 
           const color = this.colorForDamageSource(ev.targetRole, ev.source);
           lastHitColor[targetSlot] = color;
@@ -1991,6 +2006,13 @@ export class GameSession {
             // The edge vignette is the LOCAL screen's "the zone is killing YOU" —
             // it must not fire because somebody else took a fog tick.
             if (targetSlot === LOCAL_SLOT) { this.hud.flashFogTick(); this.feel.responses.screenFlash++; }
+            break;
+          }
+          // 🧀 See `quietTick` above: a small number, no burst, no kick, no freeze, no nudge.
+          // (`hud.ts` sizes the number by amount; the aura's tick is the game's smallest hit.)
+          if (quietTick) {
+            const tickPos = this.projectPointToScreen(ev.x, ev.y, 1.3);
+            if (tickPos) { this.hud.spawnDamageNumber(tickPos, ev.amount); this.feel.responses.damageNumber++; }
             break;
           }
 
