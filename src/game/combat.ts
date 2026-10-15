@@ -1747,7 +1747,11 @@ type ItemStatusField = 'sleepUntil' | 'clogUntil' | 'rootUntil' | 'blotUntil';
  * asleep for the whole match. The same arithmetic is exactly level for Pompa and Liquorice
  * (5,000 cooldown against a 5,000 state). The fix is a cooldown or a grace window in
  * `rules.ts`, which this pass does not own; the refusal here is the half that belongs in the
- * sim. §42 measures the gap rather than describing it.
+ * sim.
+ *
+ * ⚠️ THIS ENDED *"§42 measures the gap rather than describing it"* — and no §42 existed until
+ * 2026-10-15, when the B3 sweep opened it for other rows. **It does not measure this gap.** The
+ * chain is still open and still unmeasured in `sim.test.mjs`; the arithmetic above is the record.
  *
  * ⚠️ **SLEEP KILLS BOTH KINDS OF WIND-UP.** Uri's sleep denies a fighter its whole turn, so
  * a commitment it had already opened dies exactly as a stun kills one — `cast-cancelled` and
@@ -1879,7 +1883,9 @@ function resolveItem(
     // cannot be a sim input without the sim ceasing to be a pure function of its inputs, and
     // a bot's sight is `movement.ts:isVisibleFrom`, which is geometry. So a slate-blind
     // fighter behaves identically to a sighted one INSIDE the simulation, and the entire
-    // effect is what the player can see. §42 asserts that inertness rather than assuming it.
+    // effect is what the player can see.
+    // ⚠️ This said *"§42 asserts that inertness rather than assuming it"*. No such row exists —
+    // §42 (opened 2026-10-15 by the B3 sweep) does not contain it; the inertness is ASSUMED.
     case 'squid_ink': {
       const t = itemTargetInRange(state, user, ITEM_THROW_RANGE);
       if (t === null) return;

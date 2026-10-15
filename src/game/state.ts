@@ -1621,11 +1621,16 @@ export type GameEvent =
    * ⚠️ `reason` GAINED `'sleep'` WITH THE LOADOUT ITEMS. `ITEMS.warm_milk` denies a fighter
    * its whole turn, so a wind-up it had already opened must die exactly as a stun kills one
    * — and calling that `'stun'` would have been a lie in the one field whose job is to say
-   * which terminator fired. Additive: `combat.ts` is the only emitter and nothing in `src/`
-   * consumes this event yet, so the widening reaches no consumer today (`vfx.ts`'s
-   * `cancelCastTelegraph` takes its own separate `'stun' | 'death' | 'resolved'` and is
-   * called from `match.ts`, which does not route this event at all — reported, not fixed
-   * here: a cast telegraph that is never cancelled outlives the cast it draws).
+   * which terminator fired. `combat.ts` is the only emitter.
+   *
+   * ⚠️ IT GOES ON TO SAY, AND IT IS NO LONGER TRUE: *"Additive: … nothing in `src/` consumes this
+   * event yet, so the widening reaches no consumer today (`vfx.ts`'s `cancelCastTelegraph` …
+   * is called from `match.ts`, which does not route this event at all — reported, not fixed
+   * here: a cast telegraph that is never cancelled outlives the cast it draws)."* Since the B1
+   * package (`75148fd`, 2026-10-15) `match.ts` DOES route it — `cast-started` draws Mega's
+   * telegraph and `cast-cancelled` calls `vfx.cancelCastTelegraph`, mapping `'sleep'` onto the
+   * stun (interrupt) look rather than `'resolved'`. A new `reason` now reaches a consumer, and
+   * that consumer's mapping is where it must be handled.
    */
   | { type: 'cast-cancelled'; fighterRole: FighterRole; fighterId: FighterId; weaponKey: string; reason: 'stun' | 'death' | 'sleep' }
   | {

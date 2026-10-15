@@ -820,8 +820,19 @@ export function stepMatch(state: MatchState, dt: number, input: MatchInputs): Ga
 
   // Projectiles update every tick regardless of match phase — faithfully
   // reproducing the prototype, whose projectile loop is never gated by gameState
-  // either (see the report: projectiles keep flying and can still land damage for
-  // one extra tick after a match technically ends).
+  // either.
+  //
+  // ⚠️ IT WENT ON *"(see the report: projectiles keep flying and can still land damage for one
+  // extra tick after a match technically ends)"* — and "one extra tick" is FALSE. Nothing here
+  // retires a shot when the phase leaves `'playing'`, so the sim steps every projectile on EVERY
+  // call after the whistle, for as long as its caller keeps calling — and the shipped
+  // `GameSession` does, under the result card. A shot in flight therefore flew its whole
+  // remaining range and could hit, or kill, the declared winner: 18 of 550 winners across
+  // N=2..6 (BH-01, up to ~41 ticks late). Since `03db60e` the SESSION retires them
+  // (`match.ts:retireShotsAfterWhistle` empties `state.projectiles` before stepping a decided
+  // match); the sim still does not. A sim-side gate here was measured turning `sim.test.mjs`
+  // §20(b) red — its fixture and `tools/tmp/press_value.mjs` park a state with phase `'ended'`
+  // and rely on shots still landing — so moving the rule into the sim is a trade with those.
   stepProjectiles(state, dt, events);
 
   // Time limit. Resolved AFTER everything else in the tick, so a killing blow — or a
@@ -1488,9 +1499,11 @@ function applySuddenDeathFog(state: MatchState, dt: number, events: GameEvent[])
     // pass walks past `combat.ts`'s `lastFighterStanding` and kills the fighter it has just
     // declared the winner: 6 deaths out of 6 seats, `state.winner` naming a corpse for the
     // victory screen to draw. The ordinary fighter loop deliberately does NOT stop on a
-    // phase change (the prototype's projectile loop keeps running for one more tick and
+    // phase change (the prototype's projectile loop is never gated on phase either, and
     // `stepMatch` reproduces that), but a fog that keeps burning after the whistle is a
     // different thing: it damages a fighter for whom the match is over.
+    // ⚠️ The parenthesis said the projectile loop *"keeps running for ONE MORE TICK"*. It keeps
+    // running on every call after the whistle — see the `stepProjectiles` call in `stepMatch`.
     if (state.phase !== 'playing') break;
     if (!fighter.alive || fighter.hp <= 0) continue;
     // ⚠️ THE SAME PREDICATE THE ORDINARY FOG USES — `dist > safeRadius` — AND NOT AN
