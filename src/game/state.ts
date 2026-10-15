@@ -1221,6 +1221,11 @@ export interface MatchState {
    * `nearestLivingOpponent` returned this tick, so an AI that switches targets leaves a
    * stale belief behind in the column it left. That is correct and intended: the belief
    * belongs to the PAIR, which is the whole reason the scalar became a matrix.
+   * ⚠️ **NARROWED by B5 (`bbb0b4f`, AI-B2, 2026-10-16):** a bot now refreshes the cell of
+   * EVERY opponent it can SEE each tick, not only its target's — the column-it-left rule above
+   * had frozen a never-targeted opponent's belief at its SPAWN point from t=0 (7,200 of 9,000
+   * six-bot pair-ticks stale). Only a CONCEALED opponent's column freezes now, which is the
+   * part of "the belief belongs to the pair" that was ever meant.
    *
    * There is still deliberately no mirror for a human: a human already knows where they are,
    * and the scripted player in `tools/tmp/scripted_player.mjs` is a measuring instrument

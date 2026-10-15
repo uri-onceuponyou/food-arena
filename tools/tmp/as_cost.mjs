@@ -328,9 +328,14 @@ const ARM_EDITS = {
    * tick, and a tick-cost comparison against it would otherwise be measuring the wrong
    * thing.
    */
+  // ⚠️ RE-ANCHORED 2026-10-16 (orchestrator, routed from B5). It patched
+  //   'const visible = isVisibleFrom(self.x, self.y, target.x, target.y, state.arena, state, target);'
+  // and B5's AI-B2 fix (`7ff48c1`) folded that line into a loop that refreshes the belief about
+  // EVERY visible opponent, so the anchor matched 0 times and the selftest read 34/37. Same arm
+  // (the TARGET is always seen; the predicate still called), new line. B5 tested it: 37/37.
   oracle: [['ai.ts',
-    'const visible = isVisibleFrom(self.x, self.y, target.x, target.y, state.arena, state, target);',
-    'const visible = isVisibleFrom(self.x, self.y, target.x, target.y, state.arena, state, target) || true;']],
+    '      if (other === target) { visible = seen; continue; }',
+    '      if (other === target) { visible = seen || true; continue; }']],
   /**
    * 🚨 THE ONLY ARM THAT TOUCHES A FILE OUTSIDE THIS PASS'S SET, AND IT IS A MEASUREMENT
    * ARM ONLY — nothing under `src/` is written, ever. `movement.ts` belongs to §48's owner.
