@@ -20,6 +20,7 @@ import {
 import { noteGpu, onQualityChange, tierProfile, type TierProfile } from './quality';
 import { CHARACTER_INK_LAYER, FORM_SIDE_ALBEDO, LOOK, markCharacter, markEnvironment } from './roles';
 import { CharacterContourEffect } from './contour';
+import { SeatRings, SEAT_RING_STYLE, type SeatRingSeat, type SeatRingStyle } from './seatRings';
 import { CHARACTER_RADIUS } from '../units';
 // Squid Ink's channel. `game/vfx.ts` writes it off the sim's `blotUntil`; this file
 // reads it once per frame. See `vfx/ink.ts`'s header for why the seam is a module and
@@ -1398,16 +1399,40 @@ export class Stage {
    *   shadow   lighter world cast shadow, shade in the ground's hue
    *   rimGate  the arena's Fresnel rim gated off flat faces by curvature
    *   contour  match only: the post contour on, the per-part character hulls off
+   *   rings    match only: graphics campaign F1's seat ring under every fighter
+   *            (`seatRings.ts`). Not touched by `r1_probe`'s `legacy` variant, which
+   *            predates it — F1's paired A/B is `r1` vs `-rings`.
    */
   readonly look = {
-    split: true, form: true, shadow: true, rimGate: true, contour: true,
+    split: true, form: true, shadow: true, rimGate: true, contour: true, rings: true,
     /** Sweep knobs, read every frame; the defaults are what ships (lighting.ts / roles.ts). */
     frontWorld: FRONT_FILL_WORLD,
     sideAlbedo: FORM_SIDE_ALBEDO,
     shadowIntensity: WORLD_SHADOW_INTENSITY,
     /** Multiplier on `lighting.ts` `WORLD_SHADE_TINT`. */
     shadeTint: 1,
+    /** Seat-ring knobs (`seatRings.ts` `SeatRingStyle`); the defaults ship. */
+    ringSpread: SEAT_RING_STYLE.spread,
+    ringFill: SEAT_RING_STYLE.fill,
+    ringRim: SEAT_RING_STYLE.rim,
+    ringKey: SEAT_RING_STYLE.key,
+    ringLocal: SEAT_RING_STYLE.local,
+    ringEnemy: SEAT_RING_STYLE.enemy,
   };
+  /** `look`'s ring knobs, re-packed every frame without allocating. */
+  private readonly ringStyle: SeatRingStyle = { ...SEAT_RING_STYLE };
+  /**
+   * The seat rings (`seatRings.ts`). Null until a match frame asks for one; exposed so a
+   * probe can re-tint or count them on one frozen frame.
+   */
+  seatRings: SeatRings | null = null;
+  /**
+   * Seats as the GAME states them (`setFighterSeats`), or null to infer them from the
+   * scene. See `updateSeatRings` for what inference can and cannot know.
+   */
+  private fighterSeats: readonly SeatRingSeat[] | null = null;
+  /** Reused every frame by the inference path, so it allocates nothing per frame. */
+  private readonly inferredSeats: { root: THREE.Object3D; local: boolean; alive: boolean }[] = [];
   /** Top-level roots already given their material role (`roles.ts`). */
   private readonly roleRoots = new WeakSet<THREE.Object3D>();
   private roleSweep = 0;
@@ -2843,6 +2868,9 @@ export class Stage {
     // after it would leave their matrices a frame behind. They never enter the
     // fingerprint itself — it only hashes meshes with `castShadow`, and these do not.
     this.updateContactShadows();
+    // Same placement rule as the contact decals, for the same reason: they track fighters,
+    // so they must be positioned before anything walks the scene's matrices.
+    this.updateSeatRings();
     if (this.shadowsOn) this.scheduleShadowUpdate();
     if (this.composer) this.composer.render(dtSeconds);
     else this.renderer.render(this.scene, this.rig.camera);
@@ -2993,10 +3021,89 @@ export class Stage {
     const walk = (o: THREE.Object3D): void => {
       if (!o.visible) return;
       if (o.name.startsWith('character:')) { out.push(o); return; }
-      if (o.name === 'arena:kitchen' || o.name === 'lighting' || o.name === 'contact:shadows') return;
+      if (o.name === 'arena:kitchen' || o.name === 'lighting' || o.name === 'contact:shadows' || o.name === 'seat:rings') return;
       for (const c of o.children) walk(c);
     };
     for (const c of this.scene.children) walk(c);
+    return out;
+  }
+
+  /**
+   * Tell the stage which fighter is which. `seats` in any order; `null` returns to
+   * inference. Call it whenever the answer can change — once per frame is the simple,
+   * always-correct contract (it stores the array, it does not copy it).
+   *
+   * The scene graph cannot tell a corpse from a fighter, so only the game can say
+   * `alive: false`; that is the one fact inference below has to guess.
+   */
+  setFighterSeats(seats: readonly SeatRingSeat[] | null): void {
+    this.fighterSeats = seats;
+  }
+
+  /**
+   * ── THE SEAT RING UNDER EACH FIGHTER (graphics campaign F1, `seatRings.ts`) ──
+   *
+   * Match framing only, for the contact decal's reason (see `updateContactShadows`), and
+   * only while `look.rings` is on, so a probe can take the ring off on one frozen frame.
+   *
+   * WHICH SEAT IS LOCAL. The game states it through `setFighterSeats`. Until it does, the
+   * stage INFERS it, and the inference is one documented invariant rather than a guess:
+   * `match.ts` adds the fighter models "IN SLOT ORDER, and the order is load-bearing"
+   * (its `spawnMatch`), and `roster.ts` `LOCAL_SLOT` is 0 — so the first `character:*`
+   * root in scene order is the local seat. It is taken REGARDLESS of visibility (a hidden
+   * root is still slot 0), and every root is ringed only while it is drawn
+   * (`SeatRings.update`), so a concealed opponent's ring goes with its model.
+   *
+   * ⚠️ What inference cannot know is DEATH: a knocked-out opponent's corpse stays drawn at
+   * six seats, so until the game passes `alive`, a corpse keeps its ring. That is the line
+   * routed to `match.ts`'s owner.
+   */
+  private updateSeatRings(): void {
+    const on = this.rig.frameMode === 'fair' && this.look.rings;
+    if (!on) {
+      if (this.seatRings) this.seatRings.group.visible = false;
+      return;
+    }
+    let seats: readonly SeatRingSeat[] | null = this.fighterSeats;
+    if (seats) {
+      // A stated seat whose root left this scene (a restart rebuilt the models and the
+      // caller has not re-stated) is dropped rather than ringed where it last stood.
+      let attached = true;
+      for (const s of seats) {
+        let top: THREE.Object3D = s.root;
+        while (top.parent) top = top.parent;
+        if (top !== this.scene) { attached = false; break; }
+      }
+      if (!attached) seats = null;
+    }
+    if (!seats) seats = this.inferSeats();
+    if (!seats.length && !this.seatRings) return;
+    if (!this.seatRings) {
+      this.seatRings = new SeatRings();
+      this.scene.add(this.seatRings.group);
+    }
+    this.seatRings.group.visible = true;
+    const st = this.ringStyle, L = this.look;
+    st.spread = L.ringSpread; st.fill = L.ringFill; st.rim = L.ringRim; st.key = L.ringKey;
+    st.local = L.ringLocal; st.enemy = L.ringEnemy;
+    this.seatRings.update(seats, st);
+  }
+
+  private inferSeats(): readonly SeatRingSeat[] {
+    const out = this.inferredSeats;
+    let n = 0;
+    const walk = (o: THREE.Object3D): void => {
+      if (o.name.startsWith('character:')) {
+        const s = out[n] ?? (out[n] = { root: o, local: false, alive: true });
+        s.root = o; s.local = n === 0; s.alive = true;
+        n++;
+        return;
+      }
+      if (o.name === 'arena:kitchen' || o.name === 'lighting' || o.name === 'contact:shadows' || o.name === 'seat:rings') return;
+      for (const c of o.children) walk(c);
+    };
+    for (const c of this.scene.children) walk(c);
+    out.length = n;
     return out;
   }
 
@@ -3248,6 +3355,11 @@ export class Stage {
     // is "eight round trips later, the menu portrait went black". The cleanup is
     // therefore allowed to fail; the handback is not.
     try {
+      // The seat rings own a material that may be on no mesh at this moment (no local
+      // ring drawn), which the walk below could not find. Their own `dispose` takes the
+      // group out of the scene first, so nothing is freed twice.
+      this.seatRings?.dispose();
+      this.seatRings = null;
       // three disposes NOTHING for you on teardown — not a geometry, not a material,
       // not a texture. Walk it once, de-duplicated, because materials and their maps
       // are shared across hundreds of meshes here (the arena's palette, `toon.ts`'s

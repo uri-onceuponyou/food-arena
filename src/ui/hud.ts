@@ -58,7 +58,7 @@ import {
 // the HUD reads a seat NAME any more. Slots come from `roster.ts`, and the only two-valued
 // strings left are the CSS modifiers `--player` / `--enemy`, which are a look, not an
 // identity (see `buildFighterSlots`).
-import { livingFighterCount, type Fighter, type MatchState } from '../game/state';
+import { livingFighterCount, weaponsLocked, type Fighter, type MatchState } from '../game/state';
 import { fightersOf, LOCAL_SLOT, localFighter, slotKey, slotOf } from '../game/roster';
 // 🚨 THE ITEM BUTTONS ASK THE SIM'S OWN PREDICATE WHETHER THEY MAY BE PRESSED.
 // `combat.ts:itemUsable`'s header says why it is exported at all: *"the HUD must be able
@@ -106,10 +106,17 @@ export interface HudCallbacks {
    * A caller that never supplies it gets buttons that show the truth and do nothing,
    * which is the honest failure and is also what `menu_accept`'s harness sees.
    *
-   * 🔴 **AND NOTHING SUPPLIES IT ON HEAD.** `game/match.ts` builds this HUD and owns
-   * `buildInput()`; both hops are one line each and are ROUTED rather than taken, because
-   * that file belongs to another owner this run. Until they land, the buttons are the
-   * third dead link in the chain `docs/ITEMS.md` describes — see `renderItems`.
+   * ⚠️ **THIS SAID "NOTHING SUPPLIES IT ON HEAD", AND B1 (`4dbf937`) MADE THAT FALSE.**
+   * Kept, because it was true for as long as the buttons were dead:
+   *
+   *   > *"🔴 AND NOTHING SUPPLIES IT ON HEAD. `game/match.ts` builds this HUD and owns
+   *   > `buildInput()`; both hops are one line each and are ROUTED rather than taken,
+   *   > because that file belongs to another owner this run. Until they land, the buttons
+   *   > are the third dead link in the chain `docs/ITEMS.md` describes."*
+   *
+   * Both hops landed in the graphics revamp's bug sweep: `match.ts` passes
+   * `onUseItem: (slot) => this.input.pressItem(slot)`, and `input.ts:pressItem` queues the
+   * press that `buildInput()` hands the sim. A press now reaches `combat.ts:attemptItem`.
    */
   onUseItem?: (slot: number) => void;
 }
@@ -492,6 +499,33 @@ const LOW_HP_FRACTION = 0.25;
  */
 const RADAR_MARGIN = 0.14;
 
+/**
+ * The damage number's rise, as the CSS keyframes it replaced (UI-02, `createHud`): at
+ * 0 / 14 / 30 / 100% of its life — opacity 0 / 1 / 1 / 0, scale 0.55 / 1.18 / 1 / 0.92,
+ * own-height lift -50 / -66 / -76 / -50 %, and a 68 px climb over the last segment — each
+ * segment eased by the same `cubic-bezier(0.15, 0.8, 0.3, 1)` CSS applied per keyframe
+ * interval. Pure: `t` in [0, 1) in, one frame out.
+ */
+const DMG_KEYS: ReadonlyArray<readonly [t: number, op: number, sc: number, ty: number, dy: number]> = [
+  [0, 0, 0.55, -50, 0], [0.14, 1, 1.18, -66, 0], [0.3, 1, 1, -76, 0], [1, 0, 0.92, -50, -68],
+];
+function easeRise(x: number): number {
+  // cubic-bezier(0.15, 0.8, 0.3, 1): solve x(u) = x by bisection (monotone in u), return y(u).
+  const bx = (u: number): number => 3 * (1 - u) * (1 - u) * u * 0.15 + 3 * (1 - u) * u * u * 0.3 + u * u * u;
+  const by = (u: number): number => 3 * (1 - u) * (1 - u) * u * 0.8 + 3 * (1 - u) * u * u + u * u * u;
+  let lo = 0, hi = 1;
+  for (let k = 0; k < 18; k++) { const m = (lo + hi) / 2; if (bx(m) < x) lo = m; else hi = m; }
+  return by((lo + hi) / 2);
+}
+export function dmgKeyframe(t: number): { op: number; sc: number; ty: number; dy: number } {
+  let j = 0;
+  while (j < DMG_KEYS.length - 2 && t >= DMG_KEYS[j + 1][0]) j++;
+  const a = DMG_KEYS[j], b = DMG_KEYS[j + 1];
+  const e = easeRise(Math.min(1, Math.max(0, (t - a[0]) / (b[0] - a[0]))));
+  const mix = (k: 1 | 2 | 3 | 4): number => a[k] + (b[k] - a[k]) * e;
+  return { op: mix(1), sc: mix(2), ty: mix(3), dy: mix(4) };
+}
+
 function setBar(fill: HTMLElement, text: HTMLElement, hp: number, maxHp: number): void {
   const frac = maxHp > 0 ? Math.max(0, Math.min(1, hp / maxHp)) : 0;
   fill.style.width = `${(frac * 100).toFixed(1)}%`;
@@ -805,7 +839,15 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
      */
     levelValue: number;
     bar: HTMLDivElement; fill: HTMLDivElement; hpText: HTMLDivElement;
-    float: HTMLDivElement; floatEmoji: HTMLDivElement; floatFill: HTMLDivElement;
+    /**
+     * The BRAWLER NAMEPLATE over the fighter (graphics campaign F1): team-coloured name,
+     * the HP as a big stroked number, a thick two-tone bar. `floatHpValue` is the same
+     * write-elision cache as `levelValue` (-1 is not an HP the HUD prints).
+     */
+    float: HTMLDivElement; floatName: HTMLDivElement; floatHp: HTMLDivElement; floatFill: HTMLDivElement;
+    floatHpValue: number;
+    /** The plate's measured height and half width, 0 until measured for this viewport. */
+    floatH: number; floatHalfW: number;
     blip: HTMLDivElement;
   }
   let fighterSlots: FighterSlotEls[] = [];
@@ -938,11 +980,18 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       const float = document.createElement('div');
       float.className = `hud-float hud-float--${mod}`;
       float.dataset.el = `float-${key}`;
+      // ⚠️ THIS WAS A 106x28 DARK PILL — a portrait badge and a 68x12 bar, "deliberately
+      // NO name TEXT ... the top-corner nameplates are the one canonical place to read
+      // 'who is who'". Kept as the record of a choice the review then measured against:
+      // `docs/REVAMP.md` §2.1 found the reference's over-head plate carries a team-coloured
+      // NAME and the HP as a big stroked NUMBER over a thick bar, while ours read 0.21% of
+      // the frame with no name and no number. At six seats the corner rail is five chips
+      // with no names at all, so "the corner is the canonical place" stopped being true the
+      // day the rail replaced the second corner plate. The plate now says who and how much.
       float.innerHTML =
-        `<div class="hud-float-pill">` +
-          `<div class="hud-float-emoji" data-el="float-${key}-emoji"></div>` +
-          `<div class="hud-float-bar"><div class="hud-float-fill" data-el="float-${key}-fill"></div></div>` +
-        `</div>`;
+        `<div class="hud-float-name" data-el="float-${key}-name"></div>` +
+        `<div class="hud-float-hp" data-el="float-${key}-hp"></div>` +
+        `<div class="hud-float-bar"><div class="hud-float-fill" data-el="float-${key}-fill"></div></div>`;
       // ⚠️ `radarEl.parentElement`, NOT `root`. The template's outermost element is
       // `.hud-root`, so the radar is `root`'s GRANDchild and `root.insertBefore(…, radarEl)`
       // throws `NotFoundError: the node before which the new node is to be inserted is not
@@ -966,8 +1015,11 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         fill: plate.querySelector(`[data-el="${key}-fill"]`)!,
         hpText: plate.querySelector(`[data-el="${key}-hp"]`)!,
         float,
-        floatEmoji: float.querySelector(`[data-el="float-${key}-emoji"]`)!,
+        floatName: float.querySelector(`[data-el="float-${key}-name"]`)!,
+        floatHp: float.querySelector(`[data-el="float-${key}-hp"]`)!,
         floatFill: float.querySelector(`[data-el="float-${key}-fill"]`)!,
+        floatHpValue: -1,
+        floatH: 0, floatHalfW: 0,
         blip,
       });
     }
@@ -1024,6 +1076,61 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     dmgLayer.appendChild(el);
     dmgPool.push(el);
   }
+  /**
+   * ── UI-02: THE NUMBERS RUN ON THE HUD'S FRAME CLOCK, NOT ON A CSS KEYFRAME ──────
+   *
+   * They were a 0.85 s `@keyframes` on the DOCUMENT timeline — wall clock — and two
+   * things a frame-paced renderer does made them unreachable:
+   *   * a slow renderer (SwiftShader: seconds per frame) finished the keyframe between
+   *     two frames, so the number had faded before the next frame was ever drawn;
+   *   * a capture that holds CSS still (CDP playback rate 0, as `r1_probe` / `gx_gap_cap`
+   *     do) held it at its 0% keyframe, which is opacity 0.
+   * `shots/rv/audit/ui`: 0 legible numbers in 9 canonical frames while HP fell 132 -> 10.
+   * And the pause sheet never froze them (`update` stops; the document timeline does not).
+   *
+   * So `update()` owns them: `juiceMs` advances by the real time between two `update()`
+   * calls, CAPPED at `JUICE_STEP_MAX_MS` — `match.ts`'s own loop cap (`1 / 20` s), so a
+   * number lives for the same ~51 frames at any frame rate below 20 fps, and stops dead
+   * while `update()` is not being called (paused). The keyframes are the old CSS ones,
+   * evaluated here with the same per-segment `cubic-bezier(0.15, 0.8, 0.3, 1)`.
+   * `tools/tmp/f1_hud_logic.mjs` UI02: opacity 0.000 in both arms on the base tree.
+   *
+   * ⚠️ `is-playing` is still the LIVE class, because `tools/tmp/hud_accept.mjs` selects
+   * `.hud-dmg.is-playing` for its over-the-clock check — renaming it would make that check
+   * pass by having nothing left to check (CLAUDE.md rule 6's `[].every()`).
+   */
+  const DMG_LIFE_MS = 850;
+  const JUICE_STEP_MAX_MS = 50;
+  const dmgBorn = new Float64Array(DMG_POOL_SIZE).fill(-1);   // juiceMs at spawn; -1 = idle
+  const dmgX = new Float64Array(DMG_POOL_SIZE);
+  const dmgY = new Float64Array(DMG_POOL_SIZE);
+  let juiceMs = 0;
+  let juiceLast = -1;
+  function advanceJuice(): void {
+    const now = performance.now();
+    if (juiceLast >= 0) juiceMs += Math.min(JUICE_STEP_MAX_MS, Math.max(0, now - juiceLast));
+    juiceLast = now;
+  }
+  function applyDamageFrame(i: number): void {
+    const el = dmgPool[i];
+    const t = (juiceMs - dmgBorn[i]) / DMG_LIFE_MS;
+    if (t >= 1) {
+      dmgBorn[i] = -1;
+      el.classList.remove('is-playing');
+      el.style.opacity = '0';
+      return;
+    }
+    const k = dmgKeyframe(Math.max(0, t));
+    el.style.opacity = k.op.toFixed(3);
+    el.style.transform = `translate(${dmgX[i].toFixed(1)}px, ${(dmgY[i] + k.dy).toFixed(1)}px) translate(-50%, ${k.ty.toFixed(1)}%) scale(${k.sc.toFixed(3)})`;
+  }
+  function renderDamageNumbers(): void {
+    for (let i = 0; i < DMG_POOL_SIZE; i++) if (dmgBorn[i] >= 0) applyDamageFrame(i);
+  }
+  /** UI-01: frames between two cache re-reads while a plate is still generic (~0.5 s at 60 fps). */
+  const PORTRAIT_RETRY_FRAMES = 30;
+  let portraitsPending = false;
+  let portraitTick = 0;
 
   function hexToRgba(hex: string, alpha: number): string {
     const c = hex.replace('#', '');
@@ -1149,7 +1256,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
    * seeded by `state.ts:createFighter`), and it can legitimately change between matches
    * without this HUD being torn down.
    */
-  let itemSig = ' ';
+  let itemSig = '\u0000';
 
   /** `'KeyQ'` → `'Q'`. The cap PRINTED on a key, from the physical code `input.ts`
    *  matches on — the same split `input.ts:MOVE_KEYS` documents, kept in the UI layer
@@ -1198,9 +1305,9 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         root: slot,
         wipe: slot.querySelector<HTMLDivElement>('.hud-item-wipe')!,
         badge: slot.querySelector<HTMLDivElement>('[data-role="badge"]')!,
-        lastBadge: ' ',
-        lastState: ' ',
-        lastP: ' ',
+        lastBadge: '\u0000',
+        lastState: '\u0000',
+        lastP: '\u0000',
         wasReady: false,
       };
     });
@@ -1248,8 +1355,19 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         // gate 2 and `sim.test.mjs` §41(g) pin that correspondence, so this test and the
         // sim's cannot drift. Reading the null rather than re-testing `kind` keeps the
         // "has a button" question answered by the field that means it.
-        stateClass = 'is-auto';
-        badge = 'AUTO';
+        //
+        // ── ML-8: A SPENT LEFTOVERS KEPT ITS FULL-STRENGTH AUTO PLATE ─────────────
+        // AUTO means "this item is working — it IS on" (the `.is-auto` CSS header), and
+        // Leftovers works ONCE per match (`ITEM_TUNING.leftovers.usesPerMatch`): `combat.ts`
+        // decrements `revivesLeft` on the revive and never refills it, so after it the slot
+        // went on promising a second life that no longer exists. `revivesLeft` is the sim's
+        // own "may this fire" test (`state.ts` seeds it from the loadout, `combat.ts`
+        // spends it) and it is Leftovers' counter alone, so the plate asks it for that item
+        // and no other. `tools/tmp/f1_hud_logic.mjs` ML8, six seats: "is-auto / AUTO" after
+        // the revive on the base tree, "is-spent / USED" with this.
+        const spent = id === 'leftovers' && me.item.revivesLeft <= 0;
+        stateClass = spent ? 'is-spent' : 'is-auto';
+        badge = spent ? 'USED' : 'AUTO';
       } else if (cast !== null && cast.slot === i) {
         // The wind-up. `resolvesAt` is the sim's own deadline (`combat.ts:attemptItem`),
         // so this counts down the real cast rather than a copy of `windupMs`.
@@ -1591,11 +1709,16 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
    * viewport was correct then and is a stale-cache bug now. A restart at a different
    * size never resizes the window, so nothing else would have invalidated it.
    */
-  const FLOAT_HALF_W = 56;
+  /** Smallest half-width the edge clamp assumes for a plate not yet measured. */
+  const FLOAT_HALF_W_MIN = 34;
   let floatFloor = 0;
   let floatFloorW = -1;
   let floatFloorH = -1;
   let floatFloorN = -1;
+  /** `.hud-topbar`'s bottom edge, cached with `floatFloor`. */
+  let floatTopbarB = 0;
+  /** The viewport the nameplates were last measured at. */
+  let floatPlateKey = '';
   function floatFloorY(): number {
     if (window.innerWidth !== floatFloorW || window.innerHeight !== floatFloorH
       || fighterSlots.length !== floatFloorN) {
@@ -1611,6 +1734,10 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // change `.hud-float-pill`'s padding knows which term to move.
       const bottom = topbarEl.getBoundingClientRect().bottom;
       floatFloor = bottom + 36;
+      // The NAMEPLATE is no longer 28px tall (graphics campaign F1), so it clamps on its
+      // own measured height against this same bottom edge (`updateFloatingBars`); the 36
+      // above now only serves the damage numbers' spawn clamp, which it was also written for.
+      floatTopbarB = bottom;
       // ── ...and the same boundary, published to CSS for the damage layer ──────
       // Clamping a damage number's SPAWN point is not enough on its own: the rise
       // animation carries it 68px up and 76% of its own height further, so a number
@@ -2102,7 +2229,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
         if (!s) return;
         s.name.textContent = CHARACTERS[id].name;
         s.emoji.innerHTML = portraitMarkup(id, { crop: 'head' });
-        s.floatEmoji.innerHTML = portraitMarkup(id, { crop: 'head' });
+        s.floatName.textContent = CHARACTERS[id].name;
       });
       // The weapon tray is the LOCAL seat's, and only the local seat's — it is a
       // control surface, not a readout.
@@ -2112,15 +2239,40 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // fight. Character select has already warmed the shared cache in every real
       // flow, so this is a cache read. See ui/icons/portraits.ts.
       hydratePortraits(root, { generate: false });
+      portraitsPending = root.querySelector('[data-portrait]:not(.has-render)') !== null;
+      portraitTick = 0;
     },
 
     update(state, frame) {
       timerEl.textContent = formatTime(state.timeRemaining);
 
+      // ── UI-01: A PORTRAIT CACHE THAT FILLS AFTER THE MATCH MOUNTED ─────────────
+      // `setCharacters` hydrates ONCE, from whatever `thumbs.ts` has cached at that
+      // instant. Character select renders the heads progressively off an idle callback,
+      // so a match started before the batch finished (under SwiftShader the roster took
+      // 40-70 s; on a phone it is a few seconds) kept the generic mark on every plate for
+      // the whole match — and so did every scored frame (`shots/rv/audit/ui`: 0/12, 0/18,
+      // 0/6 hydrated). Re-read the cache every PORTRAIT_RETRY_FRAMES while any plate is
+      // still generic: `generate: false`, so it is a Map lookup per portrait and never a
+      // render (the no-renderer-mid-fight rule in ui/icons/portraits.ts is untouched).
+      // `tools/tmp/f1_hud_logic.mjs` UI01: 0/12 after the cache filled on the base tree.
+      if (portraitsPending && ++portraitTick % PORTRAIT_RETRY_FRAMES === 0) {
+        hydratePortraits(root, { generate: false });
+        portraitsPending = root.querySelector('[data-portrait]:not(.has-render)') !== null;
+      }
+
+      // ── UI-02: ONE-SHOT JUICE ON THE FRAME CLOCK ─────────────────────────────────
+      advanceJuice();
+      renderDamageNumbers();
+
       fightersOf(state).forEach((f, i) => {
         const s = fighterSlots[i];
         if (!s) return;
         setBar(s.fill, s.hpText, f.hp, f.maxHp);
+        // The nameplate's number — `setBar`'s own rounding, so the corner and the plate
+        // can never print two different HPs for one fighter.
+        const hpNow = Math.max(0, Math.ceil(f.hp));
+        if (s.floatHpValue !== hpNow) { s.floatHpValue = hpNow; s.floatHp.textContent = String(hpNow); }
         // ── THE FIGHTER'S OWN LEVEL, READ OFF THE FIGHTER ───────────────────────
         // Uri, playing the deployed build: *"In the gameplay add player level on
         // player data."*
@@ -2172,6 +2324,17 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // selection ring for a weapon that cannot fire.
       const trayInert = localIsSpectating(state);
       weaponsEl.classList.toggle('is-inert', trayInert);
+      // ── U1: A CLOGGED OR SLEEPING FIGHTER'S TRAY READ "READY" ──────────────────
+      // `combat.ts:attemptAttack` refuses EVERY press while `state.ts:weaponsLocked` holds
+      // (Pompa's clog, Warm Milk's sleep), and the tray lit `is-ready` off the cooldown
+      // alone — four buttons saying "press me" over a refusal, which `combat.ts:itemUsable`'s
+      // header names exactly: "a copy of this rule anywhere else is a button that lies". So
+      // the tray asks the SIM's own predicate, never a re-derivation of the two deadlines.
+      // `tools/tmp/f1_hud_logic.mjs` U1: 4/4 ready while clogged and while asleep on the
+      // base tree, 0/4 with this; the controls (free, and the lock lifting) stay 4/4.
+      // Latent in shipped play (bots equip no items, DECISIONS §91h) — live the day they do.
+      const trayLocked = !trayInert && weaponsLocked(localFighter(state), state.elapsed);
+      weaponsEl.classList.toggle('is-locked', trayLocked);
       if (playerCharId) {
         const weapons = CHARACTERS[playerCharId].weapons;
         const lastUsed = localFighter(state).lastUsed;
@@ -2185,7 +2348,7 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           // on the REAL cooldown edge. Collapsing the two would arm the one-shot flash to
           // fire on whatever the next transition happened to be.
           const readyNow = frac <= 0;
-          const ready = readyNow && !trayInert;
+          const ready = readyNow && !trayInert && !trayLocked;
           slot.root.classList.toggle('is-ready', ready);
           slot.root.classList.toggle('is-selected', !trayInert && i === frame.selectedWeapon);
           // Numeric countdown on top of the radial wipe — a lone dark wedge reads as
@@ -2199,10 +2362,14 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
           // idle-ready — re-triggering the CSS animation the same reflow-forcing way
           // the pooled damage numbers do above.
           // ⚠️ The EDGE is `readyNow`'s and the latch stores `readyNow`, so the tray going
-          // inert cannot manufacture a rising edge, and coming back from one (no shipped
-          // path today — nothing revives — but the next respawn mode is one) cannot flash
+          // inert cannot manufacture a rising edge, and coming back from one cannot flash
           // four slots at once for cooldowns that finished while the player was dead.
-          if (readyNow && !slot.wasReady && !trayInert) {
+          // ⚠️ This said *"(no shipped path today — nothing revives — but the next respawn
+          // mode is one)"*. Leftovers revives the local seat (`combat.ts`, `revivesLeft`),
+          // and since B1 (`4dbf937`) `match.ts` answers `item-revived` with a beat and a
+          // camera cut — so coming back from inert IS a shipped path, and this latch is
+          // what keeps that moment from flashing the whole tray.
+          if (readyNow && !slot.wasReady && !trayInert && !trayLocked) {
             slot.root.classList.remove('is-flash');
             void slot.root.offsetWidth;
             slot.root.classList.add('is-flash');
@@ -2416,20 +2583,32 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     },
 
     updateFloatingBars(points, health01) {
-      const floor = floatFloorY();
-      const place = (el: HTMLElement, p: ScreenPoint): void => {
-        // Clamped, not hidden. A fighter above the top of the frame is exactly when
-        // you most want to know their HP, so the pill stays — it just stops at the
-        // first row of the play area instead of climbing into the clock.
-        const y = Math.max(p.y, floor);
-        const x = Math.min(Math.max(p.x, FLOAT_HALF_W), window.innerWidth - FLOAT_HALF_W);
-        el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
-      };
+      floatFloorY();   // refreshes the cached top-bar edge on a viewport / seat change
+      // A plate's size is a function of the viewport (vh-clamped type) and of its name, so
+      // each is measured ONCE per viewport, the first frame it is shown — one layout read
+      // per plate per resize, never per frame.
+      const key = `${window.innerWidth}x${window.innerHeight}`;
+      if (key !== floatPlateKey) {
+        floatPlateKey = key;
+        for (const s of fighterSlots) { s.floatH = 0; s.floatHalfW = 0; }
+      }
       fighterSlots.forEach((s, i) => {
         const p = points[i] ?? null;
         if (!p) { s.float.style.display = 'none'; return; }
         s.float.style.display = 'flex';
-        place(s.float, p);
+        if (s.floatH <= 0) {
+          const r = s.float.getBoundingClientRect();
+          s.floatH = r.height;
+          s.floatHalfW = r.width / 2;
+        }
+        // Clamped, not hidden. A fighter above the top of the frame is exactly when you
+        // most want to know their HP, so the plate stays — it just stops below the top bar
+        // (its own height + 8 px of clearance; the plate is anchored by its BOTTOM edge)
+        // instead of climbing into the clock.
+        const y = Math.max(p.y, floatTopbarB + s.floatH + 8);
+        const hw = Math.max(s.floatHalfW, FLOAT_HALF_W_MIN);
+        const x = Math.min(Math.max(p.x, hw), window.innerWidth - hw);
+        s.float.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
         const frac = Math.max(0, Math.min(1, health01[i] ?? 0));
         s.floatFill.style.width = `${(frac * 100).toFixed(1)}%`;
         s.floatFill.classList.toggle('is-low', frac > 0 && frac <= LOW_HP_FRACTION);
@@ -2437,7 +2616,8 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
     },
 
     spawnDamageNumber(point, amount, opts) {
-      const el = dmgPool[dmgCursor];
+      const i = dmgCursor;
+      const el = dmgPool[i];
       dmgCursor = (dmgCursor + 1) % dmgPool.length;
       const heal = !!opts?.heal;
       const big = amount >= 15;
@@ -2451,17 +2631,17 @@ export function createHud(root: HTMLElement, callbacks: HudCallbacks): Hud {
       // rather than letting the clip eat all of it.
       const y = Math.max(point.y, floatFloorY());
       const x = Math.min(Math.max(point.x, 24), window.innerWidth - 24);
-      el.style.setProperty('--x', `${x.toFixed(1)}px`);
-      el.style.setProperty('--y', `${y.toFixed(1)}px`);
       el.textContent = heal
         ? `+${Math.round(amount)}`
         : `-${Math.round(amount)}`;
       const tint = heal ? ' hud-dmg--heal' : opts?.fog ? ' hud-dmg--fog' : '';
-      el.className = `hud-dmg ${big ? 'hud-dmg--big' : medium ? 'hud-dmg--medium' : 'hud-dmg--small'}${tint}`;
-      // Force a reflow between resetting the class and re-adding `is-playing` so the
-      // CSS animation restarts even when this pooled element is reused mid-animation.
-      void el.offsetWidth;
-      el.classList.add('is-playing');
+      el.className = `hud-dmg ${big ? 'hud-dmg--big' : medium ? 'hud-dmg--medium' : 'hud-dmg--small'}${tint} is-playing`;
+      // Born at the HUD's current frame time, drawn at its 0% keyframe now; `update()`
+      // advances it (UI-02 above). A pooled element reused mid-flight simply restarts.
+      dmgX[i] = x;
+      dmgY[i] = y;
+      dmgBorn[i] = juiceMs;
+      applyDamageFrame(i);
     },
 
     flashScreen(color) {
@@ -2514,14 +2694,14 @@ const CSS = `
    timer stay readable no matter how bright or busy the arena floor gets under
    them (a bright kitchen tile, a lit hazard, a light character), independent of
    each element's own text-shadow. */
-.hud-topbar-scrim {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 120px;
-  background: linear-gradient(180deg, rgba(10,6,16,0.5), rgba(10,6,16,0));
-}
+/* REMOVED (graphics campaign F1, docs/REVAMP.md §5): it was "position absolute, top 0,
+   full width, height 120px, linear-gradient(180deg, rgba(10,6,16,0.5) -> 0)". Every
+   element it protected now sits on its own opaque plate (nameplate, clock, zone, chips)
+   or its own stroke, and hud_accept measures each text run against what is actually
+   behind it — so the wash was darkening the top 120 px of the ARENA (13% of a 900 px
+   frame, a third of a landscape phone's) to protect text that no longer needed it. The
+   element stays in the DOM so nothing that queries it breaks. */
+.hud-topbar-scrim { display: none; }
 
 /* Safe areas, on every edge the HUD touches. A landscape phone eats 44px of the
    leading edge to the notch and ~21px of the trailing bottom to the home indicator,
@@ -2877,7 +3057,10 @@ const CSS = `
    (buildFighterSlots writes the whole float in one template). Corrected rather
    than deleted, because it is the shape this project keeps paying for - a
    consolation readout named in a comment as the reason a real one was dropped,
-   where nobody checked that the consolation exists. */
+   where nobody checked that the consolation exists.
+   ⚠️ AND NOW IT DOES (graphics campaign F1): the over-head plate prints each
+   fighter's HP as a big stroked numeral (.hud-float-hp), so a chip's hidden
+   "99 / 108" has a real readout at the fighter it belongs to. */
 .hud-fighter--chip .hud-healthbar-text { display: none; }
 
 .hud-clock {
@@ -3455,19 +3638,33 @@ html.fa-touch-capable .hud-radar {
    and starves the canvas of firing AND aim-facing at once. That has shipped once. So
    the opt-in is per-slot, 58x58 (well over the 44px minimum), and gated on
    html.fa-touch, which game/touch.ts only sets after a REAL finger has been seen. A
-   mouse-only machine never reaches this rule at all. */
-html.fa-touch .hud-weapon-slot {
+   mouse-only machine never reaches this rule at all.
+   F7 — AND ON A PHONE THAT GATE MADE THE FIRST TOUCH OF EVERY MATCH FIRE. fa-touch is
+   set by the first CLAIMED finger, so before it the slot was pointer-events none, a
+   touch on it fell through to the canvas, claimed the aim stick and FIRED the selected
+   weapon (bh_input_probe S3.J: first touch on slot 3 -> selectedWeapon 0, attackFrames 7;
+   the second touch, after the class landed, selected cleanly). The gate's reason —
+   "do not eat a MOUSE player's fire clicks" — cannot apply on a device whose PRIMARY
+   pointer is coarse, and html.fa-touch-capable is exactly that device (touch.ts sets it
+   at construction, phones and tablets only, never a touchscreen laptop). So the slots
+   opt in under either flag. The inert tray (0,3,0) and the AUTO/spent item !important
+   rules still out-rank both. The touch.ts half (B2's file) needs nothing for this:
+   once the slot takes the event, its pointerdown handler preventDefaults it. */
+html.fa-touch .hud-weapon-slot,
+html.fa-touch-capable .hud-weapon-slot {
   pointer-events: auto;
   cursor: pointer;
   touch-action: manipulation;
 }
 /* A tap has to acknowledge itself even when the slot it hit is still cooling — with no
    press state, a mis-hit and a dead control look identical. */
-html.fa-touch .hud-weapon-slot:active {
+html.fa-touch .hud-weapon-slot:active,
+html.fa-touch-capable .hud-weapon-slot:active {
   transform: translateY(2px);
   box-shadow: 0 1px 0 rgba(0,0,0,0.35);
 }
-html.fa-touch .hud-weapon-slot.is-selected:active { transform: translateY(-1px); }
+html.fa-touch .hud-weapon-slot.is-selected:active,
+html.fa-touch-capable .hud-weapon-slot.is-selected:active { transform: translateY(-1px); }
 /* The digit badge is a keyboard legend. On a device with no keyboard it is a small lie
    about how the game is played, so the slot keeps its plate and loses the key cap.
    Capability again, not first-touch: it should never be there to begin with, and a
@@ -3585,6 +3782,13 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
    only ever auto here under html.fa-touch (see that rule's header: .hud-root is
    none and this is the ONE opt-in in the HUD), so this is the exact counterpart. */
 .hud-weapons.is-inert .hud-weapon-slot { pointer-events: none; }
+/* LOCKED (U1): clogged or asleep — the sim refuses every press until it lifts. Greyed like
+   the inert tray, but presses stay live: SELECTING a weapon is not firing one, and a
+   locked player picking the slot to fire the instant the lock lifts is the right play. */
+.hud-weapons.is-locked {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    THE ITEM BUTTONS
@@ -3668,6 +3872,11 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
    — they ARE on — and lose every affordance that would imply a press: no pointer
    events even on touch, no :active depress, no ready flash. */
 .hud-item-slot.is-auto { pointer-events: none !important; }
+/* SPENT (ML-8): a once-per-match item that has fired. Nothing to press and nothing
+   working any more — the AUTO plate's no-press rules, with the glyph greyed out so it
+   cannot be read as "on". */
+.hud-item-slot.is-spent { pointer-events: none !important; opacity: 0.55; }
+.hud-item-slot.is-spent .hud-item-glyph { filter: grayscale(1) brightness(0.7); }
 
 .hud-item-glyph {
   line-height: 0;
@@ -3703,7 +3912,8 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 }
 .hud-item-slot.is-ready .hud-item-wipe,
 .hud-item-slot.is-empty .hud-item-wipe,
-.hud-item-slot.is-auto .hud-item-wipe { background: transparent; }
+.hud-item-slot.is-auto .hud-item-wipe,
+.hud-item-slot.is-spent .hud-item-wipe { background: transparent; }
 
 /* ── READY: an amber ring ADDED OUTSIDE the ink, never REPLACING it ─────────
    🚨 THE FIRST CUT DID WHAT .hud-weapon-slot.is-selected DOES — swapped border-color to
@@ -3816,25 +4026,29 @@ html.fa-touch-capable .hud-weapon-key { display: none; }
 html.fa-touch-capable .hud-item-key { display: none; }
 /* An empty or automatic slot has nothing to press, so it carries no key legend either. */
 .hud-item-slot.is-empty .hud-item-key,
-.hud-item-slot.is-auto .hud-item-key { display: none; }
+.hud-item-slot.is-auto .hud-item-key,
+.hud-item-slot.is-spent .hud-item-key { display: none; }
 
 /* The ONE opt-in to pointer events, exactly as the weapon slot's: per-slot, 58x58
    (well over the 44px floor), and gated on html.fa-touch, which game/touch.ts sets only
    after a REAL finger. .hud-root is pointer-events:none and a full-viewport layer that
    claims events starves the canvas of firing AND aim at once — that has shipped once. */
-html.fa-touch .hud-item-slot {
+html.fa-touch .hud-item-slot,
+html.fa-touch-capable .hud-item-slot {
   pointer-events: auto;
   cursor: pointer;
   touch-action: manipulation;
 }
 /* A press has to acknowledge itself even when the slot it hit is still cooling — with
    no press state, a mis-hit and a dead control look identical. */
-html.fa-touch .hud-item-slot:active {
+html.fa-touch .hud-item-slot:active,
+html.fa-touch-capable .hud-item-slot:active {
   transform: translateY(2px);
   box-shadow: 0 1px 0 rgba(0,0,0,0.35);
 }
 /* Nothing to press: no depress, and no pointer events to produce one. */
-html.fa-touch .hud-item-slot.is-empty { pointer-events: none; }
+html.fa-touch .hud-item-slot.is-empty,
+html.fa-touch-capable .hud-item-slot.is-empty { pointer-events: none; }
 
 /* Dead player: the cluster greys with the tray and stops accepting presses, for the
    tray's reasons and by the tray's mechanism. */
@@ -4217,56 +4431,69 @@ html.fa-items .hud-spectate {
   display: none;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 1px;
   pointer-events: none;
   will-change: transform;
 }
-/* Solid backing plate — same trick that already made the corner nameplate legible
-   over any floor colour — plus a compact emoji badge (never the name text: that
-   stays the corner's job alone) so this reads as an intentional, chunky "mini"
-   version of the corner pill rather than a bare line easy to lose mid-fight. */
-.hud-float-pill {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: rgba(10,6,16,0.62);
-  border: 2px solid rgba(26,18,36,0.85);
-  border-radius: 999px;
-  padding: 3px 8px 3px 3px;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.35);
+/* ── THE BRAWLER NAMEPLATE (graphics campaign F1, docs/REVAMP.md §2.1) ─────────
+   Name in the team colour, the HP as a big stroked numeral, a thick two-tone bar —
+   the reference's over-head unit, measured on two of its plates at 126-148 x 60-75 px
+   at 900-px equivalent (name row to bar bottom). Sized in vh so a phone gets the same
+   plate in proportion, clamped so it never drops below legibility.
+   NO backing plate, deliberately: the old 106x28 pill was a dark slab over the floor
+   (§2.1's "dark pill, no name, no number"). Legibility comes from the STROKE — every
+   glyph sits on its own 3-4 px dark outline (paint-order: stroke fill), which is also
+   what hud_accept measures it against (a stroked glyph's backdrop is its stroke).
+   Team colours are the HUD's own (#3FCB86 you, #E6493F them) and the seat ring's
+   (render/seatRings.ts), so ring, plate and corner say "you"/"them" in one vocabulary;
+   the enemy NAME takes the lighter #FF6B5C of the same family, 6.5:1 on its stroke
+   where #E6493F is 4.7:1. */
+.hud-float-name {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: clamp(10px, 2vh, 18px);
+  line-height: 1;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  -webkit-text-stroke: 3px #1a1224;
+  paint-order: stroke fill;
+  text-shadow: 0 2px 0 rgba(0,0,0,0.45);
 }
-.hud-float-emoji {
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  border-radius: 50%;
-  background: rgba(255,255,255,0.14);
+.hud-float--player .hud-float-name { color: #3FCB86; }
+.hud-float--enemy .hud-float-name { color: #FF6B5C; }
+.hud-float-hp {
+  font-family: 'Rubik', sans-serif;
+  font-weight: 900;
+  font-size: clamp(14px, 3.3vh, 30px);
+  line-height: 1;
+  color: #FFF3DE;
+  white-space: nowrap;
+  -webkit-text-stroke: 4px #1a1224;
+  paint-order: stroke fill;
+  text-shadow: 0 2px 0 rgba(0,0,0,0.5);
+  /* Sits ON the bar's top edge, the way the reference's numeral does. */
+  margin-bottom: calc(clamp(7px, 1.6vh, 15px) * -0.35);
+  position: relative;
+  z-index: 1;
 }
-.hud-float--player .hud-float-emoji { border: 1.5px solid #3FCB86; }
-.hud-float--enemy .hud-float-emoji { border: 1.5px solid #E6493F; }
-.hud-float-emoji .fa-ic-portrait { width: 100%; height: 100%; vertical-align: top; }
-
 .hud-float-bar {
-  width: 68px;
-  height: 12px;
+  width: clamp(60px, 13.5vh, 122px);
+  height: clamp(7px, 1.6vh, 15px);
   background: #241a30;
   border: 2.5px solid #1a1224;
   border-radius: 999px;
   overflow: hidden;
   box-shadow: 0 2px 0 rgba(0,0,0,0.4);
 }
+/* TWO-TONE: the team colour over a darker band of the same hue — a bar with a lit top
+   and a shaded bottom reads as an object, not a flat swatch. */
 .hud-float-fill {
   height: 100%;
   transition: width 0.15s ease-out;
-  background-image: linear-gradient(180deg, rgba(255,255,255,0.5) 0%, rgba(255,255,255,0) 45%);
-  background-blend-mode: overlay;
 }
-.hud-float--player .hud-float-fill { background-color: #3FCB86; }
-.hud-float--enemy .hud-float-fill { background-color: #E6493F; }
+.hud-float--player .hud-float-fill { background: linear-gradient(180deg, #5FE0A0 0 50%, #2E9E68 50% 100%); }
+.hud-float--enemy .hud-float-fill { background: linear-gradient(180deg, #F2665C 0 50%, #B8302A 50% 100%); }
 .hud-float-fill.is-low { animation: hud-lowhp-pulse-small 0.7s ease-in-out infinite; }
 @keyframes hud-lowhp-pulse-small {
   0%, 100% { filter: brightness(1); }
@@ -4466,15 +4693,11 @@ html.fa-items .hud-spectate {
   opacity: 0;
   will-change: transform, opacity;
 }
-.hud-dmg.is-playing {
-  animation: hud-dmg-rise 0.85s cubic-bezier(0.15, 0.8, 0.3, 1) forwards;
-}
-@keyframes hud-dmg-rise {
-  0%   { transform: translate(var(--x), var(--y)) translate(-50%, -50%) scale(0.55); opacity: 0; }
-  14%  { transform: translate(var(--x), var(--y)) translate(-50%, -66%) scale(1.18); opacity: 1; }
-  30%  { transform: translate(var(--x), var(--y)) translate(-50%, -76%) scale(1); opacity: 1; }
-  100% { transform: translate(var(--x), calc(var(--y) - 68px)) translate(-50%, -50%) scale(0.92); opacity: 0; }
-}
+/* .is-playing marks a LIVE number. Its rise is driven per frame by update() (UI-02 —
+   see dmgKeyframe); it used to be the 0.85 s hud-dmg-rise keyframe on the document
+   timeline, which a slow renderer finished between frames and a frozen capture held at
+   opacity 0. The class is kept because hud_accept selects .hud-dmg.is-playing.
+   (No backticks in this comment: the whole block is a template literal.) */
 .hud-dmg--small { font-size: 16px; }
 .hud-dmg--medium { font-size: 25px; color: #FFD873; }
 .hud-dmg--big { font-size: 36px; color: #FF6B5C; }
