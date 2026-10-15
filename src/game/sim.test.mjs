@@ -13240,6 +13240,158 @@ console.log('\n48. The bot at two, three and six seats — sudden death, what it
     }
   }
 
+  // ── (c) AI-B3: THE SHIPPED PATCHES WERE PERMANENT AI-DENIAL ZONES ─────────────────────
+  //
+  // `stepAI` walked to where it last saw its target and stopped, and from there it sees
+  // `CONCEAL_REVEAL_RADIUS` (84 wu). `DECISIONS §29.1` turned that into "patches up to roughly
+  // 168 wu across cannot become denial zones" — but a hider who walks to the FAR side of a patch
+  // is measured from where the bot STOPS, the entry edge, and every shipped patch is 110–130 wu
+  // across: its far corners are 123–145 wu from the entry midpoint. §26(f)'s own rule was right
+  // ("no interior point more than 84 wu from where a fighter entered"); the 168 mistranslated it.
+  //
+  // This runs on the SHIPPED layout, read from `tools/arena.gameplay.json` (the gameplay half of
+  // `createKitchenArena()`, which pulls in Three.js and cannot be imported here), against EVERY
+  // patch it declares — so a re-layout is re-tested rather than silently skipped, and the
+  // NON-VACUITY row fails loudly if the file stops declaring any.
+  //
+  // ⚠️ AND IT MUST NOT CRASH WHERE THAT FILE IS ABSENT. A dozen tools (`b3_knownbad`'s `runArm`,
+  // the `bb_*`/`mv_*` probes, `wpx_knownbad`) copy `src/` ALONE to a scratch directory and run
+  // this whole suite there; a throw here would end their run before the summary line they parse.
+  // So a `src/`-only copy runs the same rows on one synthetic patch of each shipped size class
+  // on an open floor, and the NON-VACUITY row's detail names which layout it ran on.
+  {
+    let dump = null;
+    try {
+      dump = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../tools/arena.gameplay.json'), 'utf8'));
+    } catch { dump = null; }
+    const shippedLayout = dump !== null && Array.isArray(dump.concealment);
+    if (!shippedLayout) {
+      dump = {
+        id: 'b5-synthetic', displayName: 'b5 synthetic', width: 2800, height: 2000, center: { x: 1400, y: 1000 },
+        maxSafeRadius: Math.hypot(1400, 1000), playerSpawn: { x: 200, y: 200 }, enemySpawn: { x: 2600, y: 1800 },
+        spawns: [{ x: 200, y: 200 }, { x: 2600, y: 200 }, { x: 200, y: 1800 }, { x: 2600, y: 1800 }, { x: 1400, y: 200 }, { x: 1400, y: 1800 }],
+        cover: [], hazards: [],
+        concealment: [110, 120, 130].map((w, i) => ({ x: 700 * (i + 1), y: 1000, w, h: w, kind: 'synthetic' })),
+      };
+    }
+    const kitchen = { ...dump, build() { return {}; }, update() {} };
+    const patches = dump.concealment ?? [];
+    const HALF = PLAYER_SIZE / 2;
+    const standable = (x, y) => x >= HALF && y >= HALF && x <= dump.width - HALF && y <= dump.height - HALF
+      && !dump.cover.some((o) => Math.abs(x - o.x) < (PLAYER_SIZE + o.w) / 2 && Math.abs(y - o.y) < (PLAYER_SIZE + o.h) / 2);
+    const clear = (a, b) => {
+      const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 5));
+      for (let i = 0; i <= n; i++) if (!standable(a.x + ((b.x - a.x) * i) / n, a.y + ((b.y - a.y) * i) / n)) return false;
+      return true;
+    };
+    // Per patch, the first side (S, N, E, W) with an open straight approach: the bot starts 200 wu
+    // out from that edge's midpoint M, the hider 100 wu out — more than the 84 wu reveal behind it,
+    // so the hider is lost as it crosses the edge (the bot is the slower of the two, so the gap
+    // only grows). The hider walks to M, then on to its goal — the FAR corner (6 wu inside both
+    // far edges) or, for the control, 40 wu past M.
+    const plan = (b) => {
+      for (const [nx, ny] of [[0, 1], [0, -1], [1, 0], [-1, 0]]) {
+        const half = nx !== 0 ? b.w / 2 : b.h / 2;
+        const M = { x: b.x + nx * half, y: b.y + ny * half };
+        const Q = { x: M.x + nx * 100, y: M.y + ny * 100 };
+        const S0 = { x: M.x + nx * 200, y: M.y + ny * 200 };
+        const FAR = nx === 0
+          ? { x: b.x - b.w / 2 + 6, y: b.y - ny * (b.h / 2 - 6) }
+          : { x: b.x - nx * (b.w / 2 - 6), y: b.y - b.h / 2 + 6 };
+        const NEAR = { x: M.x - nx * 40, y: M.y - ny * 40 };
+        if (clear(S0, M) && clear(M, FAR) && clear(M, NEAR)) return { b, M, Q, S0, FAR, NEAR };
+      }
+      return null;
+    };
+    const plans = patches.map(plan);
+    const HIDER = 'pizza';
+    const BOT = 'burrito';
+    // Two seats: [hider, bot]. Six: four statues on the shipped spawns FARTHEST from the patch,
+    // the hider in slot 1 and the bot in slot 3 — so the perception matrix is indexed at n = 6.
+    const run = (p, goal, six) => {
+      let seats;
+      let hs = 0;
+      let bs = 1;
+      const hider = { characterId: HIDER, controller: 'human', maxHp: 1e5, spawn: p.Q };
+      const bot = { characterId: BOT, controller: 'ai', maxHp: 1e5, spawn: p.S0 };
+      if (!six) seats = [hider, bot];
+      else {
+        const far = dump.spawns.slice().sort((u, v) => Math.hypot(v.x - p.b.x, v.y - p.b.y) - Math.hypot(u.x - p.b.x, u.y - p.b.y)).slice(0, 4);
+        const statue = (s, c) => ({ characterId: c, controller: 'human', maxHp: 1e5, spawn: { x: s.x, y: s.y } });
+        seats = [statue(far[0], 'egg'), hider, statue(far[1], 'soup'), bot, statue(far[2], 'donut'), statue(far[3], 'taco')];
+        hs = 1;
+        bs = 3;
+      }
+      const st = seat48(kitchen, seats);
+      st.phase = 'playing';
+      const C = st.fighters[hs];
+      const A = st.fighters[bs];
+      const r = { nearest: nearestLivingOpponent(st, A) === C, everHidden: false, settledAt: -1, presses: 0, found: -1 };
+      let leg = 0;
+      for (let k = 0; k < 3600; k++) {
+        const inputs = st.fighters.map(() => null);
+        inputs[hs] = walk48(C, leg === 0 ? p.M.x : goal.x, leg === 0 ? p.M.y : goal.y);
+        const evs = stepMatch(st, DT48, inputs);
+        if (leg === 0 && Math.hypot(C.x - p.M.x, C.y - p.M.y) < 3) leg = 1;
+        if (leg === 1 && !isVisibleFrom(A.x, A.y, C.x, C.y, st.arena, st, C)) r.everHidden = true;
+        if (r.settledAt < 0 && leg === 1 && Math.hypot(C.x - goal.x, C.y - goal.y) < 3) r.settledAt = st.elapsed;
+        if (r.settledAt >= 0) {
+          for (const e of evs) if (isPress48(e, A)) { r.presses++; if (r.found < 0) r.found = st.elapsed - r.settledAt; }
+          if (r.found >= 0 || st.elapsed - r.settledAt > 20_000) break;
+        }
+      }
+      return r;
+    };
+    const tag = (p) => `${p.b.kind}@${p.b.x},${p.b.y}/${p.b.w}`;
+    const fmtC = (rows) => rows.map(({ p, r }) => `${tag(p)} ${r.found < 0 ? 'NEVER' : `+${(r.found / 1000).toFixed(1)}s`}`).join(' · ');
+    const CONTRACT = 2 * CONCEAL_REVEAL_RADIUS;
+    check('(c) NON-VACUITY: the shipped kitchen declares patches, every one inside the 168 wu contract, each with an open approach',
+      patches.length > 0 && patches.every((b) => b.w <= CONTRACT && b.h <= CONTRACT) && plans.every((p) => p !== null),
+      `${shippedLayout ? 'SHIPPED layout' : 'src-only copy: SYNTHETIC patches'} — ${patches.length} patches, sizes ${[...new Set(patches.map((b) => b.w))].join('/')}; planned ${plans.filter(Boolean).length}`);
+    const ok = plans.filter(Boolean);
+    const near = ok.map((p) => ({ p, r: run(p, p.NEAR, false) }));
+    const far = ok.map((p) => ({ p, r: run(p, p.FAR, false) }));
+    check('(c) CONTROL: a hider 40 wu past the entry edge is found at every shipped patch',
+      near.length > 0 && near.every(({ r }) => r.found >= 0), fmtC(near));
+    check('(c) NON-VACUITY: the far-corner hider goes unseen inside every patch, and settles',
+      far.length > 0 && far.every(({ r }) => r.everHidden && r.settledAt > 0), `${far.filter(({ r }) => r.everHidden).length}/${far.length} unseen`);
+    check('(c) 🔴 two seats: a hider in the FAR corner of EVERY shipped patch is found — within 20 s',
+      far.every(({ r }) => r.found >= 0), fmtC(far));
+    // Six seats, the two largest shipped patches (the 130 wu plates) and the first 110.
+    const big = ok.filter((p) => p.b.w === Math.max(...ok.map((q) => q.b.w))).concat(ok.filter((p) => p.b.w === Math.min(...ok.map((q) => q.b.w))).slice(0, 1));
+    const six = big.map((p) => ({ p, r: run(p, p.FAR, true) }));
+    check('(c) 🔴 six seats: …and with four more seats on the map (the largest patches and a smallest one)',
+      six.length >= 2 && six.every(({ r }) => r.nearest && r.everHidden && r.found >= 0), fmtC(six));
+
+    // CONTROL — THE CONTRACT. A region BEYOND it (300 wu) is still a denial zone. The sweep below
+    // only GUARANTEES coverage inside the contract, and §26(f) states the larger-region rule
+    // ("keep concealment patches small"); a search that wandered every region would change that
+    // behaviour too, and this row is what says so.
+    {
+      const R300 = { x: 1400, y: 600, w: 300, h: 300, kind: 'test' };
+      const open = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000, concealment: [R300] });
+      const M = { x: R300.x, y: R300.y + R300.h / 2 };
+      const GOAL = { x: R300.x, y: R300.y - R300.h / 2 + 30 };   // 270 wu past the entry edge
+      const st = seat48(open, [
+        { characterId: HIDER, controller: 'human', maxHp: 1e5, spawn: { x: M.x, y: M.y + 100 } },
+        { characterId: BOT, controller: 'ai', maxHp: 1e5, spawn: { x: M.x, y: M.y + 200 } },
+      ]);
+      st.phase = 'playing';
+      const [C, A] = st.fighters;
+      let leg = 0;
+      let settled = -1;
+      let presses = 0;
+      for (let k = 0; k < 2400; k++) {
+        const evs = stepMatch(st, DT48, [walk48(C, leg === 0 ? M.x : GOAL.x, leg === 0 ? M.y : GOAL.y), null]);
+        if (leg === 0 && Math.hypot(C.x - M.x, C.y - M.y) < 3) leg = 1;
+        if (settled < 0 && leg === 1 && Math.hypot(C.x - GOAL.x, C.y - GOAL.y) < 3) settled = st.elapsed;
+        if (settled >= 0) for (const e of evs) if (isPress48(e, A)) presses++;
+      }
+      check('(c) CONTROL: a 300 wu region — outside the 168 wu contract — is still a denial zone (no search where coverage is not guaranteed)',
+        settled > 0 && presses === 0, `settled ${settled > 0}; bot presses after ${presses}`);
+    }
+  }
+
   // ── (d) AI-B4: A HIDDEN NEAREST OPPONENT LOCKED THE BOT OUT OF RETURNING FIRE ───────────
   //
   // `stepAI` picks its target with `nearestLivingOpponent` on TRUE positions and gates the shot

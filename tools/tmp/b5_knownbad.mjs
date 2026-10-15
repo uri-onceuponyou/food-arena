@@ -6,9 +6,13 @@
  *
  * `CLAUDE.md` #6: *"A guard that has not been shown to FAIL on the bug it guards against is not
  * a guard."* Each 🔴 row in §48 went red on `a53d8b0` before its fix landed and the commits say
- * so; this makes that claim re-runnable. The engine is B3's `tools/tmp/b3_knownbad.mjs:runArm`
- * (imported, not copied): one textual substitution per arm, asserted to match EXACTLY ONCE, the
- * real suite run against the copy, rows matched by name prefix.
+ * so; this makes that claim re-runnable. The engine is B3's `tools/tmp/b3_knownbad.mjs:runArm` —
+ * one textual substitution per arm, asserted to match EXACTLY ONCE, the real suite run against
+ * the copy, rows matched by name prefix — with ONE difference, which is why it is a local copy
+ * rather than the import it started as: it also copies `tools/arena.gameplay.json`, because
+ * §48(c) tests EVERY SHIPPED PATCH from that file, and a `src/`-only copy runs §48(c) on its
+ * synthetic fallback instead (see the row). Testing the known-bads against a layout the game
+ * does not ship would be validating the guard against the wrong input.
  *
  * Every fix also gets an OVER-FIX arm where one is plausible — the broader change that would pass
  * every 🔴 row — and that arm must turn a CONTROL row red. A guard that only asks "is the bug
@@ -19,10 +23,49 @@
  *   node tools/tmp/b5_knownbad.mjs --list
  *   node tools/tmp/b5_knownbad.mjs --selftest      # the rig shown to fail: a no-op revert, a drifted anchor
  */
-import { resolve } from 'node:path';
-import { runArm } from './b3_knownbad.mjs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
+
+/** Run one arm. Returns { name, ok, faults[], failed[] }. `b3_knownbad.mjs:runArm` + the layout dump. */
+export function runArm(arm, root = ROOT) {
+  const faults = [];
+  const dir = mkdtempSync(join(tmpdir(), 'b5kb-'));
+  try {
+    cpSync(join(root, 'src'), join(dir, 'src'), { recursive: true });
+    mkdirSync(join(dir, 'tools'));
+    cpSync(join(root, 'tools/arena.gameplay.json'), join(dir, 'tools/arena.gameplay.json'));
+    if (existsSync(join(root, 'node_modules'))) symlinkSync(join(root, 'node_modules'), join(dir, 'node_modules'));
+    const f = join(dir, 'src', arm.file);
+    const s = readFileSync(f, 'utf8');
+    const n = s.split(arm.find).length - 1;
+    if (n !== 1) return { name: arm.name, ok: false, faults: [`anchor matched ${n} times in ${arm.file} (must be exactly 1)`], failed: [] };
+    writeFileSync(f, s.replace(arm.find, arm.repl));
+    let out;
+    try { out = execFileSync('node', [join(dir, 'src/game/sim.test.mjs')], { encoding: 'utf8', maxBuffer: 1 << 28 }); }
+    catch (e) { out = e.stdout ?? ''; }
+    const rows = out.split('\n').map((l) => l.match(/^ {2}(ok|FAIL) - (.*)$/)).filter(Boolean).map((m) => ({ ok: m[1] === 'ok', name: m[2] }));
+    if (rows.length === 0) faults.push('the patched sim.test printed no rows (crash?)');
+    if (!/^\d+ passed, \d+ failed$/m.test(out)) faults.push('the patched sim.test never printed its summary line (crash?)');
+    const find = (prefix) => rows.filter((r) => r.name.startsWith(prefix));
+    for (const p of arm.mustFail) {
+      const hit = find(p);
+      if (hit.length === 0) faults.push(`mustFail row not found: "${p}"`);
+      else if (hit.some((r) => r.ok)) faults.push(`known-bad NOT CAUGHT: "${p}" stayed green`);
+    }
+    for (const p of arm.mustPass) {
+      const hit = find(p);
+      if (hit.length === 0) faults.push(`mustPass row not found: "${p}"`);
+      else if (hit.some((r) => !r.ok)) faults.push(`control went red: "${p}" — the revert changed the fixture, not the rule`);
+    }
+    return { name: arm.name, ok: faults.length === 0, faults, failed: rows.filter((r) => !r.ok).map((r) => r.name) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 const A_RED = [
   '(a) 🔴 two seats: a chase-branch bot KEEPS PRESSING',
@@ -46,6 +89,15 @@ const D_THREE = '(d) 🔴 three seats: the bot shoots back';
 const D_SIX = '(d) 🔴 six seats: the bot turns on the NEAREST visible opponent';
 const D_NONVAC = ['(d) NON-VACUITY: three seats', '(d) NON-VACUITY: six seats'];
 const D_OVERFIX = '(d) CONTROL: a visible opponent OUT of reach';
+const C_TWO = '(c) 🔴 two seats: a hider in the FAR corner of EVERY shipped patch';
+const C_SIX = '(c) 🔴 six seats: …and with four more seats on the map';
+const C_CONTROL = [
+  '(c) NON-VACUITY: the shipped kitchen declares patches',
+  '(c) CONTROL: a hider 40 wu past the entry edge',
+  '(c) NON-VACUITY: the far-corner hider goes unseen',
+];
+const C_CONTRACT = '(c) CONTROL: a 300 wu region';
+const SITE3 = 'SITE 3 (the chase nav target): a concealed player is chased to where it was LAST SEEN';
 
 export const ARMS = [
   // ── AI-B1 ──────────────────────────────────────────────────────────────────────
@@ -113,6 +165,34 @@ export const ARMS = [
     repl: '      if (d <= reach && (inReach === null || d > inReachD)) { inReach = other; inReachD = d; }',
     mustFail: [D_SIX],
     mustPass: [D_THREE, ...D_NONVAC, D_OVERFIX],
+  },
+  // ── AI-B3 ──────────────────────────────────────────────────────────────────────
+  {
+    name: 'no-search',
+    bug: 'AI-B3 — the bot stops at the last sighting and never looks into the patch (the shipped rule)',
+    file: 'game/ai.ts',
+    find: '    searchStep(state, self, sighting);\n',
+    repl: '',
+    mustFail: [C_TWO, C_SIX],
+    mustPass: [...C_CONTROL, C_CONTRACT, SITE3],
+  },
+  {
+    name: 'search-any-size',
+    bug: 'AI-B3 over-fix — the sweep runs in regions of ANY size, outside the 168 wu contract',
+    file: 'game/ai.ts',
+    find: '    if (b.w > SEARCH_MAX_SIDE || b.h > SEARCH_MAX_SIDE) continue;\n',
+    repl: '',
+    mustFail: [C_CONTRACT],
+    mustPass: [C_TWO, C_SIX, ...C_CONTROL],
+  },
+  {
+    name: 'search-oracle',
+    bug: 'AI-B3 over-fix — a hidden target\'s TRUE position becomes the belief (concealment broken)',
+    file: 'game/ai.ts',
+    find: '    searchStep(state, self, sighting);\n',
+    repl: '    sighting.x = target.x; sighting.y = target.y;\n',
+    mustFail: [C_CONTRACT, SITE3],
+    mustPass: [C_TWO, ...C_CONTROL],
   },
 ];
 

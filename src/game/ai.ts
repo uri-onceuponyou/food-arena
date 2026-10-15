@@ -149,12 +149,14 @@ import {
   AI_SLOW_MULTIPLIER,
   CHARACTERS,
   CHARACTER_IDS,
+  CONCEAL_REVEAL_RADIUS,
   FOG_DPS,
   GUARANTEED_VISIBLE_RADIUS,
   HIT_RADIUS_VS_PLAYER,
   ITEM_TUNING,
   levelHealthMultiplier,
   MEDIKIT,
+  PLAYER_SIZE,
   speedFor,
   suddenDeathActive,
   TRAIL,
@@ -163,12 +165,12 @@ import {
   type Weapon,
   type WeaponType,
 } from './rules.ts';
-import type { Fighter, GameEvent, MatchState, Medikit } from './state.ts';
+import type { Fighter, GameEvent, MatchState, Medikit, Sighting } from './state.ts';
 import {
   actionsLocked, isCasting, isLivingOpponentOf, movementLocked, nearestLivingOpponent, sightingIndex, weaponsLocked,
 } from './state.ts';
 import { attemptAttack, attemptItem, isOnOwnTrail, itemUsable } from './combat.ts';
-import { isVisibleFrom, moveToward, terrainSlowAt } from './movement.ts';
+import { concealmentOf, isVisibleFrom, moveToward, terrainSlowAt } from './movement.ts';
 
 /**
  * How far ahead a steered move aims. `moveToward` runs the flow field toward a TARGET
@@ -1446,6 +1448,73 @@ export function pickItem(
 }
 
 /**
+ * ── THE SEARCH: SWEEP THE PATCH YOU LOST THEM IN (AI-B3) ────────────────────
+ *
+ * Called by `stepAI` on every tick its target is HIDDEN, with that target's belief cell. It
+ * does nothing until the fighter is STANDING ON its belief (within `SEARCH_ARRIVE`) — i.e.
+ * until it has looked at the spot and the target is not there — and nothing unless that spot
+ * is at a standing concealment patch inside the size contract. Then it moves the belief one
+ * leg across the patch: to the midpoint of the edge OPPOSITE the edge nearest the belief.
+ * Arriving there, the nearest edge is the far one, so the next leg comes straight back —
+ * a patrol along the patch's axis, deterministic and stateless (the belief IS the state).
+ *
+ * WHY IT EXISTS. This file walked to the last sighting and stopped, and sees
+ * `CONCEAL_REVEAL_RADIUS` (84 wu) from there. `DECISIONS §29.1` turned that into "patches up to
+ * roughly 168 wu across cannot become AI-denial zones" — but the last sighting is the patch's
+ * ENTRY edge, and a hider who walks to the far side is 123–145 wu from it in every shipped
+ * patch (110–130 wu). Measured on `a53d8b0`, `sim.test.mjs` §48(c): a far-corner hider was
+ * found at 0 of the 20 shipped patches in 20 s, two seats and six. §26(f)'s rule was the right
+ * one ("no interior point more than 84 wu from where a fighter entered"); the 168 was not.
+ *
+ * WHY THIS SHAPE. Walking a box's axis from edge to edge passes within HALF THE OTHER SIDE of
+ * every interior point — so for a patch whose sides are both <= 2 x `CONCEAL_REVEAL_RADIUS`
+ * (the 168 wu contract) one full leg sees all of it, and the leg out from the entry point plus
+ * the leg back cover it whatever the entry was. That is exactly the promise §29.1 made, now
+ * true by construction rather than by arithmetic that did not hold.
+ *
+ * ⚠️ ONLY INSIDE THE CONTRACT, DELIBERATELY. A region wider than 168 wu is not covered by an
+ * axis sweep, and §26(f) records the larger-region rule as "keep concealment patches small" —
+ * a bot that wandered every region would change that behaviour too, which is a different
+ * decision. §48(c) has a CONTROL that a 300 wu region is still a denial zone.
+ * ⚠️ IT MOVES THE BELIEF'S POSITION, NOT ITS `at`. The cell still records when the target was
+ * last SEEN; its x/y now say where this fighter is LOOKING, which is what every reader of the
+ * belief (separation, facing, the nav target) already treats it as. Nothing reads `at` in play.
+ * ⚠️ A STALE BELIEF THAT IS NOT AT A PATCH IS LEFT ALONE — a target can only be hidden while
+ * standing in a patch, and its last sighting is within a step of the one it walked into
+ * (`SEARCH_SLACK`), so a belief anywhere else is not a lost hider and gets no search.
+ */
+const SEARCH_ARRIVE = 8;
+/** How far OUTSIDE a patch a last sighting can lie and still be "the patch it walked into". */
+const SEARCH_SLACK = PLAYER_SIZE / 2;
+/** The size contract: a patch the axis sweep is guaranteed to cover. `DECISIONS §29.1`. */
+const SEARCH_MAX_SIDE = 2 * CONCEAL_REVEAL_RADIUS;
+
+function searchStep(state: MatchState, self: Fighter, cell: Sighting): void {
+  if (Math.hypot(cell.x - self.x, cell.y - self.y) > SEARCH_ARRIVE) return;
+  const regions = concealmentOf(state.arena);
+  for (let i = 0; i < regions.length; i++) {
+    const b = regions[i];
+    if (b.w > SEARCH_MAX_SIDE || b.h > SEARCH_MAX_SIDE) continue;
+    if (state.brokenConcealment.includes(b)) continue;
+    const hw = b.w / 2;
+    const hh = b.h / 2;
+    if (Math.abs(cell.x - b.x) > hw + SEARCH_SLACK || Math.abs(cell.y - b.y) > hh + SEARCH_SLACK) continue;
+    // The edge nearest the belief, in a fixed order on a tie (W, E, N, S) — deterministic,
+    // because the sim contains no randomness and every balance number rests on that.
+    const dW = Math.abs(cell.x - (b.x - hw));
+    const dE = Math.abs(cell.x - (b.x + hw));
+    const dN = Math.abs(cell.y - (b.y - hh));
+    const dS = Math.abs(cell.y - (b.y + hh));
+    const m = Math.min(dW, dE, dN, dS);
+    if (m === dW) { cell.x = b.x + hw; cell.y = b.y; }
+    else if (m === dE) { cell.x = b.x - hw; cell.y = b.y; }
+    else if (m === dN) { cell.x = b.x; cell.y = b.y + hh; }
+    else { cell.x = b.x; cell.y = b.y - hh; }
+    return;
+  }
+}
+
+/**
  * Advance the enemy's decision-making for one tick: face the player, chase or
  * flee-and-snipe, and fire when a usable weapon is chosen. Movement is resolved
  * with the same `tryMove` collision rule the player uses.
@@ -1640,6 +1709,9 @@ export function stepAI(state: MatchState, self: Fighter, dt: number, events: Gam
     sighting.x = target.x;
     sighting.y = target.y;
     sighting.at = now;
+  } else {
+    // AI-B3: standing on the belief and the target is not there — sweep the patch it is in.
+    searchStep(state, self, sighting);
   }
   const tx = sighting.x;
   const ty = sighting.y;
