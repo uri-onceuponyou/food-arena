@@ -13,8 +13,13 @@ import {
   BlendFunction, Effect, EffectAttribute,
 } from 'postprocessing';
 import { CameraRig, SUPPORTED_ASPECT, type CameraRigOptions } from './camera';
-import { createLighting, MATCH_SHADOW_RADIUS_M, type LightingRig } from './lighting';
+import {
+  createLighting, MATCH_SHADOW_RADIUS_M, FRONT_FILL_WORLD, WORLD_SHADOW_INTENSITY,
+  type LightingRig,
+} from './lighting';
 import { noteGpu, onQualityChange, tierProfile, type TierProfile } from './quality';
+import { CHARACTER_INK_LAYER, FORM_SIDE_ALBEDO, LOOK, markCharacter, markEnvironment } from './roles';
+import { CharacterContourEffect } from './contour';
 import { CHARACTER_RADIUS } from '../units';
 // Squid Ink's channel. `game/vfx.ts` writes it off the sim's `blotUntil`; this file
 // reads it once per frame. See `vfx/ink.ts`'s header for why the seam is a module and
@@ -1374,6 +1379,38 @@ export class Stage {
    * and not a break.
    */
   ink: SquidInkEffect | null = null;
+  /**
+   * The fighters' screen-space silhouette contour (`contour.ts`). Built in MATCH framing
+   * only; null everywhere else, where the per-part ink hulls still draw. Exposed for the
+   * same reason as `ink`: ablate on one frozen frame with `look.contour = false` (which also
+   * brings the hulls back), never with `blendMode.opacity`.
+   */
+  contour: CharacterContourEffect | null = null;
+  /**
+   * Graphics campaign R1's switches (`docs/REVAMP.md` §5), applied before every render by
+   * `applyLook`. All true ships. A probe flips one on a frozen frame and renders again — the
+   * old look is a reachable state of the shipped code rather than a second tree, which is
+   * what makes a before/after PAIRED. Each switch only acts in the framings it is meant for
+   * (`applyLook`); in a portrait framing (`frameMode: 'subject'`) none of them does anything.
+   *
+   *   split    world keeps FRONT_FILL_WORLD of the front fill; characters get the rest
+   *   form     the albedo ramp on near-vertical arena faces
+   *   shadow   lighter world cast shadow, shade in the ground's hue
+   *   rimGate  the arena's Fresnel rim gated off flat faces by curvature
+   *   contour  match only: the post contour on, the per-part character hulls off
+   */
+  readonly look = {
+    split: true, form: true, shadow: true, rimGate: true, contour: true,
+    /** Sweep knobs, read every frame; the defaults are what ships (lighting.ts / roles.ts). */
+    frontWorld: FRONT_FILL_WORLD,
+    sideAlbedo: FORM_SIDE_ALBEDO,
+    shadowIntensity: WORLD_SHADOW_INTENSITY,
+    /** Multiplier on `lighting.ts` `WORLD_SHADE_TINT`. */
+    shadeTint: 1,
+  };
+  /** Top-level roots already given their material role (`roles.ts`). */
+  private readonly roleRoots = new WeakSet<THREE.Object3D>();
+  private roleSweep = 0;
   /** `readInk().revision` as of the last frame that pushed a layout into `ink`. -1 so
    * the first frame always pushes one. */
   private inkRevision = -1;
@@ -1515,6 +1552,10 @@ export class Stage {
     }
 
     this.rig = new CameraRig(opts.camera);
+    // The character ink hulls live on their own layer (`roles.ts`). Enabled from the start,
+    // so any render that reaches the camera before `applyLook` has run — and every portrait
+    // framing, always — draws them exactly as it did before they had a layer.
+    this.rig.camera.layers.enable(CHARACTER_INK_LAYER);
     // The shadow box only has to cover a whole ultrawide game viewport in an actual
     // match; every preview framing is closer and focuses its own tighter box, so
     // forcing the match minimum on those would only coarsen their shadows.
@@ -1866,6 +1907,8 @@ export class Stage {
     this.ink = null;
     this.inkRevision = -1;
     this.inkAspect = -1;
+    // Same rule again: `applyLook` writes `contour.amount` every frame.
+    this.contour = null;
     // Antialiasing, and WHICH kind, is decided here rather than at the SMAA pass.
     //
     // `antialias: true` on the renderer does nothing once a composer exists — the
@@ -2679,11 +2722,24 @@ export class Stage {
     const ink = new SquidInkEffect(INK_DISC_COUNT);
     this.ink = ink;
 
+    // ── THE FIGHTER CONTOUR — match framing only, every tier including the phone ──
+    // `contour.ts` carries the design; the placement is the part that belongs here. After
+    // the grade and the vignette, because the line is a final colour (the grade's toe would
+    // lift a near-black off near-black); before Squid Ink, which occludes everything. It
+    // declares `NONE`, like those three, so the stable sort keeps this insertion order —
+    // and the ink-last assertion below still checks the end of the chain.
+    //
+    // Not built in a portrait framing at all, so the lobby's chain is the chain it was.
+    const contour = !gradeOnly && this.rig.frameMode === 'fair' ? new CharacterContourEffect() : null;
+    this.contour = contour;
+
     const effects: Effect[] = [];
     if (contactAO) effects.push(contactAO);
     if (ssao) effects.push(ssao);
     if (bloom) effects.push(bloom);
-    effects.push(grade, vignette, ink);
+    effects.push(grade, vignette);
+    if (contour) effects.push(contour);
+    effects.push(ink);
     const fxPass = new EffectPass(this.rig.camera, ...effects);
     // 🚨 THE ORDER ABOVE IS NOT NECESSARILY THE ORDER THAT RUNS. `EffectPass` sorts on
     // `b.attributes - a.attributes`, so a `DEPTH` effect (1) is hoisted ahead of every
@@ -2777,6 +2833,11 @@ export class Stage {
     // lost, but `composer.render()` does not — it would walk the whole post chain
     // binding dead render targets once per frame, for as long as the loss lasts.
     if (this.contextLost) return;
+    // Graphics campaign R1's look, BEFORE anything draws: the shared `LOOK` uniforms are
+    // global across Stages, so each Stage writes its own answer immediately before its own
+    // render. Nothing here touches the shadow map's inputs (intensity is a sampling-time
+    // uniform), so it has no ordering relation with the fingerprint below.
+    this.applyLook();
     // BEFORE the shadow fingerprint, deliberately: the decals move with the fighters
     // and `scheduleShadowUpdate` calls `scene.updateMatrixWorld()`, so placing them
     // after it would leave their matrices a frame behind. They never enter the
@@ -2785,6 +2846,56 @@ export class Stage {
     if (this.shadowsOn) this.scheduleShadowUpdate();
     if (this.composer) this.composer.render(dtSeconds);
     else this.renderer.render(this.scene, this.rig.camera);
+  }
+
+  /**
+   * ── GRAPHICS CAMPAIGN R1: THE WORLD/CHARACTER SPLIT, THE FORM RAMP, THE CONTOUR ──
+   *
+   * Which framing gets what is the whole policy, so it is spelled out once:
+   *
+   *   portrait (`subject`: lobby, select, thumbnails, character previews)
+   *       nothing. The rig as authored, hulls on, no tag. The lobby is the framing Uri
+   *       judges characters in, and the review measured the split costing its cove
+   *       luma -0.036 there; a portrait has no props whose form needs rescuing.
+   *   world (`ground`: arena previews, and `fair`: the match)
+   *       the split, the form ramp, the lighter ground-hued shadow, the rim gate — so a
+   *       prop approved in `preview.html` renders as it does in a match.
+   *   match (`fair`) only
+   *       the contour, which needs the fighters' alpha tag and is what lets the per-part
+   *       character hulls go (`CHARACTER_INK_LAYER`: -232 to -742 draws at six seats on
+   *       the phone tier, measured by `tools/tmp/r1_probe.mjs`).
+   *
+   * Roles are assigned to materials once (`roles.ts`): characters at build, by
+   * `outlineCharacter`; the arena here, the first frame its root is in the scene, and again
+   * every few seconds in case a part was added (idempotent; a material is patched once).
+   */
+  private applyLook(): void {
+    const mode = this.rig.frameMode;
+    const world = mode !== 'subject';
+    const L = this.look;
+    this.lighting.applyLook({
+      split: world && L.split, shadow: world && L.shadow,
+      frontWorld: L.frontWorld, shadowIntensity: L.shadowIntensity, shadeTint: L.shadeTint,
+    });
+    LOOK.envSide.value = world && L.form ? L.sideAlbedo : 1;
+    LOOK.envRimFlat.value = world && L.rimGate ? 1 : 0;
+    const contour = mode === 'fair' && L.contour && this.contour !== null;
+    LOOK.charAlpha.value = contour ? 0 : 1;
+    if (this.contour) this.contour.amount = contour ? 1 : 0;
+    if (contour) this.rig.camera.layers.disable(CHARACTER_INK_LAYER);
+    else this.rig.camera.layers.enable(CHARACTER_INK_LAYER);
+    if (!world) return;
+    // Every ~5 s at 60 fps a full re-walk, otherwise only roots not seen before.
+    const sweep = this.roleSweep++ % 300 === 0;
+    for (const c of this.scene.children) {
+      const arena = c.name.startsWith('arena:');
+      const fighter = !arena && c.name.startsWith('character:');
+      if (!arena && !fighter) continue;
+      if (!sweep && this.roleRoots.has(c)) continue;
+      if (arena) markEnvironment(c);
+      else markCharacter(c);   // a no-op for every roster character — they mark at build
+      this.roleRoots.add(c);
+    }
   }
 
   /**
@@ -3124,6 +3235,7 @@ export class Stage {
     this.composer = null;
     this.grade = null;
     this.contactAO = null;
+    this.contour = null;
 
     // ── The resource walk is GUARDED, and that is not paranoia ────────────────
     // Everything from here to `this.scene.clear()` is a best-effort tidy of a few

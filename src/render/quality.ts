@@ -139,6 +139,27 @@ export interface TierProfile {
  * `kitchen.ts` this session, which quietly took most of the value out of `propInk` as a
  * tier knob (it is now worth 1 draw, not 46).
  *
+ * ⚠️ THE TABLE ABOVE NEVER COVERED SIX SEATS, AND "105 HULLS" IS STALE — kept per the
+ * reversal rule, with what dates it. The graphics review (2026-10-15) counted 134
+ * character hulls at 1v1 and 336-337 at six seats. Six seats on the phone tier, measured by
+ * `tools/tmp/r1_probe.mjs` (`tier=low`, 844x390 @ DPR 2 -> 1055x487 buffer, deterministic
+ * frozen frames, shadow pass forced as in a moving match), before -> after graphics campaign
+ * R1 took the per-part character hulls off the match camera (`roles.ts`
+ * `CHARACTER_INK_LAYER`; the fighters' outline is now one post-chain contour):
+ *
+ *   scene (seats)                                draws before   after   hulls on camera
+ *   S1  six round the pot                             961        729    372 -> 0
+ *   S3  six, south                                   1224        908    316 -> 0
+ *   S2  six, east — one fighter is TRANSMISSIVE      2390       1648    371 -> 0
+ *   T1  three by cover                                660        507    153 -> 0
+ *
+ * Read S2 twice. A material with `transmission` makes three re-render EVERY opaque mesh
+ * into a transmission target each frame, so one character wearing one (the water bottle's
+ * shell, `transmission: 0.6` — the only transmissive material in `src/characters/**` and
+ * `src/arena/**`) re-draws the opaque pass for the whole scene, which is why a hull there
+ * cost two draws (742 for 371). That cost is owned by `src/characters/waterbottle.ts`, and
+ * it is a phone-tier cost no seat count shows until the water bottle is picked.
+ *
  * ...and the same three at a phone viewport (844x390 CSS) on a device reporting DPR 2
  * or more, where the DPR cap does the work it exists for:
  *

@@ -10,6 +10,7 @@
 
 import * as THREE from 'three';
 import { tierProfile as currentTierProfile } from './quality';
+import { CHARACTER_INK_LAYER, markCharacter } from './roles';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Render tier — re-exported, not owned
@@ -421,6 +422,9 @@ export function applyRimLight(
          #endif
          float rimDot = 1.0 - clamp(dot(normalize(rimNormal), normalize(vViewPosition)), 0.0, 1.0);
          float rim = pow(rimDot, rimPower) * rimStrength;
+         #ifdef R1_RIM_GATE
+           rim *= R1_RIM_GATE;
+         #endif
          gl_FragColor.rgb += rimColor * rim;`
       );
   };
@@ -946,6 +950,24 @@ export function outlineGroup(
  */
 export function outlineCharacter(root: THREE.Object3D): void {
   outlineGroup(root, OUTLINE_CHAR_SCREEN, OUTLINE_INK, { screenSpace: true });
+  // ── THE HULLS GO ON THEIR OWN LAYER, AND THE MATERIALS GET THE CHARACTER ROLE ──
+  // Graphics campaign R1 (`docs/REVAMP.md` §5). In a MATCH the post chain draws ONE
+  // screen-space silhouette contour per fighter (`contour.ts`) and these per-part hulls are
+  // the thing it replaces: 22-78 of them per fighter, 232-742 draws at six seats on the phone
+  // tier, drawing a broken 1-1.5 px line with interior specks rather than a silhouette. The
+  // LOBBY keeps them — it is the framing the hulls were tuned at and the one Uri judges
+  // characters in — so they are not deleted, only moved to `CHARACTER_INK_LAYER`, which
+  // every Stage camera enables except a match frame whose chain draws the contour.
+  //
+  // `markCharacter` runs HERE, at the end of build and before anything has compiled, so the
+  // role patch (the alpha tag the contour reads, and the front fill the world no longer
+  // gets) is in each material's first program rather than a recompile at spawn.
+  // `roles.ts` carries the identity argument: with `LOOK` at its defaults — which is every
+  // frame outside a match — a marked material renders what an unmarked one did.
+  root.traverse((o) => {
+    if (o.name.endsWith('__outline')) o.layers.set(CHARACTER_INK_LAYER);
+  });
+  markCharacter(root);
 }
 
 /**
