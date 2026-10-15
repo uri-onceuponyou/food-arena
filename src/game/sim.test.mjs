@@ -13143,6 +13143,79 @@ console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up
     }
   }
 
+  // ── (b) BH-10: DISPOSAL BREAKS THE WIND-UP IT INTERRUPTS ──────────────────────
+  //
+  // A cast ROOTS its caster and freezes its aim so that *"a telegraph drawn where the caster
+  // stands at the press cannot lie about where the effect lands"* (`state.ts:ActiveCast`), and
+  // since `75148fd` `match.ts` DRAWS that telegraph, at the press position. `placeFighterAt` was
+  // the one writer of `x`/`y` that ignored the root, so a Water Bottle thrown mid-Mega resolved
+  // its slam from where it LANDED — 316 wu from the telegraph here, bounded only by the arena —
+  // while the telegraph went on filling at its old feet. The throw now kills the cast, as a stun
+  // or a Warm Milk sleep does: `cast-cancelled{displaced}`, cooldown spent.
+  //
+  // ⚠️ NOT `stepPush`'s guard copied over. That one REFUSES to move a `movementLocked` fighter,
+  // and `movementLocked` also covers a stun, a root and a sleep, so copying it would make Disposal
+  // useless against a Liquorice-tied victim. A CONTROL pins that a locked victim is still thrown.
+  {
+    const arena = FLOOR();
+    const KIT = CHARACTERS.waterbottle.weapons;
+    const MEGA = KIT.findIndex((w) => w.key === 'Mega');
+    // T throws V (the only fighter inside its throw); D is V's nearest other opponent, so V lands
+    // 84 wu short of D, at (1416, 1000) — 316 wu from where it pressed.
+    const SEATS = [
+      { char: 'hamburger', x: 1000, y: 1000, items: ['disposal'] },
+      { char: 'waterbottle', x: 1100, y: 1000, facing: { x: -1, y: 0 } },
+      { char: 'taco', x: 1500, y: 1000 },
+    ];
+    const run = ({ dispose = true, cast = true, root = false, shield = false } = {}) => {
+      const st = seatMatch(arena, SEATS.map((s, i) => (i === 1 && shield ? { ...s, items: ['shiitake'] } : s)));
+      const V = st.fighters[1];
+      const log = [];
+      const step = (ins) => { const evs = stepMatch(st, DT, ins); log.push(...evs); return evs; };
+      const first = idle(st);
+      if (cast) first[1] = { ...NEUTRAL, aim: { x: -1, y: 0 }, selectedWeapon: MEGA, attack: true };
+      if (shield) first[1] = { ...NEUTRAL, useItem: 0 };
+      step(first);
+      const pressAt = st.elapsed;
+      const castOpen = V.cast !== null;
+      if (root) V.item.rootUntil = st.elapsed + 5000;
+      for (let i = 0; i < 18; i++) step(idle(st));   // ~300 ms into the wind-up
+      const before = { x: V.x, y: V.y };
+      let throwEvs = [];
+      if (dispose) { const ins = idle(st); ins[0] = { ...NEUTRAL, useItem: 0 }; throwEvs = step(ins); }
+      const after = { x: V.x, y: V.y, cast: V.cast, itemCast: V.itemCast };
+      for (let i = 0; i < 160; i++) step(idle(st));   // past the Mega's 1,400 ms and Shiitake's wind-up
+      const fired = log.filter((e) => e.type === 'weapon-fired' && e.fighterId === 1 && e.weaponKey === 'Mega');
+      return { st, V, log, castOpen, pressAt, before, after, throwEvs, fired, moved: Math.hypot(V.x - before.x, V.y - before.y) };
+    };
+
+    const ctl = run({ dispose: false });
+    check('(b) NON-VACUITY / CONTROL: unthrown, V\'s Mega opens, roots it, and goes off where it was pressed',
+      ctl.castOpen && ctl.fired.length === 1 && ctl.V.x === 1100 && ctl.V.y === 1000,
+      `cast ${ctl.castOpen}, Mega fired ${ctl.fired.length}×, V at (${ctl.V.x}, ${ctl.V.y})`);
+    const hit = run();
+    const jump = Math.hypot(hit.after.x - hit.before.x, hit.after.y - hit.before.y);
+    check('(b) NON-VACUITY: the throw lands while the wind-up is open, and really relocates V',
+      hit.castOpen && ofType(hit.throwEvs, 'item-hit').some((e) => e.itemId === 'disposal' && e.targetId === 1) && jump > 200,
+      `relocated ${jump.toFixed(1)} wu`);
+    const cancels = ofType(hit.throwEvs, 'cast-cancelled').filter((e) => e.fighterId === 1);
+    check('(b) 🔴 the throw CANCELS the wind-up — one `cast-cancelled{displaced}` for Mega, on the throw\'s own tick',
+      cancels.length === 1 && cancels[0].reason === 'displaced' && cancels[0].weaponKey === 'Mega' && hit.after.cast === null,
+      `${cancels.map((e) => `${e.weaponKey}/${e.reason}`).join(' ') || 'no cancel'}; cast ${hit.after.cast === null ? 'null' : 'still open'}`);
+    check('(b) 🔴 …so the slam never goes off from where V landed',
+      hit.fired.length === 0, `Mega fired ${hit.fired.length}× after the throw`);
+    check('(b) CONTROL: the cooldown stays SPENT — the press that opened the wind-up is still stamped',
+      hit.V.lastUsed[MEGA] === hit.pressAt, `lastUsed ${hit.V.lastUsed[MEGA]}, pressed at ${hit.pressAt}`);
+    const tied = run({ cast: false, root: true });
+    check('(b) CONTROL: a ROOTED victim that is not casting (Liquorice) is still thrown — a lock is not a shield',
+      ofType(tied.throwEvs, 'item-hit').some((e) => e.itemId === 'disposal') && Math.hypot(tied.after.x - tied.before.x, tied.after.y - tied.before.y) > 200,
+      `relocated ${Math.hypot(tied.after.x - tied.before.x, tied.after.y - tied.before.y).toFixed(1)} wu`);
+    const shielded = run({ cast: false, shield: true });
+    check('(b) CONTROL: an ITEM wind-up (Shiitake) survives the throw and resolves — its shield sits on the body, not a spot',
+      shielded.after.itemCast !== null && ofType(shielded.throwEvs, 'item-cancelled').length === 0
+      && shielded.log.some((e) => e.type === 'item-hit' && e.itemId === 'shiitake' && e.targetId === 1),
+      `itemCast ${shielded.after.itemCast === null ? 'null' : 'open'} after the throw; shield resolved ${shielded.log.some((e) => e.type === 'item-hit' && e.itemId === 'shiitake')}`);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

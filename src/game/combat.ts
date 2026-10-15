@@ -158,6 +158,8 @@ export function drDurationFor(
  * END `fighter`'s wind-up without firing it. The one statement of "a cast died", shared by
  * both cancelling terminators (an applied stun, and death) so the two cannot drift into
  * clearing different things or emitting different events.
+ * (There are four now — Warm Milk's `'sleep'` and, since B4, Disposal's `'displaced'` — and
+ * the reason is the same for all of them.)
  *
  * ⚠️ **THE COOLDOWN IS DELIBERATELY NOT REFUNDED.** `lastUsed[weaponIndex]` was stamped at
  * the press and stays stamped. That is the same line `attemptAttack` has always drawn —
@@ -170,7 +172,7 @@ export function drDurationFor(
  */
 function cancelCast(
   fighter: Fighter,
-  reason: 'stun' | 'death' | 'sleep',
+  reason: 'stun' | 'death' | 'sleep' | 'displaced',
   events: GameEvent[],
 ): void {
   const c = fighter.cast;
@@ -2091,6 +2093,28 @@ function resolveItem(
       if (mag < 1e-6) { dx = dest.facing.x; dy = dest.facing.y; }
       else { dx /= mag; dy /= mag; }
       const d = ITEM_TUNING.disposal.dropDistance;
+      // ── 🚨 THE THROW BREAKS A WIND-UP (BH-10) ─────────────────────────────────
+      //
+      // A cast is rooted so that its telegraph — drawn by `match.ts` where the caster stood at
+      // the press — cannot lie about where the effect lands (`state.ts:ActiveCast`). This
+      // relocation is the one write to `x`/`y` that ignores the root, so a Water Bottle thrown
+      // 300 ms into Mega used to resolve the slam wherever it LANDED — 316 wu from its telegraph
+      // in `sim.test.mjs` §47(b), and the distance is bounded only by the arena — while the
+      // fighter it landed beside had only what was left of the wind-up, and no telegraph at its
+      // feet, to get out of the way. So the throw ENDS the cast first, exactly as a stun or a
+      // Warm Milk sleep does: `cast-cancelled{displaced}`, and the cooldown stays spent
+      // (`cancelCast`'s rule).
+      //
+      // ⚠️ CANCEL, NOT REFUSE. `stepPush` refuses to move a `movementLocked` fighter, but that
+      // lock also covers a stun, a root and a sleep: refusing here would make Disposal useless
+      // against a Liquorice-tied victim, which is a combo, not a bug — §47(b) pins that a rooted
+      // victim is still thrown. Refusing a CASTER alone would be the other honest reading (the
+      // press spent, the thrower eats the slam); it is Uri's to prefer, and it is parked with him.
+      //
+      // ⚠️ ONLY THE WEAPON CAST. An ITEM wind-up (Shiitake) resolves a shield on the BODY, not at
+      // a spot, so a relocation cannot make its telegraph lie; cancelling it here would be a
+      // balance call, not this fix. §47(b) pins that it survives the throw.
+      if (victim.cast !== null) cancelCast(victim, 'displaced', events);
       placeFighterAt(victim, dest.x + dx * d, dest.y + dy * d, state.arena);
       events.push({
         type: 'item-hit', itemId: id,
