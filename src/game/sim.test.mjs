@@ -11470,6 +11470,46 @@ console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the r
         `item-revived.hp ${rev[0]?.hp} vs ${corpseWorth(LEVEL_MAX)} (L15) / ${corpseWorth(LEVEL_MIN)} (L1)`);
     }
   }
+
+  // ── (d) 🔴 AN ITEM ID IS AN *OWN* KEY OF THE REGISTRY — META-09 ────────────────
+  //
+  // `validateLoadout` exists so *"a typo in a tool would otherwise equip a ghost that never
+  // fires"*, and it asked `it in ITEMS` — which walks `Object.prototype`. `ITEMS` is a plain
+  // object literal, so `constructor`, `toString`, `__proto__` and nine more were accepted as
+  // items, equipped, shown, and never fired: exactly the ghost the throw is for. §41(i)'s
+  // unknown-id row could not see it — its only known-bad is `not_an_item`, which `in` refuses.
+  // `match.ts:sanitiseLoadout` carries the same predicate on the way in and is that file's
+  // owner's half; this is the sim's gate, which every caller passes through.
+  {
+    const throws = (fn) => { try { fn(); return false; } catch { return true; } };
+    const ghosts = Object.getOwnPropertyNames(Object.prototype);
+    check('(d) NON-VACUITY: Object.prototype supplies the ghost names, constructor and toString among them, none a real item',
+      ghosts.length >= 10 && ghosts.includes('constructor') && ghosts.includes('toString')
+      && ghosts.every((g) => !Object.values(ITEMS).some((d) => d.id === g)),
+      `${ghosts.length} names: ${ghosts.join(' ')}`);
+    const accepted = ghosts.filter((g) => !throws(() => createMatch(ITEM_ARENA, [
+      { characterId: 'hamburger', items: [g] }, { characterId: 'donut' },
+    ])));
+    check('(d) 🔴 EVERY Object.prototype name is REFUSED as an item id — a ghost that never fires is what the throw is for',
+      accepted.length === 0, `accepted: [${accepted.join(', ')}]`);
+    // ⚠️ SPAWNS ARE EXPLICIT. This row was first written without them, and at six seats on this
+    // fixture arena `createMatch` throws for EVERY loadout (no sixth spawn — `defaultSpawn` reads
+    // `undefined.x`), so "every ghost refused" was green on the broken tree for the wrong reason.
+    // The CONTROL below is what now proves a six-seat call can be ACCEPTED at all.
+    const sixWith = (items3) => createMatch(ITEM_ARENA, Array.from({ length: MAX_FIGHTERS }, (_, i) => ({
+      characterId: 'hamburger', controller: i === 0 ? 'human' : 'ai',
+      spawn: { x: 400 + i * 300, y: 600 }, ...(i === 3 ? { items: items3 } : {}),
+    })));
+    check(`(d) CONTROL: the N=${MAX_FIGHTERS} call with a REAL item on bot slot 3 is accepted — so a refusal below is the name`,
+      !throws(() => sixWith(['pompa'])) && sixWith(['pompa']).fighters[3].item.equipped[0] === 'pompa');
+    const six = ghosts.filter((g) => !throws(() => sixWith([g])));
+    check('(d) 🔴 …on a six-seat bot slot too — the gate is createFighter\'s, not the duel\'s',
+      six.length === 0, `accepted on slot 3: [${six.join(', ')}]`);
+    check('(d) CONTROL: every REAL id is still accepted, one at a time — the refusal is the name, not the call',
+      Object.keys(ITEMS).every((id) => !throws(() => createMatch(ITEM_ARENA, [
+        { characterId: 'hamburger', items: [id] }, { characterId: 'donut' },
+      ]))));
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

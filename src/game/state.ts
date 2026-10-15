@@ -700,7 +700,13 @@ function validateLoadout(items: readonly ItemId[], id: FighterId): ItemId[] {
     );
   }
   for (const it of items) {
-    if (!(it in ITEMS)) {
+    // ⚠️ AN *OWN* KEY, NOT `in`. This read `!(it in ITEMS)`, and `ITEMS` is a plain object
+    // literal — so `in` walks `Object.prototype`, and `constructor`, `toString`, `__proto__`
+    // and nine more passed as items: equipped, shown, and never fired, which is precisely the
+    // ghost this throw exists to stop (META-09). `Object.hasOwn` is ES2022, inside both the
+    // `tsconfig` lib and the Vite build target. `match.ts:sanitiseLoadout` asks the same
+    // question on the way in with the same `in` and is that file's owner's to change.
+    if (!Object.hasOwn(ITEMS, it)) {
       throw new RangeError(`createFighter: slot ${id} was handed an unknown item id "${it}" (see rules.ts:ITEMS)`);
     }
   }
