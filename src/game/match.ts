@@ -240,10 +240,10 @@ const FEEL_EVENT_KEYS = [
   'projectile-spawned', 'projectile-destroyed:hit-target', 'projectile-destroyed:hit-cover',
   'projectile-destroyed:expired', 'hit-landed:weapon', 'hit-landed:trail', 'hit-landed:hazard',
   'hit-landed:fog', 'heal', 'death', 'splat-created', 'trail-mark-created',
-  // Added with the two cases that answer them (B2, the wind-up): a handled event the
-  // census cannot count is the "never fires" / "no response" ambiguity this record exists
-  // to remove. Keyed by `ev.type`, as `feel_census.mjs` keys everything.
-  'cast-started', 'cast-cancelled',
+  // Added with the three cases that answer them (B2 the wind-up, B4 the revive): a handled
+  // event the census cannot count is the "never fires" / "no response" ambiguity this
+  // record exists to remove. Keyed by `ev.type`, as `feel_census.mjs` keys everything.
+  'cast-started', 'cast-cancelled', 'item-revived',
 ] as const;
 
 /**
@@ -1773,6 +1773,36 @@ export class GameSession {
     // `resolveViewSubject` so that "a living player's camera is untouched" is a property
     // of this file too and not only of that one.
     if (roster[LOCAL_SLOT]?.alive) {
+      // 🚨 EXCEPT ON THE ONE FRAME THE CAMERA COMES BACK TO YOU (ML-7). A Leftovers revive
+      // stands a spectating player back up wherever they fell, and this branch used to return
+      // before the cut rule (2, above) was ever asked — so the change BACK to the local seat
+      // was always a follow-lerp glide, however far: the reviewer measured the revived fighter
+      // off screen for 3 frames, then sweeping in from the top edge over 6. `resolveViewSubject`
+      // already answered it correctly (rung 1 goes through the same `decide` as every rung, so
+      // it returns `cut: true` beyond `cutBeyondUnits`); this branch simply never asked.
+      //
+      // ⚠️ Asked ONLY when the subject is changing, i.e. `viewSubject !== LOCAL_SLOT`. On every
+      // frame a living player has ever drawn it is already `LOCAL_SLOT`, so nothing is called
+      // and the shipped camera stays byte-identical — the property this branch exists for.
+      if (this.viewSubject !== LOCAL_SLOT) {
+        if (this.shakeFadeUnits < 0) this.shakeFadeUnits = this.stage.rig.shakeFadeRadiusUnits();
+        const cam = this.stage.rig.targetUnits();
+        const back = resolveViewSubject({
+          seats: roster,
+          localSlot: LOCAL_SLOT,
+          current: this.viewSubject,
+          killedBy: this.killedBy,
+          cameraX: cam.x,
+          cameraY: cam.y,
+          cutBeyondUnits: this.shakeFadeUnits,
+        });
+        const me = roster[LOCAL_SLOT];
+        if (back.cut && me) {
+          const p = groundPos(me.x, me.y);
+          this.stage.rig.snapTo(p.x, p.z);
+          this.stage.lighting.focus(p.x, p.z);
+        }
+      }
       this.viewSubject = LOCAL_SLOT;
       this.spectateDwellMs = 0;
       this.audio.setListener(LOCAL_SLOT);
@@ -2132,6 +2162,29 @@ export class GameSession {
           this.vfx.spawnCastTelegraph(ev.fighterId, caster.x, caster.y, caster.facing, weapon,
             caster.characterId, ev.castMs);
           this.feel.responses.vfx++;
+          break;
+        }
+        // ── LEFTOVERS: A FIGHTER STANDS BACK UP ──────────────────────────────────
+        //
+        // 🚨 NOTHING ANSWERED THIS EVENT (B4 / ML-3), so a revive was invisible: no beat at
+        // all, and — the larger half, NOT fixable here — the model stays in its death topple
+        // for the rest of the match, because `characters/types.ts:BaseCharacter.play` sets
+        // `deathT = 0` on `'death'` and nothing ever resets it (`play('idle'|'run')` only
+        // writes `state`). That is a one-line fix in a file this package does not own and is
+        // ROUTED (the characters owner: reset `deathT = -1` in `play`'s default branch, or an
+        // explicit get-up state); rebuilding the slot's model from here would hide it at the
+        // cost of a mid-match geometry rebuild and a changed scene sibling order.
+        //
+        // What IS this file's: the moment itself. The heal treatment — pulse + green number —
+        // because a revive IS a heal from zero, and `ITEMS.leftovers.look` asks for it to be
+        // "unmistakable to everyone". Drawn at the sim's revive point (`ev.x`/`ev.y`, where the
+        // body fell), and the number through `projectPointToScreen`'s off-screen rejection,
+        // like every other number, so it is no free read on a fighter you cannot see.
+        case 'item-revived': {
+          this.vfx.spawnHealPulse(ev.x, ev.y);
+          this.feel.responses.vfx++;
+          const screenPos = this.projectPointToScreen(ev.x, ev.y, 1.6);
+          if (screenPos) { this.hud.spawnDamageNumber(screenPos, ev.hp, { heal: true }); this.feel.responses.damageNumber++; }
           break;
         }
         case 'cast-cancelled':
