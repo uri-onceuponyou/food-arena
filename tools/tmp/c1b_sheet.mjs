@@ -23,6 +23,7 @@
  *   node tools/tmp/sx_snap.mjs --root <tree> -- node tools/tmp/c1b_sheet.mjs --url '{URL}' \
  *       --out <dir> [--ids a,b] [--cells 20:0,20:45,58:0,58:90,58:180] [--anim idle --t 1.5]
  *       [--size 300] [--fill 0.62] [--angle metal|swiftshader] [--tag name]
+ *       [--sil]   preview's silhouette mode (black figure on white) — input for c1b_holes.mjs
  */
 import { chromium } from 'playwright';
 import sharp from 'sharp';
@@ -90,7 +91,7 @@ async function main() {
       await page.route('**/@vite/client*', (r) => r.fulfill({ status: 200, contentType: 'text/javascript', body: HMR_STUB }));
       const errors = [];
       page.on('pageerror', (e) => errors.push(String(e).slice(0, 300)));
-      await page.goto(`${BASE}/preview.html?piece=character&id=${id}&anim=${ANIM}&t=${T}&shot=1&fill=${FILL}`, { waitUntil: 'networkidle', timeout: 180_000 });
+      await page.goto(`${BASE}/preview.html?piece=character&id=${id}&anim=${ANIM}&t=${T}&shot=1&fill=${FILL}${argv.includes('--sil') ? '&silhouette=1' : ''}`, { waitUntil: 'networkidle', timeout: 180_000 });
       await page.waitForFunction('window.__previewReady === true', null, { timeout: 180_000 });
       const tiles = [];
       const raw = [];
