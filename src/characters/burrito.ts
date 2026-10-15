@@ -922,8 +922,10 @@ export class BurritoCharacter extends BaseCharacter {
     // the elbow or knee), a mitten attached over the wrist, a shoe seated on the floor. WAS:
     // three avocado tones per limb, a foil ball with a twist, a thumb and a band cuff, and a
     // cylinder stub boot ringed in foil. Hands and shoes are now both foil — one wrap, top to toe.
+    // The LIGHT avocado, not `LIMB_AVOCADO`: the kit's chunkier limbs in the dark tone took the
+    // burrito's lobby median luma 0.462 -> 0.445, under C1a's 0.45 floor (c1a_probe).
     this.rig.dressLimbs((part, size) => this.rig.kitLimb(part, size, {
-      arm: limbWrapMat, leg: limbWrapMat, hand: mittMatLimb, shoe: mittMatLimb,
+      arm: limbLightMat, leg: limbLightMat, hand: mittMatLimb, shoe: mittMatLimb,
     }));
 
     this.buildSpill(R);
