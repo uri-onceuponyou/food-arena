@@ -567,7 +567,13 @@ function sanitiseLoadout(items: readonly string[] | undefined): ItemId[] {
   const out: ItemId[] = [];
   for (const raw of items) {
     if (out.length >= ITEM_SLOTS) break;
-    if (typeof raw !== 'string' || !(raw in ITEMS)) continue;
+    // ⚠️ AN OWN-PROPERTY TEST, NOT `raw in ITEMS` (META-09). `in` walks the prototype chain,
+    // so `constructor`, `toString`, `__proto__`, `hasOwnProperty`… were all "known items":
+    // `?items=constructor,springform` equipped `["constructor","springform"]` on `8586f00`
+    // (`tools/tmp/b2_input.mjs` §M9), past this gate AND `state.ts:validateLoadout`'s copy of
+    // the same `in` (B3's file, routed). `Object.hasOwn` is ES2022 — the tsconfig lib and the
+    // Vite target — and the same Safari 15.4 floor `structuredClone` in `src/net` already sets.
+    if (typeof raw !== 'string' || !Object.hasOwn(ITEMS, raw)) continue;
     const id = raw as ItemId;
     if (out.includes(id)) continue;
     out.push(id);
