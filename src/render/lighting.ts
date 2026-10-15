@@ -156,7 +156,7 @@ export const WORLD_SHADOW_INTENSITY = 0.6;
  * ⚠️ RECOLOURING A LIGHT CANNOT FIX THIS WITHOUT RE-HUEING THE LIT GROUND, AND THAT WAS
  * MEASURED, NOT ASSUMED. "Shade hue = lit hue" means the unshadowed light must have the
  * KEY's colour, at which point lit ground (key + the rest) is key-coloured too. Measured: a
- * warmer or neutral world sky (0xffe7c4, 0xe9e9e9, 0xf3ebe0 at shadow intensity 0.5-0.6,
+ * warmer or neutral world sky (0xffe7c4, 0xe9e9e9, 0xf3ebe0 at shadow intensity 0.5-0.7,
  * three stations, 21 arms) left shade at -2.1..-9.7 degrees (S1: from -23 to -4.7..-7.0)
  * and rotated the LIT floor +2.2..+8.1 degrees warmer (0xffe7c4: +4.5..+8.1) — onto the
  * cast's own 0-60 degree hue arc, which is the separation the floor exists to give.
