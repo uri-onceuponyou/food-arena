@@ -165,6 +165,11 @@ export class InputController {
    * collected yet. See `pressItem` / `takeItemPress`.
    */
   private itemPress: number | null = null;
+  /**
+   * A left-button PRESS EDGE nobody has collected yet. See `takeAttackPress` — `mouseDown`
+   * is the level, this is the edge, and the attack needs both.
+   */
+  private attackPress = false;
 
   // ── Virtual cursor (pointer lock only) ──────────────────────────────────────
   private locked = false;
@@ -273,9 +278,49 @@ export class InputController {
   }
 
   /** Either fire control. Held mouse OR a finger on the aim stick — never one or the
-   * other, so a hybrid device can use whichever is in the player's hand. */
+   * other, so a hybrid device can use whichever is in the player's hand.
+   *
+   * ⚠️ A LEVEL, sampled once per stepping frame — so on its own it cannot see a press that
+   * goes down AND up between two samples. `takeAttackPress` is the edge that covers that. */
   get attackHeld(): boolean {
     return this.mouseDown || this.touch.firing;
+  }
+
+  /**
+   * ── CONSUME THE PENDING FIRE PRESS (F2) ─────────────────────────────────────
+   *
+   * 🚨 **A CLICK OR TAP SHORTER THAN ONE FRAME USED TO NEVER FIRE.** `attackHeld` is a level
+   * and `match.ts:buildInput()` reads it once per stepping frame, so a press whose down AND
+   * up edges both landed between two reads reached the sim as `attack: false` on every frame
+   * — mouse and touch alike. The window is one loop interval: 16.7 ms at 60 fps, 33 ms on a
+   * phone's p95 frame, a whole second on a first-use shader-compile hitch, and ALL of it for
+   * an input stack that synthesises the down/up pair together (a trackpad tap-to-click is the
+   * suspected case). Measured by `tools/tmp/b2_input.mjs` §F2 on `8586f00`: a same-task
+   * mousedown+mouseup and a same-task touchstart+touchend each reached the sim on **0** frames
+   * and stamped no `lastUsed`.
+   *
+   * So the press EDGE is latched (the left button's `mousedown`, and a finger NEWLY claiming
+   * the aim stick — `touch.ts:takeFirePress`) and consumed here, once per stepping frame. A
+   * press held across frames is unchanged: the edge and the level agree on its first frame and
+   * the latch is spent there, so a held press reaches the sim on exactly the frames it is held
+   * and never once more after the release.
+   *
+   * ⚠️ **BOTH LATCHES ARE READ AND CLEARED BEFORE THEY ARE COMBINED.** `mouse || touch.take()`
+   * would skip the touch read whenever the mouse latch was set, and that touch press would then
+   * fire a frame late, on a frame the player did not press.
+   *
+   * ⚠️ **SAME LIFETIME AS `takeItemPress`, BY DESIGN.** `buildInput()` takes it on every
+   * stepping frame and hands it to the sim only while playing, so a click during 3-2-1 is
+   * spent there and never fires at GO. The loop skips `buildInput()` while paused, so an edge
+   * latched in the very frame a pause began fires on the first frame after the resume — no
+   * NEW press can land behind the pause sheet or the capture scrim, which both cover the
+   * viewport and own the pointer. `reset()` and `onBlur` drop it.
+   */
+  takeAttackPress(): boolean {
+    const mouse = this.attackPress;
+    this.attackPress = false;
+    const touch = this.touch.takeFirePress();
+    return mouse || touch;
   }
 
   /** Normalized device coords of the last known mouse position, or null before any
@@ -359,6 +404,8 @@ export class InputController {
     this.mouseDown = false;
     // A press queued in the last match must not fire the first item of the next one.
     this.itemPress = null;
+    // ...nor the first shot of it. (`touch.reset()` below drops the touch latch.)
+    this.attackPress = false;
     this.touch.reset();
     if (this.locked) {
       this.offX = 0;
@@ -464,7 +511,11 @@ export class InputController {
   };
 
   private readonly onMouseDown = (e: MouseEvent): void => {
-    if (e.button === 0) this.mouseDown = true;
+    if (e.button !== 0) return;
+    this.mouseDown = true;
+    // The EDGE, latched — see `takeAttackPress`. ⚠️ Never cleared in `onMouseUp`: a release
+    // that also cleared it would put back exactly the sub-frame drop this exists to remove.
+    this.attackPress = true;
   };
 
   private readonly onMouseUp = (e: MouseEvent): void => {
@@ -477,6 +528,7 @@ export class InputController {
     // Same reason the held stick is dropped below: a press made on the way out of the
     // app must not fire an item when the player comes back to a fight that has moved on.
     this.itemPress = null;
+    this.attackPress = false;
     // A finger held while the app is backgrounded never sends its `touchend`, so
     // without this the fighter walks into a wall for as long as the player is away.
     this.touch.reset();

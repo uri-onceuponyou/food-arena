@@ -1515,7 +1515,19 @@ export class GameSession {
       }
     }
 
-    const attack = playing && this.input.attackHeld;
+    // ── THE ATTACK — THE HELD LEVEL, OR A PRESS EDGE LATCHED SINCE THE LAST FRAME (F2) ──
+    //
+    // 🚨 WAS `playing && this.input.attackHeld`, a LEVEL read once per stepping frame, so a
+    // click or tap whose down AND up both landed between two frames reached the sim on no
+    // frame at all — 0 attack frames and no `lastUsed`, measured by `tools/tmp/b2_input.mjs`
+    // §F2 on `8586f00`. `input.ts:takeAttackPress` has the full account.
+    //
+    // ⚠️ TAKEN ON EVERY STEPPING FRAME, BEFORE THE `playing` GATE — the same shape, and the
+    // same reason, as the item press below. `playing && (held || take())` short-circuits
+    // during 3-2-1, leaves the countdown click latched, and fires it at GO: §F2's countdown
+    // row goes red under `--plant short-circuit`.
+    const pressed = this.input.takeAttackPress();
+    const attack = playing && (this.input.attackHeld || pressed);
 
     // ── THE ITEM PRESS — CONSUMED ON EVERY STEPPING FRAME, PASSED ONLY WHILE PLAYING ──
     //

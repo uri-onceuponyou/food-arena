@@ -110,8 +110,17 @@ export interface TouchControls {
    * both DOM coordinates and `moveAxes()`'s convention.
    */
   aimDir(): Readonly<TouchVec> | null;
-  /** True while the fire finger is down. */
+  /** True while the fire finger is down. A LEVEL — see `takeFirePress` for the edge. */
   readonly firing: boolean;
+  /**
+   * CONSUME the pending fire press: true once per finger that NEWLY claimed the aim stick
+   * since the last call. `input.ts:takeAttackPress` is the only caller, once per stepping
+   * frame, and its header has the defect this closes (F2): a tap whose `touchstart` and
+   * `touchend` both land between two frames left `firing` false on every frame the game read.
+   * Set ONLY when a finger claims the stick in `onTouchStart` — never in `adopt()`, because a
+   * banked finger inheriting a released stick is a thumb that was already down, not a press.
+   */
+  takeFirePress(): boolean;
   /**
    * Hand the aim back to the mouse.
    *
@@ -210,6 +219,8 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
   const aim: TouchVec = { x: 0, y: -1 };
   let hasAim = false;
   let engaged = false;
+  /** A fire press nobody has collected yet — see `TouchControls.takeFirePress`. */
+  let firePress = false;
 
   let disposed = false;
   let pump = 0;
@@ -227,6 +238,7 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
       get moving() { return false; },
       aimDir: () => null,
       get firing() { return false; },
+      takeFirePress: () => false,
       clearAim() { /* never aimed */ },
       reset() { /* nothing to reset */ },
       dispose() { /* nothing to dispose */ },
@@ -523,7 +535,11 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
       claimed = true;
 
       if (leftZone) moveHint.classList.add('is-used');
-      else aimHint.classList.add('is-used');
+      else {
+        aimHint.classList.add('is-used');
+        // The fire EDGE, latched for a tap that lifts before the next frame reads `firing`.
+        firePress = true;
+      }
     }
     if (!claimed) return;
 
@@ -615,6 +631,12 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
     aimDir: () => (hasAim ? aim : null),
     get firing() { return aimStick.id !== null; },
 
+    takeFirePress(): boolean {
+      const pressed = firePress;
+      firePress = false;
+      return pressed;
+    },
+
     clearAim(): void {
       if (aimStick.id === null) hasAim = false;
     },
@@ -629,6 +651,8 @@ export function createTouchControls(opts: TouchControlsOptions): TouchControls {
       move.x = 0;
       move.y = 0;
       hasAim = false;
+      // A tap from before the restart / blur is not a press in the match that follows it.
+      firePress = false;
       kick();
     },
 
