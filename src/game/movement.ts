@@ -571,6 +571,14 @@ const PUSH_COINCIDENT_EPS = 1e-6;
  * whole family at 5.04 wu of stolen control authority *because* it is bounded at one body
  * length. A `selfLaunch` is different in kind (its owner asked for it) and is exactly what
  * Springform is. §42 asserts that `combat.ts`'s weapon sites call the 4-argument form.
+ *
+ * ⚠️ (B3b, 2026-10-15) **THAT LAST SENTENCE DOES NOT CHECK OUT — no row in `sim.test.mjs`
+ * asserts it.** §42 is the loadout-items section; nothing in the suite or in `tools/tmp`
+ * scans `combat.ts` for the arity of a `displaceFighter` call (grepped for the call shape,
+ * "4-argument" and "weapon sites"). So the rule above is a CONVENTION today, kept by
+ * reading, not by a guard. It still holds on this tree: the knockback and self-launch sites
+ * pass four arguments, and the lure now goes through `lureFighter`, which passes none of
+ * `opts` on to this function.
  */
 export function displaceFighter(
   fighter: Fighter,
