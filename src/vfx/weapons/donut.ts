@@ -69,23 +69,26 @@ import type { CharacterWeaponVfxMap, WeaponVfxCtx } from './types';
 // Palette — mirrors the module-private consts in `src/characters/donut.ts` so the
 // thrown candy matches the fighter throwing it. (They are `const`, not exported, so
 // this is a deliberate copy; the values are the contract.)
+// ⚠️ V1 (graphics campaign): C1a (`f0de367`) moved the donut from glaze PINK to VIOLET and its
+// dough to #D8811F, so the mirrors below were re-keyed to the new contract; the old hexes are
+// kept beside each one. The `#FF9EC4` pink notes in the prose describe the OLD palette.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Deep berry — the backing ring that outlines every glazed form in this file. Warm
  * and dark rather than black: the art direction has almost no ink outline, so this
  * is a readability device on a small fast-moving object (a pale pink ring on this
  * arena's pale warm floor dissolves without it), not a style. */
-const GLAZE_DEEP = '#C93F73';
+const GLAZE_DEEP = '#5E2C8F';  // V1: was #C93F73 (deep berry) — C1a's glaze is VIOLET (`src/characters/donut.ts` GLAZE #A65FE5); HSL 270, clear of blocking violet 258–268
 /** `DOUGH` from `src/characters/donut.ts` — the fried body under the glaze. */
-const DOUGH = '#F0C070';
+const DOUGH = '#D8811F';  // V1: was #F0C070 — C1a's DOUGH
 /** Near-white sugar. The ONE element of this effect that is not competing inside the
  * pink-on-terracotta hue stack — see the `#FF9EC4` Sticky Trail note above — so it
  * is what carries the impact's first frame and the ground ring. */
-const SUGAR = '#FFF0F6';
+const SUGAR = '#F8F0FF';  // V1: was #FFF0F6 (pink-tinted) — violet-tinted now, HSL 272
 /** The ring echoes shed in flight. Sugar tinted just far enough toward the glaze to
  * read as icing rather than as a smoke ring — the trail is Donut's, not a generic
  * puff, and neutral white wisps are already the arena's ambient dust vocabulary. */
-const GLAZE_ECHO = '#FFD9EC';
+const GLAZE_ECHO = '#EDD9FF';  // V1: was #FFD9EC (pink icing) — violet icing, HSL 272
 /** `SPRINKLE_COLORS` from `src/characters/donut.ts`. Authored as wanted, NOT
  * pre-compensated: the grade reproduces hue within ~4° and destroys channels below
  * ~10/255, and the darkest channel here is 0x1E. */
@@ -236,13 +239,13 @@ const fading = (color: string, opacity: number, extra: THREE.MeshBasicMaterialPa
  * wrap a small pool in well under a second, so this would not have been a rare race
  * here either.
  */
-const bodyGlazeMat = new THREE.MeshBasicMaterial({ color: '#FF6FA5' });
+const bodyGlazeMat = new THREE.MeshBasicMaterial({ color: '#A65FE5' });  // V1: was #FF6FA5 — C1a's GLAZE
 const bodyDoughMat = new THREE.MeshBasicMaterial({ color: DOUGH });
 const bodyBackMat = new THREE.MeshBasicMaterial({ color: GLAZE_DEEP });
 const bodySprinkleMats = SPRINKLES.map((c) => new THREE.MeshBasicMaterial({ color: c }));
 
 const nextArcMat = materialPool(18, () => fading(GLAZE_DEEP, 1));
-const nextGlazeMat = materialPool(18, () => fading('#FF6FA5', 1));
+const nextGlazeMat = materialPool(18, () => fading('#C48CFF', 1));  // V1: was #FF6FA5 — `vfx/palette.ts` effect violet
 const nextSprinkleMat = materialPool(30, () => fading('#FFFFFF', 1));
 const nextRingMat = materialPool(24, () => fading(SUGAR, 0.7));
 /** The additive element: the ring echoes shed behind the projectile in flight.
@@ -560,7 +563,7 @@ export const donutWeaponVfx: CharacterWeaponVfxMap = {
       //     that band erases the character even while its silhouette survives.
       // A hollow hoop is the only shape that can be this bright at this size without
       // hiding the thing it is giving feedback about.
-      spawnRing(ctx, x, y, z, HALO_R * 0.80 * s, HALO_R * s, '#FFF6FA', 1, 0.16,
+      spawnRing(ctx, x, y, z, HALO_R * 0.80 * s, HALO_R * s, '#FBF6FF', 1, 0.16,
         { hard: true, renderOrder: 12, fadePow: 1.1, hold: 0.45 });
       // A candy-pink hoop just inside it — the two-tone hard edge, and the colour
       // that says whose hit this was.
@@ -620,7 +623,7 @@ export const donutWeaponVfx: CharacterWeaponVfxMap = {
     cast(ctx) {
       spawnRing(
         ctx, ctx.position.x, ctx.position.y, ctx.position.z,
-        CH * 0.06, CH * 0.20, '#FFF6FA', 1, 0.16,
+        CH * 0.06, CH * 0.20, '#FBF6FF', 1, 0.16,
         { hard: true, renderOrder: 12, hold: 0.3 },
       );
       spawnRing(

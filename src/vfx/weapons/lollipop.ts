@@ -171,7 +171,14 @@ import type { CharacterWeaponVfxMap, WeaponVfxCtx } from './types';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CANDY_RED = '#E63946';   // == lollipop.ts CANDY_RED, == Weapon.color for both
-const CANDY_WHITE = '#FFFDF9'; // == lollipop.ts CANDY_WHITE
+// ⚠️ V1: this line read `const CANDY_WHITE = '#FFFDF9'; // == lollipop.ts CANDY_WHITE`, and the
+// `==` has been FALSE since C1a (`f0de367`): the character's candy is MINT — `src/characters/
+// lollipop.ts` CANDY_WHITE `#48B990` at `d1b2621`, renamed `CANDY_MINT` (same hex) by C1b on main
+// at `a53d8b0` (routed by the orchestrator from C1b). Re-keyed with the rest of the cast's
+// effects (`vfx/palette.ts`): a LIGHT version of her mint, HSL 159 — a transient clears the
+// cast's value UPWARD (`vfx.ts` hue-contract rule 1), so it is not the body hex itself. Renamed
+// so a white-named constant does not hold mint.
+const CANDY_BODY = '#9BEBCF';
 const CANDY_MINT = '#00E5B0';  // == RARITY_COLORS.Cyber, her rarity trim. Accent only.
 const SUGAR_GLOW = '#FFEAF1';  // warm pale pink for additive sugar dust
 
@@ -459,16 +466,16 @@ const nextFillMat = materialPool(3, () => new THREE.MeshBasicMaterial({
 // shown up as the ultimate turning red and blinking. Verified-by-rendering effects
 // should not be able to corrupt each other from a neighbouring weapon.
 const nextAoeSwirlMat = materialPool(2, () => new THREE.MeshBasicMaterial({
-  map: swirlTex, color: CANDY_WHITE, transparent: true, opacity: 0.5, depthWrite: false,
+  map: swirlTex, color: CANDY_BODY, transparent: true, opacity: 0.5, depthWrite: false,
 }));
 const nextGiantSwirlMat = materialPool(2, () => new THREE.MeshBasicMaterial({
   map: swirlTex, color: CANDY_RED, transparent: true, opacity: 0.9, depthWrite: false,
 }));
 const nextSwingMat = materialPool(6, () => new THREE.MeshBasicMaterial({
-  map: swirlTex, color: CANDY_WHITE, transparent: true, opacity: 0.9, depthWrite: false,
+  map: swirlTex, color: CANDY_BODY, transparent: true, opacity: 0.9, depthWrite: false,
 }));
 const nextRimMat = materialPool(3, () => new THREE.MeshBasicMaterial({
-  map: rimBandTex, color: CANDY_WHITE, transparent: true, opacity: 1, depthWrite: false,
+  map: rimBandTex, color: CANDY_BODY, transparent: true, opacity: 1, depthWrite: false,
   blending: THREE.AdditiveBlending,
 }));
 // Two boundary rings, one saturated and one pale. Neither colour alone survives both
@@ -479,13 +486,13 @@ const nextEdgeRedMat = materialPool(4, () => new THREE.MeshBasicMaterial({
   map: edgeRingTex, color: CANDY_RED, transparent: true, opacity: 1, depthWrite: false,
 }));
 const nextEdgeWhiteMat = materialPool(2, () => new THREE.MeshBasicMaterial({
-  map: edgeRingTex, color: CANDY_WHITE, transparent: true, opacity: 1, depthWrite: false,
+  map: edgeRingTex, color: CANDY_BODY, transparent: true, opacity: 1, depthWrite: false,
 }));
 const nextStampMat = materialPool(10, () => new THREE.MeshBasicMaterial({
   map: swirlTex, color: CANDY_RED, transparent: true, opacity: 0.9, depthWrite: false,
 }));
 const nextChipRedMat = materialPool(14, () => new THREE.MeshBasicMaterial({ color: CANDY_RED, transparent: true, opacity: 1 }));
-const nextChipWhiteMat = materialPool(14, () => new THREE.MeshBasicMaterial({ color: CANDY_WHITE, transparent: true, opacity: 1 }));
+const nextChipWhiteMat = materialPool(14, () => new THREE.MeshBasicMaterial({ color: CANDY_BODY, transparent: true, opacity: 1 }));
 const nextSugarMat = materialPool(24, () => new THREE.SpriteMaterial({
   map: sugarTex, color: SUGAR_GLOW, transparent: true, opacity: 1, depthWrite: false,
   blending: THREE.AdditiveBlending,
@@ -504,7 +511,7 @@ const nextPopRedMat = materialPool(12, () => new THREE.SpriteMaterial({
 const nextPopMintMat = materialPool(5, () => new THREE.SpriteMaterial({
   map: sugarTex, color: CANDY_MINT, transparent: true, opacity: 1, depthWrite: false,
 }));
-const nextGiantHeadMat = materialPool(2, () => new THREE.MeshBasicMaterial({ color: CANDY_WHITE, transparent: true, opacity: 1 }));
+const nextGiantHeadMat = materialPool(2, () => new THREE.MeshBasicMaterial({ color: CANDY_BODY, transparent: true, opacity: 1 }));
 const nextGiantStickMat = materialPool(2, () => new THREE.MeshBasicMaterial({ color: '#FBF7EE', transparent: true, opacity: 1 }));
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -823,7 +830,7 @@ const nextTeleRimMat = materialPool(2, () => new THREE.MeshBasicMaterial({
   map: edgeRingTex, color: TELE_RIM, transparent: true, opacity: 0, depthWrite: false,
 }));
 const nextTeleHeadMat = materialPool(2, () => new THREE.MeshBasicMaterial({
-  color: CANDY_WHITE, transparent: true, opacity: 1, depthWrite: false,
+  color: CANDY_BODY, transparent: true, opacity: 1, depthWrite: false,
 }));
 const nextTeleHeadSwirlMat = materialPool(2, () => new THREE.MeshBasicMaterial({
   map: swirlTex, color: CANDY_RED, transparent: true, opacity: 0.95, depthWrite: false,
@@ -865,7 +872,7 @@ export const lollipopWeaponVfx: CharacterWeaponVfxMap = {
       for (let g = 0; g < 2; g++) {
         const lead = g * 0.05;
         const mat = nextSwingMat();
-        mat.color.set(g === 0 ? CANDY_WHITE : CANDY_RED);
+        mat.color.set(g === 0 ? CANDY_BODY : CANDY_RED);
         const disc = new THREE.Mesh(unitDiscGeo, mat);
         disc.scale.setScalar(headRadius * (1 - g * 0.16));
         disc.renderOrder = 13;
