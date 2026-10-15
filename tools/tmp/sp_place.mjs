@@ -666,7 +666,16 @@ async function selftest() {
     //    x4 centre (>= the 496.25 keep-out), east runway ends flush on the pot at
     //    clearance -19.0 against a 21 wu margin. The CONTROL below is what makes it the
     //    right coordinate — it is refused for EXACTLY ONE reason, and that reason is the pin.
-    const pin = { x: 800, y: 1000 };
+    // 🚨 RE-ANCHORED 2026-10-15 (orchestrator, after A2b's hub district `d1b2621`). A2b put a
+    //    pass counter ON the east–west centre line at (1047.5,1000), 125x55 — so (800,1000)'s
+    //    east run now stops on the pass, a plain cover box, and the seat is LEGAL: zero
+    //    violations, both rows below red. Every centre-line seat is gone the same way (the
+    //    keep-out forces it west of the pass; north–south is the sink and fryer). (800,1080) is
+    //    the same geometry 80 wu off the line: its east run clears the pass's south face and
+    //    stops on the pot's box INSIDE the 95 wu burn ring — chosen by scanning this file's own
+    //    `violations()` on the shipped dump for seats with exactly that one violation, nearest
+    //    the old pin. `sp_gate`'s pair row moved with it.
+    const pin = { x: 800, y: 1080 };
     check('KNOWN-BAD: a centre-line spawn whose run ends flush on the pot is refused (the 60c5b92 pin)',
       violations(pin, arena).some((v) => v.startsWith('run-stops-in-hazard')), violations(pin, arena).join(' '));
     check('  CONTROL: …and it is NOT refused for any other reason (so the pin is what caught it)',

@@ -450,7 +450,11 @@ async function selftest() {
     //    the same GEOMETRY: (800,1000) is on the centre line, 600 wu west of the x4 centre
     //    (outside the 496.25 keep-out), and its east run ends flush on the pot at
     //    clearance -19.0 against a 21 wu margin. `sp_place`'s pin row uses the same seat.
-    const pinned = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: 800, y: 1000 }, { x: 2000, y: 1000 }] };
+    // 🚨 RE-ANCHORED 2026-10-15 (orchestrator): A2b's pass counter now sits on the centre line
+    //    at (1047.5,1000), so (800,1000)'s run stops on the pass and the pair read ZERO faults.
+    //    (800,1080) and its point-mirror (2000,920) are the same geometry 80 wu off the line —
+    //    see `sp_place`'s pin row, which moved in the same commit.
+    const pinned = { ...arena, spawns: [...arena.spawns.slice(0, 4), { x: 800, y: 1080 }, { x: 2000, y: 920 }] };
     const f = runwayFaults(pinned);
     check('KNOWN-BAD: a centre-line pair whose run ends on the pot is caught by the shipped tool',
       f.length === 1 && /hazard/.test(f[0]), f.join(' '));

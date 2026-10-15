@@ -495,6 +495,11 @@ const COVER = [
   [958, 135, 50, 50], [1842, 1865, 50, 50], [2120, 135, 50, 50], [680, 1865, 50, 50],
   [450, 845, 50, 50], [2350, 1155, 50, 50],  // 50x50 x6  (spice_cart)
   [2776, 750, 48, 46], [24, 1250, 48, 46],  // 48x46 x2  (supply_barrel, the two clipped by the wall)
+  // ⚠️ +6 on 2026-10-15 for A2b's hub district (`d1b2621`), GENERATED from the dump (the six boxes
+  //    it held that this table did not — the selftest's box-for-box row went 111 vs 117 red on the
+  //    merge, the FOURTH time it caught the drift). Three point-mirrored pairs:
+  [1752.5, 1000, 125, 55], [1047.5, 1000, 125, 55], [1867.5, 760, 125, 55], [932.5, 1240, 125, 55],  // 125x55 x4  (the pass x2, the island runs x2)
+  [1137.5, 675, 55, 80], [1662.5, 1325, 55, 80],  // 55x80 x2  (the L returns)
 ];
 /** Where the AI starts; the flood below runs from here, so "reachable" means
  *  "reachable by a fighter in a real match", not "connected to something".
