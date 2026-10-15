@@ -76,7 +76,8 @@ import { chromium } from 'playwright';
 const args = process.argv;
 const get = (k, d) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
 const MODE = get('--mode', 'all');
-const BASE = get('--base', 'http://localhost:5173');
+// PREVIEW_BASE before :5173 — `sx_snap`/`with_snapshot` inject it and pass no flag (B2, 2026-10-15).
+const BASE = get('--base', process.env.PREVIEW_BASE ?? 'http://localhost:5173');
 
 const LAUNCH_ARGS = [
   '--use-gl=angle',

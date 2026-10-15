@@ -31,7 +31,10 @@ import { squareDeflection } from '../../src/game/touch.ts';
 const args = process.argv.slice(2);
 const url = (() => {
   const i = args.indexOf('--url');
-  return i >= 0 ? args[i + 1] : 'http://localhost:5173';
+  // PREVIEW_BASE before :5173 — `sx_snap`/`with_snapshot` inject it and pass no flag, and this
+  // tool used to fall through to the shared dev server silently (B2 measured five such runs,
+  // 2026-10-15). An explicit --url still wins.
+  return i >= 0 ? args[i + 1] : (process.env.PREVIEW_BASE ?? 'http://localhost:5173');
 })();
 const shotDir = (() => {
   const i = args.indexOf('--out');
@@ -132,7 +135,15 @@ async function run() {
   record('touch', 'layer-exists-on-touch-device', caps.layer, JSON.stringify(caps));
   record('touch', 'layer-claims-NO-pointer-events', caps.layerPointerEvents === 'none', caps.layerPointerEvents);
   record('touch', 'canvas-is-top-at-centre', caps.topAtCentre === 'CANVAS', String(caps.topAtCentre));
-  record('touch', 'no-fa-touch-before-a-real-finger', caps.faTouch === false, `fa-touch=${caps.faTouch}`);
+  // 🔁 WAS 'no-fa-touch-before-a-real-finger' (caps.faTouch === false) — the rule until 6c39d30
+  // (revamp B2, bug F7): a phone's FIRST touch on a weapon slot fired the current weapon instead
+  // of selecting, because the slots only went live after a real finger. touch.ts now sets
+  // fa-touch at construction on a COARSE pointer. The old invariant still holds where it was
+  // for — a mouse-only device — and this file's own DESKTOP section already asserts it
+  // ('no-touch-layer-installed': faTouch false, slots pointer-events none;
+  // 'weapon-slots-stay-inert'), both PASS on the F7 tree.
+  record('touch', 'fa-touch-set-at-construction-on-a-coarse-pointer',
+    caps.coarse === true && caps.faTouch === true, `coarse=${caps.coarse} fa-touch=${caps.faTouch}`);
   record('touch', 'canvas-gestures-suppressed', caps.canvasTouchAction === 'none', caps.canvasTouchAction);
 
   // ── 2. MOVEMENT: a left-zone drag moves the fighter ────────────────────────
@@ -443,9 +454,10 @@ async function run() {
       bottom: innerHeight - r.bottom,
     };
   });
-  // A real finger has not landed yet in this fresh context, so the slots must still be
-  // inert — the property that keeps a mouse-only player's fire clicks off the bar.
-  record('weapons', 'slots-inert-before-any-touch', slotBox.pe === 'none', `pointer-events=${slotBox.pe}`);
+  // 🔁 WAS 'slots-inert-before-any-touch' (pe === 'none') — see §1's note: since 6c39d30 (F7)
+  // a coarse-pointer device's slots are live from the first frame, so the first touch on one
+  // SELECTS. "A mouse-only player's fire clicks stay off the bar" is the desktop section's job.
+  record('weapons', 'slots-live-before-any-touch-on-a-coarse-pointer', slotBox.pe !== 'none', `pointer-events=${slotBox.pe}`);
   await touch(s2.cdp, 'touchStart', [finger(150, 300)]);
   await touch(s2.cdp, 'touchEnd', []);
   await sleep(120);
