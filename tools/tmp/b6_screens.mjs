@@ -507,6 +507,7 @@ async function sectionM8() {
       const loadsB = await B.evaluate(() => performance.getEntriesByType('navigation').length);
       // A goes HOME (in-app) so the storage-event half is observable: its name badge.
       await navIn(tA, 'home');
+      const originA = await tA.evaluate(() => performance.timeOrigin);
       await B.bringToFront();
       await sleep(500);
       await typeName(B, 'TabB');
@@ -516,12 +517,21 @@ async function sectionM8() {
         afterB?.name === 'TabB' && afterB.claimed.includes(n1) && afterB.held === afterA.held,
         `after B: ${JSON.stringify(afterB)} · after A: ${JSON.stringify(afterA)}`);
       // T2 — A, which wrote first, is told: its badge follows storage without a reload.
+      // ⚠️ 20 s and INTERVAL polling, not 4 s on rAF: the first cut timed out at 4 s on a
+      // loaded machine with the badge already reading "TabB" in the PNG taken a moment later —
+      // the storage event reaches a BACKGROUND tab as a queued task, and rAF polling does not
+      // run until the tab is foregrounded and painting. The elapsed time is printed, so a slow
+      // delivery reads as slow rather than as absent. `timeOrigin` proves it is one document.
       await tA.bringToFront();
+      const t0 = Date.now();
       const badge = await tA.waitForFunction(() => document.querySelector('[data-el="name"]')?.textContent?.trim() === 'TabB',
-        null, { timeout: 4_000 }).then(() => 'TabB').catch(async () => tA.evaluate(() => document.querySelector('[data-el="name"]')?.textContent?.trim()));
+        null, { timeout: 20_000, polling: 250 }).then(() => 'TabB')
+        .catch(async () => tA.evaluate(() => document.querySelector('[data-el="name"]')?.textContent?.trim()));
+      const waited = Date.now() - t0;
+      const sameDoc = (await tA.evaluate(() => performance.timeOrigin)) === originA;
       await shot(tA, 'm8_tabA_home');
       ok('M8', 'T2  tab A\'s home badge shows B\'s rename without a reload (it no longer displays a state storage does not hold)',
-        badge === 'TabB', `badge "${badge}"`);
+        badge === 'TabB' && sameDoc, `badge "${badge}" after ${waited} ms · same document ${sameDoc}`);
       // T3 — the REVERSE: A (booted before B's rename, never reloaded) makes the next write.
       await navIn(tA, 'trophies');
       await claim(tA, n2);
