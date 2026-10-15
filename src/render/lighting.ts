@@ -55,6 +55,7 @@
  */
 
 import * as THREE from 'three';
+import { LOOK } from './roles';
 
 export interface LightingRig {
   group: THREE.Group;
@@ -80,7 +81,101 @@ export interface LightingRig {
    * coordinates that were snapped against the old grid.
    */
   setShadowMapSize(size: number): void;
+  /**
+   * The WORLD/CHARACTER split (graphics campaign R1). `split` hands the world
+   * `FRONT_FILL_WORLD` of the front fill and gives characters the rest inside their own
+   * shader (`roles.ts`); `shadow` lightens the world's cast shadow to
+   * `WORLD_SHADOW_INTENSITY` and keeps it in the ground's hue (`WORLD_SHADE_TINT`, applied
+   * by the environment materials). Both false is exactly the rig as authored below —
+   * which is what every portrait framing (lobby, select, thumbnails) renders. `Stage` calls
+   * this before every render, so the shared `LOOK` uniforms always describe the Stage that
+   * is drawing.
+   */
+  applyLook(look: LightingLook): void;
 }
+
+/**
+ * The world half of the rig. Booleans pick old/new; the numbers default to the constants
+ * below and exist so a probe can sweep them on one frozen frame (`Stage.look`) while the
+ * character compensation — computed from the live lights — keeps the cast where it was.
+ */
+export interface LightingLook {
+  split: boolean;
+  shadow: boolean;
+  frontWorld?: number;
+  shadowIntensity?: number;
+  /** Multiplier on `WORLD_SHADE_TINT`; 1 ships. */
+  shadeTint?: number;
+}
+
+/**
+ * The camera-axis fill a CHARACTER receives — unchanged by the split. Its geometry and its
+ * measured figure/ground value are documented on `front` below.
+ */
+export const FRONT_FILL_CHARACTER = 2.2;
+
+/**
+ * What the WORLD keeps of the front fill once the rig is split.
+ *
+ * Measured on `1090046` (`docs/REVAMP.md` §2.2): this one light lifts every prop's
+ * camera-facing face to the brightness of its top — same-mesh front/top 0.84-0.93 with it,
+ * 0.42 without it, against 0.35-0.38 on the reference's hard-edged blocks. The
+ * form ramp in `roles.ts` (`FORM_SIDE_ALBEDO`) darkens near-vertical structure in ALBEDO,
+ * so this light and that ramp are one knob in two halves; the pair is chosen together by
+ * `tools/tmp/r1_probe.mjs` on frozen frames, against the 0.40-0.60 band. Measured on four
+ * frozen six/three-seat scenes (desktop), same-mesh front/top: 0.88-0.92 as shipped before,
+ * 0.61-0.67 with this split alone, 0.51-0.58 with the ramp as well.
+ */
+export const FRONT_FILL_WORLD = 0.8;
+
+/**
+ * Cast-shadow depth on the world. `key.shadow.intensity` is a uniform (no recompile).
+ *
+ * ⚠️ THE REFUSAL BELOW (at `SHADOW_PENUMBRA_M`) PRICED 0.55 AND IS KEPT. It refused 0.55
+ * because "the arena props stop reading as grounded at all"; it recorded no failure at
+ * 0.70, and it predates both the per-fighter contact decal (`stage.ts`) and ContactAO, which
+ * now carry contact on their own. Re-priced on `1090046`: our shadows were 3-8x deeper than
+ * the reference's (lit:shadow luma ~0.53-0.56 against 0.67-0.74), and 88-99% of the
+ * ground cells among the 20 most salient world cells were cast shadow. Swept on frozen
+ * scenes (`tools/tmp/r1_metrics.py`, per-pixel median of shadowed / unshadowed ground luma):
+ * 1.0 -> 0.48-0.52, 0.65 -> 0.66-0.68, 0.6 -> 0.69-0.71, 0.5 -> 0.74-0.75.
+ */
+export const WORLD_SHADOW_INTENSITY = 0.6;
+
+/**
+ * SHADE TINT — keeps the world's cast shadow in the ground's own hue, and only there.
+ *
+ * Shadowed ground keeps every light EXCEPT the key, and everything but the key is cool: the
+ * hemisphere sky (0xd8ecff), the IBL dome (whose diffuse on an up-facing surface measured as
+ * large as the hemisphere's), the front fill and the back rim — the last two cast no shadow,
+ * so they stay at full strength inside the key's. Lit ground is dominated by the warm key.
+ * So shade turned toward violet: per pixel, -9 to -29 degrees of HSL hue at four stations on
+ * `2b2e792` (`tools/tmp/r1_metrics.py`; the review measured 24 on the rose tile), against
+ * 1-3 on the reference.
+ *
+ * ⚠️ RECOLOURING A LIGHT CANNOT FIX THIS WITHOUT RE-HUEING THE LIT GROUND, AND THAT WAS
+ * MEASURED, NOT ASSUMED. "Shade hue = lit hue" means the unshadowed light must have the
+ * KEY's colour, at which point lit ground (key + the rest) is key-coloured too. A warm world
+ * sky (0xffe7c4, swept with 0xe9e9e9 / 0xf3ebe0 at shadow intensity 0.5-0.7) took shade from
+ * -23 to -5..-7 degrees but rotated the LIT floor +4.5..+8 degrees warmer — onto the cast's
+ * own 0-60 degree hue arc, which is the separation the floor exists to give.
+ *
+ * So the correction is applied where the hue error is: an irradiance offset of ZERO
+ * luminance, added to ENVIRONMENT surfaces in proportion to how much key their shadow
+ * removes (`roles.ts`, from three's own shadow factor — no second shadow lookup). Lit
+ * ground is untouched by construction; value is untouched by construction.
+ *
+ * Sized from measurement: rendering the ground with the post chain off and the lights split
+ * by family (`r1_probe --raw`), the light that survives the key's shadow carries 36 / 41 /
+ * 50 % of lit ground's R / G / B (two stations agree to 1.7 points). At this file's
+ * `WORLD_SHADOW_INTENSITY` and `FRONT_FILL_WORLD`, the offset that makes full shade a
+ * uniform 0.63 of lit ground in every channel is, per unit of key removed, the vector below;
+ * its Rec.709 luminance is 0.0001. Result on four stations: shade hue -0.8 to -3.2 degrees
+ * (phone tier -0.6 to -2.9). The swept multiplier crosses zero between 1.0 and 1.5
+ * (0.5 -> -2.3..-7.4, 1.5 -> +0.8..+2.3), and lit ground moves +0.5..+0.9 degrees in all —
+ * the split's smaller cool front fill, not this term.
+ */
+export const WORLD_SHADE_TINT = new THREE.Vector3(0.170, -0.015, -0.350);
 
 /**
  * Smallest shadow-frustum half-extent that still covers everything on screen.
@@ -354,6 +449,8 @@ export function createLighting(opts?: {
   // the peak darkness, because the same darkening is spread over a wider penumbra, so
   // taking both would be spending twice for one effect and risking that reversal.
   // Left at its default, deliberately, and this note is the record that it was priced.
+  // ⚠️ RE-PRICED for the world by graphics campaign R1 — see `WORLD_SHADOW_INTENSITY`. This
+  // is still the value every portrait framing renders.
   //
   // The history below is kept verbatim because it is the reason to be sceptical of
   // this change, and that scepticism is the honest thing to hand the next reader:
@@ -467,7 +564,16 @@ export function createLighting(opts?: {
   // falls 1.27/1.57/1.29 to 1.06/1.21/1.12, about 15%. Swept 1.6 / 2.0 / 2.2 / 3.0:
   // that number recovers monotonically as the front comes down and heroDL falls with
   // it. 2.2 is the point where heroDL is still above the shipped rig at every station.
-  const front = new THREE.DirectionalLight(0xeef4ff, 2.2);
+  //
+  // ── SPLIT, graphics campaign R1 ────────────────────────────────────────────
+  // Everything above is still true FOR A CHARACTER, and a character still receives all 2.2
+  // of it (`FRONT_FILL_CHARACTER`): `applyLook` below hands the WORLD `FRONT_FILL_WORLD`
+  // and gives the cast the remainder inside its own shader (`roles.ts`), the same diffuse +
+  // GGX a DirectionalLight gets. So the price paragraph above is no longer paid by the
+  // props in a match — and it was larger than it says: measured on `1090046`, same-mesh
+  // front/top on structure is 0.92 with this light and 0.42 without it, i.e. the ~15% of
+  // "internal contrast" understated what it cost the props' FORM by roughly 2.2x.
+  const front = new THREE.DirectionalLight(0xeef4ff, FRONT_FILL_CHARACTER);
   front.position.set(0, 6.26, 44.56);   // 45 m at elevation 8 deg, azimuth 90 deg
   front.castShadow = false;
   group.add(front);
@@ -586,5 +692,21 @@ export function createLighting(opts?: {
     lastR = NaN;
   };
 
-  return { group, key, fill, front, rim, ambient, focus, setShadowMapSize };
+  // ── THE SPLIT ───────────────────────────────────────────────────────────────
+  // Both flags false reproduces the rig above exactly, and writes zero compensation and
+  // zero tint — the identity `roles.ts` is built around. The compensation is computed from
+  // the LIVE light, not the constant, so a probe that drives `front.color` or the world's
+  // share page-side still leaves the cast where it was.
+  const applyLook = (look: LightingLook): void => {
+    const { split, shadow } = look;
+    front.intensity = split ? (look.frontWorld ?? FRONT_FILL_WORLD) : FRONT_FILL_CHARACTER;
+    key.shadow.intensity = shadow ? (look.shadowIntensity ?? WORLD_SHADOW_INTENSITY) : 1;
+    LOOK.charFillColor.value.copy(front.color).multiplyScalar(FRONT_FILL_CHARACTER - front.intensity);
+    LOOK.charFillDir.value.copy(front.position).sub(front.target.position).normalize();
+    LOOK.envShadeTint.value.copy(WORLD_SHADE_TINT).multiplyScalar(shadow ? (look.shadeTint ?? 1) : 0);
+  };
+  // Not called here: `Stage.render` calls it before every frame, and a rig built outside a
+  // Stage (none today) keeps the authored values set above.
+
+  return { group, key, fill, front, rim, ambient, focus, setShadowMapSize, applyLook };
 }
