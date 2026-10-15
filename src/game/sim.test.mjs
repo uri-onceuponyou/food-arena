@@ -77,6 +77,11 @@ import {
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+// §45 imports `resolvePlaces` — the ONE ranking rule the payout and the result card share —
+// because its claim is that a knocked-out seat's place under THAT rule cannot move after the
+// knockout, and `match.ts` now banks on exactly that claim (META-02). A copy of the reverse-
+// elimination sort written here would keep passing against a resolver that had stopped using it.
+import { resolvePlaces } from './roster.ts';
 import {
   CHARACTERS, CHARACTER_IDS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
   MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, ENEMY_SIZE, POT, TRAIL,
@@ -11648,6 +11653,265 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
     check('(h) 🔴 CONTROL: an item with no crowd requirement IS usable in the same two-seat fixture — so (h) is Disposal\'s gate, not the harness',
       ITEMS.pompa.minAlive === MIN_FIGHTERS && itemUsable(duelPompa, duelPompa.fighters[0], 0),
       `pompa minAlive ${ITEMS.pompa.minAlive}, usable ${itemUsable(duelPompa, duelPompa.fighters[0], 0)}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 44. THE HUMAN PRESS — `MatchInput.useItem` through `stepMatch`, the hop `match.ts` lacked
+//
+// 🚨 FOR 43 DAYS EVERY ACTIVE ITEM WAS A BUTTON THAT DID NOTHING, AND NO ROW IN THIS FILE
+// COULD HAVE SAID SO. `match.ts:buildInput()` never set `useItem` and the HUD was never handed
+// `onUseItem` (routed in `174d046` on 2026-09-02, landed by the B1 package on 2026-10-15),
+// while the sim half — `sim.ts`'s human branch reading `fi.useItem` into `attemptItem` — was
+// live and UNTESTED: not one row here drove it, because every `stepMatch` caller in this file
+// predates items. The break lived in `match.ts`, which Node cannot import (extensionless Vite
+// imports, `three`, the DOM), so the red/green for the DEFECT is the browser's:
+// `tools/tmp/up_item_press.mjs` (default mode) and `tools/tmp/b1_match.mjs` §I, both red on
+// `2b2e792`. These rows pin the CONTRACT that fix stands on, from this side of the seam:
+//
+//   (b)/(c) the same tick without and with the key — the shape that shipped, and the live one;
+//   (d) the sim keeps NO queue and runs no fighter turn in the countdown, so a countdown press
+//       is gone by GO — `match.ts` now drops it at the session too, and the two must agree;
+//   (e) a corpse's press is refused at SIX seats — unreachable at two, as §34 says of every
+//       corpse rule, so the fixture is six seats and asserts its own corpse is real;
+//   (f) an empty loadout pressed is a no-op, BIT-identical to not pressing — with the
+//       comparator first shown able to tell a press from no press, or "identical" means nothing.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n44. The human item press reaches `attemptItem` through `stepMatch` (and only in play)');
+{
+  const DT = 16.667;
+  const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  const PRESS0 = { ...NEUTRAL, useItem: 0 };
+  const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+  /** Slot 0 HUMAN — `createMatch`'s default, stated anyway — every other seat AI, spaced
+   *  300 wu apart on clear floor. Left in `'countdown'`; `play()` opens it. */
+  const humanMatch = (n, items) => createMatch(arena, Array.from({ length: n }, (_, i) => ({
+    characterId: CHARACTER_IDS[i % CHARACTER_IDS.length],
+    controller: i === 0 ? 'human' : 'ai',
+    spawn: { x: 600 + i * 300, y: 400 },
+    ...(i === 0 && items ? { items } : {}),
+  })));
+  const play = (st) => { st.phase = 'playing'; return st; };
+  const used = (evs) => evs.filter((e) => e.type === 'item-used');
+
+  // ── (a) NON-VACUITY: a real human seat holding a real ACTIVE item the sim would accept ──
+  {
+    const st = play(humanMatch(2, ['springform']));
+    const me = st.fighters[0];
+    check('(a) NON-VACUITY: slot 0 is HUMAN, its slot 0 holds an ACTIVE item, and `itemUsable` accepts it',
+      me.controller === 'human' && ITEMS[me.item.equipped[0]]?.kind === 'active' && itemUsable(st, me, 0),
+      `controller ${me.controller}, equipped [${me.item.equipped.join(',')}], usable ${itemUsable(st, me, 0)}`);
+  }
+
+  // ── (b)/(c) THE SAME TICK, WITHOUT AND WITH THE KEY ────────────────────────
+  {
+    const dead = play(humanMatch(2, ['springform']));
+    const live = play(humanMatch(2, ['springform']));
+    const evDead = stepMatch(dead, DT, NEUTRAL);
+    const evLive = stepMatch(live, DT, PRESS0);
+    check('(b) the input `match.ts` shipped for 43 days (no `useItem`) spends nothing — the dead chain, from this side',
+      dead.fighters[0].item.lastUsed[0] === -Infinity && used(evDead).length === 0,
+      `lastUsed[0] ${dead.fighters[0].item.lastUsed[0]}, item-used ×${used(evDead).length}`);
+    const u = used(evLive);
+    check('(c) 🔴 the same tick WITH `useItem: 0` spends it: cooldown stamped NOW, one `item-used` for seat 0 slot 0',
+      live.fighters[0].item.lastUsed[0] === live.elapsed && u.length === 1 && u[0].fighterId === 0 && u[0].slot === 0,
+      `lastUsed[0] ${live.fighters[0].item.lastUsed[0]} vs elapsed ${live.elapsed}, events ${JSON.stringify(u)}`);
+  }
+
+  // ── (d) NO QUEUE, AND NO TURN IN THE COUNTDOWN ─────────────────────────────
+  //
+  // Pressed on every one of ten countdown ticks (167 ms — the countdown is three whole
+  // seconds, so it cannot finish inside the window, and the row asserts that rather than
+  // trusting it), then the match is opened and stepped once with NO key. Nothing may fire.
+  // Then the CONTROL: the very next tick with the key DOES fire, so "nothing fired" above
+  // was the countdown and the queue, not an item that was never usable.
+  {
+    const st = humanMatch(2, ['springform']);
+    const before = st.phase;
+    const evs = [];
+    for (let i = 0; i < 10; i++) evs.push(...stepMatch(st, DT, PRESS0));
+    check('(d) NON-VACUITY: the fixture was in the countdown for all ten pressed ticks',
+      before === 'countdown' && st.phase === 'countdown', `${before} -> ${st.phase}`);
+    check('(d) 🔴 ten countdown presses spend nothing — no fighter turn runs outside `\'playing\'`',
+      st.fighters[0].item.lastUsed[0] === -Infinity && used(evs).length === 0,
+      `lastUsed[0] ${st.fighters[0].item.lastUsed[0]}, item-used ×${used(evs).length}`);
+    play(st);
+    const afterGo = stepMatch(st, DT, NEUTRAL);
+    check('(d) 🔴 …and nothing was QUEUED: the first playing tick with no key fires nothing',
+      st.fighters[0].item.lastUsed[0] === -Infinity && used(afterGo).length === 0,
+      `lastUsed[0] ${st.fighters[0].item.lastUsed[0]}, item-used ×${used(afterGo).length}`);
+    const ctl = stepMatch(st, DT, PRESS0);
+    check('(d) CONTROL: the next tick WITH the key fires — so the silence above was the countdown, not the item',
+      used(ctl).length === 1 && st.fighters[0].item.lastUsed[0] === st.elapsed,
+      `item-used ×${used(ctl).length}`);
+  }
+
+  // ── (e) A CORPSE'S PRESS, AT SIX SEATS ─────────────────────────────────────
+  {
+    const kill = (st) => {
+      const evs = [];
+      const w = CHARACTERS[st.fighters[1].characterId].weapons[0];
+      applyDamage(st, st.fighters[0], 9999, null,
+        { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: 1 }, evs);
+      return evs;
+    };
+    const alive = play(humanMatch(MAX_FIGHTERS, ['springform']));
+    const corpse = play(humanMatch(MAX_FIGHTERS, ['springform']));
+    kill(corpse);
+    check(`(e) NON-VACUITY: at N=${MAX_FIGHTERS} seat 0 is a CORPSE in a match that is still playing`,
+      corpse.fighters.length === MAX_FIGHTERS && corpse.fighters[0].alive === false && corpse.phase === 'playing',
+      `seats ${corpse.fighters.length}, alive ${corpse.fighters[0].alive}, phase ${corpse.phase}`);
+    const evAlive = stepMatch(alive, DT, PRESS0);
+    const evCorpse = stepMatch(corpse, DT, PRESS0);
+    check(`(e) CONTROL: the same press from a LIVING seat 0 at N=${MAX_FIGHTERS} fires`,
+      used(evAlive).some((e) => e.fighterId === 0), `item-used ×${used(evAlive).length}`);
+    check('(e) 🔴 a dead human seat\'s press is refused — the corpse rule (§34) covers items too',
+      corpse.fighters[0].item.lastUsed[0] === -Infinity && !used(evCorpse).some((e) => e.fighterId === 0),
+      `lastUsed[0] ${corpse.fighters[0].item.lastUsed[0]}`);
+  }
+
+  // ── (f) AN EMPTY LOADOUT, PRESSED, IS BIT-IDENTICAL TO NOT PRESSING ────────
+  //
+  // `match.ts` now hands the sim every Q/E a player presses, including from a player who
+  // equipped nothing — the shipped default. That must cost nothing and change nothing.
+  {
+    const run = (input, items) => {
+      const st = play(humanMatch(2, items));
+      const evs = [];
+      for (let i = 0; i < 30; i++) evs.push(...stepMatch(st, DT, input));
+      return JSON.stringify({ st, evs });
+    };
+    const discriminates = run(NEUTRAL, ['springform']) !== run(PRESS0, ['springform']);
+    check('(f) NON-VACUITY: the comparator tells a press from no press when an item IS equipped',
+      discriminates);
+    let threw = null;
+    let same0 = false;
+    let same1 = false;
+    try {
+      same0 = run(NEUTRAL, undefined) === run(PRESS0, undefined);
+      same1 = run(NEUTRAL, undefined) === run({ ...NEUTRAL, useItem: 1 }, undefined);
+    } catch (err) { threw = String(err); }
+    check('(f) 🔴 Q and E with an EMPTY loadout: no throw, and 30 ticks bit-identical to never pressing',
+      threw === null && same0 && same1, `threw ${threw}, slot0 identical ${same0}, slot1 identical ${same1}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 45. A KNOCKED-OUT SEAT'S PLACE IS FINAL AT THE KNOCKOUT — unless a revive is pending
+//
+// 🚨 `match.ts` NOW BANKS ON THIS (META-02). At three or more seats a knockout does not end
+// the match, and the result used to be banked only at the whistle — so a 5th or 6th could
+// Quit while spectating and keep every trophy (+84% trophies per match at 1,500, measured by
+// the review), and a 3rd who left threw the payout away. `GameSession.notifyLocalResult` now
+// reports the place on the first frame the local seat is down with the match still playing,
+// and the screen banks it there. That is only correct if `roster.ts:resolvePlaces` can never
+// MOVE a knocked-out seat afterwards, and this section pins exactly that, from the rule's side:
+//
+//   (b) through every later knockout to the whistle, the place does not move — and (c) a
+//       resolver with rung 3 inverted fails (b), so (b) is a statement about THAT rung;
+//   (d) WHEN in the tick it is asked matters: mid-batch, a seat that died later in the same
+//       tick is "dead but unaccounted" and ranks BELOW the local seat — one place too
+//       generous — which is why `match.ts` asks after the whole frame, never in `death`;
+//   (e) Leftovers is the one exception, and why the bank WAITS for it: with a revive pending
+//       the knocked-out seat can still stand up and win, so its place at the first knockout
+//       is not final. Once no revive is left, (b) holds again.
+//
+// Constructed knockouts (the sim's own `applyDamage`), not an AI corpus: the property is about
+// the RULE, and a six-seat corpus costs ~2.6 s a match here. The real-match corpus is
+// `tools/tmp/b1_ko_final.mjs` (all-AI, six and three seats, with this section's known-bad).
+// Two seats are vacuous by construction: a knockout ends a duel on the same tick.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n45. A knocked-out seat\'s place is final at the knockout (six seats; Leftovers excepted)');
+{
+  const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+  const six = (items0) => {
+    const st = createMatch(arena, Array.from({ length: MAX_FIGHTERS }, (_, i) => ({
+      characterId: CHARACTER_IDS[i % CHARACTER_IDS.length],
+      controller: 'ai',
+      spawn: { x: 500 + i * 350, y: 500 + (i % 2) * 900 },
+      ...(i === 0 && items0 ? { items: items0 } : {}),
+    })));
+    st.phase = 'playing';
+    return st;
+  };
+  /** `match.ts`'s own tracking: one entry per `death` event, in emission order. */
+  const kill = (st, victim, killer, eliminated) => {
+    const evs = [];
+    const w = CHARACTERS[st.fighters[killer].characterId].weapons[0];
+    applyDamage(st, st.fighters[victim], 9999, null,
+      { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: killer }, evs);
+    for (const ev of evs) if (ev.type === 'death') eliminated.push(ev.fighterId);
+    return evs;
+  };
+  const input = (st, eliminated) => ({
+    seats: st.fighters.map((f, i) => ({ id: i, alive: f.alive, hp: f.hp, maxHp: f.maxHp, x: f.x, y: f.y, deaths: f.deaths })),
+    center: st.arena.center, eliminated: eliminated.slice(), winnerId: st.winnerId ?? null,
+  });
+  const placeOf0 = (st, elim, resolver = resolvePlaces) => resolver(input(st, elim)).indexOf(0);
+  /** KNOWN-BAD: rung 3 inverted — the EARLIEST knockout places best. */
+  const firstOutBest = (inp) => resolvePlaces({ ...inp, eliminated: inp.eliminated.slice().reverse() });
+
+  // ── (a)-(c): out first, then the other five go out one by one to the whistle ──
+  {
+    const st = six();
+    const elim = [];
+    kill(st, 0, 1, elim);
+    check('(a) NON-VACUITY: six seats, seat 0 knocked out, the match still PLAYING — the window META-02 is about',
+      st.fighters.length === MAX_FIGHTERS && !st.fighters[0].alive && st.phase === 'playing',
+      `seats ${st.fighters.length}, alive ${st.fighters[0].alive}, phase ${st.phase}`);
+    const atKo = placeOf0(st, elim);
+    const atKoBad = placeOf0(st, elim, firstOutBest);
+    const trail = [atKo];
+    const trailBad = [atKoBad];
+    for (const v of [3, 1, 4, 2]) {
+      kill(st, v, 5, elim);
+      trail.push(placeOf0(st, elim));
+      trailBad.push(placeOf0(st, elim, firstOutBest));
+    }
+    check('(b) NON-VACUITY: the sequence reached the whistle by knockout, seat 5 the winner',
+      st.phase === 'ended' && st.winnerId === 5, `phase ${st.phase}, winner ${st.winnerId}`);
+    check('(b) 🔴 the place at the knockout (6th) never moves — through four more knockouts and the whistle',
+      atKo === MAX_FIGHTERS - 1 && trail.every((p) => p === atKo), `places after each knockout: ${trail.join(' ')}`);
+    check('(c) KNOWN-BAD: with rung 3 inverted (earliest out places best) the same sequence MOVES the place — so (b) is a statement about that rung',
+      trailBad.some((p) => p !== trailBad[0]), `places: ${trailBad.join(' ')}`);
+  }
+
+  // ── (d) WHEN IN THE TICK THE PLACE IS ASKED ───────────────────────────────
+  {
+    const st = six();
+    const elimMidBatch = [];
+    kill(st, 0, 1, elimMidBatch);
+    const elimAfter = elimMidBatch.slice();
+    kill(st, 2, 1, elimAfter);         // a second knockout IN THE SAME TICK, later in the batch
+    const mid = placeOf0(st, elimMidBatch);   // state already post-tick, `eliminated` not yet
+    const after = placeOf0(st, elimAfter);
+    check('(d) NON-VACUITY: two seats went out in one batch and the match is still playing',
+      !st.fighters[0].alive && !st.fighters[2].alive && st.phase === 'playing', `phase ${st.phase}`);
+    check('(d) 🔴 asked MID-batch the seat is ranked one place too generously; asked after the whole batch it is not',
+      mid === MAX_FIGHTERS - 2 && after === MAX_FIGHTERS - 1, `mid-batch ${mid + 1}th, after the batch ${after + 1}th`);
+  }
+
+  // ── (e) LEFTOVERS: NOT final while a revive is pending; final again once none is left ──
+  {
+    const st = six(['leftovers']);
+    const elim = [];
+    kill(st, 0, 1, elim);
+    const atKo = placeOf0(st, elim);
+    const pending = st.fighters[0].item.revivesLeft > 0 && st.fighters[st.fighters[0].item.killerId]?.alive === true;
+    const evs = kill(st, 1, 2, elim);   // the killer goes out with five still standing: revive
+    const revived = evs.some((e) => e.type === 'item-revived') && st.fighters[0].alive;
+    const whileUp = placeOf0(st, elim);
+    check('(e) NON-VACUITY: seat 0 holds Leftovers, its killer is alive at the knockout, and the killer\'s death revives it',
+      pending && revived, `pending ${pending}, revived ${revived}, events ${evs.map((e) => e.type).join(',')}`);
+    check('(e) 🔴 so the place at the FIRST knockout is NOT final — banking it there would pay 6th to a fighter still standing',
+      atKo === MAX_FIGHTERS - 1 && whileUp < atKo, `at the knockout ${atKo + 1}th, after the revive ${whileUp + 1}th`);
+    kill(st, 0, 3, elim);              // out again, no revive left
+    const atSecond = placeOf0(st, elim);
+    const trail = [atSecond];
+    for (const v of [4, 2, 3]) { kill(st, v, 5, elim); trail.push(placeOf0(st, elim)); }
+    check('(e) 🔴 …and once no revive is left, the second knockout\'s place holds to the whistle (5th: seat 1 went out before it)',
+      st.fighters[0].item.revivesLeft === 0 && st.phase === 'ended' && atSecond === MAX_FIGHTERS - 2 && trail.every((p) => p === atSecond),
+      `revivesLeft ${st.fighters[0].item.revivesLeft}, phase ${st.phase}, places ${trail.map((p) => p + 1).join(' ')}`);
   }
 }
 

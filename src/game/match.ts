@@ -23,6 +23,9 @@ import type { DamageSource, Fighter, FighterRole, GameEvent, MatchInput, MatchSt
 // The seat range, imported rather than written as 2 and 6. `state.ts` owns it; a literal
 // here is a number that goes stale the day the sim seats eight and stays LEGAL while it does.
 import { MAX_FIGHTERS, MIN_FIGHTERS } from './state';
+// `Fighter.item.killerId`'s "nobody" — read by `localReviveStillPossible`, which must agree
+// with `combat.ts:reviveThoseKilledBy` about when a Leftovers revive can still fire.
+import { NO_FIGHTER } from './state';
 // ⚠️ `otherRole` came BACK to this file on 2026-08-11, for exactly one QA-only caller —
 // see `qaFillEvent`. The comment below is about the GAMEPLAY reconstructions, and those
 // are still gone: nothing in `handleEvents` resolves an attacker by "the other one".
@@ -48,7 +51,7 @@ import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 // `shakeProximityScale` for the same reason that one does: `camera.ts` is importable from
 // a `.mjs` tool and this file never will be (it imports `ui/hud.ts`). A camera rule whose
 // failure mode only appears at six seats has to be drivable without a GPU.
-import { resolveViewSubject, shakeProximityScale, type ViewSubjectReason } from '../render/camera';
+import { onAnyScreen, resolveViewSubject, shakeProximityScale, type ViewSubjectReason } from '../render/camera';
 import { InputController } from './input';
 import { createPointerLock, type PointerLockController } from './pointerLock';
 import { VfxLayer } from './vfx';
@@ -184,6 +187,15 @@ export interface FeelDebug {
    * anything above 1.0 is the banked time being repaid. */
   rawDtMs: number;
   stepDtMs: number;
+  /**
+   * HOW `stepDtMs` REACHED THE SIM THIS FRAME: the number of `stepMatch` calls, and the dt
+   * each one was handed (they are equal slices). `stepDtMs` alone could not say it once the
+   * hit-stop repayment was split — see `GameSession.stepSim` (BH-13). `maxStepCallMs >
+   * rawDtMs` on any frame is the defect that method exists to prevent. Written at the call
+   * site from the very argument passed, never derived afterwards.
+   */
+  stepCalls: number;
+  maxStepCallMs: number;
   /** Frames since the match began in each of the three dt regimes. `frozen +
    * repaying` over `frames` is the share of the match that is not running at 1x —
    * the number that says whether hit-stop reads as a punch or as a stutter. */
@@ -228,6 +240,10 @@ const FEEL_EVENT_KEYS = [
   'projectile-spawned', 'projectile-destroyed:hit-target', 'projectile-destroyed:hit-cover',
   'projectile-destroyed:expired', 'hit-landed:weapon', 'hit-landed:trail', 'hit-landed:hazard',
   'hit-landed:fog', 'heal', 'death', 'splat-created', 'trail-mark-created',
+  // Added with the three cases that answer them (B2 the wind-up, B4 the revive): a handled
+  // event the census cannot count is the "never fires" / "no response" ambiguity this
+  // record exists to remove. Keyed by `ev.type`, as `feel_census.mjs` keys everything.
+  'cast-started', 'cast-cancelled', 'item-revived',
 ] as const;
 
 /**
@@ -326,8 +342,15 @@ export interface MatchDebug {
  *
  * ⚠️ PLAIN DATA, NOT LIVE `Fighter` OBJECTS. `GameSessionOptions.onPhase`'s own comment
  * promises the screen layer reacts *"WITHOUT polling `MatchState` from outside"*, and the
- * sim keeps mutating for one more tick after `phase` flips (`sim.ts`'s projectile loop
- * reproduces the prototype's extra tick deliberately). Four fields, built once per match.
+ * sim keeps mutating after `phase` flips. Four fields, built once per match.
+ *
+ * ⚠️ THAT SENTENCE USED TO SAY *"the sim keeps mutating for one more tick after `phase` flips
+ * (`sim.ts`'s projectile loop reproduces the prototype's extra tick deliberately)"*, and "one
+ * more tick" was never true of this loop: it steps the sim every frame under the result card,
+ * and `sim.ts` steps projectiles in every phase, so a shot in the air flew its whole range —
+ * up to 683 ms past the whistle at two seats, killing the declared winner in 5 of 110 all-AI
+ * matches (BH-01 / ML-1 / B5). Since `retireShotsAfterWhistle` the sim still mutates after the
+ * flip (the clock, the ground effects) but no shot resolves after the ending tick.
  */
 export interface MatchOutcome {
   /** How many seats this match had — `profile.recordPlacement`'s second argument. */
@@ -366,6 +389,14 @@ export interface GameSessionOptions {
     /** Non-null on the `'ended'` transition only. See `MatchOutcome`. */
     outcome: MatchOutcome | null,
   ) => void;
+  /**
+   * THE LOCAL SEAT'S PLACE IS DECIDED BEFORE THE WHISTLE — fired at most once per match, on
+   * the first frame the local seat is knocked out with the match still `'playing'` and no
+   * revive pending. Never at two seats (a knockout ends a duel on the same tick). See
+   * `GameSession.notifyLocalResult` for why this exists (META-02) and why only `localPlace`
+   * and `seats` of the outcome are final at that moment.
+   */
+  onLocalResult?: (outcome: MatchOutcome) => void;
   /**
    * The player's CHARACTER level for `playerCharacterId`, 1-15 (`rules.ts` DEVIATION #11).
    *
@@ -755,11 +786,16 @@ export class GameSession {
    * ⚠️ **CACHED RATHER THAN RECOMPUTED PER FRAME, AND THAT IS CORRECTNESS BEFORE IT IS
    * COST.** The result card stays up until the player presses something, so a per-frame
    * `outcome()` would re-rank on every one of those frames — off a `MatchState` the sim is
-   * still stepping for one more tick (`sim.ts`'s projectile loop deliberately reproduces
-   * the prototype's extra tick), and off an `eliminated` list that can still grow if a
-   * projectile already in the air lands after the whistle. The card and the payout would
-   * then be able to disagree with each other. Computed once, at the transition, is also
-   * the only reading under which `onPhase` and `HudFrameInfo.place` are the same answer.
+   * still stepping. The card and the payout would then be able to disagree with each other.
+   * Computed once, at the transition, is also the only reading under which `onPhase` and
+   * `HudFrameInfo.place` are the same answer.
+   *
+   * ⚠️ This used to add *"for one more tick (`sim.ts`'s projectile loop deliberately
+   * reproduces the prototype's extra tick), and off an `eliminated` list that can still grow
+   * if a projectile already in the air lands after the whistle"*. The second half was the
+   * real behaviour and the first was not — shots kept landing for their whole flight, not one
+   * tick. `retireShotsAfterWhistle` closed that, so `eliminated` can no longer grow after the
+   * ending tick; the cache stays, because the reasoning above does not depend on it.
    *
    * Null in every phase but `'ended'`, which is what clears it on restart.
    */
@@ -780,6 +816,13 @@ export class GameSession {
    * stale payout would put the LAST match's trophies on the NEXT match's card.
    */
   private endedPayout: MatchPayout | null = null;
+
+  /**
+   * Has `opts.onLocalResult` fired for THIS match? Once per match, because the screen layer
+   * banks off it (`profile.recordPlacement` mutates and commits the economy) — the same reason
+   * `matchScreen.ts` guards the whistle's bank with `banked`. Cleared in `spawnMatch`.
+   */
+  private localResultSent = false;
 
   private readonly clock = new THREE.Clock();
   private raf = 0;
@@ -822,6 +865,11 @@ export class GameSession {
    * Bounded by construction — every entry is deleted on `projectile-destroyed`, which
    * `sim.ts` guarantees for every projectile it ever creates (hit / cover / expiry are
    * the only three exits, and all three route through `removeProjectile`).
+   *
+   * ⚠️ AND A FOURTH EXIT NOW, OUTSIDE THE SIM: `retireShotsAfterWhistle` empties
+   * `state.projectiles` on the first tick after a match is decided and deletes those entries
+   * here itself, since no `projectile-destroyed` is emitted for them. The sentence above is
+   * still true of the SIM; it is no longer the whole list.
    */
   private readonly projectileOrigins = new Map<number, { color: string; x: number; y: number }>();
 
@@ -883,6 +931,7 @@ export class GameSession {
     events: Object.fromEntries(FEEL_EVENT_KEYS.map((k) => [k, 0])),
     responses: { vfx: 0, shake: 0, hitStop: 0, knockback: 0, damageNumber: 0, screenFlash: 0 },
     hitStopBudgetMs: 0, hitStopBankedMs: 0, lastHitStopMs: 0, rawDtMs: 0, stepDtMs: 0,
+    stepCalls: 0, maxStepCallMs: 0,
     frames: 0, frozenFrames: 0, repayingFrames: 0,
     peakHitAmount: 0, peakShakeM: 0,
     shakeSumM: 0, shakeRawSumM: 0, peakShakeRawM: 0,
@@ -1005,9 +1054,19 @@ export class GameSession {
     // `onSelectWeapon` is the touch equivalent of the 1-4 keys — the HUD's weapon bar
     // is the only control a phone player has for it. Reads `this.input` lazily, which
     // is why it may be wired before the controller below exists.
+    //
+    // `onUseItem` is the same shape for the ITEM buttons, and `input.ts:pressItem` is the one
+    // entry point both item controls share (Q/E reach it from `onKeyDown`). 🚨 IT WAS
+    // MISSING, and so was the `takeItemPress()` in `buildInput()` below — the two hops
+    // `174d046` routed here on 2026-09-02 as *"STILL DEAD ON HEAD, BY ONE HUNK IN A FILE THIS
+    // PASS DOES NOT OWN"*. For 43 days every active item was a button the HUD drew READY
+    // (amber ring, Q/E cap, the usable-now flash) that did nothing when pressed; the sim half
+    // was live the whole time. Red/green: `tools/tmp/up_item_press.mjs` (default mode) and
+    // `tools/tmp/b1_match.mjs` §I.
     this.hud = createHud(opts.hudRoot, {
       onRestart: () => this.restart(),
       onSelectWeapon: (index) => this.input.selectWeapon(index),
+      onUseItem: (slot) => this.input.pressItem(slot),
     });
     this.hud.setCharacters(this.characterIds);
 
@@ -1215,6 +1274,9 @@ export class GameSession {
     this.killedBy.length = 0;
     this.viewSubject = LOCAL_SLOT;
     this.spectateDwellMs = 0;
+    // And the once-per-match early bank (`notifyLocalResult`): a restart is a new match, and a
+    // flag left set would make the next knockout bank nothing at all.
+    this.localResultSent = false;
     this.hitStopBudgetMs = 0;
     this.hitStopBankedMs = 0;
     for (const k of Object.keys(this.feel.events)) this.feel.events[k] = 0;
@@ -1455,7 +1517,32 @@ export class GameSession {
 
     const attack = playing && this.input.attackHeld;
 
-    return { move, aim, selectedWeapon: this.input.selectedWeapon, attack };
+    // ── THE ITEM PRESS — CONSUMED ON EVERY STEPPING FRAME, PASSED ONLY WHILE PLAYING ──
+    //
+    // ⚠️ **NOT `playing ? this.input.takeItemPress() : null`, WHICH IS THE FORM `174d046`
+    // ROUTED, AND THE DIFFERENCE IS THE COUNTDOWN.** That form leaves a press made during
+    // 3-2-1 QUEUED, so it fires on the first playing frame with no further input — measured
+    // by three independent verifiers on the patched build: Q pressed while both buttons read
+    // `WAIT` launched a Springform 99.6 wu at GO. A button that says WAIT and then acts
+    // anyway is the defect `hud.ts` names as *"a slot that reads READY and refuses the press"*,
+    // inverted. So the press is TAKEN every stepping frame and handed to the sim only while
+    // playing — the same pre-step `playing` gate `move`, `aim` and `attack` above use, so all
+    // four inputs agree on which frames are live.
+    //
+    // What is NOT changed: `input.ts`'s documented pause buffering. The loop skips
+    // `buildInput()` entirely while paused, so a press made behind the pause sheet is still
+    // delivered on the first frame after the resume, and `reset()` still drops it on restart.
+    //
+    // ⚠️ The sim would drop a countdown press on its own too — `sim.ts` runs no fighter turn
+    // outside `'playing'`, so `combat.ts:itemUsable`'s phase gate is never even reached, and
+    // the sim keeps no queue. `sim.test.mjs` §44(d) pins that half, so the session and the
+    // sim cannot come to disagree about it.
+    const itemPress = this.input.takeItemPress();
+
+    return {
+      move, aim, selectedWeapon: this.input.selectedWeapon, attack,
+      useItem: playing ? itemPress : null,
+    };
   }
 
   private syncModelTransform(model: CharacterModel, fighter: Fighter): void {
@@ -1609,6 +1696,24 @@ export class GameSession {
   }
 
   /**
+   * CAN ANY DISPLAY SHOW THE GROUND AT `(xWU, yWU)` FROM WHERE THE CAMERA IS? The yes/no twin
+   * of `shakeProximity`, same centre (`viewObserver()`), same fade radius — see
+   * `camera.ts:onAnyScreen` for why hit-stop and the slam flash need a gate where the kick
+   * needed a curve, and for the float trap the obvious gate falls into.
+   *
+   * ⚠️ Byte-identical for everything on or near YOUR fighter: a hit on the local seat is at
+   * distance 0, and a slam that can reach you is cast from inside `REACH.ultimateSlam` =
+   * 157.22 wu — inside even the 199.22 wu full-strength disc, let alone the 510.04 wu fade
+   * radius (both measured off the live rig, not copied) — so no event that can touch the local
+   * player loses its freeze or its flash.
+   */
+  private eventOnAnyScreen(xWU: number, yWU: number): boolean {
+    if (this.shakeFadeUnits < 0) this.shakeFadeUnits = this.stage.rig.shakeFadeRadiusUnits();
+    const me = this.viewObserver();
+    return onAnyScreen(Math.hypot(xWU - me.x, yWU - me.y), this.shakeFadeUnits);
+  }
+
+  /**
    * THE FIGHTER THE CAMERA IS WATCHING — the local seat while it lives, a spectated one
    * after it dies. See `camera.ts:resolveViewSubject` for the ladder.
    *
@@ -1668,6 +1773,36 @@ export class GameSession {
     // `resolveViewSubject` so that "a living player's camera is untouched" is a property
     // of this file too and not only of that one.
     if (roster[LOCAL_SLOT]?.alive) {
+      // 🚨 EXCEPT ON THE ONE FRAME THE CAMERA COMES BACK TO YOU (ML-7). A Leftovers revive
+      // stands a spectating player back up wherever they fell, and this branch used to return
+      // before the cut rule (2, above) was ever asked — so the change BACK to the local seat
+      // was always a follow-lerp glide, however far: the reviewer measured the revived fighter
+      // off screen for 3 frames, then sweeping in from the top edge over 6. `resolveViewSubject`
+      // already answered it correctly (rung 1 goes through the same `decide` as every rung, so
+      // it returns `cut: true` beyond `cutBeyondUnits`); this branch simply never asked.
+      //
+      // ⚠️ Asked ONLY when the subject is changing, i.e. `viewSubject !== LOCAL_SLOT`. On every
+      // frame a living player has ever drawn it is already `LOCAL_SLOT`, so nothing is called
+      // and the shipped camera stays byte-identical — the property this branch exists for.
+      if (this.viewSubject !== LOCAL_SLOT) {
+        if (this.shakeFadeUnits < 0) this.shakeFadeUnits = this.stage.rig.shakeFadeRadiusUnits();
+        const cam = this.stage.rig.targetUnits();
+        const back = resolveViewSubject({
+          seats: roster,
+          localSlot: LOCAL_SLOT,
+          current: this.viewSubject,
+          killedBy: this.killedBy,
+          cameraX: cam.x,
+          cameraY: cam.y,
+          cutBeyondUnits: this.shakeFadeUnits,
+        });
+        const me = roster[LOCAL_SLOT];
+        if (back.cut && me) {
+          const p = groundPos(me.x, me.y);
+          this.stage.rig.snapTo(p.x, p.z);
+          this.stage.lighting.focus(p.x, p.z);
+        }
+      }
       this.viewSubject = LOCAL_SLOT;
       this.spectateDwellMs = 0;
       this.audio.setListener(LOCAL_SLOT);
@@ -1777,11 +1912,19 @@ export class GameSession {
             this.feel.responses.vfx++;
             if (weapon.giantSlam) {
               // Everything a giant slam does that is NOT this layer's to draw.
+              // The two CAST counters stay outside the gate below: they count slams, not
+              // flashes, and a far slam is still a slam.
               this.feel.events['weapon-fired:giantSlam']++;
-              this.hud.flashScreen(weapon.color);
-              this.feel.responses.screenFlash++;
+              // 🚨 THE FLASH AND THE FREEZE ARE GATED ON "CAN ANY SCREEN SEE IT"; THE KICK
+              // ALREADY ATTENUATES. They used to fire at any range, so a slam 2,241 wu away —
+              // off every display — washed the frame red and froze the local player for
+              // 120 ms (B3). See `eventOnAnyScreen`.
+              if (this.eventOnAnyScreen(fighter.x, fighter.y)) {
+                this.hud.flashScreen(weapon.color);
+                this.feel.responses.screenFlash++;
+                this.triggerHitStop(120);
+              }
               this.kick(0.55, this.shakeProximity(fighter.x, fighter.y), 2.6);
-              this.triggerHitStop(120);
               window.__vfxDebugGiantSlamCount = (window.__vfxDebugGiantSlamCount ?? 0) + 1;
             }
           }
@@ -1897,7 +2040,9 @@ export class GameSession {
             this.shakeProximity(victim.x, victim.y),
           );
 
-          if (isWeaponHit) {
+          // Gated on the same "can any screen see it" as the slam's freeze — see
+          // `eventOnAnyScreen`. At six seats this was the bulk of B3's 53% off-screen freezes.
+          if (isWeaponHit && this.eventOnAnyScreen(victim.x, victim.y)) {
             this.triggerHitStop(THREE.MathUtils.clamp(10 + ev.amount * 4.6, 16, 105));
           }
 
@@ -1980,9 +2125,76 @@ export class GameSession {
           this.vfx.spawnDeathBurst(fighter.x, fighter.y, color);
           this.feel.responses.vfx++;
           this.kick(0.42, this.shakeProximity(fighter.x, fighter.y), 3);
-          this.triggerHitStop(90);
+          // Same gate as the hit and the slam. Your OWN death is at distance 0 from the
+          // camera's subject (the dwell holds the camera on you), so it always freezes.
+          if (this.eventOnAnyScreen(fighter.x, fighter.y)) this.triggerHitStop(90);
           break;
         }
+        // ── THE WIND-UP, DRAWN — `cast-started` / `cast-cancelled` ───────────────
+        //
+        // 🚨 BOTH FELL INTO `default` (B2). `vfx.ts:spawnCastTelegraph`'s own contract reads
+        // *"`match.ts` calls this on `cast-started` … and `cancelCastTelegraph` on
+        // `cast-cancelled`"*, and it was routed here in `e81df64` (2026-08-12) and never
+        // landed — so `waterbottle.Mega`'s 1,400 ms wind-up, whose `castMs` was DERIVED so the
+        // slowest human can escape a telegraph they can see, drew nothing in a real match: the
+        // caster stood rooted on bare floor, then the blow landed. Bots dodged it anyway
+        // (`ai.ts` reads `other.cast` straight off the sim); humans could not. The only caller
+        // of `spawnCastTelegraph` was the QA spawner. Red/green: `b1_match.mjs` §T.
+        //
+        // The resolve needs no call: the telegraph's own lifetime is `castMs`, and
+        // `weapon-fired`, emitted AT the resolve, brings the swing in on top of it (see the
+        // `vfx.ts` contract). Only the interrupt has to be told.
+        case 'cast-started': {
+          const slot = slotOf(ev.fighterId, ev.fighterRole);
+          const caster = fighterOf(this.state, ev.fighterId, ev.fighterRole);
+          // 🚨 `state.ts`'s MUST: *"AN OPPONENT-FACING TELEGRAPH DRAWN OFF THIS MUST RIDE THE
+          // SAME VISIBILITY NULL CHANNEL AS THE HP PILL"* — a wedge under a concealed enemy is
+          // a free read of its position. `hud.ts:fighterVisibleTo`, the HP pill's own
+          // predicate, asked from the camera's observer exactly as the model hide in `loop`
+          // asks it — NOT a direct `isVisibleFrom` call: `sim.test.mjs` §26(m) source-scans
+          // `src/game/*.ts` for those, and a review verifier measured a direct call here
+          // turning it red. Moot for every cast today (the press runs `spendCover`, which
+          // reveals the caster, and the caster is rooted), and kept because "moot today" is
+          // how the next concealment change ships a leak.
+          if (slot !== LOCAL_SLOT && !fighterVisibleTo(this.state, this.viewObserver(), caster)) break;
+          const weapon = CHARACTERS[caster.characterId].weapons.find((w) => w.key === ev.weaponKey);
+          if (!weapon) break;
+          this.vfx.spawnCastTelegraph(ev.fighterId, caster.x, caster.y, caster.facing, weapon,
+            caster.characterId, ev.castMs);
+          this.feel.responses.vfx++;
+          break;
+        }
+        // ── LEFTOVERS: A FIGHTER STANDS BACK UP ──────────────────────────────────
+        //
+        // 🚨 NOTHING ANSWERED THIS EVENT (B4 / ML-3), so a revive was invisible: no beat at
+        // all, and — the larger half, NOT fixable here — the model stays in its death topple
+        // for the rest of the match, because `characters/types.ts:BaseCharacter.play` sets
+        // `deathT = 0` on `'death'` and nothing ever resets it (`play('idle'|'run')` only
+        // writes `state`). That is a one-line fix in a file this package does not own and is
+        // ROUTED (the characters owner: reset `deathT = -1` in `play`'s default branch, or an
+        // explicit get-up state); rebuilding the slot's model from here would hide it at the
+        // cost of a mid-match geometry rebuild and a changed scene sibling order.
+        //
+        // What IS this file's: the moment itself. The heal treatment — pulse + green number —
+        // because a revive IS a heal from zero, and `ITEMS.leftovers.look` asks for it to be
+        // "unmistakable to everyone". Drawn at the sim's revive point (`ev.x`/`ev.y`, where the
+        // body fell), and the number through `projectPointToScreen`'s off-screen rejection,
+        // like every other number, so it is no free read on a fighter you cannot see.
+        case 'item-revived': {
+          this.vfx.spawnHealPulse(ev.x, ev.y);
+          this.feel.responses.vfx++;
+          const screenPos = this.projectPointToScreen(ev.x, ev.y, 1.6);
+          if (screenPos) { this.hud.spawnDamageNumber(screenPos, ev.hp, { heal: true }); this.feel.responses.damageNumber++; }
+          break;
+        }
+        case 'cast-cancelled':
+          // `vfx.ts` reads `'stun' | 'death'` as the two INTERRUPT looks (the footprint
+          // craters inward). The sim's third terminator, `'sleep'` (Warm Milk), is the same
+          // interrupt from the victim's side — its own `state.ts` note says it "must die
+          // exactly as a stun kills one" — so it takes the stun read, not `'resolved'`, which
+          // would make an interrupted cast vanish as if it had landed.
+          this.vfx.cancelCastTelegraph(ev.fighterId, ev.reason === 'death' ? 'death' : 'stun');
+          break;
         default:
           break;
       }
@@ -2094,6 +2306,177 @@ export class GameSession {
     // throw away the payout in the same turn it arrives.
     if (this.state.phase !== 'ended') this.endedPayout = null;
     this.opts.onPhase?.(this.state.phase, this.state.winner, this.endedOutcome);
+  }
+
+  /**
+   * 🚨 STEP THE SIM BY `stepDtMs` — BUT NEVER HAND ONE `stepMatch` CALL MORE THAN ONE FRAME'S
+   * OWN DT.
+   *
+   * The hit-stop REPAYMENT (`HITSTOP_CATCHUP_RATE` = 3 extra frames per frame) used to arrive
+   * as ONE call: `stepMatch(state, rawDtMs + catchUp)`, up to **4x a frame** — 66.7 ms at
+   * 60 fps, 133 ms at 30, 200 ms at 20 (BH-13). The sim's hit detection is point-vs-disc at
+   * the END of each step and its fog / pot / regen timers reset to 0 and drop the remainder,
+   * so every balance number in the repo — all measured at 16.667 ms — was only true of the
+   * frames that did NOT follow a freeze. Measured by the review's sweep: shots crossing a body
+   * missed 0% of the time at 16.7 ms, 0.3% at 66.7 ms, 22-82% at 200 ms; in six-seat play
+   * 4 / 13 / 15 shots per 12 matches passed through a living body at 60 / 30 / 20 fps.
+   *
+   * So the repayment is the SAME time in EQUAL SLICES, each no larger than this frame's raw
+   * dt: at 60 fps a repaying frame is four 16.667 ms ticks — exactly the corpus's dt — instead
+   * of one 66.7 ms one. `stepDtMs` summed over a match is unchanged (the borrow-back invariant
+   * above), and a frame that is not repaying is ONE call with the identical argument, so the
+   * shipped stepping is byte-identical outside catch-up.
+   *
+   * ⚠️ **WHAT THIS DOES NOT FIX, STATED SO NOBODY READS IT AS DONE:** a frame's OWN dt is still
+   * variable — a 30 fps phone still steps 33.3 ms and a 20 fps one 50 ms (the 1/20 s clamp),
+   * and at those steps the timers still drop their remainder (fog does ~10% less at 30 fps).
+   * That is the sim's reset-to-zero timers (`sim.ts`, another owner) or a true fixed-step
+   * accumulator here — the latter measured by the BH-13 verifier at +0.6 to +1.2 ms mean /
+   * +3.4 to +6.3 ms p99 of `stepMatch` time per frame on desktop, on a phone `DECISIONS §56`
+   * already measured as JS-bound. Not taken blind; routed.
+   *
+   * ⚠️ **THE ITEM PRESS RIDES THE FIRST SLICE ONLY.** `useItem` is one activation named by one
+   * press (`input.ts:takeItemPress`); `move`/`aim`/`attack` are levels and repeat, exactly as
+   * they would across four real 16.667 ms ticks.
+   *
+   * ⚠️ **AND THE WHISTLE ENDS THE FRAME.** A slice that decides the match is the ending tick
+   * and resolves in full (`DECISIONS §84`'s same-tick case is untouched); the slices after it
+   * are not run, because stepping a decided match is what `retireShotsAfterWhistle` exists to
+   * make harmless and there is no reason to give it more to do. A frame that STARTS decided
+   * runs all of its slices — the clock that drives the idle animation keeps going under the
+   * card.
+   */
+  private stepSim(stepDtMs: number, rawDtMs: number, input: MatchInput): GameEvent[] {
+    // `- 1e-9` so float dust in `raw + 3 * raw` cannot buy a fifth slice.
+    const slices = rawDtMs > 0 && stepDtMs > rawDtMs ? Math.ceil(stepDtMs / rawDtMs - 1e-9) : 1;
+    const sliceMs = stepDtMs / slices;
+    const endedAtStart = this.state.phase === 'ended';
+    const events = stepMatch(this.state, sliceMs, input);
+    let calls = 1;
+    if (slices > 1) {
+      const rest: MatchInput = input.useItem == null ? input : { ...input, useItem: null };
+      for (let k = 1; k < slices; k++) {
+        if (!endedAtStart && this.state.phase === 'ended') break;
+        for (const ev of stepMatch(this.state, sliceMs, rest)) events.push(ev);
+        calls++;
+      }
+    }
+    this.feel.stepCalls = calls;
+    this.feel.maxStepCallMs = sliceMs;
+    return events;
+  }
+
+  /**
+   * 🚨 THE SHOTS IN THE AIR AT THE WHISTLE DO NOT LAND AFTER IT.
+   *
+   * `sim.ts` steps projectiles in every phase, deliberately (it reproduces the prototype), and
+   * this loop keeps calling `stepMatch` under the result card — so every shot already in flight
+   * flew its WHOLE remaining range and resolved: Egg's latched Hatch! pecks too. Measured by
+   * three independent finders (BH-01, ML-1, B5): at two seats **the declared winner was hit
+   * after the whistle in 38/110 all-AI matches and KILLED in 5/110**, up to 683 ms (~41 ticks)
+   * later; in the browser the local seat died under its own VICTORY card — death animation,
+   * burst, kick, hit-stop and the death sting at full gain. Payout was never affected
+   * (`endedOutcome` is cached at the transition); the picture and the sound were.
+   *
+   * ⚠️ **AT THE START OF A TICK THAT BEGINS DECIDED, NOT INSIDE THE ENDING TICK.** The tick
+   * that ends the match resolves completely — its own shots included — because that is
+   * `DECISIONS §84`'s parked same-tick question and not this fix's to answer. Every tick after
+   * it begins with nothing in the air. In shipped play the phase only ever flips inside
+   * `stepMatch`, so this runs on the very next frame; asked here rather than in `notifyPhase`
+   * so it also holds when something else decides a match between frames (every QA plant in
+   * `tools/tmp` does exactly that).
+   *
+   * ⚠️ **WHY HERE AND NOT IN THE SIM.** The sim-side gate (no victim resolution on a tick that
+   * begins `'ended'`) is the cleaner rule and was measured bit-identical through the end tick —
+   * and it turns `sim.test.mjs` §20(b) red (896 -> 895), because that row's `delivered()`
+   * fixture and `tools/tmp/press_value.mjs` PARK a state with `phase = 'ended'` and rely on
+   * shots still landing. That is `sim.ts`'s owner's trade to make; this is the presentation
+   * side's, and it leaves every Node instrument and the 110-cell corpus bit-identical by
+   * construction (none of them constructs a `GameSession`).
+   *
+   * ⚠️ The session is now a second WRITER of one sim field, which this file otherwise never
+   * is. It is confined to this one method, to a decided match, and to the one array whose
+   * entries cannot change any outcome after `endedOutcome` was cached. Shots vanish rather
+   * than fizzle — `vfx.ts:syncPool` drops their meshes on the next `sync`, the same as a shot
+   * that expires at range, and `audio/director.ts` voices nothing for an expiry either.
+   */
+  private retireShotsAfterWhistle(): void {
+    const shots = this.state.projectiles;
+    if (shots.length === 0) return;
+    // `projectileOrigins`' fourth exit — see its field comment.
+    for (const p of shots) this.projectileOrigins.delete(p.id);
+    shots.length = 0;
+  }
+
+  /**
+   * 🚨 BANK A KNOCKED-OUT SEAT'S PLACE THE MOMENT IT IS DECIDED, NOT AT THE WHISTLE (META-02).
+   *
+   * At three or more seats a knockout does not end the match — the local player spectates —
+   * and the result was banked only on `'ended'`. So a 5th- or 6th-place finisher could press
+   * Quit (or reload, or close the tab) and keep every trophy: measured by the review at 1,500
+   * trophies, "leave whenever the delta is negative" earned **+84%** trophies per match. And a
+   * 3rd-place finisher who got bored of spectating threw their payout away. Yet the place was
+   * already FINAL: `roster.ts:resolvePlaces` ranks the knocked out by reverse elimination
+   * order, so everyone who goes out later places above you and nobody can drop below you.
+   *
+   * So the session reports the outcome on the first frame where the local seat is dead, the
+   * match is still `'playing'`, and no revive can still stand it back up; `matchScreen.ts`
+   * banks it through the same `banked` guard it uses at the whistle, and shows the same
+   * payout on the card when the whistle comes. Fires at most once per match.
+   *
+   * ⚠️ **AFTER THE WHOLE FRAME, NEVER INSIDE `handleEvents`' `death` CASE.** That case pushes
+   * each death into `eliminated` one event at a time while the state it would read is already
+   * post-tick, so a second fighter dying in the same tick would be "dead but unaccounted" and
+   * rank BELOW the local seat — one place too generous (a verifier reproduced 4th-for-5th on
+   * the real resolver).
+   *
+   * ⚠️ **NEVER AT TWO SEATS, BY CONSTRUCTION.** There a knockout ends the match on the same
+   * tick, so the phase is already `'ended'` here and the whistle path banks exactly as before.
+   *
+   * ⚠️ **LEFTOVERS DEFERS IT.** A pending revive is the one thing that can move a knocked-out
+   * seat (a revived fighter is a survivor and ranks above every knockout): 22 of 69 six-seat
+   * Leftovers knockouts changed place, up to 6th -> 1st. So nothing is reported while the
+   * killer the revive is waiting on is still alive; see `localReviveStillPossible`.
+   *
+   * Only `localPlace` and `seats` of the outcome handed over are final; `places` ranks the
+   * survivors by where they stand NOW and `winnerId` is null, so the screen layer banks the
+   * place and must not render the order from it.
+   */
+  private notifyLocalResult(): void {
+    if (this.localResultSent) return;
+    if (this.state.phase !== 'playing') return;
+    if (localFighter(this.state).alive) return;
+    if (this.localReviveStillPossible()) return;
+    this.localResultSent = true;
+    this.opts.onLocalResult?.(this.outcome());
+  }
+
+  /**
+   * Can Leftovers still stand the local seat back up? Mirrors `combat.ts:reviveThoseKilledBy`'s
+   * three per-fighter conditions: a revive left, a recorded killer, and that killer still
+   * alive (it fires on the killer's DEATH). Its fourth condition — enough fighters alive when
+   * the killer falls — cannot be known in advance, so this answers "possible", and a killer
+   * who dies without the revive firing leaves `killerId` pointing at a corpse, which reads as
+   * "no longer possible" on the next frame.
+   */
+  private localReviveStillPossible(): boolean {
+    const me = localFighter(this.state);
+    if (me.item.revivesLeft <= 0 || me.item.killerId === NO_FIGHTER) return false;
+    return fightersOf(this.state)[me.item.killerId]?.alive === true;
+  }
+
+  /**
+   * THE KNOCKED-OUT LOCAL SEAT'S OUTCOME, ON DEMAND — or null while it is alive, before play,
+   * or once the whistle has gone (the whistle path owns that bank).
+   *
+   * For the one window `notifyLocalResult` deliberately waits out: a Leftovers revive still
+   * pending. A player who LEAVES there forfeits the revive, so the place they hold at that
+   * moment is final for them, and `matchScreen.ts` banks it on Leave rather than letting the
+   * exit erase a loss — the hole META-02 is about, narrowed to the one item that opens it.
+   */
+  knockedOutOutcome(): MatchOutcome | null {
+    if (this.state.phase !== 'playing' || localFighter(this.state).alive) return null;
+    return this.outcome();
   }
 
   /**
@@ -2303,12 +2686,17 @@ export class GameSession {
     const prev = roster.map((f) => ({ x: f.x, y: f.y }));
 
     const input = this.buildInput();
-    const events = stepMatch(this.state, stepDtMs, input);
+    // A tick that BEGINS with the match decided resolves no shot. See `retireShotsAfterWhistle`.
+    if (this.state.phase === 'ended') this.retireShotsAfterWhistle();
+    const events = this.stepSim(stepDtMs, rawDtMs, input);
     this.handleEvents(events);
     // Second consumer of the same tick's events (the first being `handleEvents`
     // above, which drives VFX/HUD/hit-stop). Order between the two is irrelevant —
     // neither reads anything the other writes.
     this.audio.handleEvents(events, this.state);
+    // AFTER the whole frame's events, never inside `handleEvents`' `death` case: see
+    // `notifyLocalResult` for the same-tick double knockout that ordering prevents.
+    this.notifyLocalResult();
     this.notifyPhase();
     // AFTER the step, so `facing` is what `applyAim` actually committed rather than
     // what was asked for — the aim pipeline's output, not its input.
