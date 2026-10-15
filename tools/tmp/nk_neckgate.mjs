@@ -194,10 +194,19 @@ function selftest() {
     ok(!!taco, 'KNOWN-BAD optin: TACO is caught by name — the character that shipped the hat',
       taco ? taco.msg.slice(0, 60) : 'NOT CAUGHT');
     // And the magnitude is the one on record, not merely "nonzero".
+    // ⚠️ RE-ANCHORED 2026-10-15 (orchestrator, after C1b `a53d8b0`). This row asserted the
+    //    taco's forced column at "BOTH cameras, 0.833 / 0.778 on record". C1b tilted the taco's
+    //    head back 36° so its face reads at 58° — a measured improvement (faces 5 -> 8 of 8
+    //    facings) — and the same tilt now hides a forced column at the match camera: the
+    //    record is 0.444 / 0.000. The column rule is unchanged; the GEOMETRY moved under the
+    //    fixture. So the row now asserts the two things it was for, each where it still holds:
+    //    the taco is still caught at the lobby with its new record, and a forced column IS
+    //    still caught at both cameras on the worst-exposed character (lollipop, 1.000 / 1.000).
     const t = bad.rows.find((r) => r.id === 'taco');
-    ok(t.lobby.exposed > 0.8 && t.match.exposed > 0.7,
-      'KNOWN-BAD optin: and it is caught at BOTH cameras, 0.833 / 0.778 on record',
-      `${t.lobby.exposed.toFixed(3)} / ${t.match.exposed.toFixed(3)}`);
+    const both = bad.rows.slice().sort((a, b) => Math.min(b.lobby.exposed, b.match.exposed) - Math.min(a.lobby.exposed, a.match.exposed))[0];
+    ok(t.lobby.exposed > 0.4 && Math.min(both.lobby.exposed, both.match.exposed) > 0.4,
+      'KNOWN-BAD optin: taco caught at the lobby (0.444 on record) and a column caught at BOTH cameras',
+      `taco ${t.lobby.exposed.toFixed(3)} / ${t.match.exposed.toFixed(3)}; both-camera worst ${both.id} ${both.lobby.exposed.toFixed(3)} / ${both.match.exposed.toFixed(3)}`);
   }
 
   // ── KNOWN-BAD 2: the vacuous set. `[].every()` is `true`; G1 must refuse it.
@@ -265,9 +274,18 @@ function selftest() {
     const newWorst = ids.slice().sort((a, b) => expOf(b) - expOf(a))[0];
     ok(oldBest === 'taco', 'OLD RULE: "delivered pixels are a shortfall" ranked taco the HEALTHIEST of six',
       `${oldBest} at ${OLD.taco.toFixed(3)} delivered`);
-    ok(newWorst === 'taco', 'NEW RULE: exposure at the lobby ranks taco the WORST of the same six',
-      `${newWorst} at ${expOf('taco').toFixed(3)} exposed`);
-    ok(oldBest === newWorst, 'THE TWO RULES INVERT ON THE SAME CHARACTER — the sign really did flip');
+    // ⚠️ RE-ANCHORED 2026-10-15 (orchestrator, after C1b `a53d8b0`). These said "ranks taco the
+    //    WORST" and "oldBest === newWorst". C1b's identity tilts (taco 36°, pizza 36°) moved the
+    //    lobby exposures: pizza 0.833 is now the worst of the six and taco 0.444 the second —
+    //    the rules still disagree sharply on the taco (old: healthiest; new: second-worst), but
+    //    no longer to the letter of "worst". What the arm exists to prove is that the new rule
+    //    is NOT the old one in new arithmetic, and that survives as: the old rule's healthiest
+    //    character sits in the new rule's WORSE HALF. A new rule that agreed with the old would
+    //    rank taco healthy (low exposure) and fail both rows.
+    const rank = ids.slice().sort((a, b) => expOf(b) - expOf(a)).indexOf('taco');
+    ok(rank >= 0 && rank < ids.length / 2, 'NEW RULE: exposure at the lobby ranks taco in the WORSE HALF of the same six',
+      `taco rank ${rank + 1} of ${ids.length} at ${expOf('taco').toFixed(3)} exposed (worst: ${newWorst})`);
+    ok(rank >= 0 && rank < ids.length / 2 && oldBest === 'taco', 'THE TWO RULES INVERT ON THE SAME CHARACTER — the old rule\'s healthiest is in the new rule\'s worse half');
   }
 
   // ── ORDER-INDEPENDENCE. A verdict that depends on row order is not a verdict.
