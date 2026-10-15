@@ -670,6 +670,12 @@ export function lureFighter(fighter: Fighter, bait: Fighter, distance: number): 
  *      victim dropped inside a prop is *frozen permanently and silently* — that function's
  *      own header calls it "the worst shape a bug can have", and this is precisely the
  *      "becomes reachable the moment anyone adds … a pull" it predicted.
+ *      ⚠️ (B4, BH-02) **AND IT WAS EXACTLY WHAT HAPPENED, BECAUSE THE DEPENETRATION COULD FAIL.**
+ *      Minimum translation runs out inside cover in a seam narrower than a body and against a
+ *      wall-flush box — 10,757 of 224,961 drop points on `31ed880`'s kitchen — and the victim
+ *      was frozen for the rest of the match, out of reach of every projectile. `escapeCover`
+ *      now falls back to the nearest standable point when its passes run out, so this line's
+ *      promise holds for every destination (§47(a)).
  *   3. **ANY PENDING SHOVE IS DISCARDED**, direction and rate with it. A knockback owed
  *      from where the victim used to be standing is a vector about a place they are no
  *      longer in, and banking it across the relocation would fire it off at the far end.
@@ -769,6 +775,13 @@ export function stepPush(
 const ESCAPE_PASSES = 4;
 /** Clear the `<` in `boxesOverlap` by a hair, so one push ends the overlap for good. */
 const ESCAPE_EPS = 0.01;
+/**
+ * The first radius `nearestStandable` searches, doubled until it finds ground. It is a COST,
+ * never a bound — a reach that finds nothing just doubles — so one body is simply a small start.
+ * Measured over the shipped kitchen's 10,757 failures (`31ed880`): the answer lies a median
+ * 61 wu from the request, p90 106, max 136 — the second or third pass.
+ */
+const STANDABLE_FIRST_REACH = PLAYER_SIZE;
 
 /**
  * Push a fighter that is ALREADY inside cover back out, along its axis of least
@@ -797,10 +810,37 @@ const ESCAPE_EPS = 0.01;
  * rebuilt from `arena.cover` — if an arena ever hands us geometry that disagrees with
  * itself, the fighter recovers instead of locking.
  *
+ * ⚠️ (B4, 2026-10-15) "No player can reach that state today" STOPPED BEING TRUE ON `f6c13aa`:
+ * `placeFighterAt` — Disposal — writes a destination computed from a bearing, and lands
+ * fighters inside props routinely. That was always this function's job; what failed was the
+ * paragraph below.
+ *
  * Minimum-translation on purpose: the smallest displacement that resolves the overlap,
  * so nothing teleports across a wall. Clamped to the arena, and if a box is flush against
  * a wall with no room to be pushed into, the passes run out and the behaviour degrades to
  * exactly what it is today — stuck — rather than to something worse.
+ *
+ * ── 🚨 "DEGRADES TO STUCK" WAS THE WORST CASE ITSELF, NOT SOMETHING SHORT OF IT (BH-02) ──
+ *
+ * The sentence above is kept because it was a deliberate trade, and the trade was priced on a
+ * state nobody could reach. Once Disposal could reach it, "stuck" meant the header's own worst
+ * shape — total, silent, permanent: a fighter frozen inside a prop for the rest of the match,
+ * immune to every projectile (they die on the box first). And the passes run out in TWO ways,
+ * not one: against a wall-flush box the clamp undoes the push, and between two boxes closer
+ * together than a body the push out of one lands in the other and back, pass after pass.
+ * Measured on `31ed880`'s kitchen: **10,757 of 224,961** Disposal drop points ended inside
+ * cover and could not walk out, 12 wall-flush boxes plus every seam narrower than a body
+ * (`tools/tmp/b4_trapgrid.mjs`; `sim.test.mjs` §47(a) on a fixture of both shapes).
+ *
+ * So when the passes run out still inside cover, the fighter goes to the NEAREST STANDABLE
+ * POINT to where it was asked to be (`nearestStandable`). Minimum translation still answers
+ * every case it can answer — the fallback runs only after it has failed, so every escape that
+ * already succeeded is bit-identical — and "nothing teleports across a wall" is given up only
+ * where the alternative is never moving again. Over the shipped kitchen the fallback moves a
+ * fighter a median 61 wu from where it was asked to be, at most 136 (3.2 bodies), and the
+ * layout has ONE walkable floor — no sealed pocket a landing could strand anyone in. The other
+ * 214,204 drop points land bit-identically to the old rule. `b4_trapgrid` re-measures all of
+ * it for any layout.
  *
  * Minimum translation does NOT care which way the fighter wanted to go, and that is the
  * right trade. Measured: `?px=960&py=500` sits 20 wu east of `supply_barrel`'s centre, so
@@ -821,6 +861,10 @@ function escapeCover(fighter: Fighter, arena: ArenaDefinition): void {
   const size = fighter.size;
   const half = size / 2;
   const cover = arena.cover;
+  // Where the fighter was ASKED to be, before minimum translation started moving it — the point
+  // the fallback below measures "nearest" from.
+  const askedX = fighter.x;
+  const askedY = fighter.y;
 
   for (let pass = 0; pass < ESCAPE_PASSES; pass++) {
     let worst: CoverBox | null = null;
@@ -845,6 +889,85 @@ function escapeCover(fighter: Fighter, arena: ArenaDefinition): void {
       const sign = fighter.y >= worst.y ? 1 : -1;
       fighter.y = Math.min(arena.height - half, Math.max(half, fighter.y + sign * (py + ESCAPE_EPS)));
     }
+  }
+
+  // The passes ran out. Out after the last push? Then minimum translation did its job and this
+  // costs one pass over `cover`. Still inside — a seam, or a wall-flush box — and the fighter goes
+  // to the nearest standable point instead of freezing for the rest of the match (BH-02, above).
+  if (!collidesWithCover(fighter.x, fighter.y, size, cover)) return;
+  const spot = nearestStandable(askedX, askedY, size, arena);
+  if (spot !== null) {
+    fighter.x = spot.x;
+    fighter.y = spot.y;
+  }
+}
+
+/**
+ * THE NEAREST POINT TO (`x`, `y`) WHERE A `size` FIGHTER STANDS CLEAR OF EVERY BOX AND INSIDE
+ * THE ARENA'S CLAMP — exact, not sampled, and deterministic. `null` only for an arena with no
+ * standable ground at all.
+ *
+ * ── WHY A FINITE CANDIDATE SET IS EXACT ─────────────────────────────────────────
+ * Standable ground is the clamp rectangle minus the union of the boxes INFLATED by the
+ * fighter's half-size — and `<` is strict, so each inflated box is open and the ground is
+ * closed. Cut the plane along every inflated edge and that ground is a union of axis-aligned
+ * rectangles, and the nearest point of an axis-aligned rectangle to a point is its clamp, whose
+ * x is either the point's own x or one of the rectangle's edges — the same for y. So the answer
+ * is one of the products {x, every inflated x-edge, the clamp's x-edges} × {the same for y}, and
+ * testing each against the real overlap rule finds it. Only boxes within the current `reach` can
+ * shape an answer within `reach` (the nearest point lies ON the boxes that bound it), so the
+ * search doubles `reach` from one body until it finds ground — almost always on the first pass.
+ *
+ * Each edge is nudged `ESCAPE_EPS` outward for the reason `escapeCover`'s pushes are: to clear
+ * the strict `<` by a hair, so float dust in `o.x ± (size + o.w) / 2` cannot leave the fighter
+ * exactly on a face that the overlap test then reads as inside.
+ *
+ * ⚠️ TIES go to the first candidate in `cover` order — no `Array.prototype.sort` anywhere near a
+ * determinism-critical decision, the rule `projectileVictim` states for the same reason.
+ * ⚠️ IT ANSWERS "NEAREST", NOT "REACHABLE". A point clear of cover inside a sealed pocket would
+ * be a valid answer here and a new trap one level up — so whether a layout HAS such a pocket is
+ * measured, not assumed (`tools/tmp/b4_trapgrid.mjs`: one floor component on the shipped kitchen).
+ */
+function nearestStandable(x: number, y: number, size: number, arena: ArenaDefinition): { x: number; y: number } | null {
+  const half = size / 2;
+  const cover = arena.cover;
+  const minX = half;
+  const maxX = arena.width - half;
+  const minY = half;
+  const maxY = arena.height - half;
+  const ox = Math.min(maxX, Math.max(minX, x));
+  const oy = Math.min(maxY, Math.max(minY, y));
+  const span = arena.width + arena.height;
+  for (let reach = STANDABLE_FIRST_REACH; ; reach *= 2) {
+    const xs = [ox, minX, maxX];
+    const ys = [oy, minY, maxY];
+    for (let i = 0; i < cover.length; i++) {
+      const o = cover[i];
+      const hw = (size + o.w) / 2;
+      const hh = (size + o.h) / 2;
+      if (Math.abs(o.x - ox) > hw + reach || Math.abs(o.y - oy) > hh + reach) continue;
+      xs.push(o.x - hw - ESCAPE_EPS, o.x + hw + ESCAPE_EPS);
+      ys.push(o.y - hh - ESCAPE_EPS, o.y + hh + ESCAPE_EPS);
+    }
+    let bestX = 0;
+    let bestY = 0;
+    let bestD = Infinity;
+    for (let i = 0; i < xs.length; i++) {
+      const cx = xs[i];
+      if (cx < minX || cx > maxX) continue;
+      for (let j = 0; j < ys.length; j++) {
+        const cy = ys[j];
+        if (cy < minY || cy > maxY) continue;
+        const d = Math.hypot(cx - ox, cy - oy);
+        if (d > reach || d >= bestD) continue;
+        if (collidesWithCover(cx, cy, size, cover)) continue;
+        bestX = cx;
+        bestY = cy;
+        bestD = d;
+      }
+    }
+    if (bestD !== Infinity) return { x: bestX, y: bestY };
+    if (reach >= span) return null;
   }
 }
 

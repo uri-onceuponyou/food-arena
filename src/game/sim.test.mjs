@@ -75,10 +75,13 @@ import * as COMBAT from './combat.ts';
 // of `Math.min(MAX_PUSH_DISTANCE, …)` written here would keep passing against a sim that had
 // grown a second one. `stepPush` comes in so the lock rule can be driven directly, without
 // having to manufacture a whole tick around it.
+// §47(a) imports `placeFighterAt` — Disposal's relocation primitive — for the same reason: its
+// claim is that the ONE function every positional write goes through never leaves a fighter
+// inside cover, and a copy of the depenetration written here would only test the copy.
 import {
   breakConcealment, concealmentInsideRadius, concealmentKeepoutViolations, concealmentOf,
   displaceFighter, isConcealed, isHidden, isVisibleFrom, MAX_PUSH_DISTANCE, moveToward,
-  navStats, stepPush, tryMove,
+  navStats, placeFighterAt, stepPush, tryMove,
 } from './movement.ts';
 // Section 26(m) reads `src/game/*.ts` back off disk and asserts that every gameplay reader
 // of `isVisibleFrom` passes the two per-match arguments. "Everybody remembered" is a claim
@@ -1352,6 +1355,11 @@ const preFog = (hp) => hp + FOG_DAMAGE;
 // axes: every step from inside also overlaps, so every step is refused, with no event and
 // no error. Unreachable by a player today (spawns are clear, knockback is visual-only) and
 // reachable the moment anyone lands sim knockback, a dash, a pull, or a prop over a spawn.
+//
+// ⚠️ (B4, 2026-10-15) Reached by Disposal (`placeFighterAt`, `f6c13aa`) — and every row below
+// uses ONE box, which is exactly the case minimum translation always solved. The two it could
+// not — a seam narrower than a body and a box flush with the wall — were a permanent freeze
+// (BH-02) and are §47(a)'s.
 //
 // The numbers below are the real repro found by the input agent, not an invention:
 // `?px=850&py=500` puts a 42 wu fighter 25 wu from the centre of `spice_cart`
@@ -12966,6 +12974,175 @@ console.log('\n46. Combat + items, the second half — why a press is refused, t
         far.pulledTicks > 0 && far.finalS > 0 && far.finalS < far.gap, fmt(far));
     }
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 47. MOVEMENT + SIM TIMERS (`docs/REVAMP.md` §5 B4, 2026-10-15)
+//
+// Disposal's landing and the wind-up it interrupts, a dead owner's trail, the latched chick, and
+// the world-tick timers. Every row marked 🔴 was run RED on `31ed880` before its fix landed, and
+// `tools/tmp/b4_knownbad.mjs` re-runs that claim: each arm reverts ONE fix on a scratch copy of
+// `src/` and requires its own 🔴 rows to go red and its controls to stay green.
+//
+// ⚠️ THE SEAT COUNT IS PART OF EACH ROW. Disposal is refused below three living fighters
+// (`ITEMS.disposal.minAlive`), and a death leaves a body on the floor only at N ≥ 3 — at two
+// seats it ends the match — so (a), (b) and (c) are built at three seats or more, where their
+// defects can express themselves at all. (d) is a two-seat defect and is driven at two AND six.
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up it breaks, a dead owner\'s trail, the latched chick');
+{
+  const DT = 1000 / 60;
+  const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  const FLOOR = () => makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+  /** `seats` = [{ char, x, y, items?, facing? }] — every seat a HUMAN, so only scripted inputs act. */
+  const seatMatch = (arena, seats) => {
+    const st = createMatch(arena, seats.map((s) => ({
+      characterId: s.char, controller: 'human', spawn: { x: s.x, y: s.y },
+      ...(s.facing ? { facing: s.facing } : {}), ...(s.items ? { items: s.items } : {}),
+    })));
+    st.phase = 'playing';
+    return st;
+  };
+  const idle = (st) => st.fighters.map(() => NEUTRAL);
+  const ofType = (evs, type) => evs.filter((e) => e.type === type);
+  const inCoverAt = (arena, x, y) =>
+    arena.cover.some((o) => Math.abs(x - o.x) < (PLAYER_SIZE + o.w) / 2 && Math.abs(y - o.y) < (PLAYER_SIZE + o.h) / 2);
+  const DIRS8 = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+
+  // ── (a) BH-02: DISPOSAL NEVER LEAVES ITS VICTIM INSIDE COVER ──────────────────
+  //
+  // `movement.ts:placeFighterAt` clamped, then depenetrated with `escapeCover` — four passes of
+  // MINIMUM translation against the single deepest box. Between two boxes closer together than a
+  // body (the shipped kitchen butts props 2.5–15 wu apart) the push out of one lands in the
+  // other, and against a box flush with the arena wall the clamp undoes the push; either way the
+  // passes ran out INSIDE cover. `tryMove` runs the same escape on every step, so a fighter it
+  // failed once it failed forever: frozen for the rest of the match, and immune to every
+  // projectile, which dies on the box first. 10,757 of 224,961 drop points on `31ed880`'s kitchen
+  // (`tools/tmp/b4_trapgrid.mjs`).
+  //
+  // ⚠️ A FIXTURE, NOT THE SHIPPED STOVES — so a future layout change cannot make these rows
+  // vacuous while they keep passing (`valuescan` read a perfect selftest pointed at the wrong
+  // quadrant). Two 170×90 boxes 5 wu apart and a 48×46 box flush with the west wall are the two
+  // mechanisms, and the NON-VACUITY row checks each requested point really is inside cover.
+  {
+    const SEAM_N = { x: 700, y: 1255, w: 170, h: 90, kind: 'seam_n' };
+    const SEAM_S = { x: 700, y: 1350, w: 170, h: 90, kind: 'seam_s' };
+    const WALL = { x: 24, y: 1250, w: 48, h: 46, kind: 'wall_flush' };
+    const SINGLE = { x: 1800, y: 600, w: 50, h: 50, kind: 'single' };
+    const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000, cover: [SEAM_N, SEAM_S, WALL, SINGLE] });
+    const SEAM_PT = { x: 644, y: 1302.5 };   // inside both boxes, 2.5 wu from each face of the gap
+    const WALL_PT = { x: 0, y: 1250 };       // clamped to x = 21: inside the flush box
+    const SINGLE_PT = { x: 1775, y: 600 };   // 25 wu west of a lone box's centre
+    const OPEN_PT = { x: 1500, y: 900 };
+    const lone = () => seatMatch(arena, [
+      { char: 'hamburger', x: 1400, y: 300 }, { char: 'pizza', x: 2400, y: 300 }, { char: 'taco', x: 2400, y: 1700 },
+    ]);
+    const placed = (pt) => { const st = lone(); placeFighterAt(st.fighters[0], pt.x, pt.y, arena); return st.fighters[0]; };
+
+    check('(a) NON-VACUITY: every requested drop point is INSIDE cover (seam, wall-flush, lone box); the open one is not',
+      inCoverAt(arena, SEAM_PT.x, SEAM_PT.y) && inCoverAt(arena, PLAYER_SIZE / 2, WALL_PT.y)
+      && inCoverAt(arena, SINGLE_PT.x, SINGLE_PT.y) && !inCoverAt(arena, OPEN_PT.x, OPEN_PT.y));
+
+    const seam = placed(SEAM_PT);
+    check('(a) 🔴 `placeFighterAt` into a seam narrower than a body leaves the fighter STANDABLE — no box overlaps it',
+      !inCoverAt(arena, seam.x, seam.y), `landed (${seam.x.toFixed(2)}, ${seam.y.toFixed(2)})`);
+    const wall = placed(WALL_PT);
+    check('(a) 🔴 …and into a box flush with the arena wall, likewise',
+      !inCoverAt(arena, wall.x, wall.y), `landed (${wall.x.toFixed(2)}, ${wall.y.toFixed(2)})`);
+
+    // NEAREST, checked against a brute force rather than believed: every point of a 0.5 wu
+    // lattice around the request that is inside the clamp and clear of every box.
+    const nearestOnLattice = (pt) => {
+      const half = PLAYER_SIZE / 2;
+      let best = Infinity;
+      for (let dx = -200; dx <= 200; dx += 0.5) {
+        for (let dy = -200; dy <= 200; dy += 0.5) {
+          const x = pt.x + dx, y = pt.y + dy;
+          if (x < half || y < half || x > arena.width - half || y > arena.height - half) continue;
+          if (inCoverAt(arena, x, y)) continue;
+          const d = Math.hypot(dx, dy);
+          if (d < best) best = d;
+        }
+      }
+      return best;
+    };
+    {
+      const reqWall = { x: PLAYER_SIZE / 2, y: WALL_PT.y };
+      const dSeam = Math.hypot(seam.x - SEAM_PT.x, seam.y - SEAM_PT.y), bSeam = nearestOnLattice(SEAM_PT);
+      const dWall = Math.hypot(wall.x - reqWall.x, wall.y - reqWall.y), bWall = nearestOnLattice(reqWall);
+      check('(a) 🔴 …at the NEAREST standable point to the request — within half a step of a 0.5 wu brute force',
+        Number.isFinite(bSeam) && Number.isFinite(bWall) && Math.abs(dSeam - bSeam) <= 0.5 && Math.abs(dWall - bWall) <= 0.5,
+        `seam: moved ${dSeam.toFixed(3)}, lattice ${bSeam.toFixed(3)} · wall: moved ${dWall.toFixed(3)}, lattice ${bWall.toFixed(3)}`);
+    }
+
+    const single = placed(SINGLE_PT);
+    check('(a) CONTROL: a lone box still resolves by MINIMUM TRANSLATION, to the bit — the success path did not move',
+      single.x === SINGLE_PT.x - ((PLAYER_SIZE + SINGLE.w) / 2 - (SINGLE.x - SINGLE_PT.x) + 0.01) && single.y === SINGLE_PT.y,
+      `(${single.x}, ${single.y})`);
+    const open = placed(OPEN_PT);
+    check('(a) CONTROL: a drop onto open floor is written exactly where asked — no search, no nudge',
+      open.x === OPEN_PT.x && open.y === OPEN_PT.y, `(${open.x}, ${open.y})`);
+
+    // THROUGH THE REAL PRESS, at three seats. T throws V (the only fighter inside its throw); the
+    // destination is D, V's nearest living opponent other than T, and the drop point is 84 wu
+    // from D back toward V — (644, 1302.5), in the seam. Then V tries to walk off, eight ways.
+    const SEATS = [
+      { char: 'pizza', x: 900, y: 1400, items: ['disposal'] },
+      { char: 'hamburger', x: 900, y: 1302.5 },
+      { char: 'taco', x: 560, y: 1302.5 },
+    ];
+    const throwThenWalk = (dir) => {
+      const st = seatMatch(arena, SEATS);
+      const ins = idle(st);
+      ins[0] = { ...NEUTRAL, useItem: 0 };
+      const hit = ofType(stepMatch(st, DT, ins), 'item-hit').find((e) => e.itemId === 'disposal');
+      const V = st.fighters[1];
+      const landed = { x: V.x, y: V.y };
+      let maxD = 0;
+      if (dir) {
+        const walk = idle(st);
+        walk[1] = { ...NEUTRAL, move: { x: dir[0], y: dir[1] } };
+        for (let i = 0; i < 60; i++) {
+          stepMatch(st, DT, walk);
+          maxD = Math.max(maxD, Math.hypot(V.x - landed.x, V.y - landed.y));
+        }
+      }
+      return { hit, landed, maxD };
+    };
+    const thrown = throwThenWalk(null);
+    check('(a) NON-VACUITY: the press throws V, and the drop point it was given is inside the seam',
+      thrown.hit !== undefined && thrown.hit.targetId === 1 && inCoverAt(arena, 644, 1302.5),
+      thrown.hit ? `item-hit → (${thrown.hit.x.toFixed(2)}, ${thrown.hit.y.toFixed(2)})` : 'no item-hit');
+    check('(a) 🔴 a REAL Disposal at three seats lands its victim on standable floor',
+      !inCoverAt(arena, thrown.landed.x, thrown.landed.y), `landed (${thrown.landed.x.toFixed(2)}, ${thrown.landed.y.toFixed(2)})`);
+    const walks = DIRS8.map((d) => throwThenWalk(d).maxD);
+    check('(a) 🔴 …and the victim can WALK AWAY — more than a body length inside one second, in some direction',
+      Math.max(...walks) >= PLAYER_SIZE, `max displacement per direction: ${walks.map((w) => w.toFixed(1)).join(' ')}`);
+
+    // THE ESCAPE ITSELF, through `tryMove`: a fighter already wedged in the seam (a QA
+    // `?px=`/`?py=` drop) is out after its first step…
+    {
+      const st = lone();
+      const f = st.fighters[0];
+      f.x = SEAM_PT.x; f.y = SEAM_PT.y;
+      const ins = idle(st);
+      ins[0] = { ...NEUTRAL, move: { x: 0, y: 1 } };
+      stepMatch(st, DT, ins);
+      check('(a) 🔴 a fighter already WEDGED in the seam is out after its first step — `tryMove`\'s own escape',
+        !inCoverAt(arena, f.x, f.y), `(${f.x.toFixed(2)}, ${f.y.toFixed(2)})`);
+    }
+    // …and one parked there with NO input stays exactly where it was put — the photography
+    // diagnostic `escapeCover`'s header protects, because the escape runs only for a mover.
+    {
+      const st = lone();
+      const f = st.fighters[0];
+      f.x = SEAM_PT.x; f.y = SEAM_PT.y;
+      for (let i = 0; i < 30; i++) stepMatch(st, DT, idle(st));
+      check('(a) CONTROL: a fighter PARKED in the seam with no input stays put (QA photography)',
+        f.x === SEAM_PT.x && f.y === SEAM_PT.y, `(${f.x}, ${f.y})`);
+    }
+  }
+
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
