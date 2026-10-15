@@ -107,6 +107,35 @@ import { mesh, noOutline, FLOOR_Y, ARENA_W, ARENA_H, CENTER, type Materials } fr
  * heights, so it is not touched — and the new ordering is the correct one anyway:
  * hazard markings should always draw over ground grime, never under it.
  */
+/**
+ * THE GROUND'S VALUE, per role — graphics campaign A2a (`docs/REVAMP.md` §2.3, §5 A2).
+ *
+ * The review measured the scored frames' ground at median luma 0.46-0.50 against the six
+ * top-down plates' 0.39, with OKLab chroma above every plate's ground: the stage was as light
+ * as the actors on it. A1 calmed it and deliberately did NO value re-key ("re-key per role in
+ * A2"). Measured on `720c839` at the CANONICAL framings (`tools/tmp/a2a_cap.mjs` +
+ * `a2a_values.py`, exact id masks, shade included like the plates' hand masks):
+ *
+ *     canonA (the 1v1 frame)    ground luma 0.474  OKLab L 0.616  C 0.122  (71.8% of frame)
+ *     canon6 (the six-seat one) ground luma 0.436  OKLab L 0.584  C 0.117  (67.5%)
+ *
+ * against the REVAMP A2 target L 0.50-0.54 / C <= 0.10. A value multiplier on the two stone
+ * keys is the whole move: `liftArenaValue` (V^0.72) runs after it, so the DELIVERED value
+ * scales by GROUND_VALUE^0.72, and rendered linear light scales with it — OKLab L and C both
+ * fall by the same cube-root factor, which is why one knob lands both. Hue, HSV saturation,
+ * the light/dark step, A1's joints and tint field, the crumbs (tinted from the same field)
+ * all ride along unchanged. Mats, pads, puddles and the hazard ring are NOT scaled: they are
+ * walkable-family or reserved-hazard colours with their own contracts.
+ */
+export const GROUND_VALUE = 0.82;
+
+/** Scale a colour's sRGB VALUE (every channel x k): hue and HSV saturation unchanged. */
+function scaleValue(c: THREE.Color, k: number): void {
+  const o = { r: 0, g: 0, b: 0 };
+  c.getRGB(o, THREE.SRGBColorSpace);
+  c.setRGB(o.r * k, o.g * k, o.b * k, THREE.SRGBColorSpace);
+}
+
 const DECAL_Y = 0.045; // grime, spills, mats, pads, trim — just proud of the tile top (0.015)
 const FINE_Y = 0.062; // marks drawn ON a decal (wood seams, speckle flecks)
 
@@ -2069,6 +2098,11 @@ export function buildFloor(M: Materials): THREE.Group {
   //   #71535F  now   rgb(113, 83, 95)  hue 336.0  HSV 0.266  luma  90.2
   tileLightInst.color.set('#785864');
   tileDarkInst.color.set('#71535F');
+  // ── A2a (graphics revamp, wave 3): THE GROUND SITS BACK — a value move, nothing else ──
+  // Both keys above are kept as the record of the hue and the light/dark step; the stage's
+  // VALUE comes down by `GROUND_VALUE` on top of them (sRGB value: every channel x k, so hue
+  // and HSV saturation are exactly what the notes above chose). See `GROUND_VALUE`.
+  for (const m of [tileLightInst, tileDarkInst]) scaleValue(m.color, GROUND_VALUE);
   // ── ROUND 13: `vertexColors` IS NOW CORRECT, AND THE NOTE ABOVE IS NOT WRONG ──
   //
   // The block above forbids `material.vertexColors = true` and it was right for an

@@ -219,7 +219,7 @@ import {
 } from './shared';
 import { buildFloor } from './floor';
 import { buildApron } from './apron';
-import { buildPot, buildHazardGround, buildPuddleVisual } from './hazards';
+import { buildPot, buildPotHearth, buildHazardGround, buildPuddleVisual } from './hazards';
 import { buildDustField, createAmbientUpdate } from './ambient';
 import { buildStoveIsland, buildPrepCounter, buildServiceCounter } from './props/counters';
 import { buildFreezerSized, buildHerbCrate, buildCrateTall, buildFlourSack, buildLanePots } from './props/storage';
@@ -799,6 +799,11 @@ export const createKitchenArena: ArenaFactory = () => {
   // `matrixWorld` under `arena_props` over 90 frames of a live match and found
   // **exactly 8 moving drawables, all of them here** — 1,908 of 1,924 are static.
   potCover.userData[MERGE_SKIP] = true;
+  // A2a: the pot's hearth — static, so it sits OUTSIDE the MERGE_SKIP subtree and batches
+  // into the prop kit's two draws. It registers no CoverBox: the pot's box above is its box.
+  const hearth = buildPotHearth(M);
+  hearth.position.set(potPos.x, 0, potPos.z);
+  propsGroup.add(hearth);
 
   root.add(propsGroup);
   // BLOCKING gets the heaviest ink line in the arena — far past anything decoration

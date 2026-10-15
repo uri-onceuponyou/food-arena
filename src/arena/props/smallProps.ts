@@ -26,6 +26,7 @@ import {
   type Materials,
 } from '../shared';
 import { addCoverPlinth, addRoundCoverPlinth, addCoverSides, addCoverCap, COVER_BODY_FRAC, COUNTER_TOP_Y } from './counters';
+import { KitGeo, KP, barrel, block, cabinetPanels, chamferBox, chamferCyl, paint, srgb, val } from './kit';
 
 /**
  * Third step down the spice cart's violet ladder — see the same note in
@@ -51,84 +52,37 @@ function cartSkirt(): THREE.Material {
  * because hue was never the part that was broken.
  */
 export function buildSpiceCart(M: Materials, wM: number, dM: number): THREE.Group {
+  // ── A2a: a rolling spice cabinet — four iron castors under a painted cabinet with a
+  // drawer panel on every face, a raised tray of spice jars on top (coloured contents,
+  // wooden lids) and a steel push-bar at the back. Same footprint, same COUNTER_TOP_Y.
   const g = new THREE.Group();
+  const kg = new KitGeo();
   const bw = wM * COVER_BODY_FRAC, bd = dM * COVER_BODY_FRAC;
-  const y0 = addCoverPlinth(g, M, wM, dM, 0.18);
-  const capT = 0.12;
-  // Round-10: pinned to `COUNTER_TOP_Y` (was a loose 1.62m = 0.77x a character, below
-  // the committed floor of 0.94x). A kitchen trolley IS counter height, and one shared
-  // number across the whole cover family is what makes the arena read with a single
-  // cover height rather than a scatter of near-misses.
-  const bodyTop = COUNTER_TOP_Y;
-
-  // Light wheels read AGAINST the near-black plinth band rather than being buried at
-  // ground level under the body, which is where the old 0.06m ones were — invisible
-  // at every framing this project has ever shot.
-  for (const sx of [-1, 1] as const) {
-    for (const sz of [-1, 1] as const) {
-      const wheel = mesh(puck(0.1, 0.05, 12), M.potMetal, 'cart_wheel__no_outline');
-      wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(sx * bw * 0.36, y0 * 0.5, sz * (bd * 0.5 - 0.03));
-      noOutline(wheel);
-      g.add(wheel);
-    }
+  const wheelY = 0.18;
+  const body = srgb('#6D5FB4');
+  kg.add(chamferBox(wM, 0.08, dM, 0.03), { y: 0 }, paint(val(KP.plinth, 1.1), KP.plinth), 'matte', 0, 1);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    kg.add(chamferCyl(0.11, 0.07, 0.025, 10), { x: sx * bw * 0.36, y: 0.08 + 0.11, z: sz * (bd * 0.5 - 0.06), rz: Math.PI / 2 }, paint(KP.iron, val(KP.iron, 0.9), KP.steel), 'matte', 0, 0);
   }
-
-  // Violet body, not the warm cabinetDark used everywhere else — this cart sits
-  // dead-centre in the hub chokepoint and is one of the very few props guaranteed
-  // to be on-screen in every gameplay frame, so its hue does real work for palette
-  // contrast. NOT `tealTileDark` (round-6 fix): that colour belongs to the floor's
-  // own decorative hub-zone mat directly beneath this cart.
-  //
-  // Round-9b: a blind critic measured this prop's top face at luma ~83-103 and its
-  // VERTICAL face at ~93 — flat to INVERTED shading, which is exactly why it read as
-  // "a flat purple sticker". The bright `spiceCartBody` violet is now the cap only;
-  // the sides drop to `spiceCartBodyDark` over a darker skirt.
-  addCoverSides(g, bw, bd, y0, bodyTop - capT - y0, M.spiceCartBodyDark, cartSkirt(), 0.05, 'cart_body');
-  addCoverCap(g, wM, dM, bodyTop, capT, M.spiceCartBody, 'cart_lid');
-
-  // Mostly-cool jars with a single warm tomato pop — the same "cool field, one warm
-  // accent" contrast the reference frames use, just at prop scale.
-  //
-  // Round-7 fix: these used to be four bare, perfectly-even pucks in a dead-straight
-  // row — exactly the "little coloured dots... genuinely unclear as decoration vs
-  // pickup" a critic flagged. Two changes kill that read: (1) a shared wood TRAY
-  // underneath ties all four into one object — jars sitting IN a rack, not loose
-  // items floating on the cart — and (2) each is a two-part jar silhouette (a
-  // neutral wood-tone LID stacked on the coloured body), staggered front/back so the
-  // row itself is no longer perfectly regular.
-  const jarColors = [PALETTE.lettuce, KPAL.herbLeafB, PALETTE.waterCap, PALETTE.tomato];
-  const tray = mesh(roundedBox(bw * 0.68, 0.05, bd * 0.34, 0.02), M.woodPad, 'cart_tray');
-  tray.position.set(0, bodyTop + 0.025, 0);
-  g.add(tray);
-  let jx = -bw * 0.26;
-  jarColors.forEach((c, i) => {
-    const stagger = i % 2 === 0 ? -bd * 0.05 : bd * 0.07;
-    const jarY = bodyTop + 0.05;
-    const jar = mesh(puck(0.07, 0.17, 10), toonMat({ color: c }), 'cart_jar');
-    jar.position.set(jx, jarY + 0.085, stagger);
-    g.add(jar);
-    const lid = mesh(puck(0.074, 0.035, 10), M.woodSeam, 'cart_jar_lid');
-    lid.position.set(jx, jarY + 0.17 + 0.018, stagger);
-    noOutline(lid);
-    g.add(lid);
-    jx += bw * 0.175;
-  });
-
-  // Push handle — a trolley read from directly above, where the wheels are edge-on.
-  for (const sx of [-1, 1] as const) {
-    const post = mesh(puck(0.035, 0.34, 8), M.freezerTrim, 'cart_handle_post');
-    post.position.set(sx * bw * 0.4, bodyTop + 0.17, -bd * 0.4);
-    noOutline(post);
-    g.add(post);
+  const topY = COUNTER_TOP_Y - 0.12;
+  block(kg, 0, wheelY, 0, bw, topY - wheelY, bd, 0.06, paint(val(body, 1.08), val(body, 0.92)), 'matte', { aoK: 0.6 });
+  cabinetPanels(kg, bw, bd, wheelY, topY, body, { pulls: true });
+  // the top: a slab with a raised steel rim round a tray
+  kg.add(chamferBox(wM * 0.99, 0.12, dM * 0.99, 0.04), { y: topY }, paint(val(body, 1.22), val(body, 1.0), val(body, 1.38)), 'matte', topY, 0.4);
+  const ty = topY + 0.12, rimW = 0.06;
+  const steel = paint(KP.steel);
+  for (const [x, z, w, d] of [[0, bd * 0.42, bw * 0.86, rimW], [0, -bd * 0.42, bw * 0.86, rimW], [bw * 0.42, 0, rimW, bd * 0.84], [-bw * 0.42, 0, rimW, bd * 0.84]] as const) {
+    kg.add(chamferBox(w, 0.07, d, 0.02, { noVEdges: true }), { x, y: ty, z }, steel, 'gloss', 0, 0);
   }
-  const handleBar = mesh(puck(0.035, bw * 0.8, 8), M.freezerTrim, 'cart_handle_bar');
-  handleBar.rotation.z = Math.PI / 2;
-  handleBar.position.set(0, bodyTop + 0.34, -bd * 0.4);
-  noOutline(handleBar);
-  g.add(handleBar);
-
-  return g;
+  const jars = [KP.leafA, srgb('#E8503A'), srgb('#F2C14E'), srgb('#7FD3E8'), srgb('#C06BD8'), KP.leafB];
+  for (let i = 0; i < 6; i++) {
+    const jx = -bw * 0.26 + (i % 3) * bw * 0.26, jz = (i < 3 ? -1 : 1) * bd * 0.18;
+    kg.add(chamferCyl(0.1, 0.24, 0.025, 10), { x: jx, y: ty, z: jz }, (_p, n) => (n.y > 0.8 ? val(jars[i], 1.1) : jars[i]), 'gloss', ty, 0.4);
+    kg.add(chamferCyl(0.105, 0.05, 0.015, 10), { x: jx, y: ty + 0.24, z: jz }, paint(srgb('#C89A5C')), 'matte', 0, 0);
+  }
+  for (const sx of [-1, 1]) block(kg, sx * bw * 0.4, ty, -bd * 0.44, 0.05, 0.36, 0.05, 0.015, steel, 'gloss', { bands: [], aoK: 0 });
+  kg.add(chamferCyl(0.035, bw * 0.84, 0.012, 8), { x: -bw * 0.42, y: ty + 0.36, z: -bd * 0.44, rz: -Math.PI / 2 }, steel, 'gloss', 0, 0);
+  return kg.emit(g, M);
 }
 
 /**
@@ -144,64 +98,16 @@ export function buildSpiceCart(M: Materials, wM: number, dM: number): THREE.Grou
  * never a hazard hue.
  */
 export function buildSupplyBarrel(M: Materials, wM: number, dM: number, opts?: { dark?: boolean }): THREE.Group {
+  // ── A2a: a built barrel (`./kit.ts` `barrel`) — staves, bulge, steel hoops, a plank lid —
+  // on the round dark band that marks its footprint. Same radius and height as the old puck.
   const g = new THREE.Group();
+  const kg = new KitGeo();
   const base = Math.min(wM, dM);
   const r = base * 0.42;
-  // Round-10: the height is now ABSOLUTE, not a fraction of the footprint. The two
-  // barrel sizes (60x50wu and 48x46wu) previously came out 1.78m and 1.65m tall, i.e.
-  // the arena's "one cover height" already had a 13cm scatter inside a single prop
-  // kind. Deriving it from `COUNTER_TOP_Y` makes every barrel exactly counter height
-  // and lets the radius keep carrying the size difference, which is the axis a drum
-  // should vary on anyway.
-  const y0 = addRoundCoverPlinth(g, M, r * 1.08, 0.18);
-  const h = COUNTER_TOP_Y - y0;
-  // Round props get their own RADIAL grounding decal on top of `addCover`'s
-  // rounded-rect one — a rect's corners are the wrong shape under a cylinder, which
-  // is the grounding complaint that survives at `piece=prop` zoom.
-  g.add(buildContactShadow(M.contactShadow, wM, dM, 1.3));
-
-  const upper = opts?.dark ? M.barrelBodyDark : M.barrelBody;
-  const skirt = opts?.dark ? M.steelDark : M.barrelBodyDark;
-  const skirtH = h * 0.3;
-  const lo = mesh(puck(r, skirtH, 20), skirt, 'barrel_skirt');
-  lo.position.y = y0 + skirtH / 2;
-  g.add(lo);
-  const body = mesh(puck(r, h - skirtH, 20), upper, 'barrel_body');
-  body.position.y = y0 + skirtH + (h - skirtH) / 2;
-  g.add(body);
-
-  for (const frac of [0.3, 0.72]) {
-    const hoop = mesh(new THREE.TorusGeometry(r * 1.01, r * 0.08, 6, 18), M.potMetalDark, 'barrel_hoop');
-    hoop.rotation.x = Math.PI / 2;
-    hoop.position.y = y0 + h * frac;
-    g.add(hoop);
-  }
-
-  // Thin metal lid rim tracing the top edge — NOT a large dark disc. An earlier pass
-  // used a `coverPlinth` cap at 90% of the body's own radius, which from the steep
-  // top-down gameplay camera covered almost the whole top face and read as a hollow
-  // bucket interior rather than a barrel lid.
-  const lidRim = mesh(new THREE.TorusGeometry(r * 0.94, r * 0.07, 6, 20), M.potMetalDark, 'barrel_lid_rim');
-  lidRim.rotation.x = Math.PI / 2;
-  lidRim.position.y = y0 + h + 0.01;
-  g.add(lidRim);
-
-  // Round-9: the bung used to be `coverPlinth` — the reserved near-black BLOCKING
-  // colour, unlit, on a small disc in the middle of the barrel's brightest face. A
-  // fresh critic read it as a HOLE punched through the mesh, which is what a pure
-  // black ellipse on a lit curved surface always reads as. It is now a raised metal
-  // cap: a mid-grey plug in the same `potMetal` family as the hoops, ringed so it has
-  // an edge instead of being a silhouette.
-  const bung = mesh(puck(r * 0.2, 0.06, 14), M.potMetal, 'barrel_bung');
-  bung.position.y = y0 + h + 0.03;
-  g.add(bung);
-  const bungRing = mesh(new THREE.TorusGeometry(r * 0.22, r * 0.035, 6, 14), M.potMetalDark, 'barrel_bung_ring__no_outline');
-  bungRing.rotation.x = Math.PI / 2;
-  bungRing.position.y = y0 + h + 0.02;
-  noOutline(bungRing);
-  g.add(bungRing);
-
-  return g;
+  const y0 = 0.18;
+  kg.add(chamferCyl(r * 1.08, y0, 0.04, 18), {}, paint(val(KP.plinth, 1.1), KP.plinth), 'matte', 0, 1);
+  barrel(kg, 0, y0, 0, r, COUNTER_TOP_Y - y0, opts?.dark ? KP.barrelDark : KP.barrel, val(KP.steel, 0.82));
+  return kg.emit(g, M);
 }
 
 /**

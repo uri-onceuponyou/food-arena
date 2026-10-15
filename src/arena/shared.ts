@@ -1092,7 +1092,12 @@ export const KPAL = {
   // multipliers); the old `concealRack` #C29A5E, `concealPlate` #F7F1E4 and
   // `concealTrayWarm` #C9552F are retired with the rack.
   // The old line: `concealCloth: '#E9DCC0',` (and the teal attempt, `'#2E5C56'`).
-  concealCloth: '#6B4D1D',
+  // A2a (graphics revamp, wave 3): HSV S 0.73 -> 0.60 at the SAME value and hue (36.9 deg).
+  // The one per-role CHROMA move in the package, asked for by the wave-3 brief: the table
+  // rendered at HSV S 0.97 and a fighter standing beside one lost salience (arena-scan
+  // `freezer_nw` playerRank 26 -> 61 across A1). Checked against `arena-scan --gate`'s warm
+  // rails before it landed. Was `concealCloth: '#6B4D1D',`.
+  concealCloth: '#6B522B',
   /** Traced on the region's true edge — the family's darkest tone, unlit. (Was tan
    * #C29A5E, "well clear of `greaseRim`" #8A6A22; this is darker than both.) */
   concealClothRim: '#3A2A10',
@@ -2537,6 +2542,12 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
   // Vertex-colour TONES: multipliers on `M.concealCloth`, the ONE family (see its note
   // in `KPAL`). Linear, so 0.62 arrives ~0.80x in sRGB value before lighting.
   const T_CLOTH = 1.0, T_CHECK = 0.80, T_BORDER = 0.66, T_HEM = 0.62, T_LEG = 0.40, T_DISH = 1.32, T_DISH_RIM = 0.86;
+  // A2a: the DRAPE's own tones. It hung at T_CLOTH / T_HEM, i.e. the lit top's colour on a
+  // vertical face — which R1's form ramp takes x0.78 (`render/roles.ts` FORM_SIDE_ALBEDO) and
+  // the key barely reaches — so it rendered near-black at the frame edge (w1 capture, right
+  // edge). A side should read as the same cloth a step darker, not as a hole: these put it
+  // there after the ramp. (Linear multipliers: 1.5 arrives ~1.2x in sRGB value.)
+  const T_DRAPE = 1.5, T_DRAPE_HEM = 0.98;
   const tone = (geo: THREE.BufferGeometry, k: number): THREE.BufferGeometry => {
     const n = geo.getAttribute('position').count;
     geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(k), 3));
@@ -2590,7 +2601,7 @@ export function buildConcealPatch(M: Materials, wM: number, dM: number): THREE.G
     for (let r = 0; r <= ROWS; r++) {
       const t = r / ROWS;
       const y = yTop + (HEM_Y - yTop) * t;
-      const k = y < HEM_Y + HEM_BAND ? T_HEM : T_CLOTH;
+      const k = y < HEM_Y + HEM_BAND ? T_DRAPE_HEM : T_DRAPE;
       for (let i = 0; i <= SEG; i++) {
         const a = -len / 2 + (len * i) / SEG;
         const corner = Math.min(1, (len / 2 - Math.abs(a)) / 0.25);
