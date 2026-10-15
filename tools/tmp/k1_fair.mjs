@@ -30,6 +30,8 @@
  *       Lollipop's reach circle is on screen.
  *   §D  every weapon's reach (range + HIT_RADIUS_VS_PLAYER) against BOTH radii, and
  *       `FAIR_PLAY.radiusUnits` against `rules.ts:GUARANTEED_VISIBLE_RADIUS`.
+ *   §F  `shakeFadeRadiusUnits()` against the farthest ground point the camera really shows —
+ *       exact under 'centred', PINNED short under the shipped 'past' aim (510.0 vs 544.3 at 58°).
  *   §E  (--base <tree>) BYTE-IDENTITY of the shipped path: every camera matrix the default
  *       rig builds, at every pitch of the band x 33 aspects, Object.is-equal between this
  *       tree's camera.ts and the base tree's — plus the shake-fade radius.
@@ -263,6 +265,24 @@ for (const aim of ['centred', 'past']) {
     check(`[past] PINNED RED — the guaranteed disc leaves the frame at ${discFailCells}/${cells} cells (max |NDC| ${worstDisc.m.toFixed(3)}); `
       + `true reach BELOW the player is as short as ${worstNearPast.near.toFixed(1)} wu (pitch ${worstNearPast.p}, aspect ${fa(worstNearPast.a)})`,
       discFailCells === cells, `${discFailCells}/${cells} — if this is no longer every cell, the shipped aim changed: re-read this arm`);
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// §F — the shake-fade radius ("the farthest ground point ANY supported aspect can show")
+// against the farthest ground point the real camera shows, at the shipped pitch
+// ═════════════════════════════════════════════════════════════════════════════
+console.log('\n§F — CameraRig.shakeFadeRadiusUnits() vs the farthest visible ground point (all 33 aspects)');
+for (const aim of ['centred', 'past']) {
+  const claimed = rigAt(cam, SHIPPED_PITCH, 16 / 9, aim).shakeFadeRadiusUnits();
+  let trueMax = 0;
+  for (const a of BAND) for (const q of groundCorners(rigAt(cam, SHIPPED_PITCH, a, aim).camera)) trueMax = Math.max(trueMax, Math.hypot(q.x, q.z) / WORLD_SCALE);
+  proof[`fade_${aim}`] = { claimed, trueMax };
+  if (aim === 'centred') {
+    check(`[centred] the fade radius equals the farthest visible ground point (${claimed.toFixed(1)} vs ${trueMax.toFixed(1)} wu)`, Math.abs(claimed - trueMax) < 0.5);
+  } else {
+    check(`[past] PINNED: the fade radius UNDER-reads the farthest visible ground point (${claimed.toFixed(1)} vs ${trueMax.toFixed(1)} wu) — events in that band are on a screen but get no hit-stop`,
+      trueMax - claimed > 10, `gap ${(trueMax - claimed).toFixed(1)} — if it closed, the shipped aim or the fade arithmetic changed: re-read`);
   }
 }
 

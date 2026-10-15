@@ -306,11 +306,14 @@ export function visibleGroundRadiusUnits(
   const { dist, lookAhead } = fairSolveAt(aspect, pitchDeg, fovDeg, wu(fairRadiusUnits), aim);
   // `kNear`/`kFar` are measured from the AIM point; the corners wanted here are offsets
   // from the TARGET, which sits `lookAhead` back down-screen from it.
-  // ⚠️ (K1) The two lines below are the CENTRED aim's arithmetic: under the shipped `'past'`
-  // aim the target sits `lookAhead` UP-screen of the aim, so the far corner is
-  // `reachFar + lookAhead` and this under-reads the fade radius by 2 x lookAhead (~76 wu at
-  // 58°). Left verbatim — it feeds the shipped shake / hit-stop / hand-off radius — and
-  // routed; see `QA_CAMERA`.
+  // ⚠️ (K1) The sentence above is right about the shipped `'past'` aim and the two lines below
+  // are not: with the target down-screen of the aim, the top corners are `reachFar + lookAhead`
+  // from it and the bottom ones `reachNear - lookAhead` — the signs used here are the CENTRED
+  // aim's (target UP-screen of the aim). Measured through the real camera at 58°: this
+  // returns 510.0 wu, the farthest ground point any supported aspect shows is 544.3 (21:9 top
+  // corners) — so an event in that 34 wu band is on a screen but gets the shake floor, no
+  // hit-stop and no flash. Exact (510.0 vs 510.0) under `'centred'`. Left verbatim — it feeds
+  // the shipped shake / hit-stop / hand-off radius — and routed; see `QA_CAMERA`.
   const reachNear = dist * kNear;
   const reachFar = dist * kFar;
   const halfWidthFar = (dist + reachFar * cosP) * tanHalfH;
