@@ -1,5 +1,20 @@
 # HANDOVER — read this, then `docs/STATE.md`
 
+> 🆕 **2026-10-16 — A LATER SESSION RAN THE GRAPHICS REVAMP + BUG SWEEP, AND THE SNAPSHOT BELOW
+> PREDATES IT.** Where that work stands lives in **`docs/REVAMP.md`** — §8 is the blind scoreboard
+> (r0 → w5: arena 4.60 → 5.08, arena6 4.97 → 4.85, **fighter crop 4.51 → 5.50**, home 5.37 → 5.27,
+> select 5.83 → 5.85, against ~8.3 for the reference side; "good enough" is ≥ 7.0, `DECISIONS §91d`),
+> §5/§6 the packages and waves. Every judgement call it made is `DECISIONS-FOR-URI.md §91a–§91v`.
+> Merged and pushed by 2026-10-16 01:00 (HEAD `f6aabdc`, deployed `982f2bd`): B1–B4 (items usable, the
+> combat/movement/timer bug sweep — `sim.test` **1037**), F1 (seat rings + name plates), R1 (relight +
+> fighter outline), A1/A2a/A2b (calm floor, prop kit, the hub district), C1a/C1b (cast palette, one
+> limb system, faces that read at 58°), U1 (menus), V1 (effects). In flight at that hour: B5 (AI), B6
+> (screens), V1b (the trail reads as a hole — w5's new complaint); queued: K1 (camera-pitch
+> EXPERIMENT, §91e), C1c, V2 (item presentation — bug B7, owned by no package until now), T1 (≈20
+> instrument repairs, incl. `np_nfighter`'s pre-existing N=5 off-screen row and `driver_guard`'s
+> shared temp path). The numbers in the snapshot below (88 verified, `sim.test` 745) are SUPERSEDED;
+> the gate table in `docs/TOOLS.md` is the only place counts live.
+
 Written at the close of a 109-commit session, HEAD `85f1847`. Deployed and live at
 `https://uri-onceuponyou.github.io/food-arena/`.
 
