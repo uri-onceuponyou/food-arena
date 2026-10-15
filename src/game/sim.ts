@@ -1412,14 +1412,35 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
     }
   }
 
+  // ── 🚨 THE FOG, THE POT AND REGEN CARRY THEIR OVERSHOOT (move B3, B4 package) ──
+  //
+  // Each of them used to RESET TO ZERO when it fired, throwing away whatever the frame had
+  // overshot the interval by. So the delivered period was the declared one rounded UP to a whole
+  // number of frames, and that rounding is a function of the frame time `match.ts` steps — which
+  // is variable: at a true 60 Hz frame (16.6667 ms) the pot ticked every 266.67 ms against its
+  // declared 250, regen every 216.67 against 200, and at a 45 ms hitch the fog every 315 against
+  // 300 (`sim.test.mjs` §47(e)). The Node corpus steps 16.667, a hair ABOVE 1000/60, which lands
+  // all three on their nominal frames — so every balance number measured there was right for the
+  // corpus and wrong, by up to 8%, for the browser it was measured for.
+  //
+  // `(t - period) % period` and not `t - period`: identical whenever `dt < period`, which the
+  // shipped loop guarantees (its 50 ms clamp against intervals of 160 ms and up), and it keeps an
+  // instrument that steps seconds at a time from banking a backlog that would then fire on every
+  // later frame. One tick per step either way — the same shape `ITEM_AURA_TICK_MS`'s clock took.
+  //
+  // At 16.667 the carried remainder grows by 0.004–0.006 ms a period, so it cannot pull a tick
+  // one frame early for over 800 s of continuous exposure: the corpus is bit-identical (the
+  // commit carries the digest).
+
   // Central damage hazard(s) — any arena hazard of kind 'damage'.
   state.arena.hazards.forEach((hazard, idx) => {
     if (hazard.kind !== 'damage') return;
     const dist = Math.hypot(fighter.x - hazard.x, fighter.y - hazard.y);
     if (dist < hazard.radius) {
       const t = (fighter.hazardTimers[idx] ?? 0) + dt;
-      if (t >= (hazard.tickMs ?? Infinity)) {
-        fighter.hazardTimers[idx] = 0;
+      const period = hazard.tickMs ?? Infinity;
+      if (t >= period) {
+        fighter.hazardTimers[idx] = (t - period) % period;
         applyDamage(state, fighter, hazard.damage ?? 0, null, { kind: 'hazard' }, events);
       } else {
         fighter.hazardTimers[idx] = t;
@@ -1433,7 +1454,7 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   if (state.elapsed - fighter.lastDamagedAt > REGEN_DELAY_MS && fighter.hp < fighter.maxHp && fighter.hp > 0) {
     fighter.regenTimer += dt;
     if (fighter.regenTimer >= REGEN_TICK_MS) {
-      fighter.regenTimer = 0;
+      fighter.regenTimer = (fighter.regenTimer - REGEN_TICK_MS) % REGEN_TICK_MS;
       const before = fighter.hp;
       fighter.hp = Math.min(fighter.maxHp, fighter.hp + REGEN_AMOUNT);
       if (fighter.hp > before) {
@@ -1455,7 +1476,7 @@ function applyWorldTick(state: MatchState, fighter: Fighter, dt: number, attempt
   if (distFromCenter > state.safeRadius && fighter.hp > 0) {
     fighter.fogTimer += dt;
     if (fighter.fogTimer >= FOG_TICK_MS) {
-      fighter.fogTimer = 0;
+      fighter.fogTimer = (fighter.fogTimer - FOG_TICK_MS) % FOG_TICK_MS;
       applyDamage(state, fighter, FOG_DAMAGE, null, { kind: 'fog' }, events);
     }
   } else {

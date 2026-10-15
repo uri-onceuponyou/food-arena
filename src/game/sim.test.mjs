@@ -13336,6 +13336,70 @@ console.log('\n47. Movement + sim timers — Disposal\'s landing and the wind-up
     check('(d) CONTROL: a victim that stands still keeps the chick exactly where it struck',
       heldOffset(still) && onBody(still), fmtHits(still));
   }
+
+  // ── (e) move B3: A WORLD-TICK TIMER DELIVERS ITS DECLARED RATE AT ANY FRAME TIME ──
+  //
+  // Four per-fighter accumulators — the fog (`FOG_TICK_MS`), the pot (`POT.tickMs`), regen
+  // (`REGEN_TICK_MS`) and the Sticky Trail drop (`TRAIL.dropIntervalMs`) — were reset to ZERO
+  // when they fired, throwing the overshoot away. So the delivered period was the declared one
+  // rounded UP to a whole number of frames, and the rounding depends on the frame time
+  // `match.ts` steps, which is variable (a 60 Hz frame is 16.6667 ms, a 30 fps phone 33.3, a
+  // hitch up to the 50 ms clamp). At a true 60 Hz frame the pot ticked every 266.67 ms (declared
+  // 250), regen every 216.67 (200) and the trail every 166.67 (160); at a 45 ms hitch the fog
+  // every 315 (300). The Node corpus's 16.667 is a hair ABOVE 1000/60, which is why it happened
+  // to land the fog, the pot and regen on time (the CONTROL row) and nobody saw it there.
+  //
+  // ⚠️ Driven at TWO seats: every timer is a property of the one fighter it belongs to.
+  {
+    const W_MS = 12_000;
+    const DTS = [1000 / 60, 1000 / 30, 1000 / 144, 45];
+    const BIG = 1e6;
+    /** Firings of one timer over `W_MS` of uninterrupted exposure, at frame time `dt`. */
+    const firings = (kind, dt) => {
+      const pot = { x: 1400, y: 1000, radius: POT.dangerRadius, kind: 'damage', damage: POT.damage, tickMs: POT.tickMs };
+      const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: kind === 'fog' ? 300 : 50_000, hazards: kind === 'pot' ? [pot] : [] });
+      const subjectAt = { fog: { x: 2300, y: 1000 }, pot: { x: 1430, y: 1000 }, regen: { x: 600, y: 600 }, trail: { x: 300, y: 1000 } }[kind];
+      const st = seatMatch(arena, [{ char: kind === 'trail' ? 'donut' : 'hamburger', ...subjectAt }, { char: 'pizza', x: 1600, y: 1000 }]);
+      const me = st.fighters[0];
+      me.maxHp = BIG;
+      me.hp = kind === 'regen' ? 1 : BIG;
+      const ins = idle(st);
+      if (kind === 'trail') ins[0] = { ...NEUTRAL, move: { x: 1, y: 0 } };
+      const steps = Math.round(W_MS / dt);
+      let n = 0;
+      for (let i = 0; i < steps; i++) {
+        for (const e of stepMatch(st, dt, ins)) {
+          if (kind === 'fog' && e.type === 'hit-landed' && e.targetId === 0 && e.source.kind === 'fog') n++;
+          if (kind === 'pot' && e.type === 'hit-landed' && e.targetId === 0 && e.source.kind === 'hazard') n++;
+          if (kind === 'regen' && e.type === 'heal' && e.fighterId === 0) n++;
+          if (kind === 'trail' && e.type === 'trail-mark-created' && e.ownerId === 0) n++;
+        }
+      }
+      return { n, ms: steps * dt };
+    };
+    const PERIOD = { fog: FOG_TICK_MS, pot: POT.tickMs, regen: REGEN_TICK_MS, trail: TRAIL.dropIntervalMs };
+    const sweep = (kind) => DTS.map((dt) => { const r = firings(kind, dt); return { dt, ...r, want: Math.floor(r.ms / PERIOD[kind]) }; });
+    const fmtSweep = (rows) => rows.map((r) => `${r.dt.toFixed(2)} ms: ${r.n} (declared ${r.want})`).join(' · ');
+    const onRate = (rows) => rows.every((r) => Math.abs(r.n - r.want) <= 1);
+    const rows = { fog: sweep('fog'), pot: sweep('pot'), regen: sweep('regen'), trail: sweep('trail') };
+    check('(e) NON-VACUITY: every timer fires in every arm — the exposure is real at every frame time',
+      Object.values(rows).every((rs) => rs.every((r) => r.n > 0 && r.want > 10)),
+      Object.entries(rows).map(([k, rs]) => `${k} ${rs.map((r) => r.n).join('/')}`).join(' · '));
+    check(`(e) 🔴 the FOG ticks once per FOG_TICK_MS (${FOG_TICK_MS}) at 60 Hz, 30 fps, 144 Hz and a 45 ms hitch`, onRate(rows.fog), fmtSweep(rows.fog));
+    check(`(e) 🔴 the POT ticks once per POT.tickMs (${POT.tickMs}) at every frame time`, onRate(rows.pot), fmtSweep(rows.pot));
+    check(`(e) 🔴 REGEN ticks once per REGEN_TICK_MS (${REGEN_TICK_MS}) at every frame time`, onRate(rows.regen), fmtSweep(rows.regen));
+    // The corpus frame. 16.667 is a hair above 1000/60, so 18 / 15 / 12 frames reach 300 / 250 /
+    // 200 and the three hazard timers fire on their nominal frames on BOTH trees — which is what
+    // keeps every balance number measured at 16.667 valid for them. The trail is not among them:
+    // 160 / 16.667 = 9.6 frames, so it delivered 166.67 there too.
+    {
+      const at = (kind) => { const r = firings(kind, 16.667); return { ...r, want: Math.floor(r.ms / PERIOD[kind]) }; };
+      const corpus = { fog: at('fog'), pot: at('pot'), regen: at('regen') };
+      check('(e) CONTROL: at the corpus\'s 16.667 ms the fog, the pot and regen fire exactly on their declared counts — on both trees',
+        Object.values(corpus).every((r) => r.n === r.want),
+        Object.entries(corpus).map(([k, r]) => `${k} ${r.n}/${r.want}`).join(' · '));
+    }
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
