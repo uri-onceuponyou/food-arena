@@ -735,7 +735,10 @@ export function buildServiceCounter(M: Materials, wM: number, dM: number, varian
   if (variant === 'fryer') {
     // the well: a deep amber oil surface just below the lip, two wire baskets half sunk in
     // it (dark rims, the oil showing through), handles reaching out over the front lip
-    kg.add(chamferBox(inW, 0.04, inD, 0.01), { y: topY + 0.02 }, flat(srgb('#A86A24')), 'gloss', 0, 0);
+    // ⚠️ DARK, and matte: a lit glossy amber rendered as the loudest saturated warm patch on
+    // the counter — the cast's hue band at a high value, which the arena's palette contract
+    // forbids (`shared.ts`: "spend warm chroma DARK; never at luma ~150").
+    kg.add(chamferBox(inW, 0.04, inD, 0.01), { y: topY + 0.02 }, flat(srgb('#6E4416')), 'matte', 0, 0);
     for (const sx of [-1, 1]) {
       const cx = sx * inW * 0.25, bw2 = inW * 0.4, bd2 = inD * 0.74;
       for (const [x, z, w, d] of [[cx, bd2 / 2, bw2, 0.05], [cx, -bd2 / 2, bw2, 0.05], [cx + bw2 / 2, 0, 0.05, bd2], [cx - bw2 / 2, 0, 0.05, bd2]] as const) {

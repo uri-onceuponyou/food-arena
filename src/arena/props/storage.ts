@@ -70,15 +70,30 @@ export function buildFreezerSized(M: Materials, wM: number, dM: number): THREE.G
   for (const [x, z, w, d] of [[0, pd / 2 - pT / 2, pw, pT], [0, -pd / 2 + pT / 2, pw, pT], [pw / 2 - pT / 2, 0, pT, pd - pT * 2], [-pw / 2 + pT / 2, 0, pT, pd - pT * 2]] as const) {
     kg.add(chamferBox(w, pH, d, 0.04, { noVEdges: true }), { x, y: bodyTop, z }, paint(trim, val(trim, 0.86)), 'gloss', bodyTop, 0.4);
   }
-  // two raised standing seams across the roof, either side of the condenser
+  // two raised standing seams across the roof, either side of the condenser — a value step
+  // DARKER than the roof so they read as seams at 58 deg, not as a sheen
   for (const sxf of [0.145, 0.44]) {
-    kg.add(chamferBox(0.12, 0.06, pd - pT * 2, 0.02, { noVEdges: true }), { x: wM * sxf, y: bodyTop }, paint(val(roof, 1.08), val(roof, 0.8), val(roof, 1.2)), 'gloss', 0, 0);
+    kg.add(chamferBox(0.14, 0.07, pd - pT * 2, 0.02, { noVEdges: true }), { x: wM * sxf, y: bodyTop }, paint(val(roof, 0.84), val(roof, 0.72), val(roof, 1.05)), 'gloss', 0, 0);
   }
+  // roof furniture, so the largest top in the arena is not one plane: an access hatch, two
+  // mushroom vents (LIGHT caps — a dark disc on this roof was once read as a burner) and a
+  // conduit run from the upper box to the condenser
+  const hx = wM * 0.3, hz = -dM * 0.24;
+  kg.add(chamferBox(1.3, 0.16, 1.1, 0.05), { x: hx, y: bodyTop, z: hz }, paint(val(roof, 1.06), val(roof, 0.82), val(roof, 1.18)), 'gloss', bodyTop, 0.5);
+  kg.add(chamferBox(0.5, 0.06, 0.08, 0.02, { noVEdges: true }), { x: hx, y: bodyTop + 0.16, z: hz + 0.36 }, paint(KP.iron), 'matte', 0, 0);
+  for (const [vx, vz] of [[wM * 0.04, dM * 0.3], [-wM * 0.36, dM * 0.3]] as const) {
+    kg.add(chamferCyl(0.12, 0.42, 0.03, 10), { x: vx, y: bodyTop, z: vz }, paint(val(trim, 0.9), val(trim, 0.78)), 'gloss', bodyTop, 0.5);
+    kg.add(chamferCyl(0.3, 0.12, 0.05, 12), { x: vx, y: bodyTop + 0.42, z: vz }, paint(val(trim, 1.05), val(trim, 0.85), val(trim, 1.15)), 'gloss', 0, 0);
+  }
+  kg.add(chamferBox(wM * 0.44, 0.12, 0.14, 0.03, { noVEdges: true }), { x: wM * 0.06, y: bodyTop, z: dM * 0.08 }, paint(val(trim, 0.92), val(trim, 0.75)), 'gloss', bodyTop, 0.4);
   // the upper box, set back toward the -x/-z corner
   const uw = wM * 0.56, ud = dM * 0.6, uh = 1.15, ux = -wM * 0.16, uz = -dM * 0.16;
   skirt(kg, { x: ux, z: uz }, bodyTop, uw / 2, ud / 2, 0.35, roof, 'gloss', 0.35, 0, { x0: -pw / 2 + pT, x1: pw / 2 - pT, z0: -pd / 2 + pT, z1: pd / 2 - pT });
   block(kg, ux, bodyTop, uz, uw, uh - 0.12, ud, 0.07, paint(val(wall, 0.84), val(wall, 0.84)), 'gloss', { bands: [0.2, 0.5], aoK: 0.6 });
   kg.add(chamferBox(uw * 1.02, 0.12, ud * 1.02, 0.05), { x: ux, y: bodyTop + uh - 0.12, z: uz }, paint(roof, val(roof, KIT_SIDE), val(roof, KIT_EDGE)), 'gloss', 0, 0);
+  for (const f of [-0.2, 0.2]) {
+    kg.add(chamferBox(0.14, 0.07, ud * 0.98, 0.02, { noVEdges: true }), { x: ux + uw * f, y: bodyTop + uh, z: uz }, paint(val(roof, 0.84), val(roof, 0.72), val(roof, 1.05)), 'gloss', 0, 0);
+  }
   // the door on the front face: a recessed frame, the door leaf, handle, hinges, window
   const doorW = bw * 0.36, doorH = (bodyTop - capT - y0) * 0.8, fz = bd / 2;
   kg.add(chamferBox(doorW + 0.24, 0.07, doorH + 0.12, 0.025, { noVEdges: true }), { x: 0, y: y0 + doorH / 2 + 0.06, z: fz, rx: Math.PI / 2 }, paint(val(trim, 0.85)), 'gloss', 0, 0);
