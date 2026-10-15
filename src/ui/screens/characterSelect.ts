@@ -149,13 +149,23 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
       <div class="fa-panel chars-detail">
         <p class="fa-panel-title">Stats</p>
         <div class="chars-stats" data-el="stats"></div>
-        <div class="chars-level" data-el="level"></div>
         <p class="fa-panel-title">Abilities</p>
-        <div class="fa-scroll chars-abilities" data-el="abilities"></div>
+        <div class="chars-kit" data-el="kit" role="group" aria-label="Abilities"></div>
+        <div class="chars-kit-cap" data-el="kitcap" aria-live="polite"></div>
       </div>
     </div>
 
+    <!-- The LEVEL block lives in the action row, beside FIGHT, and not in the detail column.
+         r0 (shots/rv/r0/critics.json, 6 of 6 select critics on the scored 852x393 frame):
+         "the '1,590' on the Upgrade button runs past its edge and the 'Lettuce Fling' card is
+         cut off at the bottom". Both had one cause: '.chars-level' was 119 of the column's
+         281 px (42%) and its button was as wide as a 179 px column, so the price overflowed
+         by 2.5 px and the ability list got a 28-74 px window. In the action row the button is
+         sized to its own content (it cannot clip its price) and the column gets the height
+         back. The upgrade IS an action — a price you pay — so it belongs with the other one.
+         Measured: tools/tmp/u1_clip.mjs, C1 and C2. -->
     <footer class="chars-bottom">
+      <div class="chars-level" data-el="level"></div>
       <button class="fa-btn fa-btn--primary fa-btn--hero" type="button" data-el="fight">${icon('play')} Fight!</button>
     </footer>
 
@@ -170,7 +180,8 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
 
   const rosterEl = q<HTMLDivElement>('roster');
   const statsEl = q<HTMLDivElement>('stats');
-  const abilitiesEl = q<HTMLDivElement>('abilities');
+  const kitEl = q<HTMLDivElement>('kit');
+  const kitCapEl = q<HTMLDivElement>('kitcap');
   const heroHost = q<HTMLDivElement>('hero3d');
   const heroName = q<HTMLSpanElement>('heroname');
   const heroRarity = q<HTMLSpanElement>('herorarity');
@@ -332,20 +343,26 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
       <span class="chars-lv-gain"><span class="chars-lv-item">${icon('health')} +${nextHp - hp}</span
         ><span class="chars-lv-item">${icon('damage')} +${Math.round((nextDmg / dmg - 1) * 100)}%</span></span>`;
 
+    // A SLAB in the action row (see the footer's note in the template): badge | the two
+    // numbers the sim computes, with the next level's gain under them | the button, with
+    // the shortfall under it. Same runs, same order, same classes as the column version —
+    // only the axis moved — so `dc_guard`'s `.chars-lv-gain` fixtures still describe it.
     levelEl.innerHTML = `
-      <div class="chars-lv-head">
-        <span class="chars-lv-badge${maxed ? ' is-max' : ''}">Lv ${level}${maxed ? '' : ` / ${LEVEL_MAX}`}</span>
+      <span class="chars-lv-badge${maxed ? ' is-max' : ''}">Lv ${level}${maxed ? '' : ` / ${LEVEL_MAX}`}</span>
+      <span class="chars-lv-read">
         <span class="chars-lv-now"><span class="chars-lv-item">${icon('health')} ${hp} HP</span
           ><span class="chars-lv-item">${icon('damage')} x${dmg.toFixed(2)}</span></span>
-      </div>
-      ${gain}
-      <button class="ds-btn ds-btn--block chars-lv-btn" type="button" data-el="upgrade"${maxed || !affordable ? ' disabled' : ''}>${
-        maxed
-          ? `${icon('star')} Max level`
-          : `${icon('sparkle')} Upgrade <span class="chars-lv-price">${icon('coin')} ${price.coins.toLocaleString()}</span>`
-      }</button>
-      ${maxed || affordable ? '' : `<span class="chars-lv-short">${
-        (price.coins - ctx.profile.coins).toLocaleString()} more coins needed</span>`}
+        ${gain}
+      </span>
+      <span class="chars-lv-act">
+        <button class="ds-btn chars-lv-btn" type="button" data-el="upgrade"${maxed || !affordable ? ' disabled' : ''}>${
+          maxed
+            ? `${icon('star')} Max level`
+            : `${icon('sparkle')} Upgrade <span class="chars-lv-price">${icon('coin')} ${price.coins.toLocaleString()}</span>`
+        }</button>
+        ${maxed || affordable ? '' : `<span class="chars-lv-short">${
+          (price.coins - ctx.profile.coins).toLocaleString()} more coins needed</span>`}
+      </span>
     `;
   }
 
@@ -361,6 +378,11 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
     // button), which a critic flagged — a state that needs saying three times is
     // being said badly once.
   }
+
+  /** The open ability tile, and which fighter it was opened on — a swap starts at the
+   *  first ability, a re-render of the same fighter (a profile change) keeps the tap. */
+  let kitIndex = 0;
+  let kitFor: CharacterId | null = null;
 
   function view(id: CharacterId, scrollIntoView = false): void {
     viewed = id;
@@ -381,58 +403,110 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
       statVals.get(row.key)!.textContent = String(def.stats[row.key]);
     }
 
-    abilitiesEl.innerHTML = '';
-    // Abilities are the prose; weapons are the numbers. They are two views of the
-    // same thing, so pairing them turns a flavour list into a readout you can
-    // actually pick a fighter with — and it is what fills the detail panel instead
-    // of leaving half of it empty.
-    //
-    // ⚠️ THE OLD JOIN IS KEPT HERE WITH ITS REASON, because the reason was the bug:
-    //
-    // > `const weapon = def.weapons.find((w) => w.name === ability.name);`
-    // > *"…and `rules.ts` names them identically, so pairing them…"*
-    //
-    // It named the load-bearing assumption out loud — the two arrays agreed **by
-    // convention**, with nothing in the type system or in any gate holding them
-    // together. `AbilityBlurb.weapon` is now a declared key into this character's own
-    // `weapons[]`, `abilityCards()` performs the join once, and this screen no longer
-    // touches `def.weapons` at all. Identical output on all 34 rows (33 joined + Donut's
-    // passive), proven by rendering both arms — `tools/tmp/wj_render.mjs`.
-    for (const ability of abilityCards(def)) {
-      const weapon = ability.weapon;
-      const pill = el('div', 'chars-ability');
-      pill.innerHTML = `
-        <span class="chars-ability-em">${abilityIcon(ability.emoji)}</span>
-        <span class="chars-ability-body">
-          <span class="chars-ability-name">${ability.name}</span>
-          <span class="chars-ability-desc">${ability.desc}</span>
-          ${weapon ? `<span class="chars-ability-facts">${
-            weaponFacts(weapon).map((f) => `<span class="chars-fact">${f}</span>`).join('')
-          }</span>` : ''}
-        </span>
-      `;
-      abilitiesEl.appendChild(pill);
-    }
-    // Donut's Sticky Trail is a passive with no weapon slot; it is already in the
-    // ability list, but the trail flag is the one gameplay property a player cannot
-    // infer from the abilities alone, so it gets called out.
-    if (def.hasTrail) {
-      const note = el('div', 'chars-ability chars-ability--passive');
-      note.innerHTML = `
-        <span class="chars-ability-em">${icon('honey')}</span>
-        <span class="chars-ability-body">
-          <span class="chars-ability-name">Passive</span>
-          <span class="chars-ability-desc">Leaves a damaging speed-boost trail while moving.</span>
-        </span>
-      `;
-      abilitiesEl.appendChild(note);
-    }
-    abilitiesEl.scrollTop = 0;
+    if (id !== kitFor) { kitIndex = 0; kitFor = id; }
+    renderKit();
 
     stage.show(id);
     renderEquippedState();
     renderLevel();
   }
+
+  /**
+   * ═════════════════════════════════════════════════════════════════════════════
+   * THE ABILITIES, AS A KIT — tiles you press, and one caption for the one you pressed
+   * ═════════════════════════════════════════════════════════════════════════════
+   *
+   * WAS a scrolling list of full rows (icon, name, description, fact pills), one per
+   * ability. Its own CSS stated the contract it was built to: "THE FIRST ABILITY IS WHOLE
+   * AT EVERY VIEWPORT ... a partially visible second row is itself the affordance that
+   * says there is more." That contract is what r0's critics scored: 5 of 6 select sheets
+   * named the half-row as a defect ("the second ability card ('Lettuce Fling') is sliced
+   * off mid-text"), on the scored 852x393 frame. The affordance read as a rendering fault.
+   *
+   * And no row list can be made to fit there: most of the cast's descriptions run 60-180
+   * characters and Donut renders six rows, in a column ~180 px wide and ~250 px tall on a
+   * notched landscape phone. So this is `home.ts`'s kit, which already solved the same
+   * budget on the same phone: every ability is a TILE that is always whole, and the one
+   * you pressed is spelled out in a caption under them. `home.ts` also recorded why rows
+   * were wrong on a brawler's lobby at any size ("four white rows of identical width ...
+   * reads as a spreadsheet"), and this screen was the second copy of that spreadsheet.
+   *
+   * Nothing is dropped: every name, description and fact pill is still on the screen,
+   * one ability at a time. When the caption cannot fit (a 180-character special on the
+   * smallest phone) it SCROLLS behind a visible fade (`.is-clipped`) instead of being cut.
+   *
+   * Abilities are the prose; weapons are the numbers — the pairing below is unchanged.
+   */
+  function renderKit(): void {
+    const def = CHARACTERS[viewed];
+    const cards = abilityCards(def);
+    const entries: Array<{ name: string; desc: string; em: string; weapon: Weapon | null; passive: boolean }> =
+      cards.map((ability) => ({
+        name: ability.name,
+        desc: ability.desc,
+        em: abilityIcon(ability.emoji),
+        weapon: ability.weapon,
+        passive: !ability.weapon,
+      }));
+    // Donut's Sticky Trail is a passive with no weapon slot. The row list ALSO appended a
+    // separate "Passive" note restating it, because "the trail flag is the one gameplay
+    // property a player cannot infer from the abilities alone". The card without a weapon
+    // now carries a PASSIVE tag instead of a duplicate tile; a trail with no such card
+    // still gets its own tile, so the flag can never go unstated.
+    if (def.hasTrail && !entries.some((e) => e.passive)) {
+      entries.push({ name: 'Passive', desc: 'Leaves a damaging speed-boost trail while moving.', em: icon('honey'), weapon: null, passive: true });
+    }
+    if (kitIndex >= entries.length) kitIndex = 0;
+    kitEl.dataset.n = String(entries.length);
+    kitEl.style.setProperty('--chars-kit-cols', String(entries.length <= 4 ? entries.length : 3));
+    kitEl.innerHTML = entries.map((e, i) => `
+      <button class="chars-abl${i === kitIndex ? ' is-on' : ''}" type="button" data-abl="${i}"
+              aria-pressed="${i === kitIndex}" aria-label="${e.name}">
+        <span class="chars-abl-em">${e.em}</span>
+        <span class="chars-abl-name">${e.name}</span>
+      </button>`).join('');
+    const picked = entries[kitIndex];
+    kitCapEl.innerHTML = picked ? `
+      <span class="chars-abl-head">
+        <span class="chars-abl-capname">${picked.name}</span>
+        ${picked.passive ? '<span class="chars-abl-tag">Passive</span>' : ''}
+      </span>
+      <span class="chars-abl-desc">${picked.desc}</span>
+      ${picked.weapon ? `<span class="chars-ability-facts">${
+        weaponFacts(picked.weapon).map((f) => `<span class="chars-fact">${f}</span>`).join('')
+      }</span>` : ''}` : '';
+    kitCapEl.scrollTop = 0;
+    markCaptionClip();
+  }
+
+  /** Fade the caption's bottom edge only while it actually overflows — a fade on text that
+   *  fits would be a lie about there being more. Needs layout, so it is re-run on resize. */
+  function markCaptionClip(): void {
+    const over = kitCapEl.scrollHeight - kitCapEl.clientHeight > 1;
+    kitCapEl.classList.toggle('is-clipped', over);
+  }
+
+  kitEl.addEventListener('click', (ev) => {
+    const tile = (ev.target as HTMLElement).closest<HTMLElement>('[data-abl]');
+    if (!tile) return;
+    const i = Number(tile.dataset.abl);
+    if (!Number.isInteger(i) || i === kitIndex) return;
+    kitIndex = i;
+    renderKit();
+  });
+
+  // ⚠️ THE OLD JOIN IS KEPT HERE WITH ITS REASON, because the reason was the bug:
+  //
+  // > `const weapon = def.weapons.find((w) => w.name === ability.name);`
+  // > *"…and `rules.ts` names them identically, so pairing them…"*
+  //
+  // It named the load-bearing assumption out loud — the two arrays agreed **by
+  // convention**, with nothing in the type system or in any gate holding them
+  // together. `AbilityBlurb.weapon` is now a declared key into this character's own
+  // `weapons[]`, `abilityCards()` performs the join once, and this screen no longer
+  // touches `def.weapons` at all. Identical output on all 34 rows (33 joined + Donut's
+  // passive), proven by rendering both arms — `tools/tmp/wj_render.mjs`. (That tool
+  // renders the RETIRED row markup; `renderKit` above reads the same `abilityCards()`.)
 
   q<HTMLButtonElement>('back').addEventListener('click', () => ctx.navigate({ name: 'home' }));
 
@@ -497,12 +571,20 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
   view(viewed);
   stage.attachTo(heroHost);
 
+  // The caption's overflow can only be known with layout, and the first `view()` runs
+  // before `shell.ts:mount` appends this root (every box is 0x0 then — the same trap
+  // `home.ts:positionKitCaret` documents). Observing the caption covers mount, window
+  // resizes AND layout-only changes such as a safe-area inset, which fire no resize event.
+  const capObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => markCaptionClip()) : null;
+  capObserver?.observe(kitCapEl);
+
   return {
     root,
     update(dt) { stage.update(dt); },
-    resize() { stage.resize(); },
+    resize() { stage.resize(); markCaptionClip(); },
     dispose() {
       unsubscribe();
+      capObserver?.disconnect();
       stage.detach();
       root.remove();
     },
@@ -512,12 +594,16 @@ export function createCharacterSelectScreen(ctx: ScreenContext): Screen {
 const CSS = `
 .fa-chars .chars-heading { flex: 0 1 auto; }
 
+/* The detail column's floor is 200 px and not 168: it now carries the ability KIT, and
+   four 44 px tap targets plus three 3 px gaps (185) plus the panel's padding and ink
+   line (2 x 4 + 2 x 3 on a short screen) is 199. A 168-179 px column cannot hold four
+   tiles at the tap floor, which is the same arithmetic that cut the price at 852x393. */
 .fa-chars .chars-body {
   display: grid;
   grid-template-columns:
     clamp(150px, 25vw, 430px)
     minmax(0, 1fr)
-    clamp(168px, 21vw, 330px);
+    clamp(200px, 21vw, 330px);
   gap: var(--gap);
   min-height: 0;
 }
@@ -878,21 +964,38 @@ const CSS = `
    rarity onto the node fill that already carried claim state.
 
    Every colour here is ink-on-cream or ink-on-gold: this panel is the one place on the
-   screen a PRICE is stated, and a price that fails AA is a price the player disputes. */
+   screen a PRICE is stated, and a price that fails AA is a price the player disputes.
+
+   ⚠️ IT IS A SLAB IN THE ACTION ROW NOW, NOT A BLOCK IN THE DETAIL COLUMN. WAS:
+   'display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border: 2px solid
+   rgba(26,18,36,0.22); background: rgba(255,255,255,0.5)' inside '.chars-detail', where it
+   was 119 of the column's 281 px at 852x393 and its button was column-wide — 'u1_clip' C1
+   measured the price 2.5 px past the button's own ink line there. Here the button is sized
+   to its content and the slab sits left of FIGHT, in the row that was empty but for it. */
 .fa-chars .chars-level {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px 8px;
-  border: var(--ds-stroke-1) solid rgba(26,18,36,0.22);
-  border-radius: var(--ds-r-2);
-  background: rgba(255,255,255,0.5);
-}
-.fa-chars .chars-lv-head {
+  margin-inline-end: auto;
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: var(--ds-s3);
+  min-width: 0;
+  padding: 3px 4px 3px 8px;
+  background: var(--panel);
+  border: var(--ds-stroke-2) solid var(--ink);
+  border-radius: var(--ds-r-3);
+  box-shadow: var(--ds-e3);
+}
+.fa-chars .chars-lv-read {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.fa-chars .chars-lv-act {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  flex: 0 0 auto;
 }
 .fa-chars .chars-lv-badge {
   flex: 0 0 auto;
@@ -949,6 +1052,7 @@ const CSS = `
   padding: 0 var(--ds-s4);
   letter-spacing: var(--ds-track-tight);
   text-transform: none;
+  flex: 0 0 auto;
 }
 /* A disabled upgrade keeps FULL ink contrast and loses only its lift and its fill.
    The usual 0.5 layer opacity would drop the price below AA, and a price is the last
@@ -1012,27 +1116,101 @@ const CSS = `
    now sit in is a DARK slate plate. Reusing it to keep a class list tidy would have
    shipped dark ink on a dark ground -- 'docs/LESSONS.md' §1 case 10, for the third time
    in this repo. See '.chars-stat' below for what replaced all of it. */
-.fa-chars .chars-abilities { display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+/* ── The kit: tiles you press, one caption for the one pressed ─────────────────
+   WAS a '.chars-abilities' scroller of '.chars-ability' rows (icon | name, description,
+   fact pills), whose contract was "the FIRST ability is whole at every viewport" — the
+   half-cut second row it left on the scored phone frame is what 5 of 6 r0 critics named.
+   See 'renderKit' for the measurement and for why no row list fits that column.
 
-.fa-chars .chars-ability {
+   Columns come from the COUNT, not from auto-fit: auto-fit puts four tiles 3 + 1 in a
+   247 px column and leaves the ragged cell a critic already named a defect on home. One
+   row for up to four abilities; five go 3 + 2 on a six-track grid so both rows are full. */
+.fa-chars .chars-kit {
+  display: grid;
+  grid-template-columns: repeat(var(--chars-kit-cols, 4), minmax(0, 1fr));
+  gap: var(--ds-s1);
+  flex: 0 0 auto;
+}
+.fa-chars .chars-kit[data-n="5"] { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.fa-chars .chars-kit[data-n="5"] .chars-abl { grid-column: span 2; }
+.fa-chars .chars-kit[data-n="5"] .chars-abl:nth-child(n+4) { grid-column: span 3; }
+.fa-chars .chars-abl {
+  appearance: none;
+  cursor: pointer;
   display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  padding: 5px 8px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: var(--tap);
+  padding: 4px 3px;
+  color: var(--ink);
+  background: linear-gradient(180deg, #FFFFFF 0%, #F1DFC0 100%);
+  border: var(--ds-stroke-1) solid var(--ink);
+  border-radius: var(--ds-r-2);
+  box-shadow: var(--ds-e2), var(--ds-bevel);
+  transition: transform 0.08s, box-shadow 0.08s;
+}
+.fa-chars .chars-abl:hover { filter: brightness(1.04); }
+.fa-chars .chars-abl:active { transform: translateY(3px); box-shadow: var(--ds-e0), var(--ds-bevel); }
+/* Selected = the GET colour, exactly as on home's kit, so "the one you are reading" is the
+   same signal on both screens. */
+.fa-chars .chars-abl.is-on {
+  background: linear-gradient(180deg, var(--mustard-hi) 0%, var(--mustard) 100%);
+  --ds-lip: var(--gold-shadow);
+}
+.fa-chars .chars-abl-em { font-size: var(--ds-t5); line-height: 1; flex: 0 0 auto; }
+.fa-chars .chars-abl-name {
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-bold);
+  font-size: var(--ds-t1);
+  line-height: 1.1;
+  text-align: center;
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+/* The caption. Content-sized; it may SHRINK below its content (min-height 0) and then
+   scrolls — and only then does it carry the fade ('.is-clipped', set from JS when it
+   actually overflows), so the edge says "there is more" instead of cutting a line. */
+.fa-chars .chars-kit-cap {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px 7px;
   background: #FFFFFF;
   border: var(--ds-stroke-1) solid var(--ink);
   border-radius: var(--ds-r-2);
 }
-.fa-chars .chars-ability--passive { background: #FFF0CF; }
-.fa-chars .chars-ability-em { font-size: var(--ds-t6); line-height: 1.2; flex: 0 0 auto; }
-.fa-chars .chars-ability-body { display: flex; flex-direction: column; min-width: 0; }
-.fa-chars .chars-ability-name {
-  font-family: 'Rubik', sans-serif;
-  font-weight: var(--ds-w-bold);
-  font-size: var(--ds-t3);
-  line-height: 1.22;
+.fa-chars .chars-kit-cap::-webkit-scrollbar { display: none; }
+.fa-chars .chars-kit-cap.is-clipped {
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(180deg, #000 calc(100% - 22px), transparent);
 }
-.fa-chars .chars-ability-desc {
+.fa-chars .chars-abl-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.fa-chars .chars-abl-capname {
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-black);
+  font-size: var(--ds-t3);
+  line-height: 1.15;
+}
+.fa-chars .chars-abl-tag {
+  padding: 0 6px;
+  border-radius: var(--ds-r-pill);
+  background: var(--mustard);
+  border: var(--ds-stroke-1) solid var(--ink);
+  font-family: 'Rubik', sans-serif;
+  font-weight: var(--ds-w-black);
+  font-size: var(--ds-t1);
+  letter-spacing: var(--ds-track);
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+.fa-chars .chars-abl-desc {
   font-size: var(--ds-t2);
   line-height: 1.3;
   color: #4E2C1B;
@@ -1167,6 +1345,14 @@ const CSS = `
      and that is what scrolling means. A metric that cannot be satisfied is not a metric.
      What must never happen again is the FIRST row being sliced, because a partially
      visible second row is itself the affordance that says there is more. */
+  /* 🔴 REVERSED (graphics campaign U1, 2026-10-15) — the wording above is kept because it
+     was a reasoned contract, and the blind round is what refuted it. On the scored 852x393
+     frame 5 of 6 r0 critics wrote that "the second ability card ('Lettuce Fling') is cut
+     off at the bottom": the "affordance" read as the same rendering fault the 28 px window
+     did. 'tools/tmp/u1_clip.mjs' C2 on the base tree: 9 of 11 fighters CUT a row at
+     852x393 (Lettuce Fling by 74.5 px). The list is now the KIT ('renderKit'): every tile
+     whole at every viewport, and the one long caption that cannot fit scrolls behind a
+     fade rather than being sliced. The level block no longer lives in this panel. */
   /* The three bars below it are each labelled "Damage" / "Health" / "Speed" in 11px
      ink. A section header that repeats what its own contents already say is the
      cheapest 20px on the panel. The ABILITIES title stays — the pills below it are not
@@ -1217,13 +1403,15 @@ const CSS = `
      Re-ordering it would therefore ship a 1px horizontal gap that no author asked for.
      Deleted; the reasoning is kept here because the next reader will see 'dc_guard''s
      fault disappear and wonder which way it was fixed. */
-  .fa-chars .chars-level { padding: 2px 6px; gap: 2px; }
-  .fa-chars .chars-abilities { gap: 4px; }
-  .fa-chars .chars-ability-desc { line-height: 1.25; }
-  /* 2px and not 3: at 852x393 the region came out 68px against a 69.34px row, so the
-     first row's own 2.5px ink BORDER was still shaved by 1.34px while every text metric
-     read clear. The acceptance test is the row's BOX for that reason. */
-  .fa-chars .chars-ability { padding: 1px 6px; gap: 6px; }
+  /* WAS four rules here tuning the retired ability ROWS and the level block's in-column
+     padding to the pixel ('.chars-level { padding: 2px 6px; gap: 2px }', '.chars-abilities
+     { gap: 4px }', '.chars-ability-desc { line-height: 1.25 }', '.chars-ability { padding:
+     1px 6px; gap: 6px }' — "2px and not 3: at 852x393 the region came out 68px against a
+     69.34px row"). A list tuned to clear its FIRST row by a pixel is the design r0 scored;
+     the level block left the column and the rows became the kit, so none has a target. */
+  .fa-chars .chars-level { padding: 2px 3px 2px 6px; gap: var(--ds-s2); }
+  .fa-chars .chars-abl-desc { line-height: 1.25; }
+  .fa-chars .chars-kit-cap { padding: 4px 6px 5px; gap: 2px; }
   /* The fact pills wrapped to two lines inside a 129px body and were worth ~21px of the
      first row on their own. Tighter pills, not smaller type: 10.24px is already the
      floor here and 'screen_metrics' judges these on contrast, which shrinking would
@@ -1297,6 +1485,12 @@ const CSS = `
      firing, and a truncated label is the D2 defect this screen already fixed once. */
   .fa-chars .chars-stat .ds-row-label { letter-spacing: var(--ds-track-tight); }
   .fa-chars .chars-stat .ds-row-val { font-size: var(--ds-t4); }
+  /* ICON-ONLY tiles on a short screen, exactly as home's kit does on the same phones: a
+     185 px row holds four 44 px tap targets, not four names. The caption below states the
+     name of the one pressed, so no ability is unnamed on screen. */
+  .fa-chars .chars-abl-name { display: none; }
+  .fa-chars .chars-abl { padding: 2px; }
+  .fa-chars .chars-abl-em { font-size: var(--ds-t6); }
 }
 
 /* ── AND THE NOTCHED LANDSCAPE PHONE PAYS FOR THE BAND OUT OF THE BAND ─────────
@@ -1333,12 +1527,64 @@ const CSS = `
 }
 
 @media (max-width: 700px) {
+  /* ── PORTRAIT: HERO | DETAIL ON TOP, THE WHOLE ROSTER UNDER THEM ──────────────────
+     WAS one column of three rows — 'grid-template-rows: minmax(90px, 0.9fr) minmax(0,
+     1.1fr) auto' with '.chars-detail { max-height: 34vh }'. Measured at 390x844 on the
+     base tree ('u1_shots'): the hero in a 366x165 letterbox at ~65 px tall, the roster cut
+     through its second row, and the abilities sliced after one ('u1_clip' C2: every
+     fighter, every portrait viewport). Uri plays this screen in portrait.
+     Side by side, the hero gets a TALL box — its own shape — and the detail column gets
+     the height the kit needs; the roster below holds all three rows of four, so no card is
+     cut. The rows' 12vh floor is a landscape number (101 px at 844 tall, i.e. 303 px of
+     cards before a gap); 9.5vh keeps the tap target and returns ~60 px to the hero. */
   .fa-chars .chars-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(90px, 0.9fr) minmax(0, 1.1fr) auto;
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: "hero detail" "roster roster";
   }
-  .fa-chars .chars-detail { max-height: 34vh; }
+  .fa-chars .chars-hero { grid-area: hero; }
+  .fa-chars .chars-detail { grid-area: detail; align-self: stretch; max-height: none; }
+  .fa-chars .chars-rosterwrap { grid-area: roster; }
+  /* FIXED rows, not minmax(.., 1fr): in an auto-height row a 1fr track resolves to the
+     cards' content height (measured ~118 px), which handed the roster ~100 px the hero
+     and the kit's caption needed. 12 cards, 3 rows of 4, all whole. */
+  .fa-chars .chars-roster { grid-auto-rows: clamp(68px, 9.5vh, 100px); }
+  .fa-chars .chars-card { min-height: 0; }
+  /* ~80 px cards, the landscape phone's size, so the landscape phone's answer: the rarity
+     CHIP goes and the 2 px rarity RING on the gloss carries the six-way distinction (see
+     "THE RING IS WHAT PAYS FOR DROPPING THE CHIP" in the max-height 460 block — the same
+     two rules). Measured need: "LEGENDARY" at the 11 px floor with the tracking its 1.6 px
+     ink stroke requires is ~84 px of chip in a ~72 px card; it rendered "EGENDARY". The
+     roster's padding and gaps tighten so the longest name, "Water Bottle", fits whole. */
+  .fa-chars .chars-card-rarity { display: none; }
+  .fa-chars .chars-card:not(.chars-card--locked) .chars-card-gloss {
+    box-shadow: inset 0 0 0 2px var(--rarity, transparent);
+  }
+  .fa-chars .chars-roster { padding: 6px; gap: 4px; }
+  .fa-chars .chars-card { padding: 4px 2px 5px; }
+  /* The hero name runs at the landscape title size (3.1vh = 26 px) in a ~170 px panel and
+     was cut by it ("Hamburgei"). One ramp step that holds "Water Bottle", the longest. */
+  .fa-chars .chars-hero-name { font-size: var(--ds-t5); }
   .fa-chars .chars-heading { display: none; }
+  /* The detail column is ~180 px wide here: the kit goes two-up, icon-only (the caption
+     names the pressed one), and the section titles go — the stat cells and the tiles are
+     self-describing at this size, exactly as on the short landscape phone. */
+  .fa-chars .chars-detail > .fa-panel-title { display: none; }
+  .fa-chars .chars-detail { padding: 6px; gap: 6px; }
+  .fa-chars .chars-kit { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fa-chars .chars-kit[data-n="5"] { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  .fa-chars .chars-abl-name { display: none; }
+  .fa-chars .chars-abl-em { font-size: var(--ds-t6); }
+  .fa-chars .chars-kit[data-n="3"] .chars-abl:last-child { grid-column: 1 / -1; }
+  /* The hero panel is ~170 px wide here, so a top-right Equip and a top-left nameplate
+     meet in the middle. Equip moves to the panel's foot, full width — still on the hero,
+     which is where the note on '.chars-equip' says it belongs. */
+  .fa-chars .chars-equip {
+    top: auto;
+    bottom: 8px;
+    inset-inline: 8px;
+    justify-content: center;
+  }
   /* ── THE STAT BAND GOES ACROSS HERE TOO, AND 'chars_metrics' IS WHAT SAID SO ──
      Portrait caps this panel at 34vh = 317px, and the tall '.ds-row' form is three 56px
      slabs plus gaps = ~180px of it. With the level block at ~100 and two section titles
@@ -1374,7 +1620,11 @@ const CSS = `
      "Hamburger" to "Hambu...". Sizing it off the card instead of off the viewport is
      not something CSS can express, so the ramp step is simply shorter here — 12.1px,
      still over the 11px floor and still a step above the rarity chip below it. */
-  .fa-chars .chars-card-name { font-size: var(--ds-t2); }
+  /* ⚠️ AND NOW THE FLOOR STEP: WAS 'var(--ds-t2)'. The portrait cards are ~80 px since the
+     roster went three rows under a hero | detail row (block head), and t2 ellipsised
+     "Hamburg..." and "Water Bo..." there. t1 is the 11 px floor; the chip it had to stay a
+     step above is not drawn at this size any more (see the ring above). */
+  .fa-chars .chars-card-name { font-size: var(--ds-t1); letter-spacing: 0; }
   /* TOP-LEFT here, bottom-centre everywhere else, and the reason is the panel's shape
      rather than a preference. In portrait the hero row is ~380px tall against a full
      column's ~740, and the rig frames the subject to a fraction of the panel HEIGHT —
@@ -1394,5 +1644,15 @@ const CSS = `
   /* The bottom scrim was there for a bottom-centred plate. With the plate at the top it
      is darkening a corner of the set for nothing. */
   .fa-chars .chars-hero-vignette { background: none; }
+  /* The ACTION ROW WRAPS here: badge + readouts + the Upgrade button need ~290 px and FIGHT
+     ~150, against 340 at 360 px wide. The slab takes the first line and FIGHT the second,
+     both full width — portrait has the height, and a full-width CTA is the portrait norm. */
+  .fa-chars .chars-bottom { flex-wrap: wrap; row-gap: var(--ds-s2); }
+  .fa-chars .chars-level { flex: 1 1 100%; margin-inline-end: 0; }
+  .fa-chars .chars-lv-read { flex: 1 1 auto; }
+  /* Full width and 60 px rather than the 9.5vh (78 px at 844 tall) the landscape CTA uses:
+     a full-width slab is already the loudest object on a portrait screen, and the 18 px go
+     to the hero. */
+  .fa-chars .chars-bottom > .fa-btn--hero { flex: 1 1 100%; min-height: 60px; }
 }
 `;
