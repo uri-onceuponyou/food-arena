@@ -488,12 +488,34 @@ export function applyDamage(
       // press opportunities: if ANY damage cancelled, only 24.8% of ultimates would
       // survive a 900 ms wind-up — three in four dying on a 3.5 s cooldown, which is a
       // dead button, not counterplay. Stun-only leaves 84.1%. The gap is 59.3 pp against
-      // a ±2.86 pp floor. Parked as `DECISIONS §74(a)` with stun-only IN FORCE.
+      // a ±2.86 pp floor. Stun-only is IN FORCE.
+      //
+      // ⚠️ THIS SAID *"Parked as `DECISIONS §74(a)`"* AND THAT CITATION IS DEAD — kept so the
+      // next reader does not go looking. `DECISIONS §74` is Uri's 2026-08-12 answer about the
+      // phone and the six-seat lobby; it has no (a), and no section of that file records the
+      // stun-only interrupt. The decision is real and measured (above); its parking entry was
+      // never written. Found 2026-10-15 by the B3 sweep (BH-06's verifiers), reported.
       //
       // The cooldown is NOT refunded: `lastUsed[]` was stamped at the press and stays
       // stamped, exactly as a melee swing that misses stays spent.
       if (target.cast !== null) {
         cancelCast(target, 'stun', events);
+      }
+      // ── AND IT KILLS AN *ITEM* WIND-UP TOO — `state.ts:ItemCast`'s contract ────────
+      //
+      // That record promised, from the item system's first commit, to share *"cancellation
+      // on the two terminators that kill a weapon cast (an applied stun, and death)"*, and
+      // `item-cancelled.reason` has carried `'stun'` all along. This line is the one that was
+      // never written: `cancelItemCast` had a `'death'` site and a `'sleep'` site and no
+      // `'stun'` one, so a stunned Shiitake wearer finished its 2.5 s wind-up on schedule —
+      // 4 of 6 measured wind-ups went off WHILE STILL STUNNED (BH-06) — and the counterplay
+      // `ITEMS.shiitake.look` is built on (*"that is what makes it counterable"*) did not exist.
+      //
+      // ⚠️ INSIDE this `stunMs > 0` guard for the reason the weapon cancel above is: a
+      // grace-refused stun is not a stun, and a cancel placed beside the `hit-landed` event
+      // would kill wind-ups on stuns that never happened. §42(a) plants exactly that.
+      if (target.itemCast !== null) {
+        cancelItemCast(target, 'stun', events);
       }
     }
   }

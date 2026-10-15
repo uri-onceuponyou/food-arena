@@ -11215,6 +11215,128 @@ console.log('\n39. Weapons can move you — displacement, per weapon and absent 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 42. LOADOUT ITEMS — THE BEHAVIOUR (§41 is the contract, §43 the bot, §44 the press)
+//
+// 🚨 THIS SECTION WAS CITED BEFORE IT EXISTED. `combat.ts` named "§42" at seven sites in the
+// present tense — *"§42 asserts…"*, *"§42 plants exactly that…"* — and `state.ts` and
+// `movement.ts` once each, for rows nobody had written; §43's header recorded the gap and left
+// it to "the sim track". The B3 bug sweep (`docs/REVAMP.md` §5, 2026-10-15) is the sim track,
+// and it opens the section with the rows its bugs needed. **Every 🔴 row below went RED on
+// `4dbf937` before the fix it guards landed**, and the commit that landed each fix carries the
+// failing value — a guard that has not failed on its bug is not a guard.
+//
+// Every seat is HUMAN unless a row says otherwise, so an idle input keeps the board still and
+// "who was hit" is never confounded with what a bot chose to do that tick.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n42. Loadout items — the behaviour (the shield, the cloud, the revive, the loadout gate)');
+{
+  const DT = 1000 / 60;
+  const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+  const ITEM_ARENA = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+  /** `n` HUMAN seats on clear floor, 300 wu apart on one row, PLAYING. `opts.items[i]` per seat. */
+  const seats = (n, opts = {}) => {
+    const st = createMatch(ITEM_ARENA, Array.from({ length: n }, (_, i) => ({
+      characterId: opts.chars?.[i] ?? 'hamburger',
+      controller: 'human',
+      spawn: opts.spawns?.[i] ?? { x: 400 + i * 300, y: 600 },
+      ...(opts.items?.[i] ? { items: opts.items[i] } : {}),
+      ...(opts.level !== undefined ? { level: opts.level } : {}),
+    })));
+    st.phase = 'playing';
+    return st;
+  };
+  const idle = (st) => st.fighters.map(() => NEUTRAL);
+  const pressItem = (st, seat, slot) => {
+    const ins = idle(st);
+    ins[seat] = { ...NEUTRAL, useItem: slot };
+    return ins;
+  };
+  /** A real weapon source from `attackerId`'s own kit — the shape all three weapon sites build. */
+  const weaponSource = (st, attackerId, wi = 0) => {
+    const w = CHARACTERS[st.fighters[attackerId].characterId].weapons[wi];
+    return { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId };
+  };
+  const ofType = (evs, type) => evs.filter((e) => e.type === type);
+
+  // ── (a) 🔴 AN APPLIED STUN KILLS AN *ITEM* WIND-UP — BH-06 ──────────────────
+  //
+  // `state.ts:ItemCast` promised it from the item system's first commit: the record shares
+  // *"cancellation on the two terminators that kill a weapon cast (an applied stun, and
+  // death)"*, and `item-cancelled.reason` carries `'stun'`. Nothing emitted it —
+  // `cancelItemCast` had a `'death'` and a `'sleep'` call site and no `'stun'` one — so a
+  // stunned Shiitake wearer finished its 2.5 s wind-up on schedule, often WHILE STILL STUNNED,
+  // and the counterplay `ITEMS.shiitake.look` names (*"that is what makes it counterable"*) did
+  // not exist. Driven at BOTH seat counts: the terminator does not care, but a fix that only
+  // worked for the duel's slot 1 is a shape this file has paid for before.
+  for (const n of [MIN_FIGHTERS, MAX_FIGHTERS]) {
+    const windUp = () => {
+      const st = seats(n, { items: [['shiitake']] });
+      const evs = stepMatch(st, DT, pressItem(st, 0, 0));
+      return { st, wearer: st.fighters[0], used: ofType(evs, 'item-used') };
+    };
+    const { st, wearer, used } = windUp();
+    check(`(a) N=${n} NON-VACUITY: a real press opened a Shiitake WIND-UP — the record the stun has to kill`,
+      wearer.itemCast !== null && used.length === 1 && used[0].windupMs === ITEM_TUNING.shiitake.windupMs,
+      `itemCast ${JSON.stringify(wearer.itemCast)}, item-used ${JSON.stringify(used)}`);
+    const evs = [];
+    applyDamage(st, wearer, 1, 'stun', weaponSource(st, 1), evs);
+    const cancels = ofType(evs, 'item-cancelled');
+    check(`(a) N=${n} NON-VACUITY: the stun was APPLIED, not refused — the wearer is stunned`,
+      wearer.status.stunnedUntil > st.elapsed, `stunnedUntil ${wearer.status.stunnedUntil} vs elapsed ${st.elapsed}`);
+    check(`(a) N=${n} 🔴 an applied stun CANCELS the item wind-up: one item-cancelled{stun}, the record cleared`,
+      wearer.itemCast === null && cancels.length === 1 && cancels[0].reason === 'stun'
+      && cancels[0].itemId === 'shiitake' && cancels[0].fighterId === 0,
+      `itemCast ${JSON.stringify(wearer.itemCast)}, cancels ${JSON.stringify(cancels)}`);
+    const later = [];
+    for (let i = 0; i < Math.ceil(ITEM_TUNING.shiitake.windupMs / DT) + 5; i++) later.push(...stepMatch(st, DT, idle(st)));
+    check(`(a) N=${n} 🔴 …so it never goes off: no item-resolved, no shield, past the whole wind-up`,
+      ofType(later, 'item-resolved').length === 0 && wearer.item.shieldUntil === -Infinity,
+      `item-resolved ×${ofType(later, 'item-resolved').length}, shieldUntil ${wearer.item.shieldUntil}`);
+    // CONTROL: the identical wind-up with nobody touching it resolves on schedule, so the
+    // silence above is the stun and not a wind-up that never resolves anyway.
+    const ctl = windUp();
+    const ctlEvs = [];
+    for (let i = 0; i < Math.ceil(ITEM_TUNING.shiitake.windupMs / DT) + 5; i++) ctlEvs.push(...stepMatch(ctl.st, DT, idle(ctl.st)));
+    check(`(a) N=${n} CONTROL: the same wind-up, unstunned, resolves and raises the shield`,
+      ofType(ctlEvs, 'item-resolved').length === 1 && ctl.wearer.item.shieldUntil > ctl.st.elapsed,
+      `item-resolved ×${ofType(ctlEvs, 'item-resolved').length}, shieldUntil ${ctl.wearer.item.shieldUntil}`);
+  }
+  // A GRACE-REFUSED stun is not a stun — §33(g)'s rule for the weapon cast, and the cancel has
+  // to sit INSIDE `applyDamage`'s `statusReadyAt` guard for it to hold. Placed beside the
+  // `hit-landed` event instead, it would cancel on stuns that never happened, and nothing
+  // downstream could tell: both versions emit the same `item-cancelled`.
+  {
+    const st = seats(MIN_FIGHTERS, { items: [['shiitake']] });
+    stepMatch(st, DT, pressItem(st, 0, 0));
+    const wearer = st.fighters[0];
+    wearer.status.stunnedUntil = st.elapsed - 1;   // expired 1 ms ago: inside the grace window
+    const refusedAt = st.elapsed < statusReadyAt(wearer, 'stun');
+    const evs = [];
+    applyDamage(st, wearer, 1, 'stun', weaponSource(st, 1), evs);
+    check('(a) NON-VACUITY: the planted stun really is inside the grace window, so the sim REFUSES it',
+      refusedAt && wearer.status.stunnedUntil === st.elapsed - 1,
+      `readyAt ${statusReadyAt(wearer, 'stun')} vs elapsed ${st.elapsed}`);
+    check('(a) 🔴 a GRACE-REFUSED stun leaves the item wind-up OPEN — the cancel follows the stun, not the hit',
+      wearer.itemCast !== null && ofType(evs, 'item-cancelled').length === 0,
+      `itemCast ${JSON.stringify(wearer.itemCast)}, cancels ${ofType(evs, 'item-cancelled').length}`);
+  }
+  // A blow that both stuns and kills cancels with 'stun' — `applyDamage` writes the status
+  // before it tests for death — and the death terminator then finds nothing left to cancel.
+  // The same ordering `cast-cancelled`'s doc states for the weapon twin.
+  {
+    const st = seats(MAX_FIGHTERS, { items: [['shiitake']] });
+    stepMatch(st, DT, pressItem(st, 0, 0));
+    const wearer = st.fighters[0];
+    const evs = [];
+    applyDamage(st, wearer, wearer.hp + 50, 'stun', weaponSource(st, 1), evs);
+    const cancels = ofType(evs, 'item-cancelled');
+    check('(a) 🔴 a blow that STUNS AND KILLS reports the wind-up once, as \'stun\' — death finds it already gone',
+      !wearer.alive && cancels.length === 1 && cancels[0].reason === 'stun',
+      `alive ${wearer.alive}, cancels ${JSON.stringify(cancels.map((c) => c.reason))}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 43. THE BOT PRESSES THE SAME BUTTONS THE PLAYER DOES — `ai.ts`'s LOADOUT ITEMS block
 //
 // 🚨 THIS SECTION WAS CITED EIGHT TIMES BEFORE IT EXISTED, AND THAT IS THE FINDING.
