@@ -77,6 +77,11 @@ import {
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+// §45 imports `resolvePlaces` — the ONE ranking rule the payout and the result card share —
+// because its claim is that a knocked-out seat's place under THAT rule cannot move after the
+// knockout, and `match.ts` now banks on exactly that claim (META-02). A copy of the reverse-
+// elimination sort written here would keep passing against a resolver that had stopped using it.
+import { resolvePlaces } from './roster.ts';
 import {
   CHARACTERS, CHARACTER_IDS, PLAYER_MAX_HP, PLAYER_SIZE, PLAYER_SPEED, SLOW_MOVE_MULTIPLIER, FOG_DAMAGE, FOG_TICK_MS,
   MATCH_DURATION_MS, MIN_SAFE_RADIUS, ENEMY_MAX_HP, ENEMY_SIZE, POT, TRAIL,
@@ -11788,6 +11793,125 @@ console.log('\n44. The human item press reaches `attemptItem` through `stepMatch
     } catch (err) { threw = String(err); }
     check('(f) 🔴 Q and E with an EMPTY loadout: no throw, and 30 ticks bit-identical to never pressing',
       threw === null && same0 && same1, `threw ${threw}, slot0 identical ${same0}, slot1 identical ${same1}`);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 45. A KNOCKED-OUT SEAT'S PLACE IS FINAL AT THE KNOCKOUT — unless a revive is pending
+//
+// 🚨 `match.ts` NOW BANKS ON THIS (META-02). At three or more seats a knockout does not end
+// the match, and the result used to be banked only at the whistle — so a 5th or 6th could
+// Quit while spectating and keep every trophy (+84% trophies per match at 1,500, measured by
+// the review), and a 3rd who left threw the payout away. `GameSession.notifyLocalResult` now
+// reports the place on the first frame the local seat is down with the match still playing,
+// and the screen banks it there. That is only correct if `roster.ts:resolvePlaces` can never
+// MOVE a knocked-out seat afterwards, and this section pins exactly that, from the rule's side:
+//
+//   (b) through every later knockout to the whistle, the place does not move — and (c) a
+//       resolver with rung 3 inverted fails (b), so (b) is a statement about THAT rung;
+//   (d) WHEN in the tick it is asked matters: mid-batch, a seat that died later in the same
+//       tick is "dead but unaccounted" and ranks BELOW the local seat — one place too
+//       generous — which is why `match.ts` asks after the whole frame, never in `death`;
+//   (e) Leftovers is the one exception, and why the bank WAITS for it: with a revive pending
+//       the knocked-out seat can still stand up and win, so its place at the first knockout
+//       is not final. Once no revive is left, (b) holds again.
+//
+// Constructed knockouts (the sim's own `applyDamage`), not an AI corpus: the property is about
+// the RULE, and a six-seat corpus costs ~2.6 s a match here. The real-match corpus is
+// `tools/tmp/b1_ko_final.mjs` (all-AI, six and three seats, with this section's known-bad).
+// Two seats are vacuous by construction: a knockout ends a duel on the same tick.
+// ─────────────────────────────────────────────────────────────────────────────
+console.log('\n45. A knocked-out seat\'s place is final at the knockout (six seats; Leftovers excepted)');
+{
+  const arena = makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 });
+  const six = (items0) => {
+    const st = createMatch(arena, Array.from({ length: MAX_FIGHTERS }, (_, i) => ({
+      characterId: CHARACTER_IDS[i % CHARACTER_IDS.length],
+      controller: 'ai',
+      spawn: { x: 500 + i * 350, y: 500 + (i % 2) * 900 },
+      ...(i === 0 && items0 ? { items: items0 } : {}),
+    })));
+    st.phase = 'playing';
+    return st;
+  };
+  /** `match.ts`'s own tracking: one entry per `death` event, in emission order. */
+  const kill = (st, victim, killer, eliminated) => {
+    const evs = [];
+    const w = CHARACTERS[st.fighters[killer].characterId].weapons[0];
+    applyDamage(st, st.fighters[victim], 9999, null,
+      { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: killer }, evs);
+    for (const ev of evs) if (ev.type === 'death') eliminated.push(ev.fighterId);
+    return evs;
+  };
+  const input = (st, eliminated) => ({
+    seats: st.fighters.map((f, i) => ({ id: i, alive: f.alive, hp: f.hp, maxHp: f.maxHp, x: f.x, y: f.y, deaths: f.deaths })),
+    center: st.arena.center, eliminated: eliminated.slice(), winnerId: st.winnerId ?? null,
+  });
+  const placeOf0 = (st, elim, resolver = resolvePlaces) => resolver(input(st, elim)).indexOf(0);
+  /** KNOWN-BAD: rung 3 inverted — the EARLIEST knockout places best. */
+  const firstOutBest = (inp) => resolvePlaces({ ...inp, eliminated: inp.eliminated.slice().reverse() });
+
+  // ── (a)-(c): out first, then the other five go out one by one to the whistle ──
+  {
+    const st = six();
+    const elim = [];
+    kill(st, 0, 1, elim);
+    check('(a) NON-VACUITY: six seats, seat 0 knocked out, the match still PLAYING — the window META-02 is about',
+      st.fighters.length === MAX_FIGHTERS && !st.fighters[0].alive && st.phase === 'playing',
+      `seats ${st.fighters.length}, alive ${st.fighters[0].alive}, phase ${st.phase}`);
+    const atKo = placeOf0(st, elim);
+    const atKoBad = placeOf0(st, elim, firstOutBest);
+    const trail = [atKo];
+    const trailBad = [atKoBad];
+    for (const v of [3, 1, 4, 2]) {
+      kill(st, v, 5, elim);
+      trail.push(placeOf0(st, elim));
+      trailBad.push(placeOf0(st, elim, firstOutBest));
+    }
+    check('(b) NON-VACUITY: the sequence reached the whistle by knockout, seat 5 the winner',
+      st.phase === 'ended' && st.winnerId === 5, `phase ${st.phase}, winner ${st.winnerId}`);
+    check('(b) 🔴 the place at the knockout (6th) never moves — through four more knockouts and the whistle',
+      atKo === MAX_FIGHTERS - 1 && trail.every((p) => p === atKo), `places after each knockout: ${trail.join(' ')}`);
+    check('(c) KNOWN-BAD: with rung 3 inverted (earliest out places best) the same sequence MOVES the place — so (b) is a statement about that rung',
+      trailBad.some((p) => p !== trailBad[0]), `places: ${trailBad.join(' ')}`);
+  }
+
+  // ── (d) WHEN IN THE TICK THE PLACE IS ASKED ───────────────────────────────
+  {
+    const st = six();
+    const elimMidBatch = [];
+    kill(st, 0, 1, elimMidBatch);
+    const elimAfter = elimMidBatch.slice();
+    kill(st, 2, 1, elimAfter);         // a second knockout IN THE SAME TICK, later in the batch
+    const mid = placeOf0(st, elimMidBatch);   // state already post-tick, `eliminated` not yet
+    const after = placeOf0(st, elimAfter);
+    check('(d) NON-VACUITY: two seats went out in one batch and the match is still playing',
+      !st.fighters[0].alive && !st.fighters[2].alive && st.phase === 'playing', `phase ${st.phase}`);
+    check('(d) 🔴 asked MID-batch the seat is ranked one place too generously; asked after the whole batch it is not',
+      mid === MAX_FIGHTERS - 2 && after === MAX_FIGHTERS - 1, `mid-batch ${mid + 1}th, after the batch ${after + 1}th`);
+  }
+
+  // ── (e) LEFTOVERS: NOT final while a revive is pending; final again once none is left ──
+  {
+    const st = six(['leftovers']);
+    const elim = [];
+    kill(st, 0, 1, elim);
+    const atKo = placeOf0(st, elim);
+    const pending = st.fighters[0].item.revivesLeft > 0 && st.fighters[st.fighters[0].item.killerId]?.alive === true;
+    const evs = kill(st, 1, 2, elim);   // the killer goes out with five still standing: revive
+    const revived = evs.some((e) => e.type === 'item-revived') && st.fighters[0].alive;
+    const whileUp = placeOf0(st, elim);
+    check('(e) NON-VACUITY: seat 0 holds Leftovers, its killer is alive at the knockout, and the killer\'s death revives it',
+      pending && revived, `pending ${pending}, revived ${revived}, events ${evs.map((e) => e.type).join(',')}`);
+    check('(e) 🔴 so the place at the FIRST knockout is NOT final — banking it there would pay 6th to a fighter still standing',
+      atKo === MAX_FIGHTERS - 1 && whileUp < atKo, `at the knockout ${atKo + 1}th, after the revive ${whileUp + 1}th`);
+    kill(st, 0, 3, elim);              // out again, no revive left
+    const atSecond = placeOf0(st, elim);
+    const trail = [atSecond];
+    for (const v of [4, 2, 3]) { kill(st, v, 5, elim); trail.push(placeOf0(st, elim)); }
+    check('(e) 🔴 …and once no revive is left, the second knockout\'s place holds to the whistle (5th: seat 1 went out before it)',
+      st.fighters[0].item.revivesLeft === 0 && st.phase === 'ended' && atSecond === MAX_FIGHTERS - 2 && trail.every((p) => p === atSecond),
+      `revivesLeft ${st.fighters[0].item.revivesLeft}, phase ${st.phase}, places ${trail.map((p) => p + 1).join(' ')}`);
   }
 }
 

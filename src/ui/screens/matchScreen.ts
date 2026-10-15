@@ -77,7 +77,8 @@
  * clickable on top of it — which is exactly what "match end → back to menu" needs.
  */
 
-import { startGame, type GameSession } from '../../game/match';
+import { startGame, type GameSession, type MatchOutcome } from '../../game/match';
+import type { MatchPayout } from '../hud';
 import { CHARACTERS } from '../../game/rules';
 import { MAX_FIGHTERS, MIN_FIGHTERS, type MatchPhase } from '../../game/state';
 import { brawlRoster } from './brawl';
@@ -103,6 +104,13 @@ import { ensureIconStyles, icon } from '../icons';
  * game. See the header of `game/input.ts` for why that mattered enough to change.
  */
 export const PAUSE_KEY = 'Escape';
+
+/** `5` -> `5th`. The same rule `hud.ts` applies to the result card's finishing line. */
+function ordinal(n: number): string {
+  const suffix = n % 100 >= 11 && n % 100 <= 13 ? 'th'
+    : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th';
+  return `${n}${suffix}`;
+}
 
 export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   if (route.name !== 'match') throw new Error('createMatchScreen: wrong route');
@@ -154,6 +162,38 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
    *  callback that fires on every transition, and `restart()` re-enters 'countdown'
    *  — so the result must be banked exactly once per completed match. */
   let banked = false;
+  /**
+   * 🚨 A RESULT BANKED BEFORE THE WHISTLE — the knocked-out seat at three or more (META-02).
+   *
+   * `banked` used to be set only on `'ended'`, so a 5th- or 6th-place finisher could Quit
+   * while spectating and keep every trophy (+84% trophies per match measured at 1,500 for
+   * "leave whenever the delta is negative"), and a 3rd-place finisher who left threw their
+   * payout away. The place is final at the knockout (`GameSession.notifyLocalResult` says why),
+   * so it is banked THERE, under the same `banked` guard, and this remembers what it paid so
+   * the whistle shows that payout on the card instead of banking a second time.
+   *
+   * Cleared with `banked` on every non-`'ended'` transition: a restart is a new match.
+   */
+  let earlyPaid: { payout: MatchPayout; place: number; seats: number } | null = null;
+
+  /** Bank a decided PLACE and return what it paid, as the card shows it. The one call that
+   *  mutates the economy, for both the early bank and the Leave-with-a-revive-pending one. */
+  const bankPlace = (outcome: MatchOutcome): void => {
+    banked = true;
+    const paid = ctx.profile.recordPlacement(outcome.localPlace, outcome.seats);
+    earlyPaid = {
+      payout: { trophies: paid.trophies, coins: paid.coins, xp: placementXp(paid.place, paid.seats), chests: paid.chests },
+      place: paid.place,
+      seats: paid.seats,
+    };
+    // Harmless before the whistle — `hudResult()` gates the payout on `endedOutcome` — and it
+    // means the card is right even if the whistle's own re-hand below were ever skipped.
+    session.showPayout(earlyPaid.payout);
+  };
+  /** The same seat-range test the whistle's bank applies. Outside it, defer to the whistle,
+   *  whose `recordResult` fallback is the one path that can pay an unpayable outcome. */
+  const payable = (o: MatchOutcome | null): o is MatchOutcome => o !== null
+    && o.localPlace >= 0 && o.seats >= MIN_FIGHTERS && o.seats <= MAX_FIGHTERS;
 
   // ── 🚨 DECISIONS §66'S FLAG, AND IT IS OFF UNLESS A ROUTE SAYS OTHERWISE ─────
   //
@@ -221,8 +261,18 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
     // mirrors it inside `GameSession` — see `enemyLevelFor`, which is where Uri's
     // "AI players adjust to the player's level" answer is expressed exactly once.
     playerLevel: ctx.profile.characterLevel(route.player),
+    // ── 🚨 THE KNOCKED-OUT SEAT BANKS AT THE KNOCKOUT (META-02) — see `earlyPaid`. ──
+    // Never fires at two seats (a knockout ends a duel on the same tick), so the duel's bank
+    // below is untouched by construction. An unpayable outcome is left for the whistle.
+    onLocalResult(outcome) {
+      if (banked || !payable(outcome)) return;
+      bankPlace(outcome);
+    },
     onPhase(phase: MatchPhase, winner, outcome) {
       if (phase === 'ended') {
+        // Banked at the knockout: the whistle must not bank again (`recordPlacement` mutates
+        // and commits), but the card still has to be handed what that bank paid.
+        if (banked && earlyPaid) session.showPayout(earlyPaid.payout);
         if (!banked) {
           banked = true;
           // ── 🚨 THE PAYOUT JOIN ──────────────────────────────────────────────
@@ -285,6 +335,7 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
         root.classList.add('is-ended');
       } else {
         banked = false;
+        earlyPaid = null;
         root.classList.remove('is-ended');
       }
     },
@@ -312,10 +363,15 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   // ── 🚨 THE ONE DESTRUCTIVE ACT IN THE PRODUCT GETS A CONFIRM ────────────────
   //
   // Leaving a live match is not undoable and it is not free: the profile write is
-  // guarded by `banked`, which is only ever set from `onPhase(phase === 'ended')`, so
-  // a match abandoned mid-play banks **nothing** — no trophies, no coins, no XP, no
-  // chest progress. That is correct (you did not finish), and it is exactly why a
-  // mis-tap here costs the player the whole match.
+  // guarded by `banked`, so a match abandoned by a fighter STILL STANDING banks
+  // **nothing** — no trophies, no coins, no XP, no chest progress. That is correct (you did
+  // not finish), and it is exactly why a mis-tap here costs the player the whole match.
+  //
+  // ⚠️ THIS PARAGRAPH SAID `banked` *"is only ever set from `onPhase(phase === 'ended')`"*,
+  // and that was the defect for a KNOCKED-OUT player at three or more seats (META-02): their
+  // place was already final, so Quit let a 5th or 6th skip the loss and made a 3rd forfeit
+  // the win. `banked` is now also set at the knockout (`onLocalResult`) and on a Leave that
+  // forfeits a pending Leftovers revive; `confirmBody` says which of the three applies.
   //
   // ⚠️ AND THE LIKELIEST MIS-TAP IS NOT THE ONE THE OLD LAYOUT DEFENDED AGAINST.
   // The header below argues at length about the *chip* being out of the thumb zone —
@@ -349,11 +405,30 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   let armTimer = 0;
   let pendingExit: Route | null = null;
 
+  /**
+   * WHAT LEAVING COSTS, SAID TRUTHFULLY FOR EACH STATE A LIVE MATCH CAN BE IN.
+   *
+   * ⚠️ It was ONE sentence — *"This match ends now — no trophies, coins or XP from it."* —
+   * which is true for a fighter still standing (`DECISIONS §19`: abandoning a live match pays
+   * nothing) and became FALSE for a knocked-out one the moment META-02's early bank landed:
+   * their place is already paid. It stays word for word for the standing fighter.
+   */
+  function confirmBody(): string {
+    if (earlyPaid) return `You finished ${ordinal(earlyPaid.place + 1)} of ${earlyPaid.seats} — that is already banked.`;
+    const ko = session.knockedOutOutcome();
+    if (payable(ko)) {
+      return `You are out in ${ordinal(ko.localPlace + 1)} of ${ko.seats}. Leaving banks that now and gives up your Leftovers revive.`;
+    }
+    return 'This match ends now — no trophies, coins or XP from it.';
+  }
+
   function showConfirm(to: Route, label: string, glyph: string): void {
     pendingExit = to;
     leaveBtn.innerHTML = `${icon(glyph)} ${label}`;
-    q<HTMLParagraphElement>('confirmbody').textContent =
-      'This match ends now — no trophies, coins or XP from it.';
+    q<HTMLParagraphElement>('confirmbody').textContent = confirmBody();
+    // A knocked-out player is not playing; the safe option says what it actually does.
+    const out = earlyPaid !== null || session.knockedOutOutcome() !== null;
+    q<HTMLButtonElement>('keep').innerHTML = `${icon('play')} ${out ? 'Keep Watching' : 'Keep Playing'}`;
     panePause.hidden = true;
     paneConfirm.hidden = false;
     leaveBtn.disabled = true;
@@ -388,7 +463,19 @@ export function createMatchScreen(ctx: ScreenContext, route: Route): Screen {
   q<HTMLButtonElement>('quit').addEventListener('click',
     () => showConfirm({ name: 'home' }, 'Quit to Home', 'home'));
   q<HTMLButtonElement>('keep').addEventListener('click', () => setPaused(false));
-  leaveBtn.addEventListener('click', () => { if (pendingExit) ctx.navigate(pendingExit); });
+  leaveBtn.addEventListener('click', () => {
+    if (!pendingExit) return;
+    // ⚠️ THE ONE KNOCKED-OUT STATE THE EARLY BANK WAITS OUT — a Leftovers revive still pending
+    // (see `GameSession.notifyLocalResult`). Leaving forfeits that revive, so the place held
+    // right now IS this player's final place, and banking it here is what stops "leave while
+    // the revive is pending" from re-opening the loss-skip META-02 closed. A standing fighter
+    // gets `null` and banks nothing, exactly as before (`DECISIONS §19`).
+    if (!banked) {
+      const ko = session.knockedOutOutcome();
+      if (payable(ko)) bankPlace(ko);
+    }
+    ctx.navigate(pendingExit);
+  });
   exitBtn.addEventListener('click', () => ctx.navigate({ name: 'home' }));
 
   // Escape toggles pause — desktop players reach for it before they look for a chip.

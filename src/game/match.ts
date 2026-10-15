@@ -23,6 +23,9 @@ import type { DamageSource, Fighter, FighterRole, GameEvent, MatchInput, MatchSt
 // The seat range, imported rather than written as 2 and 6. `state.ts` owns it; a literal
 // here is a number that goes stale the day the sim seats eight and stays LEGAL while it does.
 import { MAX_FIGHTERS, MIN_FIGHTERS } from './state';
+// `Fighter.item.killerId`'s "nobody" — read by `localReviveStillPossible`, which must agree
+// with `combat.ts:reviveThoseKilledBy` about when a Leftovers revive can still fire.
+import { NO_FIGHTER } from './state';
 // ⚠️ `otherRole` came BACK to this file on 2026-08-11, for exactly one QA-only caller —
 // see `qaFillEvent`. The comment below is about the GAMEPLAY reconstructions, and those
 // are still gone: nothing in `handleEvents` resolves an attacker by "the other one".
@@ -386,6 +389,14 @@ export interface GameSessionOptions {
     /** Non-null on the `'ended'` transition only. See `MatchOutcome`. */
     outcome: MatchOutcome | null,
   ) => void;
+  /**
+   * THE LOCAL SEAT'S PLACE IS DECIDED BEFORE THE WHISTLE — fired at most once per match, on
+   * the first frame the local seat is knocked out with the match still `'playing'` and no
+   * revive pending. Never at two seats (a knockout ends a duel on the same tick). See
+   * `GameSession.notifyLocalResult` for why this exists (META-02) and why only `localPlace`
+   * and `seats` of the outcome are final at that moment.
+   */
+  onLocalResult?: (outcome: MatchOutcome) => void;
   /**
    * The player's CHARACTER level for `playerCharacterId`, 1-15 (`rules.ts` DEVIATION #11).
    *
@@ -805,6 +816,13 @@ export class GameSession {
    * stale payout would put the LAST match's trophies on the NEXT match's card.
    */
   private endedPayout: MatchPayout | null = null;
+
+  /**
+   * Has `opts.onLocalResult` fired for THIS match? Once per match, because the screen layer
+   * banks off it (`profile.recordPlacement` mutates and commits the economy) — the same reason
+   * `matchScreen.ts` guards the whistle's bank with `banked`. Cleared in `spawnMatch`.
+   */
+  private localResultSent = false;
 
   private readonly clock = new THREE.Clock();
   private raf = 0;
@@ -1256,6 +1274,9 @@ export class GameSession {
     this.killedBy.length = 0;
     this.viewSubject = LOCAL_SLOT;
     this.spectateDwellMs = 0;
+    // And the once-per-match early bank (`notifyLocalResult`): a restart is a new match, and a
+    // flag left set would make the next knockout bank nothing at all.
+    this.localResultSent = false;
     this.hitStopBudgetMs = 0;
     this.hitStopBankedMs = 0;
     for (const k of Object.keys(this.feel.events)) this.feel.events[k] = 0;
@@ -2335,6 +2356,77 @@ export class GameSession {
   }
 
   /**
+   * 🚨 BANK A KNOCKED-OUT SEAT'S PLACE THE MOMENT IT IS DECIDED, NOT AT THE WHISTLE (META-02).
+   *
+   * At three or more seats a knockout does not end the match — the local player spectates —
+   * and the result was banked only on `'ended'`. So a 5th- or 6th-place finisher could press
+   * Quit (or reload, or close the tab) and keep every trophy: measured by the review at 1,500
+   * trophies, "leave whenever the delta is negative" earned **+84%** trophies per match. And a
+   * 3rd-place finisher who got bored of spectating threw their payout away. Yet the place was
+   * already FINAL: `roster.ts:resolvePlaces` ranks the knocked out by reverse elimination
+   * order, so everyone who goes out later places above you and nobody can drop below you.
+   *
+   * So the session reports the outcome on the first frame where the local seat is dead, the
+   * match is still `'playing'`, and no revive can still stand it back up; `matchScreen.ts`
+   * banks it through the same `banked` guard it uses at the whistle, and shows the same
+   * payout on the card when the whistle comes. Fires at most once per match.
+   *
+   * ⚠️ **AFTER THE WHOLE FRAME, NEVER INSIDE `handleEvents`' `death` CASE.** That case pushes
+   * each death into `eliminated` one event at a time while the state it would read is already
+   * post-tick, so a second fighter dying in the same tick would be "dead but unaccounted" and
+   * rank BELOW the local seat — one place too generous (a verifier reproduced 4th-for-5th on
+   * the real resolver).
+   *
+   * ⚠️ **NEVER AT TWO SEATS, BY CONSTRUCTION.** There a knockout ends the match on the same
+   * tick, so the phase is already `'ended'` here and the whistle path banks exactly as before.
+   *
+   * ⚠️ **LEFTOVERS DEFERS IT.** A pending revive is the one thing that can move a knocked-out
+   * seat (a revived fighter is a survivor and ranks above every knockout): 22 of 69 six-seat
+   * Leftovers knockouts changed place, up to 6th -> 1st. So nothing is reported while the
+   * killer the revive is waiting on is still alive; see `localReviveStillPossible`.
+   *
+   * Only `localPlace` and `seats` of the outcome handed over are final; `places` ranks the
+   * survivors by where they stand NOW and `winnerId` is null, so the screen layer banks the
+   * place and must not render the order from it.
+   */
+  private notifyLocalResult(): void {
+    if (this.localResultSent) return;
+    if (this.state.phase !== 'playing') return;
+    if (localFighter(this.state).alive) return;
+    if (this.localReviveStillPossible()) return;
+    this.localResultSent = true;
+    this.opts.onLocalResult?.(this.outcome());
+  }
+
+  /**
+   * Can Leftovers still stand the local seat back up? Mirrors `combat.ts:reviveThoseKilledBy`'s
+   * three per-fighter conditions: a revive left, a recorded killer, and that killer still
+   * alive (it fires on the killer's DEATH). Its fourth condition — enough fighters alive when
+   * the killer falls — cannot be known in advance, so this answers "possible", and a killer
+   * who dies without the revive firing leaves `killerId` pointing at a corpse, which reads as
+   * "no longer possible" on the next frame.
+   */
+  private localReviveStillPossible(): boolean {
+    const me = localFighter(this.state);
+    if (me.item.revivesLeft <= 0 || me.item.killerId === NO_FIGHTER) return false;
+    return fightersOf(this.state)[me.item.killerId]?.alive === true;
+  }
+
+  /**
+   * THE KNOCKED-OUT LOCAL SEAT'S OUTCOME, ON DEMAND — or null while it is alive, before play,
+   * or once the whistle has gone (the whistle path owns that bank).
+   *
+   * For the one window `notifyLocalResult` deliberately waits out: a Leftovers revive still
+   * pending. A player who LEAVES there forfeits the revive, so the place they hold at that
+   * moment is final for them, and `matchScreen.ts` banks it on Leave rather than letting the
+   * exit erase a loss — the hole META-02 is about, narrowed to the one item that opens it.
+   */
+  knockedOutOutcome(): MatchOutcome | null {
+    if (this.state.phase !== 'playing' || localFighter(this.state).alive) return null;
+    return this.outcome();
+  }
+
+  /**
    * 🚨 PUT A BANKED PAYOUT ON THE RESULT CARD. The screen layer's one-way edge IN.
    *
    * `DECISIONS §64` defect 3: `bb00d66` made a 3rd-of-6 finish pay **+9 trophies, 44
@@ -2549,6 +2641,9 @@ export class GameSession {
     // above, which drives VFX/HUD/hit-stop). Order between the two is irrelevant —
     // neither reads anything the other writes.
     this.audio.handleEvents(events, this.state);
+    // AFTER the whole frame's events, never inside `handleEvents`' `death` case: see
+    // `notifyLocalResult` for the same-tick double knockout that ordering prevents.
+    this.notifyLocalResult();
     this.notifyPhase();
     // AFTER the step, so `facing` is what `applyAim` actually committed rather than
     // what was asked for — the aim pipeline's output, not its input.
