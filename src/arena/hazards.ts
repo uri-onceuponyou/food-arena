@@ -29,6 +29,7 @@ import { flatMat } from '../render/toon';
 import { wu, groundPos } from '../units';
 import { POT } from '../game/rules';
 import { puck, mesh, noOutline, buildContactShadow, applyContactRamp, FLOOR_Y, KPAL, type Materials } from './shared';
+import { KitGeo, chamferCyl, paint, skirt, srgb, val } from './props/kit';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Central pot assembly.
@@ -58,10 +59,25 @@ export interface PotAssembly {
   flameCore: THREE.Mesh;
 }
 
+// ── A2a: THE HERO POT STANDS ON A HEARTH ─────────────────────────────────────────────
+// The pot stood on bare stone (A1's leftover, `docs/REVAMP.md` wave 3): the arena's one
+// landmark had no base, and it read as a bucket put down on the floor. It now stands on a
+// stepped octagonal hearth whose FLATS sit exactly on the CoverBox's faces (`POT.bodyRadius`
+// is the box's half-width), so the base is the honest outline of what blocks you — and on
+// the diagonals, where the AABB used to stand 21.5 wu off a round pot (`kitchen.ts`), the
+// hearth's corners now fill most of that dead band. The VISIBLE pot is `POT_ON_HEARTH` of
+// the box so a stone ledge shows all round it; it is raised by `HEARTH_H`. Nothing in the
+// sim reads either number: the CoverBox and the damage radius are unchanged.
+/** Height of the hearth's top, metres (two tiers). */
+export const HEARTH_H = 0.38;
+/** The visible pot body as a fraction of `POT.bodyRadius`. */
+export const POT_ON_HEARTH = 0.88;
+
 export function buildPot(M: Materials): PotAssembly {
   const g = new THREE.Group();
-  const bodyR = wu(POT.bodyRadius);
-  const bodyH = bodyR * 0.95;
+  const boxR = wu(POT.bodyRadius);
+  const bodyR = boxR * POT_ON_HEARTH;
+  const bodyH = boxR * 0.95;
 
   const solid = new THREE.Group();
   solid.name = 'pot_solid';
@@ -105,7 +121,7 @@ export function buildPot(M: Materials): PotAssembly {
   // The general form is worth keeping: an alpha-blended dark decal drawn BEFORE an
   // additive plane covering the same pixels is invisible whatever its own alpha says
   // (`docs/LESSONS.md` §1), and the fix for a draw-order bug is draw order.
-  const potContact = buildContactShadow(M.contactShadow, bodyR * 2.1, bodyR * 2.1, 1.45);
+  const potContact = buildContactShadow(M.contactShadow, boxR * 2.1, boxR * 2.1, 1.45);
   potContact.renderOrder = 3;
   g.add(potContact);
   applyContactRamp(g);
@@ -268,7 +284,35 @@ export function buildPot(M: Materials): PotAssembly {
   // one pass; inking here as well would just stack a second, thinner hull inside it
   // (`outlineGroup` skips `*__outline` meshes, so the two do not cancel).
 
+  // A2a: everything but the floor contact decal stands on the hearth.
+  for (const c of g.children) if (c !== potContact) c.position.y += HEARTH_H;
+  for (const w of steam) w.userData.baseY = (w.userData.baseY as number) + HEARTH_H;
+
   return { group: g, steam, bubbles, flame, flameCore };
+}
+
+/**
+ * The pot's HEARTH (see `HEARTH_H`): two octagonal tiers of violet slate — the BLOCKING
+ * family, because it is the part that blocks — with a lit chamfer on each top edge, floor AO
+ * at its foot and a contact shade round the pot on its top. Built on the prop kit, so it is
+ * STATIC and merges into the kit's two draws (`kitchen.ts` adds it to `propsGroup` beside the
+ * pot, outside the pot's MERGE_SKIP subtree, which would cost it a draw of its own).
+ */
+export function buildPotHearth(M: Materials): THREE.Group {
+  const g = new THREE.Group();
+  g.name = 'pot_hearth';
+  const kg = new KitGeo();
+  const apothem = wu(POT.bodyRadius);
+  const oct = Math.cos(Math.PI / 8);
+  const stone = srgb('#8A7DBE');
+  const h1 = 0.24, h2 = HEARTH_H - h1;
+  kg.add(chamferCyl(apothem / oct, h1, 0.07, 8, { flatSides: true, phase: Math.PI / 8, bands: [0.08] }), {},
+    paint(val(stone, 0.92), val(stone, 0.8), val(stone, 1.05)), 'matte', 0, 1);
+  kg.add(chamferCyl((apothem - 0.2) / oct, h2, 0.05, 8, { flatSides: true, phase: Math.PI / 8 }), { y: h1 },
+    paint(stone, val(stone, 0.86), val(stone, 1.16)), 'matte', h1, 0.5);
+  // contact shade round the pot on the upper tier — width stops short of the tier's flats
+  skirt(kg, { x: 0, z: 0 }, HEARTH_H, 0, 0, Math.max(0.04, apothem - 0.2 - apothem * POT_ON_HEARTH - 0.02), stone, 'matte', 0.5, apothem * POT_ON_HEARTH);
+  return kg.emit(g, M);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

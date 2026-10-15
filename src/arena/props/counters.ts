@@ -21,6 +21,7 @@ import { toonMat, roundedBox, cloneToon } from '../../render/toon';
 import { PALETTE } from '../../game/rules';
 import { CHARACTER_HEIGHT } from '../../units';
 import { puck, mesh, noOutline, addBacksplash, addTopRim, type Materials } from '../shared';
+import { KitGeo, KP, block, burner, chamferBox, chamferCyl, counterShell, flat, herbPot, paint, skirt, srgb, stockpot, topClip, val } from './kit';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COVER GRAMMAR
@@ -623,197 +624,47 @@ function buildHerbSprig(M: Materials, scale = 1): THREE.Group {
 }
 
 export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { panRack?: boolean }): THREE.Group {
+  // ── A2a: THE COOK LINE, BUILT — the kit (`./kit.ts`) in place of the old plinth + two-tone
+  // slab + cap + loose parts. Same footprint, same COUNTER_TOP_Y, same backsplash height and
+  // side; every visible part still inside the CoverBox (countertop at 0.99, carcass at 0.95).
   const g = new THREE.Group();
-  const bw = wM * COVER_BODY_FRAC, bd = dM * COVER_BODY_FRAC;
-  const capT = 0.15;
-  const y0 = addCoverPlinth(g, M, wM, dM);
-  const sideTop = COUNTER_TOP_Y - capT;
-
-  // DARK sides, BRIGHT overhanging cap — see `addCoverCap`. The cap is the only plane
-  // carrying this prop's identity colour and it is now cool steel rather than the
-  // arena's saturated orange (see `stoveCap`); the plum vertical faces render ~100 luma
-  // below it, which is what gives the box its top-vs-side value break.
-  addCoverSides(g, bw, bd, y0, sideTop - y0, coverBody(M), coverSkirt(M), 0.06, 'stove_cabinet');
-  addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, stoveCap(M), 'stove_counter');
-
-  // Back wall + bright cap trim — see `addBacksplash`. Sits further back (-Z) than
-  // the pan rack posts below, so on the island that has a rack this reads as "wall
-  // behind the hanging pans" rather than clipping through them.
-  addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, coverBody(M), BACKSPLASH_H);
-
-  // ── Hob plate — round-10 rebuild ────────────────────────────────────────────
-  // Measured at shipped framing, the old hob rendered rgb(18,51,76), **luma 45.6**,
-  // against its own counter cap at luma 137: a 91-value drop, hard-edged, filling
-  // ~55% of the counter's top face. A large flat rectangle that dark on a lit
-  // surface is a HOLE — the same read the barrel's pure-black bung got, at ten times
-  // the screen area. Worse for this round specifically: luma 45.6 is within 11 of the
-  // reserved `coverPlinthPanel` BLOCKING band (luma 34.9), so the arena's one colour
-  // that is supposed to mean "this stops a bullet" was also appearing as a big flat
-  // panel lying flat on top of cover, i.e. exactly the flat-coloured-rectangle
-  // language the walkable floor mats use. Two grammars collided on one surface.
-  //
-  // r10 gave it a smaller MID-grey plate with real thickness and a brighter lip, and a
-  // fresh blind critic measured that the fix only got halfway: *"the grey griddle plates
-  // on the blue counters are the darkest large shapes in the midfield and read as HOLES
-  // IN THE FLOOR rather than as surface detail on solid cover — and they use the same
-  // grey as the pot's corrugated drum, so one material is doing two unrelated jobs."*
-  //
-  // Both halves check out on the pixels:
-  //   - `potMetalDark` arrives at luma 85 against a counter cap at 144. The drop went
-  //     91 -> 59, which is better and still a hard-edged dark rectangle over a third of
-  //     the counter's top face.
-  //   - the LIP that exists specifically to stop that read is `potMetal`, which arrives
-  //     at luma 92 here. **Seven luma brighter than the thing it is supposed to frame** —
-  //     the cue was authored and then never checked against a render.
-  //   - `potMetal`/`potMetalDark` ARE the boiling-pot hazard's own materials. Cover and
-  //     damage sharing a material is the same class of bug `buildLanePots` was rebuilt
-  //     to fix, and it survived here because the hob was thought of as machinery rather
-  //     than as part of a cover prop.
-  //
-  // So both surfaces leave the hazard's palette through `tinted()` and are authored as a
-  // real ladder instead of inheriting one. Measured on screen after the change:
-  //
-  //   griddle  rgb(117,102,81)   luma 104  hue  35  sat 0.31   <- warm cast iron
-  //   cap      rgb(94,152,208)   luma 144  hue 209  sat 0.55
-  //   lip      rgb(150,170,178)  luma 166  hue 197  sat 0.16   <- bright steel
-  //
-  // Griddle < cap < lip, so the plate reads as recessed INTO a lit surface rather than
-  // punched through it, and the warm hue puts it 174 degrees off the hazard pot's cold
-  // grey drum. The burner rings stay on the shared dark metal — they are 6cm tori, far
-  // too small to read as a panel.
-  // ── ROUND 14: THE BLANK SLAB. ~8 CRITICS, ARENA *AND* CAST ROUNDS. ──────────
-  //
-  //   *"the giant untextured pale-blue box in the foreground looks like an unfinished
-  //    placeholder block"* · *"the huge blank ice-block slab in the lower-left crops the
-  //    frame with nothing on it"* · *"untextured, unlit and unshadowed"*
-  //
-  // It is this prop: the stove island is 8.5 x 4.5 m, the arena's largest cover, and its
-  // cap is the arena's largest single flat plane. The hob covered `0.32 x 0.36` of it —
-  // **4.4 m² of 38.25 m², i.e. 11.5%** — so 88% of the biggest thing in the frame was one
-  // unbroken pale-blue fill with a 2-burner griddle floating in the middle of it.
-  //
-  // ── INDEPENDENT CORROBORATION FROM AN INSTRUMENT NOT LOOKING FOR IT ─────────
-  // `tools/tmp/fp_ground_windows.mjs` clusters a frame's modal surfaces to find the
-  // GROUND, and on our action frames it adopts **rgb(140,204,254) — this cap — as a ground
-  // cluster in 2 of 8 frames**, because it is large, flat and spatially spread enough to
-  // pass a test built to separate ground from props. `ac08dbf` recorded the same shape as
-  // an instrument fault it had to defend against ("on our own frames the same fault would
-  // have adopted the big pale-blue counter slab"). A prop that a ground-finder mistakes
-  // for the floor is, measurably, a plane with nothing on it.
-  //
-  // ── AND THAT SAME INSTRUMENT SCORES THE FIX, WITHOUT BEING ASKED TO ────────
-  // Re-run after this change, 9-10 action frames per arm captured the same way:
-  //
-  //   original cap   adopted as GROUND in 3/10, 4/10, 3/10 frames (three separate runs)
-  //   rebuilt cap    adopted as GROUND in **1 of 9**
-  //
-  // `fp_ground_windows.mjs` has no notion of "blank" and no knowledge of this prop — it
-  // takes the frame's modal surfaces and filters them by spatial spread. The cap stopped
-  // passing that filter. That is the ~8 critics' claim, arrived at by an instrument with
-  // no opinion about it, and it is the only objective number this defect has ever had.
-  //
-  // ── AND `e4734e2` MADE IT WORSE, WHICH IS CHECKED RATHER THAN ASSUMED ───────
-  // That pass took `stoveCap` #7C9CC2 -> #94C5FF, i.e. delivered luma **167 -> 195**, on
-  // exactly this surface. It was right to (the frame drew no highlights at all; `hi70`
-  // went 2.40% -> 13.58%), and raising a big blank slab 28 luma also makes the blankness
-  // 28 luma louder. **The value is not reverted** — that would undo a measured win and
-  // land back in the "flat, unlit, coloured paper" frame six critics scored 6/10. What is
-  // wrong is the BLANKNESS, so this fills the plane instead of dimming it.
-  //
-  //   hob deck   0.32 x 0.36 -> 0.56 x 0.60 of the top face: 11.5% -> 33.6% of it
-  //   burners    2 -> 4, in a 2x2 grid, at commercial-range spacing
-  //   stock pot  a real solid standing ON the deck, which is the only thing here that
-  //              answers *"unshadowed"* literally: it is the first object in this prop's
-  //              history to cast a shadow onto its own cap
-  //
-  // Cost, MEASURED on a paired null control rather than estimated: +6 meshes per island x
-  // 4 islands = **+24 meshes**, and `tools/perf.mjs --mode counts` reads 804 -> 834 draw
-  // calls across this change and the ground-debris layer together (+3.7%), of which the
-  // debris layer is +4 measured in isolation on an otherwise identical tree. Triangles
-  // 383,450 -> 435,276.
-  const hobW = wM * 0.56, hobD = dM * 0.60;
-  const hobT = 0.12;
-  const hobLip = mesh(roundedBox(hobW + 0.14, hobT * 0.6, hobD + 0.14, 0.03), tinted(M, M.potMetal, '#D2D7DC'), 'stove_hob_lip');
-  hobLip.position.y = COUNTER_TOP_Y + hobT * 0.3;
-  g.add(hobLip);
-  const hob = mesh(roundedBox(hobW, hobT, hobD, 0.03), tinted(M, M.potMetalDark, '#7A6A52'), 'stove_hob');
-  hob.position.y = COUNTER_TOP_Y + hobT / 2;
-  g.add(hob);
-
-  // Four burner rings + a lit-coil disc each, on a 2x2 grid. The ring/coil sizes go up
-  // with the deck (0.17/0.12 -> 0.26/0.19) so they still read as burners rather than as
-  // studs on a large plate — the r10 note below is about the DECK reading as a hole, and
-  // the answer to a bigger deck is bigger burners, not more empty steel.
-  const burners: Array<[number, number]> = [];
-  for (const bx of [-wM * 0.155, wM * 0.155]) for (const bz of [-dM * 0.155, dM * 0.155]) burners.push([bx, bz]);
-  for (const [bx, bz] of burners) {
-    // ⚠️ Both leave the hazard pot's palette through `tinted()`. Judged on the rendered
-    // frame at 4 burners rather than 2: `M.potMetalDark` and `M.potMetal` arrive as a
-    // COLD BLUE ring and a pale blue disc (they are keyed for the boiling pot's steel
-    // drum, hue 209), and four of them on a warm cast-iron deck read as blue buttons
-    // rather than as burners. Warm iron and warm steel instead — which also keeps this
-    // prop's whole top plane in one hue family, so the deck reads as one object.
-    const ring = mesh(new THREE.TorusGeometry(0.26, 0.045, 8, 20), tinted(M, M.potMetalDark, '#4A423A'), 'burner_ring');
-    ring.rotation.x = Math.PI / 2;
-    ring.position.set(bx, COUNTER_TOP_Y + hobT + 0.02, bz);
-    g.add(ring);
-    const coil = mesh(puck(0.19, 0.02, 16), tinted(M, M.potMetal, '#BFB6A4'), 'burner_coil');
-    coil.position.set(bx, COUNTER_TOP_Y + hobT + 0.02, bz);
-    g.add(coil);
+  const kg = new KitGeo();
+  const topY = counterShell(kg, wM, dM, {
+    topY: COUNTER_TOP_Y, topT: 0.16, top: KP.rangeTop, topFinish: 'gloss',
+    plinthH: COVER_PLINTH_H, bodyFrac: COVER_BODY_FRAC, backsplashH: BACKSPLASH_H,
+  });
+  // the hob: a cast-iron plate in a steel frame, four burners, knobs on the front edge
+  const hobW = wM * 0.56, hobD = dM * 0.6;
+  kg.add(chamferBox(hobW + 0.18, 0.05, hobD + 0.18, 0.025), { y: topY }, paint(val(KP.steel, 0.96)), 'gloss', topY, 0.3);
+  kg.add(chamferBox(hobW, 0.09, hobD, 0.03), { y: topY }, paint(KP.hob, val(KP.hob, 0.85), val(KP.hob, 1.45)), 'matte', topY, 0.3);
+  skirt(kg, { x: 0, z: 0 }, topY, (hobW + 0.18) / 2, (hobD + 0.18) / 2, 0.3, KP.rangeTop, 'gloss', 0.3, 0, topClip(wM, dM));
+  const hobTop = topY + 0.09;
+  const bx = wM * 0.155, bz = dM * 0.155;
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) burner(kg, sx * bx, hobTop, sz * bz, 0.3);
+  for (let i = 0; i < 4; i++) {
+    kg.add(chamferCyl(0.075, 0.08, 0.022, 8), { x: (i - 1.5) * 0.42, y: topY - 0.08, z: dM * 0.495, rx: Math.PI / 2 },
+      paint(KP.iron, val(KP.iron, 0.9), val(KP.steel, 1.0)), 'matte', 0, 0);
   }
-
-  // A stock pot standing on the back-left burner. This is the one addition here that is
-  // an OBJECT rather than surface articulation, and it is the one that answers the
-  // critics' third word: a 0.62 m pot is the first thing this prop has ever had that
-  // throws a shadow across its own top face. It is also what makes a stove read as a
-  // stove in one glance from a 58deg camera, where a flat griddle reads as a panel.
-  //
-  // ⚠️ NOT the boiling-pot hazard's materials. `potMetal`/`potMetalDark` are the hazard's
-  // own palette and this file already has one round (see the hob note below) spent
-  // undoing cover and damage sharing a material. Both surfaces leave through `tinted()`,
-  // and this one is deliberately a WARM brass rather than the hazard's cold grey drum.
-  {
-    const potR = 0.34, potH = 0.62;
-    const bx = -wM * 0.155, bz = -dM * 0.155;
-    const body = mesh(puck(potR, potH, 18), tinted(M, M.potMetal, '#C9A96A'), 'stove_stockpot');
-    body.position.set(bx, COUNTER_TOP_Y + hobT + potH / 2, bz);
-    g.add(body);
-    const lid = mesh(puck(potR * 1.06, 0.07, 18), tinted(M, M.potMetal, '#E4CE9A'), 'stove_stockpot_lid');
-    lid.position.set(bx, COUNTER_TOP_Y + hobT + potH + 0.035, bz);
-    g.add(lid);
-  }
-
-  // Herb garnish sitting on the steel top's inner-front corner (the side that faces
-  // the pot — `+dM*0.26` lands there regardless of the 0/180 deg yaw the caller
-  // applies, since that flips which world edge is "inner"), clear of both burners.
-  const herb = buildHerbSprig(M, 1.6);
-  // wM*0.30 -> wM*0.35: the hob deck below widened from 0.32 to 0.56 of the top face,
-  // so its lip now reaches wM*0.288 and the old position would have stood the pot inside it.
-  herb.position.set(wM * 0.35, COUNTER_TOP_Y, dM * 0.26);
-  g.add(herb);
-
+  // the stockpot on the back-left burner, a frying pan on the front-right one
+  stockpot(kg, -bx, hobTop + 0.05, -bz, 0.36, 0.62);
+  kg.add(chamferCyl(0.3, 0.08, 0.03, 16), { x: bx, y: hobTop + 0.05, z: bz }, paint(val(KP.iron, 1.15), KP.iron, val(KP.iron, 1.7)), 'matte', hobTop, 0.4);
+  kg.add(chamferBox(0.62, 0.05, 0.09, 0.02), { x: bx + 0.55, y: hobTop + 0.09, z: bz + 0.05, yaw: -0.15 }, paint(KP.iron), 'matte', 0, 0);
+  herbPot(kg, wM * 0.35, topY, dM * 0.26, 1.6);
+  skirt(kg, { x: wM * 0.35, z: dM * 0.26 }, topY, 0, 0, 0.12, KP.rangeTop, 'gloss', 0.35, 0.14, topClip(wM, dM));
   if (opts?.panRack) {
-    const postH = 0.8;
-    const post = mesh(roundedBox(0.05, postH, 0.05, 0.02), M.freezerTrim, 'rack_post');
-    post.position.set(-wM * 0.32, COUNTER_TOP_Y + postH / 2, -dM * 0.26);
-    g.add(post);
-    const bar = mesh(roundedBox(wM * 0.5, 0.045, 0.045, 0.02), M.freezerTrim, 'rack_bar');
-    bar.position.set(-wM * 0.05, COUNTER_TOP_Y + postH, -dM * 0.26);
-    g.add(bar);
-    let px = -wM * 0.28;
-    for (const pr of [0.16, 0.13, 0.15]) {
-      const chain = mesh(puck(0.008, 0.16, 6), M.potMetalDark, 'pan_chain');
-      chain.position.set(px, COUNTER_TOP_Y + postH - 0.1, -dM * 0.26);
-      noOutline(chain);
-      g.add(chain);
-      const pan = mesh(puck(pr, 0.045, 16), M.potMetal, 'hanging_pan');
-      pan.position.set(px, COUNTER_TOP_Y + postH - 0.2, -dM * 0.26);
-      g.add(pan);
-      px += wM * 0.24;
+    // a pot rail over the back half: two iron posts, a bar, three hanging pans
+    const postH = 0.8, rz = -dM * 0.26;
+    const ironP = paint(KP.iron, val(KP.iron, 0.9), val(KP.iron, 1.5));
+    for (const px of [-wM * 0.32, wM * 0.22]) block(kg, px, topY, rz, 0.07, postH, 0.07, 0.02, ironP, 'matte', { bands: [], aoK: 0.5 });
+    kg.add(chamferBox(wM * 0.56, 0.05, 0.05, 0.018), { x: -wM * 0.05, y: topY + postH - 0.05, z: rz }, ironP, 'matte', 0, 0);
+    let px = -wM * 0.24;
+    for (const pr of [0.17, 0.13, 0.16]) {
+      kg.add(chamferBox(0.025, 0.16, 0.025, 0.008), { x: px, y: topY + postH - 0.21, z: rz }, ironP, 'matte', 0, 0);
+      kg.add(chamferCyl(pr, 0.05, 0.02, 14), { x: px, y: topY + postH - 0.27, z: rz }, paint(val(KP.steel, 0.95)), 'gloss', 0, 0);
+      px += wM * 0.2;
     }
   }
-
-  return g;
+  return kg.emit(g, M);
 }
 
 /**
@@ -826,155 +677,81 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
  * a bare-vs-furnished repeat (the round-6 "vary... clutter" note).
  */
 export function buildPrepCounter(M: Materials, wM: number, dM: number, opts?: { knifeBlock?: boolean; rollingPin?: boolean }): THREE.Group {
+  // ── A2a: the prep counter on the kit's counter shell with a BUTCHER-BLOCK top (boards
+  // along its length, V seams), a cutting board with chopped veg, and its second topper —
+  // a knife block with handles, or a mixing bowl and a rolling pin. Same CoverBox.
   const g = new THREE.Group();
-  const bw = wM * COVER_BODY_FRAC, bd = dM * COVER_BODY_FRAC;
-  const capT = 0.14;
-  const y0 = addCoverPlinth(g, M, wM, dM);
-  const sideTop = COUNTER_TOP_Y - capT;
-
-  addCoverSides(g, bw, bd, y0, sideTop - y0, coverBody(M), coverSkirt(M), 0.06, 'prep_cabinet');
-  // Butcher block is the arena's one large WARM surface — see `prepCap` for why it is
-  // held at reference chroma here rather than greyed with the rest of the environment,
-  // and why it runs well below the shared `KPAL` entry's value.
-  addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, prepCap(M), 'prep_top');
-  addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, coverBody(M), BACKSPLASH_H);
-
-  // Always-present cutting board + a few chopped-veg cubes, off-centre so it never
-  // collides with either the knife block or the bowl/pin below.
-  //
-  // Round-10: this was 3.5cm thick in `crateWood` and rendered rgb(248,133,16) — S
-  // 0.934 with red one step off the rail — i.e. a hard-edged, fully saturated, flat
-  // orange RECTANGLE lying flat on the counter with no measurable thickness. That is
-  // the visual language of a floor decal, and the whole point of this round is that
-  // the player must be able to tell a painted rectangle from a solid object. It is now
-  // a 9cm slab (thick enough to throw its own shadow line and show an edge from the
-  // gameplay pitch) in the calmer `woodPad` tone, so it reads as a board someone put
-  // down rather than a colour printed on the counter.
-  const boardY = COUNTER_TOP_Y;
-  const board = mesh(roundedBox(wM * 0.3, 0.09, dM * 0.5, 0.025), M.woodPad, 'prep_cutting_board');
-  board.position.set(-wM * 0.2, boardY + 0.045, 0);
-  g.add(board);
-  // Round-7 fix: these used to be four separate chips spread evenly across the
-  // board — a critic flagged small isolated coloured items on counters as
-  // "genuinely unclear as decoration vs pickup." Clustering them into two tight,
-  // overlapping piles (with size jitter) reads as diced scraps someone just left
-  // mid-prep, not four placed objects at reading-distance spacing.
-  const choppedMats = [M.tomato, M.onion, M.lettuce];
-  const choppedPiles: Array<[number, number]> = [[-0.05, 0.09], [0.07, -0.08]];
-  let choppedIdx = 0;
-  choppedPiles.forEach(([px, pz]) => {
-    for (let k = 0; k < 2; k++) {
-      const jx = (k === 0 ? -1 : 1) * 0.017;
-      const jz = (k === 0 ? 1 : -1) * 0.013;
-      const sc = k === 0 ? 1.15 : 0.85;
-      const chip = mesh(
-        new THREE.BoxGeometry(0.042 * sc, 0.026 * sc, 0.042 * sc),
-        choppedMats[choppedIdx % choppedMats.length],
-        'prep_chopped_veg'
-      );
-      chip.position.set(-wM * 0.2 + (px + jx) * wM * 0.3, boardY + 0.09 + 0.013 * sc, (pz + jz) * dM * 0.3);
-      chip.rotation.y = choppedIdx * 0.8;
-      g.add(chip);
-      choppedIdx++;
-    }
+  const kg = new KitGeo();
+  const topY = counterShell(kg, wM, dM, {
+    topY: COUNTER_TOP_Y, topT: 0.15, top: KP.butcher, topFinish: 'matte', topBoards: 5,
+    plinthH: COVER_PLINTH_H, bodyFrac: COVER_BODY_FRAC, backsplashH: BACKSPLASH_H,
   });
-
+  const clip = topClip(wM, dM);
+  // cutting board (lighter wood) with chopped veg on it
+  const cbx = -wM * 0.2, cbw = wM * 0.3, cbd = dM * 0.46;
+  skirt(kg, { x: cbx, z: 0.05 }, topY, cbw / 2, cbd / 2, 0.16, KP.butcher, 'matte', 0.3, 0, clip);
+  kg.add(chamferBox(cbw, 0.08, cbd, 0.03), { x: cbx, y: topY, z: 0.05 }, paint(srgb('#F7DDA6'), srgb('#D9B47A')), 'matte', topY, 0.3);
+  const veg = [srgb('#E8503A'), srgb('#7CC04A'), srgb('#F2E2C0')];
+  for (let i = 0; i < 6; i++) {
+    const vx = cbx - cbw * 0.25 + (i % 3) * cbw * 0.2, vz = 0.05 + (i < 3 ? -0.18 : 0.16);
+    kg.add(chamferBox(0.13, 0.08, 0.13, 0.025, { noVEdges: true }), { x: vx, y: topY + 0.08, z: vz, yaw: i * 0.7 }, paint(veg[i % 3]), 'matte', 0, 0);
+  }
   if (opts?.knifeBlock) {
-    const block = mesh(roundedBox(0.22, 0.26, 0.18, 0.04), M.crateSlat, 'knife_block');
-    block.position.set(wM * 0.3, boardY + 0.13, 0);
-    g.add(block);
-    for (const a of [-0.5, -0.2, 0.1, 0.4]) {
-      const blade = mesh(new THREE.BoxGeometry(0.03, 0.24, 0.07), M.steel, 'knife_blade__no_outline');
-      noOutline(blade);
-      blade.position.set(wM * 0.3 + Math.sin(a) * 0.07, boardY + 0.3, Math.cos(a) * 0.04);
-      blade.rotation.z = a * 0.5;
-      g.add(blade);
+    const kx = wM * 0.3;
+    skirt(kg, { x: kx, z: 0 }, topY, 0.13, 0.11, 0.14, KP.butcher, 'matte', 0.35, 0, clip);
+    block(kg, kx, topY, 0, 0.26, 0.32, 0.22, 0.04, paint(KP.darkWood), 'matte', { bands: [], aoK: 0.5 });
+    for (const [dx, a] of [[-0.06, -0.3], [0.0, 0.0], [0.06, 0.3]] as const) {
+      kg.add(chamferBox(0.05, 0.2, 0.06, 0.015, { noVEdges: true }), { x: kx + dx, y: topY + 0.3, z: 0, rz: a * 0.4 }, paint(KP.iron), 'matte', 0, 0);
     }
   } else if (opts?.rollingPin) {
-    // The OTHER counter's distinct topper — a mixing bowl + rolling pin — so this
-    // pair reads as two different prep stations rather than a copy-pasted repeat.
-    const bowl = mesh(puck(0.16, 0.1, 16), toonMat({ color: PALETTE.lettuce, roughness: 0.5 }), 'prep_bowl');
-    bowl.position.set(wM * 0.28, boardY + 0.05, 0.12);
-    g.add(bowl);
-    const bowlRimTorus = mesh(new THREE.TorusGeometry(0.16, 0.014, 6, 16), M.rimLight, 'prep_bowl_rim');
-    bowlRimTorus.rotation.x = Math.PI / 2;
-    bowlRimTorus.position.set(wM * 0.28, boardY + 0.1, 0.12);
-    noOutline(bowlRimTorus);
-    g.add(bowlRimTorus);
-    const pin = mesh(puck(0.035, 0.36, 10), M.woodPad, 'prep_rolling_pin');
-    pin.rotation.z = Math.PI / 2;
-    pin.position.set(wM * 0.28, boardY + 0.035, -0.14);
-    g.add(pin);
-    for (const side of [-1, 1]) {
-      const knob = mesh(puck(0.022, 0.05, 8), M.crateSlat, 'prep_rolling_pin_knob');
-      knob.rotation.z = Math.PI / 2;
-      knob.position.set(wM * 0.28 + side * 0.205, boardY + 0.035, -0.14);
-      noOutline(knob);
-      g.add(knob);
-    }
+    const bx = wM * 0.28;
+    skirt(kg, { x: bx, z: 0.14 }, topY, 0, 0, 0.12, KP.butcher, 'matte', 0.35, 0.22, clip);
+    kg.add(chamferCyl(0.2, 0.18, 0.03, 14, { rTop: 0.26 }), { x: bx, y: topY, z: 0.14 }, paint(srgb('#F4E4C4'), KP.leafA, val(KP.leafA, 1.2)), 'gloss', topY, 0.4);
+    kg.add(chamferCyl(0.04, 0.42, 0.012, 10), { x: bx, y: topY + 0.045, z: -0.2, rz: Math.PI / 2 }, paint(srgb('#E9C48A')), 'matte', 0, 0);
+    for (const sx of [-1, 1]) kg.add(chamferCyl(0.026, 0.1, 0.01, 8), { x: bx + sx * 0.26, y: topY + 0.045, z: -0.2, rz: Math.PI / 2 }, paint(KP.darkWood), 'matte', 0, 0);
   }
-
-  return g;
+  return kg.emit(g, M);
 }
 
 export function buildServiceCounter(M: Materials, wM: number, dM: number, variant: 'fryer' | 'sink'): THREE.Group {
+  // ── A2a: the service counter on the kit's counter shell; the fryer carries a well of amber
+  // oil and two baskets whose handles break the silhouette, the sink a basin and a faucet.
   const g = new THREE.Group();
-  const bw = wM * COVER_BODY_FRAC, bd = dM * COVER_BODY_FRAC;
-  const capT = 0.15;
-  const y0 = addCoverPlinth(g, M, wM, dM);
-  const sideTop = COUNTER_TOP_Y - capT;
-
-  addCoverSides(g, bw, bd, y0, sideTop - y0, coverBody(M), coverSkirt(M), 0.06, 'service_cabinet');
-  // Stainless cap — the DARKEST and least saturated top in the counter family, so
-  // fryer/sink stay distinguishable from the stove islands and the prep counters
-  // without the sides having to differ. Consistent dark sides across all cover is the
-  // point; identity lives on the top plane, which is also the plane that dominates the
-  // frame at this camera pitch. Measured, the three caps now read as a proper ladder
-  // rather than three hues: service `potMetal` luma 92 sat 0.18 / stove slate luma 144
-  // sat 0.55 / prep butcher-block luma 168 sat 0.38. The stove cap moving cool put it
-  // in the same half of the wheel as this one (see `stoveCap`), which is why the gap
-  // that separates them is now 52 luma and 0.37 of saturation rather than hue.
-  addCoverCap(g, wM, dM, COUNTER_TOP_Y, capT, M.potMetal, 'service_top');
-  addBacksplash(g, M, wM, dM, COUNTER_TOP_Y, coverBody(M), BACKSPLASH_H);
-
-  // Both variants get a bright metal LIP standing proud of the counter around their
-  // dark well/basin. Same round-10 reason as the stove hob: a flat dark rectangle
-  // sitting flush in a lit top face reads as a hole punched through the mesh, and any
-  // large flat single-value rectangle on cover is the walkable-floor-decal language
-  // this round exists to stop borrowing.
-  // A lighter tint of the cap's own metal, not `potMetal` itself — the service cap IS
-  // `potMetal`, so an untinted lip would be invisible against it.
-  const lipT = 0.07;
-  const lip = mesh(roundedBox(wM * 0.66, lipT, dM * 0.66, 0.03), tinted(M, M.potMetal, '#B7BEC6'), 'service_well_lip');
-  lip.position.y = COUNTER_TOP_Y + lipT / 2;
-  g.add(lip);
-
-  if (variant === 'fryer') {
-    const well = mesh(roundedBox(wM * 0.55, 0.1, dM * 0.55, 0.04), M.potMetalDark, 'fryer_well');
-    well.position.y = COUNTER_TOP_Y + lipT - 0.025;
-    noOutline(well);
-    g.add(well);
-    const basket = mesh(roundedBox(wM * 0.4, 0.22, dM * 0.4, 0.03), M.steelDark, 'fryer_basket');
-    basket.position.y = COUNTER_TOP_Y + lipT + 0.115;
-    g.add(basket);
-    const handleBar = mesh(puck(0.015, wM * 0.5, 8), M.steelDark, 'fryer_handle');
-    handleBar.rotation.z = Math.PI / 2;
-    handleBar.position.set(0, COUNTER_TOP_Y + lipT + 0.255, 0);
-    noOutline(handleBar);
-    g.add(handleBar);
-  } else {
-    const basin = mesh(roundedBox(wM * 0.6, 0.14, dM * 0.55, 0.05), M.steelDark, 'sink_basin');
-    basin.position.y = COUNTER_TOP_Y + lipT - 0.025;
-    noOutline(basin);
-    g.add(basin);
-    const faucetPost = mesh(puck(0.025, 0.32, 8), M.steel, 'faucet_post');
-    faucetPost.position.set(0, COUNTER_TOP_Y + lipT + 0.155, -dM * 0.2);
-    g.add(faucetPost);
-    const faucetArc = mesh(new THREE.TorusGeometry(0.14, 0.02, 6, 12, Math.PI), M.steel, 'faucet_arc');
-    faucetArc.rotation.set(0, Math.PI / 2, 0);
-    faucetArc.position.set(0, COUNTER_TOP_Y + lipT + 0.295, -dM * 0.08);
-    g.add(faucetArc);
+  const kg = new KitGeo();
+  const topY = counterShell(kg, wM, dM, {
+    topY: COUNTER_TOP_Y, topT: 0.16, top: KP.serviceTop, topFinish: 'gloss',
+    plinthH: COVER_PLINTH_H, bodyFrac: COVER_BODY_FRAC, backsplashH: BACKSPLASH_H,
+  });
+  const lipW = wM * 0.62, lipD = dM * 0.6;
+  // a raised steel lip round the well (its inner faces read the depth)
+  const lip = paint(val(KP.steel, 1.02), val(KP.steel, 0.86), val(KP.steel, 1.12));
+  const LT = 0.09, LW = 0.12;
+  for (const [x, z, w, d] of [[0, lipD / 2 - LW / 2, lipW, LW], [0, -lipD / 2 + LW / 2, lipW, LW],
+    [lipW / 2 - LW / 2, 0, LW, lipD - LW * 2], [-lipW / 2 + LW / 2, 0, LW, lipD - LW * 2]] as const) {
+    kg.add(chamferBox(w, LT, d, 0.03), { x, y: topY, z }, lip, 'gloss', topY, 0.3);
   }
-
-  return g;
+  skirt(kg, { x: 0, z: 0 }, topY, lipW / 2, lipD / 2, 0.25, KP.serviceTop, 'gloss', 0.28, 0, topClip(wM, dM));
+  const inW = lipW - LW * 2, inD = lipD - LW * 2;
+  if (variant === 'fryer') {
+    // the well: a deep amber oil surface just below the lip, two wire baskets half sunk in
+    // it (dark rims, the oil showing through), handles reaching out over the front lip
+    kg.add(chamferBox(inW, 0.04, inD, 0.01), { y: topY + 0.02 }, flat(srgb('#A86A24')), 'gloss', 0, 0);
+    for (const sx of [-1, 1]) {
+      const cx = sx * inW * 0.25, bw2 = inW * 0.4, bd2 = inD * 0.74;
+      for (const [x, z, w, d] of [[cx, bd2 / 2, bw2, 0.05], [cx, -bd2 / 2, bw2, 0.05], [cx + bw2 / 2, 0, 0.05, bd2], [cx - bw2 / 2, 0, 0.05, bd2]] as const) {
+        kg.add(chamferBox(w, 0.1, d, 0.015, { noVEdges: true }), { x, y: topY + 0.03, z }, paint(val(KP.steel, 0.7), val(KP.steel, 0.55)), 'gloss', 0, 0);
+      }
+      kg.add(chamferBox(0.06, 0.06, dM * 0.3, 0.02), { x: cx, y: topY + 0.16, z: bd2 / 2 + dM * 0.13, rx: -0.3 }, paint(KP.iron), 'matte', 0, 0);
+    }
+  } else {
+    // a double basin (a divider down the middle) holding water, and an arched faucet
+    kg.add(chamferBox(inW, 0.03, inD, 0.01), { y: topY + 0.005 }, flat(srgb('#4F92C2')), 'gloss', 0, 0);
+    kg.add(chamferBox(0.08, LT, inD, 0.025, { noVEdges: true }), { y: topY }, lip, 'gloss', topY, 0.3);
+    const fz = -lipD / 2 + LW / 2;
+    block(kg, 0, topY + LT, fz, 0.07, 0.42, 0.07, 0.02, paint(KP.steel), 'gloss', { bands: [], aoK: 0.4 });
+    kg.add(chamferBox(0.07, 0.07, 0.4, 0.02), { x: 0, y: topY + LT + 0.42, z: fz + 0.17 }, paint(KP.steel), 'gloss', 0, 0);
+    for (const sx of [-1, 1]) kg.add(chamferCyl(0.05, 0.08, 0.02, 8), { x: sx * 0.2, y: topY + LT, z: fz }, paint(KP.steel), 'gloss', topY + LT, 0.3);
+  }
+  return kg.emit(g, M);
 }
+
