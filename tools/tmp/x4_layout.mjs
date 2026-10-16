@@ -50,7 +50,7 @@
  *   node tools/tmp/x4_layout.mjs --selftest      # the known-bad battery
  */
 
-import { writeFileSync, mkdirSync } from 'node:fs';   // ⚠️ `readFileSync` went with the rules.ts scrapes
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';   // ⚠️ `readFileSync` went with the rules.ts scrapes; it is back for §Z, which reads the DUMP, not source
 import { dirname, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
@@ -164,9 +164,12 @@ export function ringFaults(arena, margin = PLAYER_SIZE) {
   return out;
 }
 
-/** `shared.ts`'s own derivation, duplicated so this tool runs before the edit lands. */
-const FOG_FIRST_CONTACT_S = 6;
-export const MAX_SAFE_RADIUS = Math.round(Math.hypot(W / 2, H / 2) / (1 - (FOG_FIRST_CONTACT_S * 1000) / MATCH_DURATION_MS));
+/** `shared.ts`'s own derivation, duplicated so this tool runs before the edit lands.
+ *  ⚠️ WAS `Math.round(hypot(W/2, H/2) / (1 - FOG_FIRST_CONTACT_S * 1000 / MATCH_DURATION_MS))`
+ *  with `FOG_FIRST_CONTACT_S = 6` — the clock-coupled opening retired 2026-08-12, 1792 at
+ *  today's clock. `shared.ts` derives `fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` = 1720.47;
+ *  that function is IMPORTED here rather than re-typed (T1a, 2026-10-16, §Z). */
+export const MAX_SAFE_RADIUS = R.fogOpeningRadiusFor(Math.hypot(W / 2, H / 2));
 
 /** 🔴 The nav-cell rule. `movement.ts:navGrid` doubles the cell until the grid fits. */
 export function navCellFor(width, height) {
@@ -271,6 +274,23 @@ export const HUB = [
   [CX, CY - 330, 150, 70, 'sink_counter', { yawDeg: 180, build: "buildServiceCounter(M, w, d, 'sink')" }],
 ];
 
+/**
+ * The hub district — A2b (`8b17796`, 2026-10-15), designed and checked in
+ * `a2b_district.mjs:DISTRICT`, shipped in `kitchen.ts`, and ABSENT from this table until
+ * T1a's §Z found the generator 6 boxes short of the arena (2026-10-16). Same rows, same
+ * build args. Named, not just appended, because two checks below must know which boxes
+ * these are: §D's history fixture predates them, and §F's "no prop was scaled" rule is about
+ * the x4 resize while these are new AUTHORED kit pieces (REVAMP §5 A2), not scaled ones.
+ */
+export const DISTRICT_A2B = [
+  [1752.5, 1000, 125, 55, 'pass_counter', { build: 'buildPassCounter(M, w, d)' }],
+  [1867.5, 760, 125, 55, 'prep_counter', { build: 'buildPrepCounter(M, w, d, { rollingPin: true })' }],
+  [1137.5, 675, 55, 80, 'counter_run', { build: 'buildCounterRun(M, w, d)' }],
+];
+/** A box that is one of `DISTRICT_A2B`'s rows or its 180-degree image. */
+export const isDistrictA2b = (c) => DISTRICT_A2B.some(([x, y, w, h, kind]) => c.kind === kind && c.w === w && c.h === h
+  && ((c.x === x && c.y === y) || (c.x === W - x && c.y === H - y)));
+
 export const NORTH = [
   // ── NW walk-in freezer stack — the 1x corner landmark, now two deep ────────
   [300, 300, 230, 190, 'freezer', { build: 'buildFreezerSized(M, w, d)' }],
@@ -351,6 +371,9 @@ export const NORTH = [
   // ── The west bay's inboard wall — what makes the bay a BAY and not a lane ──
   [450, 845, 50, 50, 'spice_cart', { build: 'buildSpiceCart(M, w, d)' }],
   [450, 910, 160, 55, 'prep_counter', { build: 'buildPrepCounter(M, w, d, { knifeBlock: true })' }],
+
+  // ── The hub district (below) ──
+  ...DISTRICT_A2B,
 ];
 
 /**
@@ -400,7 +423,10 @@ export const SPAWN_NORTH = [
 
 /** The two slow hazards. Named `puddleSouth` / `puddleNorth` in source — `arena_probe`'s
  *  extractor reads exactly those two identifiers, so the pair stays a pair. */
-export const PUDDLE_SOUTH = { x: 1830, y: 1250, radius: 50 };
+// ⚠️ WAS { x: 1830, y: 1250 } — 20 wu INSIDE A CRATE, 0 of 7,845 cells standable. `6955c04`
+// moved the shipped pair out on 2026-08-11 (the day this file landed) and this table never
+// followed; nothing here checked a puddle, so 54 assertions passed over it (T1a, §Z).
+export const PUDDLE_SOUTH = { x: 1950, y: 1100, radius: 50 };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Assembly — the mirror is a TRANSFORM, never a typed coordinate
@@ -438,8 +464,9 @@ export function build() {
   const puddleNorth = { x: W - PUDDLE_SOUTH.x, y: H - PUDDLE_SOUTH.y, radius: PUDDLE_SOUTH.radius };
   const hazards = [
     { x: CX, y: CY, radius: POT_DANGER_RADIUS, kind: 'damage', damage: POT_DAMAGE, tickMs: POT_TICK_MS },
-    { x: PUDDLE_SOUTH.x, y: PUDDLE_SOUTH.y, radius: PUDDLE_SOUTH.radius, kind: 'slow', slowFactor: 0.55 },
-    { x: puddleNorth.x, y: puddleNorth.y, radius: puddleNorth.radius, kind: 'slow', slowFactor: 0.55 },
+    // ⚠️ `slowFactor` WAS a literal 0.55, a value `rules.ts:PUDDLE_SLOW_FACTOR` (0.45) never had.
+    { x: PUDDLE_SOUTH.x, y: PUDDLE_SOUTH.y, radius: PUDDLE_SOUTH.radius, kind: 'slow', slowFactor: R.PUDDLE_SLOW_FACTOR },
+    { x: puddleNorth.x, y: puddleNorth.y, radius: puddleNorth.radius, kind: 'slow', slowFactor: R.PUDDLE_SLOW_FACTOR },
   ];
 
   return {
@@ -842,6 +869,41 @@ const check = (name, ok, detail = '') => {
   else { fail++; console.log(`  FAIL - ${name}${detail ? `\n         ${detail}` : ''}`); }
 };
 
+/**
+ * 🚨 §Z's comparator — every field the GENERATOR owns, against the browser's dump of the
+ * SHIPPED arena. Returns one line per drifted field and nothing when they agree.
+ *
+ * It exists because this file's header says it "asserts the layout that landed" and, until
+ * T1a (2026-10-16), every one of its checks ran over ITS OWN table and nothing compared that
+ * table with what shipped. By then the table had: both slow puddles 20 wu INSIDE A CRATE
+ * ((1830,1250), the spot `6955c04` moved the shipped ones out of on 2026-08-11, the day this
+ * file landed), a 0.55 slow factor the sim has never had (`PUDDLE_SLOW_FACTOR` is 0.45 and
+ * always was), the dead clock-coupled ring (1792 vs 1720.47) and 111 of the 117 shipped
+ * boxes (A2b's district missing). 54 assertions passed over it. `kx_seatfair` already held
+ * the spawn half of this comparison; the rest was nobody's.
+ */
+export function generatorDrift(gen, dump) {
+  const out = [];
+  const box = (c) => `${c.kind}@${c.x},${c.y},${c.w}x${c.h}`;
+  const setDiff = (label, a = [], b = []) => {
+    const A = new Set(a.map(box)), B = new Set(b.map(box));
+    const onlyGen = [...A].filter((k) => !B.has(k)), onlyDump = [...B].filter((k) => !A.has(k));
+    if (onlyGen.length || onlyDump.length || a.length !== b.length) {
+      out.push(`${label}: generator ${a.length} vs shipped ${b.length} (${onlyGen.length} only in the generator, ${onlyDump.length} only shipped${onlyDump.length ? `, e.g. ${onlyDump[0]}` : ''})`);
+    }
+  };
+  if (gen.width !== dump.width || gen.height !== dump.height) out.push(`size ${gen.width}x${gen.height} vs ${dump.width}x${dump.height}`);
+  if (JSON.stringify(gen.center) !== JSON.stringify(dump.center)) out.push(`center ${JSON.stringify(gen.center)} vs ${JSON.stringify(dump.center)}`);
+  if (!(Math.abs(gen.maxSafeRadius - dump.maxSafeRadius) < 1e-6)) out.push(`maxSafeRadius ${gen.maxSafeRadius} vs ${dump.maxSafeRadius}`);
+  setDiff('cover', gen.cover, dump.cover);
+  setDiff('concealment', gen.concealment, dump.concealment);
+  const pts = (ps = []) => ps.map((p) => `${p.x},${p.y}`).join(' ');
+  if (pts(gen.spawns) !== pts(dump.spawns)) out.push(`spawns [${pts(gen.spawns)}] vs [${pts(dump.spawns)}]`);
+  const hz = (hs = []) => hs.map((h) => `${h.kind}@${h.x},${h.y},r${h.radius},sf${h.slowFactor ?? '-'},dmg${h.damage ?? '-'},tick${h.tickMs ?? '-'}`).sort().join(' ');
+  if (hz(gen.hazards) !== hz(dump.hazards)) out.push(`hazards [${hz(gen.hazards)}] vs [${hz(dump.hazards)}]`);
+  return out;
+}
+
 async function selftest() {
   console.log(`\nx4_layout --selftest   ${W}x${H} · body ${PLAYER_SIZE} · nav cell ${NAV_CELL_AT_X4} · legal gaps <=${GAP_SLIT_MAX} or >=${GAP_CORRIDOR_MIN}\n`);
   const arena = build();
@@ -963,6 +1025,11 @@ async function selftest() {
     // (950,670)/(950,760) ONLY because the islands did, so reverting one and not the other
     // reconstructs a tree that never existed and the row would fail for the wrong reason.
     // It did, first time — kept as the reason this fixture is written the long way.
+    // ⚠️ AND THE DISTRICT GOES TOO (T1a): this reconstructs the tree BEFORE `21fb6be`, and
+    // A2b's six boxes landed two months after it. Once §Z put them in the table, leaving them
+    // in made this row fail "gaps 4 · notches 2 · deep 648" — a tree that never existed, the
+    // exact failure the comment above records. Same lesson, a second time.
+    broken.cover = broken.cover.filter((c) => !isDistrictA2b(c));
     for (const c of broken.cover) {
       if (c.kind === 'herb_crate' && c.x === 950 && c.y === 670) { c.x = 910; c.y = 560; }
       if (c.kind === 'herb_crate' && c.x === W - 950 && c.y === H - 670) { c.x = W - 910; c.y = H - 560; }
@@ -1036,9 +1103,20 @@ async function selftest() {
     const d0 = shipped.cover.reduce((s, c) => s + c.w * c.h, 0) / (shipped.width * shipped.height);
     check(`density within 15% of shipped (${(d * 100).toFixed(2)}% vs ${(d0 * 100).toFixed(2)}%)`, Math.abs(d / d0 - 1) < 0.15);
     check('~4x the prop COUNT', arena.cover.length >= 3 * shipped.cover.length, `${shipped.cover.length} -> ${arena.cover.length}`);
-    check('every prop SIZE is drawn from the shipped set (no prop was scaled)',
-      arena.cover.every((c) => shipped.cover.some((s0) => s0.w === c.w && s0.h === c.h)),
-      arena.cover.filter((c) => !shipped.cover.some((s0) => s0.w === c.w && s0.h === c.h)).map((c) => `${c.kind} ${c.w}x${c.h}`).join(' '));
+    // ⚠️ WAS over EVERY box. Rule 1 is about the x4 RESIZE — density from more props, never
+    // from stretched ones — and it held over the table this file checked, because that table
+    // was not the shipped map (§Z). On the shipped map A2b's district fails it: three new
+    // AUTHORED kit pieces (pass/prep counters 125x55, counter runs 55x80), not scaled 1x
+    // props. The rule keeps its teeth over everything else, and the exemption is ASSERTED to
+    // cover exactly those six boxes — an exemption nothing checks is a comment.
+    const base = arena.cover.filter((c) => !isDistrictA2b(c));
+    const exempt = arena.cover.filter(isDistrictA2b);
+    check('every prop SIZE outside A2b\'s district is drawn from the shipped 1x set (no prop was scaled)',
+      base.every((c) => shipped.cover.some((s0) => s0.w === c.w && s0.h === c.h)),
+      base.filter((c) => !shipped.cover.some((s0) => s0.w === c.w && s0.h === c.h)).map((c) => `${c.kind} ${c.w}x${c.h}`).join(' '));
+    check('…and the district exemption covers EXACTLY its six boxes, every row and its mirror present',
+      exempt.length === 2 * DISTRICT_A2B.length && DISTRICT_A2B.length === 3,
+      `${exempt.length} exempt of ${2 * DISTRICT_A2B.length} expected`);
     check('KNOWN-BAD: a x2 linear STRETCH of the shipped layout is a quarter of the density',
       (shipped.cover.reduce((s, c) => s + c.w * c.h, 0) / (W * H)) / d0 < 0.3);
   }
@@ -1096,6 +1174,26 @@ async function selftest() {
     check(`${arena.concealment.length} patches, ~4x the shipped 6`, arena.concealment.length >= 18 && arena.concealment.length <= 24, `${arena.concealment.length}`);
     check('every patch is still <= the 168 wu AI ceiling', arena.concealment.every((b) => Math.max(b.w, b.h) <= MELEE_HEAVY * 2));
     check('the ceiling did NOT scale with the arena', MELEE_HEAVY * 2 === 168);
+  }
+
+  // §Z — the table every check above runs over must BE the shipped arena (see generatorDrift).
+  console.log('\n§Z — the generator IS the shipped arena (tools/arena.gameplay.json, the browser\'s dump)');
+  {
+    const dump = JSON.parse(readFileSync(`${ROOT}/tools/arena.gameplay.json`, 'utf8'));
+    // NON-EMPTY FIRST: a drift check over an empty dump agrees with an empty generator.
+    check('the shipped dump is populated — cover, concealment, hazards and six spawns to compare against',
+      dump.cover?.length > 0 && dump.concealment?.length > 0 && dump.hazards?.length > 0 && dump.spawns?.length === 6,
+      `cover ${dump.cover?.length} conceal ${dump.concealment?.length} hazards ${dump.hazards?.length} spawns ${dump.spawns?.length}`);
+    const drift = generatorDrift(arena, dump);
+    check('build() equals the shipped arena on every field it owns — the 54 checks above are about the map that SHIPPED',
+      drift.length === 0, drift.join(' · '));
+    // KNOWN-BADS, one per kind of drift the table actually carried until T1a.
+    const ring = generatorDrift({ ...arena, maxSafeRadius: 1792 }, dump);
+    check('KNOWN-BAD: the dead clock-coupled ring (1792) is named as drift', ring.some((l) => l.startsWith('maxSafeRadius')), ring.join(' · ') || 'no drift reported');
+    const pud = generatorDrift({ ...arena, hazards: arena.hazards.map((h) => (h.kind === 'slow' && h.x > CX ? { ...h, x: 1830, y: 1250 } : h)) }, dump);
+    check('KNOWN-BAD: the pre-6955c04 south puddle (1830,1250 — inside a crate) is named as drift', pud.some((l) => l.startsWith('hazards')), pud.join(' · ') || 'no drift reported');
+    const lost = generatorDrift({ ...arena, cover: arena.cover.filter((c) => c.kind !== 'pass_counter') }, dump);
+    check('KNOWN-BAD: a layout missing a shipped district (the two pass counters) is named as drift', lost.some((l) => l.startsWith('cover')), lost.join(' · ') || 'no drift reported');
   }
 
   console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'}  ${pass} passed, ${fail} failed\n`);
