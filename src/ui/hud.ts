@@ -71,7 +71,7 @@ import { fightersOf, LOCAL_SLOT, localFighter, slotKey, slotOf } from '../game/r
 // greying out on a boolean that cannot tell the two apart (U1, B3b). It replaced this file's
 // import of `state.ts:weaponsLocked`, which F1 had wired for the same tray.
 import { itemUsable, weaponRefusal } from '../game/combat';
-import { isVisibleFrom } from '../game/movement';
+import { fighterVisibleTo } from '../visibility';
 // The keyboard half of the item buttons, imported rather than transcribed — the same
 // argument `input.ts:MOVE_KEYS` makes for `settings.ts`: two copies of one mapping is a
 // defect waiting for the day they disagree, and a control that lies about its own key is
@@ -390,22 +390,16 @@ export interface Hud {
  * every balance number in the project is untouched (`sim.test.mjs` stays at 253 and
  * `conceal_lab --bitid` stays exact).
  *
- * Degenerates to `true` on every arena that ships no `concealment` list, which today is
- * all of them — so this is currently a no-op by construction, not by luck.
+ * Degenerates to `true` on every arena that ships no `concealment` list, ~~which today is
+ * all of them — so this is currently a no-op by construction, not by luck.~~ ⚠️ STALE: the
+ * kitchen ships 20 concealment regions (found by V2 and V3, 2026-10-16), so this is live.
  */
-export function fighterVisibleTo(state: MatchState, observer: Fighter, target: Fighter): boolean {
-  // ⚠️ `state, target` ARE THE §29c ARGUMENTS, and omitting them made THE PLAYER'S OWN
-  // SCREEN the only observer still resolving concealment against DECLARED regions instead of
-  // STANDING ones. Two facts live on the match, not the arena, and `ArenaDefinition` cannot
-  // carry either — it is one shared object across every match a process runs:
-  //   `MatchState.brokenConcealment`  a plate the target shattered by attacking from under it
-  //   `Fighter.revealedUntil`         the window a fighter's own attack buys the other side
-  // Without them the radar would keep hiding an enemy who had just destroyed their cover and
-  // fired at you — the sim would treat them as seen while the HUD treated them as hidden, and
-  // that disagreement between two readers of one rule is this project's oldest defect shape.
-  // `ai.ts` takes the same two arguments at its own single call site for the same reason.
-  return isVisibleFrom(observer.x, observer.y, target.x, target.y, state.arena, state, target);
-}
+// ⚠️ ONE RULE, ONE PLACE (V3, `7c1ab96`, 2026-10-16): the body moved to `src/visibility.ts`, because
+// `vfx.ts` and `audio/director.ts` gate on it too and `director.ts` cannot import THIS file (hud.ts ->
+// ../audio -> director would cycle). It was byte-identical when it moved, and `v3_conceal`'s
+// `B.one-rule` row asserted the two copies agreed over 30 seat pairs (5 of them false) while both
+// existed. The §29c argument note above still describes it exactly.
+export { fighterVisibleTo };
 
 /**
  * @deprecated THE TWO-SEAT SPELLING of `fighterVisibleTo(state, local, state.enemy)`.

@@ -2147,6 +2147,12 @@ export class GameSession {
         }
         case 'heal': {
           const fighter = fighterOf(this.state, ev.fighterId, ev.fighterRole);
+          // Same gate, same predicate and same observer as `cast-started` above (V3, `7c1ab96`):
+          // a hidden fighter's regen drew a pulse and a green number at its feet — a free read of
+          // its position (measured by V3 on 6010df0; the heal SOUND was already gated in
+          // `director.ts`). HP may show (§35); position may not. Your own heals always draw.
+          const slot = slotOf(ev.fighterId, ev.fighterRole);
+          if (slot !== LOCAL_SLOT && !fighterVisibleTo(this.state, this.viewObserver(), fighter)) break;
           this.vfx.spawnHealPulse(fighter.x, fighter.y);
           this.feel.responses.vfx++;
           const screenPos = this.projectPointToScreen(fighter.x, fighter.y, 1.6);
