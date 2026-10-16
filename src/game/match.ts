@@ -244,6 +244,8 @@ const FEEL_EVENT_KEYS = [
   // event the census cannot count is the "never fires" / "no response" ambiguity this
   // record exists to remove. Keyed by `ev.type`, as `feel_census.mjs` keys everything.
   'cast-started', 'cast-cancelled', 'item-revived',
+  // V2: the four item events, added with the cases that answer them (same rule as above).
+  'item-used', 'item-resolved', 'item-cancelled', 'item-hit',
 ] as const;
 
 /**
@@ -2226,9 +2228,66 @@ export class GameSession {
         // like every other number, so it is no free read on a fighter you cannot see.
         case 'item-revived': {
           this.vfx.spawnHealPulse(ev.x, ev.y);
+          // V2: and the FRIDGE LIGHT `look` asks for, in the same beat (one response, not two —
+          // `b1_match.mjs` §R pins exactly one).
+          this.vfx.itemRevived(ev.x, ev.y);
           this.feel.responses.vfx++;
           const screenPos = this.projectPointToScreen(ev.x, ev.y, 1.6);
           if (screenPos) { this.hud.spawnDamageNumber(screenPos, ev.hp, { heal: true }); this.feel.responses.damageNumber++; }
+          break;
+        }
+        // ── V2: ITEMS YOU CAN SEE — `item-used` / `item-resolved` / `item-cancelled` / `item-hit` ──
+        //
+        // 🚨 ALL FOUR FELL INTO `default` (bug-hunt row B7): pressing an item showed NOTHING —
+        // no throw, no landing, no state on the victim — while B1 had just made items usable and
+        // `DECISIONS §91m` measured one item taking a bot duel from 61.8% to 99.1%. What each
+        // looks like is `src/vfx/items.ts`'s; what is decided HERE is who may see it.
+        //
+        // ⚠️ AN ITEM PRESS DOES NOT SPEND COVER (`combat.ts:attemptItem` never calls `spendCover`,
+        // unlike `attemptAttack`), so a concealed fighter can use one and STAY concealed. Every
+        // beat therefore rides the same visibility channel as the HP pill and `cast-started`'s
+        // wind-up — `fighterVisibleTo` from `viewObserver()`, the local seat always seen — or a
+        // throw from a bush would be a free read of the bush. Red/green: `tools/tmp/v2_items.mjs`.
+        case 'item-used': {
+          const slot = slotOf(ev.fighterId, ev.fighterRole);
+          const user = fighterOf(this.state, ev.fighterId, ev.fighterRole);
+          if (slot !== LOCAL_SLOT && !fighterVisibleTo(this.state, this.viewObserver(), user)) break;
+          this.vfx.itemUsed(slot, ev.itemId, ev.x, ev.y, user.facing, this.state.elapsed);
+          this.feel.responses.vfx++;
+          break;
+        }
+        case 'item-resolved': {
+          const slot = slotOf(ev.fighterId, ev.fighterRole);
+          const user = fighterOf(this.state, ev.fighterId, ev.fighterRole);
+          if (slot !== LOCAL_SLOT && !fighterVisibleTo(this.state, this.viewObserver(), user)) break;
+          this.vfx.itemResolved(slot, ev.itemId, ev.x, ev.y);
+          this.feel.responses.vfx++;
+          break;
+        }
+        case 'item-cancelled': {
+          // No position on the event (the sim did not need one): the fighter's own, this tick.
+          const slot = slotOf(ev.fighterId, ev.fighterRole);
+          const user = fighterOf(this.state, ev.fighterId, ev.fighterRole);
+          if (slot !== LOCAL_SLOT && !fighterVisibleTo(this.state, this.viewObserver(), user)) break;
+          this.vfx.itemCancelled(slot, ev.itemId, user.x, user.y);
+          this.feel.responses.vfx++;
+          break;
+        }
+        case 'item-hit': {
+          const ownerSlot = slotOf(ev.ownerId, ev.ownerRole);
+          const targetSlot = slotOf(ev.targetId, ev.targetRole);
+          const owner = fighterOf(this.state, ev.ownerId, ev.ownerRole);
+          const target = fighterOf(this.state, ev.targetId, ev.targetRole);
+          const observer = this.viewObserver();
+          const seeOwner = ownerSlot === LOCAL_SLOT || fighterVisibleTo(this.state, observer, owner);
+          const seeTarget = targetSlot === LOCAL_SLOT || fighterVisibleTo(this.state, observer, target);
+          // Disposal MOVED the victim: the drain opens where they WERE, and that place has its own
+          // answer (`fromX/fromY` are the victim's before the throw — `state.ts`'s note).
+          const seeFrom = ev.itemId !== 'disposal' ? seeTarget
+            : targetSlot === LOCAL_SLOT || fighterVisibleTo(this.state, observer, { ...target, x: ev.fromX, y: ev.fromY });
+          if (!seeTarget && !seeFrom) break;
+          this.vfx.itemHit(ev, ownerSlot, targetSlot, seeOwner, seeTarget, seeFrom, this.state.elapsed);
+          this.feel.responses.vfx++;
           break;
         }
         case 'cast-cancelled':

@@ -43,11 +43,11 @@
 
 import * as THREE from 'three';
 import type {
-  Fighter, FighterId, FighterRole, MatchState, Medikit, Projectile, Vec2,
+  Fighter, FighterId, FighterRole, GameEvent, MatchState, Medikit, Projectile, Vec2,
 } from './state';
 // The presentation-side seat rules, stated once for all four consumers of the event
 // stream — see `roster.ts` for why every resolver has a legacy-role fallback.
-import { fighterOf, fightersOf, slotOf } from './roster';
+import { fighterOf, fightersOf, LOCAL_SLOT, slotOf } from './roster';
 import { MAX_FIGHTERS, hasItem } from './state';
 import { SPLAT_RADIUS, SPLAT_DURATION_MS, TRAIL, REACH, MEDIKIT, ITEM_TUNING } from './rules';
 // The sim's own predicate for "may this status be applied yet", exported by
@@ -82,6 +82,15 @@ import { VFX_SIGNATURE, effectColor } from '../vfx/palette';
 import { BlueCheeseClouds } from '../vfx/blueCheese';
 // One shared, velocity-aligned ribbon behind every projectile (graphics campaign V1).
 import { RibbonBatch, type RibbonPoint } from '../vfx/ribbons';
+// V2 — every item's presentation (`src/vfx/items.ts`) and the Squid Ink channel's WRITER
+// (`src/vfx/ink.ts` names this file's `sync` as its one writer; nothing wrote it until V2).
+import { ItemVfx } from '../vfx/items';
+import { clearInk, inkEnvelope, writeInk } from '../vfx/ink';
+import type { ItemId } from './rules';
+// Concealment's ONE presentation-side predicate (the HP pill's, `cast-started`'s), so a state
+// drawn on a fighter the observer cannot see is not a free read of where they stand. NOT a direct
+// `isVisibleFrom` call: `sim.test.mjs` §26(m) pins `src/game/*.ts` to exactly two of those.
+import { fighterVisibleTo } from '../ui/hud';
 
 declare global {
   interface Window {
@@ -3054,6 +3063,12 @@ export class VfxLayer {
   private readonly ribbons = new RibbonBatch(RIBBON_MAX, RIBBON_POINTS);
   /** Linear ribbon colour per weapon colour (after the identity re-key), memoised. */
   private readonly ribbonRgb = new Map<string, [number, number, number]>();
+  /** V2: every item's one-shots and states. Built in the constructor (it needs the shared
+   *  textures); its group is the LAST child the constructor adds, so nothing that existed before
+   *  it moves in the scene-graph order. */
+  private readonly items: ItemVfx;
+  /** Scratch for `sync`'s per-seat concealment answer, reused every frame. */
+  private readonly itemShown: boolean[] = [];
   private readonly cheeseClouds = new BlueCheeseClouds(TRAIL_Y + 0.03, MAX_FIGHTERS, CHEESE_HAZE, CHEESE_EDGE, CHEESE_HAZE_A, CHEESE_EDGE_A);
 
   /** The (linear) MULTIPLY factor a mark keyed to `hex` stains the floor with at full coverage —
@@ -3272,6 +3287,10 @@ export class VfxLayer {
     // shipped match seats), the rest grown at the top of `sync()`.
     this.buildStatusVisual = buildStatusVisual;
     this.ensureSlots(2);
+
+    // V2 — the item layer. After every pool, so the order of everything above is unchanged.
+    this.items = new ItemVfx(GROUND_VFX_Y, { glow: this.glowTex, softDisc: this.softDiscTex, star: this.starTex });
+    this.group.add(this.items.group);
 
     // QA-only on-demand spawn — see the `__vfxSpawnTest` declaration above.
     window.__vfxSpawnTest = (kind, xWU, yWU, amount = 14, color = '#FFC93C', who, weaponKey, castMs) => {
@@ -3871,6 +3890,72 @@ export class VfxLayer {
         star.material.opacity = 0.95;
       });
     });
+
+    // ── V2: ITEM STATES, and the SQUID INK channel ─────────────────────────────────────
+    //
+    // The observer is the LOCAL seat while it lives — `match.ts:viewObserver()`'s rung 1, which
+    // is every frame a living player draws. Once it is dead the camera is on a spectated subject
+    // this layer is not told about, and every seat is shown rather than asking a corpse: a
+    // corpse 2,000 wu away would hide the very fighter the camera is pointed at (the "rendering
+    // and invisible" failure `viewObserver`'s own note records). The exact observer is a ROUTED
+    // follow-up (pass `viewObserver()` into `sync`; the call is in `match.ts`'s loop).
+    const local = roster[LOCAL_SLOT];
+    const observer = local && local.alive ? local : null;
+    this.itemShown.length = roster.length;
+    for (let i = 0; i < roster.length; i++) {
+      this.itemShown[i] = observer === null || i === LOCAL_SLOT || fighterVisibleTo(state, observer, roster[i]!);
+    }
+    this.items.sync(state, roster, this.itemShown);
+
+    // `vfx/ink.ts`'s header: *"`game/vfx.ts` observes the sim. Its `sync(state)` is the only
+    // per-frame call in the presentation layer that is handed a live `MatchState`, so it is the
+    // only place that can read `localFighter(state).item.blotUntil`."* It never did, so the blots
+    // never drew. Three gates, each a requirement in `ITEMS.squid_ink.look`:
+    //   * the LOCAL seat only — *"SCREEN-SPACE blots on the victim's own view only"*;
+    //   * alive — *"must do something defensible when you are dead and spectating"*: the ink
+    //     impairs a PLAYER, and a dead one has nothing left to be impaired at, so a spectator
+    //     watches the fight clean;
+    //   * `'playing'` — the result card must not freeze half a blot over the whistle.
+    // The duration is the status's own (`applyItemStatus` writes `blotMs` and refuses a re-apply
+    // while one runs), so the envelope can be solved from the deadline alone; the seed is the
+    // deadline itself — one layout per cast, which is what `writeInk` keys its revision on.
+    const total = ITEM_TUNING.squid_ink.blotMs;
+    const left = local ? local.item.blotUntil - state.elapsed : 0;
+    if (local && local.alive && state.phase === 'playing' && left > 0) {
+      writeInk(inkEnvelope(left, total), Math.min(1, Math.max(0, 1 - left / total)), Math.floor(local.item.blotUntil));
+    } else {
+      clearInk();
+    }
+  }
+
+  // ── V2: THE ITEM EVENTS, CALLED FROM `match.ts`'s EVENT SWITCH ──────────────────────────
+  // `match.ts` makes the concealment call (`fighterVisibleTo` from `viewObserver()`, exactly as
+  // its `cast-started` case does) and passes the answer; nothing here re-asks it.
+
+  /** `item-used`. */
+  itemUsed(slot: number, itemId: ItemId, xWU: number, yWU: number, facing: Vec2, nowSim: number): void {
+    this.items.used(slot, itemId, xWU, yWU, facing, nowSim);
+  }
+  /** `item-resolved` (Shiitake's wind-up landing). */
+  itemResolved(slot: number, itemId: ItemId, xWU: number, yWU: number): void {
+    this.items.resolved(slot, itemId, xWU, yWU);
+  }
+  /** `item-cancelled` (Shiitake's wind-up interrupted). */
+  itemCancelled(slot: number, itemId: ItemId, xWU: number, yWU: number): void {
+    this.items.cancelled(slot, itemId, xWU, yWU);
+  }
+  /** `item-hit` — `seeFrom` matters only for Disposal, whose victim moved. */
+  itemHit(ev: Extract<GameEvent, { type: 'item-hit' }>, ownerSlot: number, targetSlot: number,
+    seeOwner: boolean, seeTarget: boolean, seeFrom: boolean, nowSim: number): void {
+    this.items.hit(ev, ownerSlot, targetSlot, seeOwner, seeTarget, seeFrom, nowSim);
+  }
+  /** `item-revived` — Leftovers' fridge light (the heal pulse beside it stays `spawnHealPulse`). */
+  itemRevived(xWU: number, yWU: number): void {
+    this.items.revived(xWU, yWU);
+  }
+  /** QA: the item layer's pool counters (calls / steals / beats) — `tools/tmp/v2_items.mjs`. */
+  get itemStats(): Readonly<{ calls: number; steals: number; beats: number }> {
+    return this.items.stats;
   }
 
   /**
@@ -3881,6 +3966,8 @@ export class VfxLayer {
    * That's the whole point of hit-stop: the WORLD pauses, the HIT still pops.
    */
   updateEffects(dtSeconds: number): void {
+    // V2's one-shots ride the same hit-stop-free clock as every beat below.
+    this.items.update(dtSeconds);
     for (const p of this.particles) {
       if (!p.active) continue;
       p.life += dtSeconds;
@@ -5969,6 +6056,10 @@ export class VfxLayer {
   /** Drop every tracked mesh AND reset one-shot effects — call on match restart so
    * stale VFX (a burst mid-fade, a status ring) doesn't linger into the next match. */
   clear(): void {
+    // V2: the item one-shots and states, and the ink channel — module state that outlives a
+    // match, so a player who quits inked must not carry the blots into the lobby (`ink.ts`).
+    this.items.clear();
+    clearInk();
     // `shellPool` is listed here and not left to `syncPool` for the same reason the
     // other three are: `clear()` runs on a match restart, when `state.projectiles`
     // becomes empty without any pool ever being asked to sync against it again.
@@ -6035,6 +6126,7 @@ export class VfxLayer {
 
   dispose(): void {
     this.clear();
+    this.items.dispose();
     delete window.__vfxSpawnTest;
     if (window.__vfxLayer === this) delete window.__vfxLayer;
     this.projectileGeo.dispose();

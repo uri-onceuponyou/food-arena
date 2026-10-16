@@ -228,3 +228,38 @@ export function clearInk(): void {
   CHANNEL.amount = 0;
   CHANNEL.age = 0;
 }
+
+/** What `applyInkTo` needs of the post effect — `render/stage.ts:SquidInkEffect` has all three. */
+export interface InkSink {
+  amount: number;
+  age: number;
+  setDiscs(discs: readonly InkDisc[]): void;
+}
+
+/**
+ * ── THE READER, AS ONE CALL — for `render/stage.ts`, which owns the post chain ──────────────
+ *
+ * 🚨 **THE READER DID NOT EXIST EITHER.** This file's header and `stage.ts`'s import comment both
+ * say `stage.ts` "reads it once per frame", and `stage.ts` carries the fields for it
+ * (`inkRevision`, `inkAspect`) — but nothing in `stage.ts` ever calls `readInk()`, `inkLayout()`
+ * or `SquidInkEffect.setDiscs()` (`git log -S "readInk()" -- src/render/stage.ts` finds only the
+ * comment, `a015d1f`). So V2's writer alone cannot put a blot on screen: the effect sits in the
+ * chain at `amount = 0`, the identity, forever. The missing half is one line in `Stage.render()`
+ * before `composer.render` — `if (this.ink) applyInkTo(this.ink, this.rig.camera.aspect, memo)` —
+ * and it is ROUTED to the `src/render/**` owner (V2 does not own that file).
+ * `tools/tmp/v2_items.mjs --plant ink-reader` injects exactly that line into the SERVED module and
+ * asserts the uniform then follows the channel.
+ *
+ * `seen` is the caller's memo of the layout it last pushed, so the fifteen discs are rebuilt
+ * once per cast and once per orientation change, never per frame.
+ */
+export function applyInkTo(sink: InkSink, aspect: number, seen: { revision: number; aspect: number }): void {
+  const ch = readInk();
+  if (ch.revision !== seen.revision || aspect !== seen.aspect) {
+    sink.setDiscs(inkLayout(ch.seed, aspect));
+    seen.revision = ch.revision;
+    seen.aspect = aspect;
+  }
+  sink.amount = ch.amount;
+  sink.age = ch.age;
+}
