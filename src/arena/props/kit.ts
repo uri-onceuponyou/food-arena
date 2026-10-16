@@ -650,13 +650,71 @@ export function cabinetPanels(kg: KitGeo, bw: number, bd: number, y0: number, y1
   face(bd, 'z', -1, bw / 2);
 }
 
-/** A gas burner: a cast-iron ring with a cross grate, standing on `y`. */
+/**
+ * A gas burner HEAD, standing on `y`: a flat cast-iron spreader ring on the plate and a
+ * brushed-steel cap standing in it.
+ *
+ * ⚠️ A2c: this used to be *"a cast-iron ring with a cross grate"* — a 10-segment ring `r` and
+ * two bars `r x 2.15` long crossed over it. Kept here per the reversal rule. At the match camera
+ * that is a ~23 px X on a ~180 x 100 px plate, and the w6 crop critics read the island's hob as
+ * *"the big flat purple slab"* / *"the flat, untextured purple slab ... greybox geometry"*
+ * (`shots/rv/w6/scores.json`): the PLATE was the read and the burners were punctuation on it.
+ * The bars moved into `rangeGrate` (one continuous grate over the whole hob); the head kept the
+ * ring and gained a bright cap, the one small light shape a burner is recognised by. The ring
+ * is flat (24 triangles) because the island is at its per-piece budget (A2: <= 2.5k).
+ */
 export function burner(kg: KitGeo, x: number, y: number, z: number, r: number): void {
   const iron = paint(KP.iron, val(KP.iron, 0.8), val(KP.iron, 1.5));
-  kg.add(chamferCyl(r, 0.05, 0.015, 10), { x, y, z }, iron, 'matte', y, 0.5);
-  for (const yaw of [Math.PI / 4, -Math.PI / 4]) {
-    kg.add(chamferBox(r * 2.15, 0.045, 0.06, 0.014, { noVEdges: true }), { x, y: y + 0.05, z, yaw }, iron, 'matte', y, 0.4);
+  kg.add(new THREE.RingGeometry(r * 0.6, r, 12), { x, y: y + 0.004, z, rx: -Math.PI / 2 }, iron, 'matte', y, 0);
+  kg.add(chamferCyl(r * 0.48, 0.05, 0.015, 8), { x, y, z },
+    paint(val(KP.steel, 0.86), val(KP.steel, 0.66), val(KP.steel, 1.04)), 'gloss', y, 0.3);
+}
+
+/**
+ * A CONTINUOUS cast-iron range grate (A2c) over a `w` x `d` hob centred on (x, z), standing on
+ * `y`, for four burners of ring radius `r` at (x +- bx, z +- bz): a frame, a centre cross that
+ * splits it into one cell per burner, and in each cell two fingers along x that run in from the
+ * cell's walls and stop `gap` short of the ring — so the burner heads show whole, framed by
+ * iron. This lattice, not the plate under it, is what identifies a gas range from above.
+ *
+ * One geometry for the whole grate, and each bar is a plain box with no underside and no
+ * chamfer (10 triangles): a 2.5 cm chamfer on a 10 cm bar is ~1 px at the match camera, and
+ * the island is at its budget. 15 bars, 150 triangles, no new draw.
+ */
+export function rangeGrate(
+  kg: KitGeo, x: number, y: number, z: number, w: number, d: number,
+  bx: number, bz: number, r: number, gap = 0.06,
+): void {
+  const iron = paint(val(KP.iron, 0.92), val(KP.iron, 0.72), val(KP.iron, 1.6));
+  const t = 0.1, h = 0.09;
+  const P: number[] = [], N: number[] = [];
+  const bar = (x0: number, x1: number, z0: number, z1: number) => {
+    if (x1 - x0 < 0.02 || z1 - z0 < 0.02) return; // a finger the ring reaches past: not built
+    const yt = h;
+    quadOriented(P, N, [x0, yt, z0], [x0, yt, z1], [x1, yt, z1], [x1, yt, z0], [0, 1, 0]);
+    quadOriented(P, N, [x1, 0, z0], [x1, 0, z1], [x1, yt, z1], [x1, yt, z0], [1, 0, 0]);
+    quadOriented(P, N, [x0, 0, z0], [x0, 0, z1], [x0, yt, z1], [x0, yt, z0], [-1, 0, 0]);
+    quadOriented(P, N, [x0, 0, z1], [x1, 0, z1], [x1, yt, z1], [x0, yt, z1], [0, 0, 1]);
+    quadOriented(P, N, [x0, 0, z0], [x1, 0, z0], [x1, yt, z0], [x0, yt, z0], [0, 0, -1]);
+  };
+  const hw = w / 2, hd = d / 2;
+  // frame
+  bar(-hw, hw, -hd, -hd + t); bar(-hw, hw, hd - t, hd);
+  bar(-hw, -hw + t, -hd + t, hd - t); bar(hw - t, hw, -hd + t, hd - t);
+  // centre cross: one cell per burner
+  bar(-t / 2, t / 2, -hd + t, hd - t);
+  bar(-hw + t, -t / 2, -t / 2, t / 2); bar(t / 2, hw - t, -t / 2, t / 2);
+  // fingers along x, written for the +x/+z cell and mirrored
+  const reach = r + gap;
+  for (const sx of [-1, 1]) {
+    for (const sz of [-1, 1]) {
+      for (const [a0, a1] of [[t / 2, bx - reach], [bx + reach, hw - t]]) {
+        const u0 = sx * a0, u1 = sx * a1;
+        bar(Math.min(u0, u1), Math.max(u0, u1), sz * bz - t / 2, sz * bz + t / 2);
+      }
+    }
   }
+  if (P.length) kg.add(geoFrom(P, N), { x, y, z }, iron, 'matte', y, 0.3);
 }
 
 /** A stockpot with a lid, a knob and two side handles, standing on `y`. */
