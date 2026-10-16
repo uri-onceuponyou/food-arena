@@ -340,19 +340,30 @@ const DT = Number(args.dt ?? 16.667);
 const N = Number(args.n ?? 6);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// THE ARENA. `maxSafeRadius` is DERIVED from MATCH_DURATION_MS in `arena/shared.ts`, so a
-// cached dump goes stale the moment the clock moves — recompute it, exactly as
-// `roster_lab.mjs` and `conceal_lab.mjs` do, or this tool measures a different fog.
+// THE ARENA.
+// ⚠️ REVERSED 2026-10-16 (T1a), old wording kept per the reversal rule:
+//   "`maxSafeRadius` is DERIVED from MATCH_DURATION_MS in `arena/shared.ts`, so a cached
+//    dump goes stale the moment the clock moves — recompute it, exactly as `roster_lab.mjs`
+//    and `conceal_lab.mjs` do, or this tool measures a different fog."
+// That stopped being true on 2026-08-12: the ring was decoupled from the clock and
+// `shared.ts` derives `MAX_SAFE_RADIUS = fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` = 1720.47.
+// The recompute here (`halfDiag / (1 - 6000 / MATCH_DURATION_MS)`) kept running and returned
+// 1792 — every placement this tool printed since was measured on a ring 4.2% too large.
+// The dump is written by the browser from the shipped arena, so it carries the shipped
+// value: READ it. `--maxsafe` still overrides; a dump without the field is refused rather
+// than handed to the sim as `undefined`.
 // ─────────────────────────────────────────────────────────────────────────────
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
-const FOG_FIRST_CONTACT_MS = 6000; // arena/shared.ts FOG_FIRST_CONTACT_S
 function loadArena() {
   if (!existsSync(ARENA_PATH)) return null;
   const d = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
-  const halfDiag = Math.hypot(d.width / 2, d.height / 2);
+  const maxSafeRadius = Number(args.maxsafe ?? d.maxSafeRadius);
+  if (!Number.isFinite(maxSafeRadius) || maxSafeRadius <= 0) {
+    throw new Error(`nf_ffa: ${ARENA_PATH} carries no usable maxSafeRadius (${d.maxSafeRadius}) — pass --maxsafe or regenerate the dump`);
+  }
   return {
     ...d,
-    maxSafeRadius: Number(args.maxsafe ?? Math.round(halfDiag / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS))),
+    maxSafeRadius,
     build: () => null,
     update: () => {},
   };
