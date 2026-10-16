@@ -729,6 +729,15 @@ export class MatchAudio {
         // 998 audible heal voices overlapping under it, against 7 here). That is a mix choice
         // for the audio owner, not part of this defect.
         const f = fighterOf(state, ev.fighterId, ev.fighterRole);
+        // 🚨 V3: AND A HEAL ON A FIGHTER THE EAR CANNOT SEE IS NOT VOICED, by B6's rule for the same
+        // reason — gated BEFORE the throttle, so a hidden tick neither plays nor spends it. The cue is
+        // placed on the healed fighter, and out-of-combat regen is exactly what a fighter hiding
+        // under a table is doing (Onion Ring's deliberate heal too: §29c, pressing the heal does not
+        // break cover), so it was a free read of the hiding spot every 200 ms of regen
+        // (`v3_conceal.mjs` A.HIDDEN.heal_regen / heal_ring, A.SPEC_HIDDEN.heal_regen: played on
+        // `0b3360d`). ⚠️ THE VISUAL HALF IS NOT THIS FILE'S and is ROUTED: `match.ts`'s `heal` case
+        // still draws the pulse and the green number on a hidden fighter (§X measures it).
+        if (!this.audible(state, f, slotOf(ev.fighterId, ev.fighterRole))) break;
         const at = this.place(f.x, f.y, state);
         if (at.gain < SFX_INAUDIBLE_GAIN) break;
         if (ev.amount <= REGEN_AMOUNT && state.elapsed - this.lastHealSoundAt < HEAL_MIN_INTERVAL_MS) break;

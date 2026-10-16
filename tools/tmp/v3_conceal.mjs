@@ -550,6 +550,13 @@ try {
       play('hit_pompa', hitBase('pompa'));
       play('hit_tender', hitBase('tenderiser', { stacks: 3 }));
       play('hit_shiitake', { ...hitBase('shiitake'), ownerRole: S.role, ownerId: S.id });
+      // V3 commit 4 — the `heal` cue, placed on the healed fighter: an out-of-combat REGEN tick (what a
+      // fighter hiding under a table is doing) and a deliberate heal (Onion Ring's 25; §29c: pressing
+      // the heal does not break cover). The director's ONE heal throttle is reset first, so an
+      // earlier play cannot silence a later arm — the confound that read "0 plays" in §X once.
+      const heal = (name, amount) => { aud.lastHealSoundAt = -Infinity; play(name, { type: 'heal', fighterRole: S.role, fighterId: S.id, amount }); };
+      heal('heal_regen', K.rules.REGEN_AMOUNT);
+      heal('heal_ring', 25);
       return { plays: out, ear: aud.listenerSlot, vis: K.vis(aud.listenerSlot, src), srcHidden: K.movement.isHidden(S.x, S.y, st.arena, st, S) };
     }, { src, owner });
   };
@@ -560,7 +567,7 @@ try {
     results.audio.live = { H, V, O };
     row('A.PRE.live', H.ear === 0 && H.vis === false && H.srcHidden === true && V.vis === true && O.srcHidden === true, { ear: H.ear, H: H.vis, V: V.vis, O: O.srcHidden });
     const names = Object.keys(V.plays);
-    row('A.PRE.nonempty', names.length === 9 && names.every((n) => V.plays[n].length > 0), { visiblePlays: V.plays });
+    row('A.PRE.nonempty', names.length === 11 && names.every((n) => V.plays[n].length > 0), { visiblePlays: V.plays });
     for (const n of names) {
       row(`A.HIDDEN.${n}`, H.plays[n].length === 0, { plays: H.plays[n] });
       row(`A.VISIBLE.${n}`, V.plays[n].length > 0, { plays: V.plays[n] });
@@ -618,13 +625,15 @@ try {
     row('R.cheese-radius<=reveal', r.R <= r.REV, { radius: r.R, reveal: r.REV });
   }
 
-  // ── §S: the local seat DEAD, the camera (and the ear) on a spectated subject ─────────────────
   // ── §X: OUT-OF-SET LEAKS, MEASURED FOR ROUTING (INFO — not this package's files) ─────────────
   // Two more things drawn and voiced ON a hidden fighter, through BOTH shipped consumers, with the
   // local seat alive and 130 wu away: a REGEN tick (out-of-combat regen is exactly what a fighter
   // hiding under a table is doing) and a THIRD party's hit on it. The visual halves live in
-  // `match.ts`'s event switch (`heal`, `hit-landed`), outside V3's set; the audio halves are left
-  // ungated ON PURPOSE so the two consumers of one event keep agreeing until both are routed.
+  // `match.ts`'s event switch (`heal`, `hit-landed`), outside V3's set, and are ROUTED. The audio
+  // half of `heal` is V3's and is gated (commit 4, asserted in §A/§T — "fix the half you own"); the
+  // audio half of `hit-landed` is NOT, because hiding a hit that landed contradicts a documented
+  // decision (`vfx.ts`'s projectile-pool note: "suppressing it would mean a hit that lands and shows
+  // nothing") whose stated justification only holds at TWO seats — a call parked for Uri.
   if (on('X')) {
     await arrange({ 0: 'd130', [T]: 'C', 3: 'tVisible' });
     await camOn('d130');
@@ -641,6 +650,10 @@ try {
           born: [...s1.objs.keys()].filter((k) => !s0.objs.has(k)).length, plays: window.__v3Plays.slice() };
       };
       t.hp = Math.max(1, t.maxHp - 20);
+      // The director's ONE heal throttle, reset: §A's heal rows run first and stamp it, and at a
+      // crawling sim clock that stamp is "recent" for the rest of the probe — this row read 0 plays
+      // for the throttle's reason, not the gate's, until it was reset.
+      aud.lastHealSoundAt = -Infinity;
       const regen = route({ type: 'heal', fighterRole: t.role, fighterId: t.id, amount: K.rules.REGEN_AMOUNT });
       const w = K.rules.CHARACTERS[F[3].characterId].weapons[0];
       const hit = route({ type: 'hit-landed', targetRole: t.role, targetId: t.id, amount: 4, effect: null, x: t.x, y: t.y,
@@ -655,9 +668,10 @@ try {
     // culled by distance, and both rows read "0 plays" — a leak reported as absent. Hence it runs
     // before §S now, and this row asserts the ear and the gain it hears the wearer at.
     row('X.PRE.hidden', x.hidden === true && x.alive0 === true && x.ear === 0 && x.gain > 0.5, { hidden: x.hidden, alive0: x.alive0, ear: x.ear, gain: x.gain });
-    row('X.heal-on-hidden (match.ts `heal` + director `heal`)', null, x.regen);
+    row('X.heal-on-hidden (match.ts `heal`; the director half is gated since V3 commit 4)', null, x.regen);
     row('X.third-party-hit-on-hidden (match.ts `hit-landed` + director playHit)', null, x.hit);
   }
+  // ── §S: the local seat DEAD, the camera (and the ear) on a spectated subject ─────────────────
   if (on('S') || on('T')) {
     // Kill the local seat at d80 with the subject (slot 1) at d130 and the wearer at C: with no
     // death event routed there is no dwell and no killer chain, so `resolveViewSubject` takes rung 4
@@ -712,9 +726,11 @@ try {
             resolved_shiitake: ev0('item-resolved', { itemId: 'shiitake', slot: 0, x: S.x, y: S.y }),
             hit_milk: hit('warm_milk'),
             hit_tender: hit('tenderiser', { stacks: 3 }),
+            heal_regen: { type: 'heal', fighterRole: S.role, fighterId: S.id, amount: K.rules.REGEN_AMOUNT },
           };
           const out = {};
           for (const [n, ev] of Object.entries(evs)) {
+            if (ev.type === 'heal') aud.lastHealSoundAt = -Infinity;
             window.__v3Plays = []; window.__v3On = true;
             try { aud.handleEvents([ev], st); } finally { window.__v3On = false; }
             out[n] = window.__v3Plays.slice();
