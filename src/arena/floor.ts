@@ -1884,9 +1884,18 @@ export function buildFloor(M: Materials, cover: readonly CoverBox[] = []): THREE
   /**
    * wu. The tile's side. An exact divisor of BOTH `ARENA_W` and `ARENA_H` (asserted where
    * the grid is built), so whole tiles meet every wall and a grout line runs through
-   * `CENTER`. 50 wu is ~1.2x a fighter's footprint (`PLAYER_SIZE` 42): close to the
-   * reference plates' tile, which measures ~1.4 fighters wide, and coarse enough that a
-   * joint never approaches the one-pixel aliasing regime round 4 (point 5) warned about.
+   * `CENTER`. 50 wu is ~1.2x a fighter's footprint (`PLAYER_SIZE` 42) — by EYE (not
+   * measured) a little under the one square-tile plate's ~1.4 fighter widths — and coarse
+   * enough that a joint never approaches the one-pixel aliasing regime round 4 (point 5)
+   * warned about. 80 wu was rendered too: calmer, but `fp_ground_windows` put its hf back
+   * BELOW the plates' range (0.00302 / 0.00263 on the canonical framings) and its mf/lf at
+   * the range's floor, where 50 wu lands all three bands near the plates' medians.
+   *
+   * At the shipped match camera a 50 wu tile measures 132-147 px across a 1600 px frame
+   * (grout autocorrelation along three rows of `a2a_cap`'s canon6, nearer rows larger), i.e.
+   * ~0.34-0.38 wu/px: A1's 0.362 wu/px (the `JOINT_SOFT` note above) checks out against the
+   * first ruler of known size this file has drawn. (An eyeball off a half-size sheet had
+   * said ~97 px; the measurement is what is written here.)
    */
   const GLAZE_TILE = 50;
   // ── A1 (graphics revamp, 2026-10-15): ONE SOFT JOINT ─────────────────────────
