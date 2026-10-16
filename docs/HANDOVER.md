@@ -1,19 +1,38 @@
 # HANDOVER — read this, then `docs/STATE.md`
 
 > 🆕 **2026-10-16 — A LATER SESSION RAN THE GRAPHICS REVAMP + BUG SWEEP, AND THE SNAPSHOT BELOW
-> PREDATES IT.** Where that work stands lives in **`docs/REVAMP.md`** — §8 is the blind scoreboard
-> (r0 → w5: arena 4.60 → 5.08, arena6 4.97 → 4.85, **fighter crop 4.51 → 5.50**, home 5.37 → 5.27,
-> select 5.83 → 5.85, against ~8.3 for the reference side; "good enough" is ≥ 7.0, `DECISIONS §91d`),
-> §5/§6 the packages and waves. Every judgement call it made is `DECISIONS-FOR-URI.md §91a–§91v`.
-> Merged and pushed by 2026-10-16 01:00 (HEAD `f6aabdc`, deployed `982f2bd`): B1–B4 (items usable, the
-> combat/movement/timer bug sweep — `sim.test` **1037**), F1 (seat rings + name plates), R1 (relight +
-> fighter outline), A1/A2a/A2b (calm floor, prop kit, the hub district), C1a/C1b (cast palette, one
-> limb system, faces that read at 58°), U1 (menus), V1 (effects). In flight at that hour: B5 (AI), B6
-> (screens), V1b (the trail reads as a hole — w5's new complaint); queued: K1 (camera-pitch
-> EXPERIMENT, §91e), C1c, V2 (item presentation — bug B7, owned by no package until now), T1 (≈20
-> instrument repairs, incl. `np_nfighter`'s pre-existing N=5 off-screen row and `driver_guard`'s
-> shared temp path). The numbers in the snapshot below (88 verified, `sim.test` 745) are SUPERSEDED;
-> the gate table in `docs/TOOLS.md` is the only place counts live.
+> PREDATES IT.** Closed ~07:30 on 2026-10-16. The campaign's record is **`docs/REVAMP.md`** (§8 the
+> blind scoreboard, §5/§6 the packages); every judgement call it made is
+> **`DECISIONS-FOR-URI.md §91a–§91ad`** — **read §91z first** (below).
+>
+> **The score, r0 → w7** (one fresh blind critic per sheet, canonical rubric; reference side ~8.3–8.5;
+> "good enough" = 7.0, `§91d`): arena 4.60 → 5.18 · arena6 4.97 → 4.78 · **fighter crop 4.51 → 5.46**
+> · home 5.37 → 5.27 · select 5.83 → 5.85. **🛑 The graphics loop is PARKED** (REVAMP §8, w7): the
+> fighter-readability work converted (+0.95), every environment lever came back flat (density,
+> surface detail, a built district, a nameable tile floor), and all three match elements were flat
+> for three rounds while the critics grew harsher (drift −0.21). What is left is not a package:
+> - **`§91z` — a FAIRNESS BUG in the match camera:** the guaranteed 199 wu view ends at **123 wu below
+>   the player** (16:9); 28 of 42 weapons can hit from below the screen; `aspect.mjs` could not see
+>   it. The fix reframes the game, so it is the owner's call — try `?camAim=centred` on the deployed
+>   build. `np_nfighter`'s one red row IS this bug (pinned until decided).
+> - `§91s` the floor/cast hue clash; `§91aa` splat colours; `§91ab`/`§91ad` items vs hidden fighters.
+>
+> **The bug sweep is done:** B1–B7 (items usable; combat, items, movement, timers, AI, screens; bot
+> pathing ~6× faster), V2 (items you can see and hear; Squid Ink finally blots), V3 (effects no
+> longer reveal a hidden fighter — a fairness leak). `sim.test` **1087**. Every fix red-first.
+>
+> **The instruments:** T1a/T1b fixed the flakes (`driver_guard`'s shared temp path; `menu_accept`'s
+> boot was a RACE with the title card, not slowness), the dead fog-ring formula in the balance
+> gates, `al_guard`'s collision collar, and registered the campaign's tools — **`gatecount` on a
+> clean worktree reads 104 verified, 0 faults** (gitignored-data rows SKIP by name, `needs`).
+> Leftovers for a T1c (re-site two stations, four pre-existing red tools, re-measure `nf_ffa`'s
+> six-seat placements and `kit_lab`'s default profile — both were on the dead ring) are in the last
+> campaign commits' messages.
+>
+> ⚠️ Also: six `snapshot.mjs` processes (PIDs 8141 8186 8255 9737 13788 55799, 52–54 days old), a
+> 54-day-old `q1_verify` (59634) and a **57-day-old `:4321` playtest server (59725) serving an old
+> build** are orphans from earlier sessions — the deployed site is current. The numbers in the
+> snapshot below (88 verified, `sim.test` 745) are SUPERSEDED; counts live only in `docs/TOOLS.md`.
 
 Written at the close of a 109-commit session, HEAD `85f1847`. Deployed and live at
 `https://uri-onceuponyou.github.io/food-arena/`.
