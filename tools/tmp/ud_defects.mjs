@@ -40,7 +40,11 @@
  *    parent. That is exactly D3.
  *
  * D3 is per-ROW: the bottom of each `.chars-ability` against the client bottom of its
- *    scroll container. "The panel scrolls" is not a defence — a row cut through its
+ *    scroll container. ⚠️ U1 (`a7d5ce5`) retired those rows: the kit is tiles
+ *    (`.chars-kit .chars-abl`) plus ONE caption (`.chars-kit-cap`), and this probe read
+ *    ZERO rows from then until T1a (2026-10-16) — printing "first row whole (0/0 rows
+ *    cut)". The rows are the tiles and the caption now, each against its own nearest
+ *    clipping ancestor, and an empty kit is a DEFECT row, not a pass. "The panel scrolls" is not a defence — a row cut through its
  *    descenders with no scrollbar thumb in view reads as a rendering bug, and the
  *    audit's capture showed exactly that. Reported as `cutPx`, the number of device
  *    pixels of the row that lie below the container's client box.
@@ -389,8 +393,11 @@ function probeFn() {
   }
 
   if (screen === 'characters') {
-    const ab = document.querySelector('.chars-abilities');
-    const rows = [...document.querySelectorAll('.chars-ability')];
+    // ⚠️ WAS `.chars-abilities` / `.chars-ability` — see the D3 note in the header.
+    const ab = document.querySelector('.chars-kit');
+    const cap = document.querySelector('.chars-kit-cap');
+    const tiles = [...document.querySelectorAll('.chars-kit .chars-abl')];
+    const rows = cap ? [...tiles, cap] : tiles;
     const clip = ab ? clipper(ab) : null;
     const abBox = ab ? {
       rect: rect(ab),
@@ -414,11 +421,16 @@ function probeFn() {
             .filter((k) => { const r = k.getBoundingClientRect(); return r.width > 0 || r.height > 0; })
             .map((k) => `${(k.className || k.tagName).split(' ').pop()}=${R(k.getBoundingClientRect().height)}`),
         } : null,
+        tiles: tiles.length,
+        caption: cap ? { rect: rect(cap), clientH: cap.clientHeight, scrollH: cap.scrollHeight, overflowY: cap.scrollHeight - cap.clientHeight } : null,
         rows: rows.map((r) => {
           const rr = rect(r);
-          const container = abBox ? abBox.clientBottom : (clip ? clip.bottom : null);
-          const name = r.querySelector('.chars-ability-name');
-          const desc = r.querySelector('.chars-ability-desc');
+          // Each row against ITS OWN clipping ancestor: the tiles and the caption are siblings,
+          // not children of one scroller, so the old shared `clientBottom` has no analogue.
+          const own = clipper(r);
+          const container = own ? own.bottom : null;
+          const name = r.querySelector('.chars-abl-name') ?? r.querySelector('.chars-abl-capname');
+          const desc = r.querySelector('.chars-abl-desc');
           // The DESCENDER, not the box. A line box's bottom is above the font's
           // descent for most faces, so a row whose rect ends exactly at the container
           // still has "g", "y" and "p" cut. Measured off the last text run's own
@@ -442,7 +454,8 @@ function probeFn() {
           };
         }),
       },
-      d2chars: textRuns(['.chars-ability-name', '.chars-ability-desc', '.chars-fact', '.fa-panel-title']),
+      // ⚠️ WAS '.chars-ability-name' / '.chars-ability-desc' — both retired by U1; matched nothing.
+      d2chars: textRuns(['.chars-abl-name', '.chars-abl-capname', '.chars-abl-desc', '.chars-fact', '.fa-panel-title']),
     };
   }
 
@@ -769,15 +782,18 @@ for (const vp of VIEWPORTS) {
     // ink BORDER still cut, because the box is taller than the text inside it. A card
     // whose bottom border is shaved is exactly the "unfinished" read the audit named;
     // the ink test would have passed it forever.
+    // ⚠️ NON-EMPTY FIRST. `d3.rows.length ? … : 0` made an empty kit read "first row whole
+    // (0/0 rows cut)" — which is what this printed for every viewport after U1 (T1a).
     const firstCut = d3.rows.length ? Math.max(d3.rows[0].cutPx, d3.rows[0].inkCutPx) : 0;
     console.log(`=== CHARS ${vp.name} ===`);
-    console.log(`D3 .chars-abilities ${d3.abilities?.rect.w}x${d3.abilities?.rect.h}  clientH=${d3.abilities?.clientH} scrollH=${d3.abilities?.scrollH} `
-      + `overflowY=${d3.abilities?.overflowY}  detail h=${d3.detail?.rect.h}  `
+    if (!d3.tiles || !d3.caption) console.log(bad(`D3 NOTHING TO MEASURE — ${d3.tiles} .chars-abl tiles, caption ${d3.caption ? 'present' : 'ABSENT'}`));
+    console.log(`D3 .chars-kit ${d3.abilities?.rect.w}x${d3.abilities?.rect.h}  tiles=${d3.tiles}  caption ${d3.caption?.rect.w}x${d3.caption?.rect.h} `
+      + `overflowY=${d3.caption?.overflowY}  detail h=${d3.detail?.rect.h}  `
       + `${firstCut > 0.5 ? bad(`FIRST ROW CUT ${firstCut}px`) : 'first row whole'}  (${cut.length}/${d3.rows.length} rows cut)`);
     console.log(`   detail bill: ${d3.detail?.items.join('  ')}`);
     for (const r of d3.rows) {
       const flag = r.inkCutPx > 0.5 ? `cut ${r.inkCutPx}px` : 'whole';
-      console.log(`   ${String(r.name).padEnd(18)} h=${r.rect.h} bottom=${r.rect.bottom} ink=${r.inkBottom} container=${d3.abilities?.clientBottom}  ${flag}`);
+      console.log(`   ${String(r.name).padEnd(18)} h=${r.rect.h} bottom=${r.rect.bottom} ink=${r.inkBottom}  ${flag}`);
     }
     const tc = m.d2chars.filter((r) => r.ellipsised);
     if (tc.length) { bad('x'); for (const r of tc) console.log(`   TRUNC ${r.sel} "${r.ellipsised.full}" -> "${r.ellipsised.shown}"`); }

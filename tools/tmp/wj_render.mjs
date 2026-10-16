@@ -110,22 +110,49 @@ export function compare(a, b) {
 // ── the browser half ─────────────────────────────────────────────────────────
 
 /**
- * IN-PAGE. Reads the character-select detail panel. Captures the emoji span's
- * innerHTML rather than its text, because `abilityIcon()` may render an SVG — a
- * glyph swap is invisible to `textContent`.
+ * Reads the character-select ability kit, ONE TILE AT A TIME. Captures the emoji span's
+ * innerHTML rather than its text, because `abilityIcon()` may render an SVG — a glyph swap
+ * is invisible to `textContent`.
+ *
+ * ⚠️ WAS one in-page read of `.chars-abilities .chars-ability` pills, each carrying its own
+ * name, desc and fact chips. U1 (`a7d5ce5`) replaced the pills with TILES (`.chars-kit
+ * .chars-abl`: icon + name) and ONE caption (`.chars-kit-cap`) that shows the PRESSED tile's
+ * name, desc and facts — so this read zero rows on every character, and the misaim guard
+ * below refused to write (exit 3) on every run (T1a, 2026-10-16). Each tile is pressed now,
+ * the caption is waited on until it names THAT tile, and the same six fields are read.
+ * `passive` is the synthetic trail NOTE (`renderKit` adds a tile named 'Passive' when no
+ * ability is passive) — the old `.chars-ability--passive` row — not the Passive TAG an
+ * ability without a weapon carries; that tag is recorded as `passiveTag`.
  */
-function readCharsFn() {
-  const pills = [...document.querySelectorAll('.chars-abilities .chars-ability')];
-  return pills.map((p) => ({
-    passive: p.classList.contains('chars-ability--passive'),
-    emojiHTML: p.querySelector('.chars-ability-em')?.innerHTML ?? null,
-    name: p.querySelector('.chars-ability-name')?.textContent ?? null,
-    desc: p.querySelector('.chars-ability-desc')?.textContent ?? null,
-    // The join, made visible: these chips are derived from the WEAPON the pill is
-    // paired with. This is the field a positional join moves.
-    facts: [...p.querySelectorAll('.chars-ability-facts .chars-fact')].map((f) => f.textContent),
-    hasFacts: !!p.querySelector('.chars-ability-facts'),
-  }));
+async function readChars(page) {
+  const n = await page.evaluate(() => document.querySelectorAll('.chars-kit .chars-abl').length);
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    await page.click(`.chars-kit [data-abl="${i}"]`);
+    await page.waitForFunction((k) => {
+      const t = document.querySelector(`.chars-kit [data-abl="${k}"]`);
+      const cap = document.querySelector('.chars-kit-cap .chars-abl-capname');
+      return !!t && t.classList.contains('is-on') && !!cap && cap.textContent === t.querySelector('.chars-abl-name')?.textContent;
+    }, i, { timeout: 15000 });
+    rows.push(await page.evaluate((k) => {
+      const t = document.querySelector(`.chars-kit [data-abl="${k}"]`);
+      const cap = document.querySelector('.chars-kit-cap');
+      const name = t.querySelector('.chars-abl-name')?.textContent ?? null;
+      const passiveTag = !!cap.querySelector('.chars-abl-tag');
+      return {
+        passive: name === 'Passive' && passiveTag,
+        passiveTag,
+        emojiHTML: t.querySelector('.chars-abl-em')?.innerHTML ?? null,
+        name,
+        desc: cap.querySelector('.chars-abl-desc')?.textContent ?? null,
+        // The join, made visible: these chips are derived from the WEAPON the ability is
+        // paired with. This is the field a positional join moves.
+        facts: [...cap.querySelectorAll('.chars-ability-facts .chars-fact')].map((f) => f.textContent),
+        hasFacts: !!cap.querySelector('.chars-ability-facts'),
+      };
+    }, i));
+  }
+  return rows;
 }
 
 /** IN-PAGE. Reads the home kit grid and the caption for the tile at `i`. */
@@ -166,7 +193,11 @@ async function run() {
         CHARACTERS[id].name,
         { timeout: 15000 },
       );
-      const rows = await page.evaluate(readCharsFn);
+      const rows = await readChars(page);
+      // NON-EMPTY per character: every character has abilities, so zero tiles is a reader
+      // pointed at nothing — which is what this file was for a month (see readChars).
+      // A throw, not process.exit: an exit here would skip the `finally` that closes the browser.
+      if (rows.length === 0) throw new Error(`wj_render: ${id} has ZERO ability tiles on character select — the reader is pointed at nothing`);
       byCharacter[id] = { chars: rows };
       abilityRows += rows.length;
     }
