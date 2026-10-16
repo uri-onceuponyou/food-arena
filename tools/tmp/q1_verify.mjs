@@ -72,6 +72,16 @@ const BG = { r: 22, g: 16, b: 31, alpha: 1 };
 }
 
 const manifestPath = resolve(args.manifest ?? 'shots/review/q1-manifest.json');
+// 🚨 A VISIBLE SKIP, NOT A CRASH AND NOT A PASS (T1a, 2026-10-16). The manifest and every sheet
+// it names live under GITIGNORED `shots/`, so on a clean worktree this died on ENOENT — one of
+// three "faults" every merge battery read that were not faults. Absent DEFAULT manifest ⇒ say so
+// and exit 3 ("not run"), printing NO "N/M sheets vouched" line, so nothing can parse a count
+// out of a run that checked nothing. An EXPLICIT `--manifest` that is missing is still an error.
+if (!existsSync(manifestPath)) {
+  if (args.manifest) { console.error(`q1_verify: --manifest ${manifestPath} does not exist`); process.exit(2); }
+  console.log(`⏭  SKIP  q1_verify: ${manifestPath} absent — the round's data is gitignored, so this tree has nothing to vouch for. 0 sheets checked; NOT a pass.`);
+  process.exit(3);
+}
 const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 const rows = manifest.assignments ?? [];
 

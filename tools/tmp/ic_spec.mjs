@@ -451,8 +451,18 @@ if (IS_MAIN && process.argv[2] === '--selftest') {
       overlapReport(k2).shared.length > 0, true);
   }
 
+  // 🚨 THE DATA ARMS ARE COUNTED APART FROM THE GATE'S NUMBER (T1a, 2026-10-16). The two
+  // blocks below read the GITIGNORED `shots/ic/` tree, so they ran (24) on a working tree that
+  // had ever run `ic_collect` and silently did not (16) on a clean one — and the gate-table
+  // row flipped between the two for two months, each "fix" checked on whichever tree its
+  // author had. Now the counted line is the offline arms ONLY, identical on every tree, and
+  // the data arms report on their own line: PASS when the data is there, a named SKIP when
+  // it is not. A data arm that FAILS still counts as a failure and still exits 1.
+  const offlinePass = pass;
+  const dataSkipped = [];
   // ── POSITIVE CONTROL on the real measurement, if it is present. ────────────
   // A checker that only ever runs on fixtures proves the fixtures, not the tree.
+  if (!existsSync('shots/ic/delivered.json')) dataSkipped.push('REAL TREE (4 checks): shots/ic/delivered.json absent');
   if (existsSync('shots/ic/delivered.json')) {
     const { spec: s } = buildSpec(['shots/ic/delivered.json']);
     check('REAL TREE: range is 13.8 px, cream on ink',
@@ -467,6 +477,9 @@ if (IS_MAIN && process.argv[2] === '--selftest') {
       [...s.values()].filter((v) => v.px === 20 && v.bg === LEGACY_HARNESS.bg).length, 0);
   }
 
+  if (!(existsSync('shots/ic/delivered.json') && existsSync('shots/ic/lollipop.json'))) {
+    dataSkipped.push('REAL PAIR (4 checks): shots/ic/delivered.json + lollipop.json absent');
+  }
   // ── THE REAL HISTORICAL KNOWN-BAD PAIR ────────────────────────────────────
   // `shots/ic/spec.json` was built from exactly these two files by exactly the merge
   // that is now refused. Not a synthetic reduction — the pair that shipped.
@@ -498,7 +511,9 @@ if (IS_MAIN && process.argv[2] === '--selftest') {
       [63, 63, true]);
   }
 
-  console.log(`\nic_spec selftest ${pass} pass / ${fail} fail`);
+  for (const sk of dataSkipped) console.log(`  SKIP  ${sk} — gitignored data, not a pass`);
+  console.log(`\nic_spec selftest ${offlinePass} pass / ${fail} fail`);
+  console.log(`ic_spec real-data arms: ${pass - offlinePass} pass, ${dataSkipped.length ? `${dataSkipped.length} block(s) SKIPPED (data absent)` : 'none skipped'}`);
   process.exit(fail ? 1 : 0);
 }
 
