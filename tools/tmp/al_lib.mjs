@@ -67,6 +67,13 @@ export function loadArena() {
     throw new Error(`al_lib: tools/arena.gameplay.json is STALE — it says ${dump.width}x${dump.height}, `
       + `src/arena/shared.ts says ${w}x${h}. Re-run tools/arena-dump.js before trusting any arena tool.`);
   }
+  // The body the sim collides on — `rules.ts:PLAYER_SIZE` — read rather than retyped, for the
+  // collar test (`collarAt`). Read by regex like ARENA_W/H above: this file stays synchronous.
+  const rules = fs.readFileSync(path.join(ROOT, 'src/game/rules.ts'), 'utf8');
+  const bodySize = Number(/export const PLAYER_SIZE\s*=\s*(\d+)/.exec(rules)?.[1]);
+  if (!Number.isFinite(bodySize) || bodySize <= 0) {
+    throw new Error('al_lib: could not read PLAYER_SIZE out of src/game/rules.ts — the collar test needs the body');
+  }
   return {
     w, h,
     cx: dump.center.x, cy: dump.center.y,
@@ -74,6 +81,7 @@ export function loadArena() {
     halfDiagonal: Math.hypot(w / 2, h / 2),
     cover: dump.cover ?? [],
     spawns: dump.spawns ?? [],
+    bodySize,
   };
 }
 
@@ -452,6 +460,33 @@ export function coverAt(arena, x, y) {
   return null;
 }
 
+/**
+ * Where a fighter CENTRED at (x, y) cannot stand, though the point is outside every box: the
+ * cover box whose collision COLLAR holds it, or the outer wall whose half-body margin does.
+ * Returns `{ kind: 'cover', c }`, `{ kind: 'wall', side }` or null.
+ *
+ * 🚨 **WHY THIS EXISTS: `coverAt` IS THE WRONG QUESTION FOR A STATION.** The sim collides a
+ * fighter as a `PLAYER_SIZE` (42 wu) square — `movement.ts:collidesWithCover` is
+ * `|x - o.x| < (size + o.w) / 2 && |y - o.y| < (size + o.h) / 2` — so a station 20 wu clear of
+ * a box is still inside it as far as the game is concerned: the seat is refused or pushed out.
+ * A2b's first 190 wu hub pass put FIVE repo fixtures in that collar (`arena-scan`'s `west_choke`
+ * (900,1000) among them — the scan refused to run) while `al_guard` §C, testing the box, read
+ * green; `a2b_district.mjs:fixtureFaults` caught it. This is that rule, made the guard's own.
+ * The predicate is the SIM's, character for character (strict `<`, so a station exactly on the
+ * collar edge is legal), and `al_guard --selftest` §KB-C asserts the two agree on a lattice
+ * around every box rather than trusting that they do.
+ * The outer walls are the same fact: `movement.ts` clamps a centre to [size/2, W - size/2].
+ */
+export function collarAt(arena, x, y) {
+  const size = arena.bodySize;
+  for (const c of arena.cover) {
+    if (Math.abs(x - c.x) < (size + c.w) / 2 && Math.abs(y - c.y) < (size + c.h) / 2) return { kind: 'cover', c };
+  }
+  const half = size / 2;
+  const side = x < half ? 'west' : x > arena.w - half ? 'east' : y < half ? 'north' : y > arena.h - half ? 'south' : null;
+  return side ? { kind: 'wall', side } : null;
+}
+
 /** NW / NE / SW / SE about the live centre. */
 export function quadrant(arena, x, y) {
   return (y < arena.cy ? 'N' : 'S') + (x < arena.cx ? 'W' : 'E');
@@ -467,7 +502,7 @@ export function quadrant(arena, x, y) {
  * `1400×1000` there means "a convenient rectangle", not "the arena". Testing them
  * against the shipped `CoverBox` list flagged **41 rows in one file, every one wrong.**
  *
- * So legality (`IN-COVER`, `OOB`, quadrant coverage) applies only where the point is
+ * So legality (`IN-COVER`, `IN-COLLAR`, `OOB`, quadrant coverage) applies only where the point is
  * genuinely aimed at the kitchen: the file reads the shipped dump, reads
  * `window.__matchArena`, or drives the real game in a browser — **and** does not build
  * its own arena.
@@ -511,6 +546,19 @@ export function classify(arena, hit, ctx) {
         } else {
           const c = coverAt(arena, x, y);
           if (c) flags.push({ code: 'IN-COVER', detail: `inside ${c.kind} at (${c.x},${c.y}) ${c.w}×${c.h}` });
+          else {
+            // Outside the box is not enough: a body centred here must also clear the collar.
+            const k = collarAt(arena, x, y);
+            if (k?.kind === 'cover') {
+              const o = k.c;
+              flags.push({ code: 'IN-COLLAR', detail: `clear of ${o.kind} at (${o.x},${o.y}) ${o.w}×${o.h} but inside its `
+                + `${arena.bodySize} wu collision collar — a body centred here overlaps it by `
+                + `${((arena.bodySize + o.w) / 2 - Math.abs(x - o.x)).toFixed(1)} × ${((arena.bodySize + o.h) / 2 - Math.abs(y - o.y)).toFixed(1)} wu` });
+            } else if (k?.kind === 'wall') {
+              flags.push({ code: 'IN-COLLAR', detail: `within half a body (${arena.bodySize / 2} wu) of the ${k.side} wall — `
+                + 'movement.ts clamps a centre there, so the fighter never stands on this point' });
+            }
+          }
         }
       }
     }

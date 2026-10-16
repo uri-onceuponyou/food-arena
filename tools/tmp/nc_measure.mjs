@@ -61,6 +61,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createScriptedPlayer, rng, DRIVER_REV } from './scripted_player.mjs';
 import { simModulesFromTree } from './tf2_simstage.mjs';
+import { ringOf } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const args = Object.fromEntries(
@@ -169,20 +170,25 @@ const { CHARACTER_IDS, MATCH_DURATION_MS, REACH } = LIVE.RULES;
 const { MAX_FIGHTERS, MIN_FIGHTERS, nearestLivingOpponent } = LIVE.ST;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Arena — the shipped kitchen, with the derived ring (identical to roster_lab/conceal_lab)
+// Arena — the shipped kitchen, with the SHIPPED ring (read the same way roster_lab/conceal_lab do)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
-const FOG_FIRST_CONTACT_MS = 6000;
-function withDerivedRing(d) {
-  const halfDiag = Math.hypot(d.width / 2, d.height / 2);
+// ⚠️ REVERSED 2026-10-16 (T1b) — `withDerivedRing` set
+//   `maxSafeRadius: halfDiag * (MATCH_DURATION_MS / (MATCH_DURATION_MS - FOG_FIRST_CONTACT_MS))`
+// with FOG_FIRST_CONTACT_MS = 6000: the RECIPROCAL spelling of the clock-coupled formula retired
+// 2026-08-12, unrounded (1792.15), and invisible to `fs_sched_census` until T1b because that
+// pattern was anchored on `1 -`. The ring is `rules.ts:fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` —
+// the half-diagonal (1720.47 on 2026-10-16) — read off the dump by `t1b_ring:ringOf`. The object
+// shape is unchanged (no render hooks added): this file measures payload sizes.
+function withShippedRingOf(d) {
   return {
     ...d,
     concealment: d.concealment ?? [],
-    maxSafeRadius: halfDiag * (MATCH_DURATION_MS / (MATCH_DURATION_MS - FOG_FIRST_CONTACT_MS)),
+    maxSafeRadius: ringOf(d, { override: args.maxsafe, rules: LIVE.RULES, source: ARENA_PATH }),
   };
 }
-const ARENA = existsSync(ARENA_PATH) ? withDerivedRing(JSON.parse(readFileSync(ARENA_PATH, 'utf8'))) : null;
+const ARENA = existsSync(ARENA_PATH) ? withShippedRingOf(JSON.parse(readFileSync(ARENA_PATH, 'utf8'))) : null;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // INSTRUMENTS — each one has a known-bad in `--selftest`
@@ -1033,7 +1039,7 @@ for (const [label] of ARMS) {
   console.log('\n  THE SIZE DIAL AND THE NAV CACHE — a measured cost on §49c\n');
   for (const [label, sizes] of [['same size (today: PLAYER_SIZE === ENEMY_SIZE === 42)', [42, 42]],
     ['seat 0 given a different body (42 vs 40)', [42, 40]]]) {
-    const a = withDerivedRing(JSON.parse(readFileSync(ARENA_PATH, 'utf8')));   // a FRESH arena object per arm
+    const a = withShippedRingOf(JSON.parse(readFileSync(ARENA_PATH, 'utf8')));   // a FRESH arena object per arm
     NAVSTATS.reset();
     const cfg = ringConfigs(a, 2, 0, 'ai');
     cfg[0].size = sizes[0]; cfg[1].size = sizes[1];

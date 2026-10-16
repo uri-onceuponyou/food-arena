@@ -117,6 +117,10 @@ if (IS_MAIN) {
     const okDrift = !drift.ok && drift.faults.some((f) => f.startsWith('anchor matched 0 times'));
     console.log(`${okNoop ? 'PASS' : 'FAIL'}  a no-op revert is reported NOT CAUGHT  (${noop.faults.length} faults)`);
     console.log(`${okDrift ? 'PASS' : 'FAIL'}  a drifted anchor FAULTS instead of running  (${drift.faults.join('; ')})`);
+    // A COUNT LINE (T1b, 2026-10-16) — gatecount registers this selftest against it; two PASS lines
+    // and no total cannot be diffed against a documented number.
+    const nPass = [okNoop, okDrift].filter(Boolean).length;
+    console.log(`\nb7_knownbad --selftest: ${nPass} passed, ${2 - nPass} failed`);
     process.exit(okNoop && okDrift ? 0 : 1);
   }
   const only = argv.includes('--arm') ? argv[argv.indexOf('--arm') + 1] : null;

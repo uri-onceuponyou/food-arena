@@ -105,6 +105,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -149,17 +150,11 @@ const DT = Number(args.dt ?? 16.667);
 // the identical file, so it cancels. Named so nobody rediscovers it as a finding.
 // ─────────────────────────────────────────────────────────────────────────────
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
-const FOG_FIRST_CONTACT_MS = 6000;
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
 function loadArena() {
   if (!existsSync(ARENA_PATH)) throw new Error(`ub2_itemuse: no arena at ${ARENA_PATH}`);
-  const d = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
-  const halfDiag = Math.hypot(d.width / 2, d.height / 2);
-  return {
-    ...d,
-    maxSafeRadius: Math.round(halfDiag / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS)),
-    build: () => null,
-    update: () => {},
-  };
+  return withShippedRing(JSON.parse(readFileSync(ARENA_PATH, 'utf8')), { override: args.maxsafe, source: ARENA_PATH });
 }
 
 /** `nf_ffa`'s ring, same construction and for its reason: `2*pi/n`-symmetric by design. */

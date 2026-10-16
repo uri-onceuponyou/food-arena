@@ -161,6 +161,8 @@ if (IS_MAIN) {
       [a.westOnly && still.westOnly, 'nobody crossed the wall — the floor really is split'],
     ];
     for (const [ok, msg] of rows) console.log(`${ok ? 'PASS' : 'FAIL'}  ${msg}`);
+    // A COUNT LINE (T1b, 2026-10-16): gatecount registers this selftest against it.
+    console.log(`\nb7_reroot --selftest: ${rows.filter(([ok]) => ok).length} passed, ${rows.filter(([ok]) => !ok).length} failed`);
     process.exit(rows.every(([ok]) => ok) ? 0 : 1);
   }
   if (ARGS.includes('--kitchen')) {

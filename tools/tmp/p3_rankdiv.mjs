@@ -15,6 +15,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createScriptedPlayer, rng } from './scripted_player.mjs';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const { createMatch, stepMatch } = await import(`${ROOT}/src/game/sim.ts`);
@@ -25,8 +26,9 @@ const { CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, REACH } = RULES;
 const ARENA_PATH = `${ROOT}/tools/arena.gameplay.json`;
 if (!existsSync(ARENA_PATH)) { console.error('no arena dump'); process.exit(1); }
 const A = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
-const HALF = Math.hypot(A.width / 2, A.height / 2);
-const arena = { ...A, maxSafeRadius: Math.round(HALF / (1 - 6000 / MATCH_DURATION_MS)), build: () => null, update: () => {} };
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
+const arena = withShippedRing(A, { rules: RULES, source: ARENA_PATH });
 const driver = createScriptedPlayer({ CHARACTERS, REACH, arena });
 const DT = 16.667;
 const SEEDS = Number(process.argv.includes('--seeds') ? process.argv[process.argv.indexOf('--seeds') + 1] : 8);

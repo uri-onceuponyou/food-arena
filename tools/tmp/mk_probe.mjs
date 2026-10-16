@@ -55,6 +55,7 @@ import { readFileSync, existsSync, cpSync, mkdtempSync, rmSync, writeFileSync } 
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const IS_MAIN = process.argv[1] !== undefined
@@ -126,13 +127,9 @@ const { CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, MEDIKIT, REACH, HIT_RADIUS
 // `arena.maxSafeRadius` is DERIVED from `MATCH_DURATION_MS` in `arena/shared.ts`, so a
 // cached dump goes stale the moment the clock moves. Recomputed exactly as `roster_table`
 // and `nf_ffa` recompute it — one formula, three callers.
-const HALF_DIAG = Math.hypot(ARENA_DATA.width / 2, ARENA_DATA.height / 2);
-const FOG_FIRST_CONTACT_MS = 6000;
-const arena = {
-  ...ARENA_DATA,
-  maxSafeRadius: Math.round(HALF_DIAG / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS)),
-  build: () => null, update: () => {},
-};
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
+const arena = withShippedRing(ARENA_DATA, { override: args.maxsafe, rules: RULES, source: ARENA_PATH });
 
 const DT = Number(args.dt ?? 16.667);
 const N = Number(args.n ?? 6);

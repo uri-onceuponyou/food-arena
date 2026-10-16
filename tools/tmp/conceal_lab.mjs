@@ -75,6 +75,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createScriptedPlayer, rng, parseDriverFlags, DRIVER_REV } from './scripted_player.mjs';
 import { simModulesFromTree, simModulesAtRef } from './tf2_simstage.mjs';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -206,20 +207,17 @@ const { CHARACTER_IDS, MATCH_DURATION_MS, REACH, HIT_RADIUS_VS_PLAYER, HIT_RADIU
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
 const ARENA_DATA = existsSync(ARENA_PATH) ? JSON.parse(readFileSync(ARENA_PATH, 'utf8')) : null;
 
-/** `arena.maxSafeRadius` is DERIVED from MATCH_DURATION_MS in `arena/shared.ts`, so a
- *  cached dump goes stale the moment the clock moves. Recompute from the same formula —
- *  identical to `roster_lab.mjs`, so a row here is the same match as a row there. */
-const FOG_FIRST_CONTACT_MS = 6000;
-function withDerivedRing(data) {
-  const halfDiag = Math.hypot(data.width / 2, data.height / 2);
-  return {
-    ...data,
-    maxSafeRadius: Math.round(halfDiag / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS)),
-    build: () => null,
-    update: () => {},
-  };
-}
-const BASE_ARENA = ARENA_DATA ? withDerivedRing(ARENA_DATA) : null;
+/** ⚠️ REVERSED 2026-10-16 (T1b) — this read: "`arena.maxSafeRadius` is DERIVED from
+ *  MATCH_DURATION_MS in `arena/shared.ts`, so a cached dump goes stale the moment the clock
+ *  moves. Recompute from the same formula — identical to `roster_lab.mjs`, so a row here is the
+ *  same match as a row there." — and `withDerivedRing` recomputed `halfDiag / (1 - 6000 / T)` (1792).
+ *  Since 2026-08-12 the ring is `rules.ts:fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` — the
+ *  half-diagonal (1720.47 on 2026-10-16) — so the recompute WAS the wrong ring. The second half of
+ *  the old sentence still holds and is now true by construction: this file and `roster_lab` read the
+ *  ring through the same `t1b_ring`, which refuses a dump without it or one stale for this tree. */
+const BASE_ARENA = ARENA_DATA
+  ? withShippedRing(ARENA_DATA, { override: args.maxsafe, rules: LIVE.RULES, source: ARENA_PATH })
+  : null;
 
 /**
  * ⚠️ `--levels p:e` — AND WITHOUT IT THIS TOOL CANNOT SEE A MIS-RESOLVED ATTACKER.
@@ -1283,7 +1281,10 @@ if (args.selftest) {
     // `CLEAR`'s deliberately-absurd `maxSafeRadius: 5000` — the keepout is derived from
     // the ring, so a 5000 wu ring keeps out the whole map and the test would pass
     // vacuously in one direction and fail spuriously in the other.
-    const RING = BASE_ARENA ? BASE_ARENA.maxSafeRadius : 1985;
+    // ⚠️ The fallback was the literal `1985` — a retired ×4 ring (`al_lib:MAXR_RETIRED_X4`), so
+    // with no dump these rows passed on a number the game has not opened at since 2026-08-12. NaN
+    // fails (a) and (b) loudly instead; the dump is tracked, so this only fires on a broken tree.
+    const RING = BASE_ARENA ? BASE_ARENA.maxSafeRadius : NaN;
     const keepout = concealmentKeepoutRadius(RING);
     // ⚠️ REPLACED for `6631446`. Old assertion, kept because it is what this row shipped as
     //    and because its failure mode is the lesson:

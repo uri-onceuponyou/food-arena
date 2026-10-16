@@ -110,7 +110,7 @@ const args = (() => {
  * `rules.ts` and not to whatever `tools/arena.gameplay.json` happens to hold — and it propagates
  * a STALE source visibly instead of overwriting it with a number the caller did not ask for.
  *
- * Kept as an exported function ONLY so `--selftest` can run it as a named known-bad.
+ * Kept as an exported function ONLY so `--selftest` can run it as a named KNOWN-BAD.
  */
 export function legacyClockCoupledMaxSafe(width, height, matchDurationMs, firstContactMs = 6000) {
   return Math.round(Math.hypot(width / 2, height / 2) / (1 - firstContactMs / matchDurationMs));

@@ -47,6 +47,7 @@
 import { resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { createScriptedPlayer, rng, parseDriverFlags } from './scripted_player.mjs';
+import { ringOf } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -75,11 +76,9 @@ const { CHARACTER_IDS, MATCH_DURATION_MS } = A.RULES;
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
 const ARENA_DATA = existsSync(ARENA_PATH) ? JSON.parse(readFileSync(ARENA_PATH, 'utf8')) : null;
 if (!ARENA_DATA) { console.error(`no arena at ${ARENA_PATH}`); process.exit(1); }
-const FOG_FIRST_CONTACT_MS = 6000;
-const derivedMaxSafe = Math.round(
-  Math.hypot(ARENA_DATA.width / 2, ARENA_DATA.height / 2) / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS),
-);
-const arena = { ...ARENA_DATA, maxSafeRadius: derivedMaxSafe, build: () => null, update: () => {} };
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
+const arena = { ...ARENA_DATA, maxSafeRadius: ringOf(ARENA_DATA, { override: args.maxsafe, source: ARENA_PATH }), build: () => null, update: () => {} };
 
 /**
  * 🚨 THE ARENA IS THE SECOND PLACE HP LIVES, AND IT IS NOT IN `rules.ts`.
@@ -93,7 +92,7 @@ const arena = { ...ARENA_DATA, maxSafeRadius: derivedMaxSafe, build: () => null,
  */
 const ARENA_B_PATH = args['arena-b'] ? String(args['arena-b']) : null;
 const arenaB = ARENA_B_PATH
-  ? (() => { const d = JSON.parse(readFileSync(ARENA_B_PATH, 'utf8')); return { ...d, maxSafeRadius: Math.round(Math.hypot(d.width / 2, d.height / 2) / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS)), build: () => null, update: () => {} }; })()
+  ? (() => { const d = JSON.parse(readFileSync(ARENA_B_PATH, 'utf8')); return { ...d, maxSafeRadius: ringOf(d, { override: args.maxsafe, source: ARENA_B_PATH }), build: () => null, update: () => {} }; })()
   : arena;
 
 const DT = Number(args.dt ?? 16.667);
