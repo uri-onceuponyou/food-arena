@@ -134,19 +134,36 @@ try {
   // ── 1. Control: unmodified cache must still MATCH ────────────────────────
   // Without this, "MISMATCH on the known-bad input" proves nothing — a tool that always
   // says MISMATCH would pass case 2 and be useless.
+  // ⚠️ This row was RED from the day the ring stopped being clock-coupled until 2026-10-16:
+  // `extractFromSource` still derived the dead 2065 opening, the dump carries 1720.47, so
+  // `--verify` could MATCH nothing — a guard that always says MISMATCH, which is exactly what
+  // this control exists to catch (T1a). ⚠️ And the old name said "no concealment on either
+  // side": both sides carry the arena's real canopies now (20 at T1a), DUMP_WITHOUT is the
+  // real dump, and the row is the control for that, unchanged in meaning.
   const ctl = run(PROBE, ['--verify', '--layout', DUMP_WITHOUT]);
-  check('CONTROL: the real layout with no concealment on either side still MATCHes',
+  check('CONTROL: the real layout, unmodified, MATCHes the source extraction',
     ctl.code === 0 && said(ctl, 'MATCH — the extractor is a faithful second reader'),
     ctl.out.trim().split('\n').slice(-3).join(' | '));
 
   // ── 2. The known-bad input, through the FIXED tool ───────────────────────
   const bad = run(PROBE, ['--verify', '--layout', DUMP_WITH]);
-  check('KNOWN-BAD: a dump carrying 4 concealment boxes against a source with none -> MISMATCH',
+  check('KNOWN-BAD: a dump whose concealment list is not the source\'s -> MISMATCH',
     bad.code === 1 && said(bad, 'MISMATCH'),
     `exit ${bad.code}: ${bad.out.trim().split('\n').slice(-3).join(' | ')}`);
   check('…and it NAMES the dropped boxes rather than only reporting a count',
     said(bad, 'conceal') && said(bad, 'plate_stack@240,200,120x120'),
     bad.out.trim().split('\n').slice(-6).join(' | '));
+  // A MISMATCH outside the box lists used to print the bare word and nothing else — the
+  // stale ring read "MISMATCH" with cover and concealment agreeing box-for-box, and finding
+  // the field took a re-derivation (T1a). Known-bad: the real dump with only its ring moved.
+  {
+    const DUMP_RING = join(TMP, 'dump-ring-moved.json');
+    writeFileSync(DUMP_RING, JSON.stringify({ ...real, maxSafeRadius: real.maxSafeRadius + 100 }, null, 2));
+    const ring = run(PROBE, ['--verify', '--layout', DUMP_RING]);
+    check('KNOWN-BAD: a dump with only its opening ring moved -> MISMATCH that NAMES the field (`msr`)',
+      ring.code === 1 && said(ring, 'MISMATCH') && /field msr\b/.test(ring.out),
+      `exit ${ring.code}: ${ring.out.trim().split('\n').slice(-3).join(' | ')}`);
+  }
 
   // ── 3. The same input, through the COMMITTED PRE-FIX copy ────────────────
   // This is the whole point: the ablation is run, not asserted.
@@ -156,12 +173,21 @@ try {
       { cwd: ROOT, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
     writeFileSync(HEAD_PROBE, headSrc);
     headProbeAvailable = true;
+    // 🚨 BLINDNESS IS "CANNOT TELL THE TWO INPUTS APART", NOT "SAYS MATCH". This row used to
+    // require the pre-fix copy to print MATCH on DUMP_WITH. That held only while every OTHER
+    // field agreed — and the pre-fix copy carries the dead 2065 ring, so it says MISMATCH (on
+    // `msr`) for every dump today and the row read red for a reason that has nothing to do
+    // with concealment (T1a, 2026-10-16). The property is the same either way: the copy gives
+    // the SAME verdict on two dumps that differ ONLY in their concealment list, while the
+    // working copy (rows 1-2) separates them.
     const blind = run(HEAD_PROBE, ['--verify', '--layout', DUMP_WITH]);
-    const blindIsBlind = blind.code === 0 && said(blind, 'MATCH — the extractor is a faithful second reader');
-    check(`ABLATION: the PRE-FIX copy (${REF}) calls the SAME input MATCH — the guard really was blind`,
+    const blindCtl = run(HEAD_PROBE, ['--verify', '--layout', DUMP_WITHOUT]);
+    const verdictOf = (r) => `${r.code}|${r.out.replace(/^== EXTRACTOR VERIFY vs .*$/m, '')}`;
+    const blindIsBlind = verdictOf(blind) === verdictOf(blindCtl);
+    check(`ABLATION: the PRE-FIX copy (${REF}) gives the SAME verdict with and without the concealment change — the guard really was blind`,
       blindIsBlind,
-      blindIsBlind ? '' : `exit ${blind.code}: ${blind.out.trim().split('\n').slice(-3).join(' | ')}`
-        + '\n         (if this reports MISMATCH, --ref already contains the fix: pass the pre-fix sha)');
+      blindIsBlind ? '' : `with: exit ${blind.code} ${blind.out.trim().split('\n').slice(-1)} | without: exit ${blindCtl.code} ${blindCtl.out.trim().split('\n').slice(-1)}`
+        + '\n         (if the two verdicts differ, --ref already contains the fix: pass the pre-fix sha)');
     check('…and the pre-fix copy did not even PRINT a concealment count',
       srcConcealCount(blind.out) === null);
   } catch (e) {
