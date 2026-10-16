@@ -14159,6 +14159,152 @@ console.log('\n48. The bot at two, three and six seats — sudden death, what it
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 49. SIM FOLLOW-UPS ROUTED BY B4, B5 AND V1 (`docs/REVAMP.md` §5, B7, 2026-10-16)
+//
+// Three defects earlier packages measured and could not land, because the file was another
+// package's at the time. Every row marked 🔴 was run RED on `7360289` before its fix landed, and
+// `tools/tmp/b7_knownbad.mjs` re-runs that claim: each arm reverts ONE fix (or swaps in a
+// plausible wrong one) on a scratch copy of `src/` and requires its own 🔴 rows to go red while
+// its controls stay green.
+//
+//   (a) AI-B5 (found and priced by B5, `79bbad6`) — the bots shared ONE flow field.
+//
+// ⚠️ SEAT COUNTS. (a) cannot express itself below TWO BOTS — a lone bot never evicts anyone — so
+// its rows run at two and six, and the lone bot is its CONTROL.
+// ═══════════════════════════════════════════════════════════════════════════
+console.log('\n49. Sim follow-ups (B7) — every bot steers by its own flow field');
+{
+  // ── (a) AI-B5: EVERY BOT STEERS BY ITS OWN FLOW FIELD ─────────────────────────
+  //
+  // `movement.ts:navSteer` kept ONE distance field per arena, keyed by the last goal ASKED for,
+  // so bots with different goals evicted each other's field and nearly every query flooded a
+  // fresh BFS — B5 measured 0.85–0.96 rebuilds per query on the shipped kitchen at two to six
+  // all-bot seats (`tools/tmp/b5_navcost.mjs`). Each fighter now keeps its own field over the
+  // shared passability grid, and a field is rebuilt only when ITS OWN goal cell changes.
+  //
+  // ⚠️ THE CACHE MUST STAY TRANSPARENT: on a connected floor a field is a pure function of its
+  // goal, so the cache may change WHEN a flood runs and never what a bot does. The CONTROL row
+  // holds that to the bit against a COLD computation — a fresh fighter object on a fresh arena
+  // object, so neither a field nor a grid can be reused — and `b5_digest`'s 316 cells hold it
+  // over whole matches across the two trees (the commit). The floor here is ONE connected
+  // component on purpose: the re-root branch (goal in another component) picks its stand against
+  // the target point of the query that BUILT the field, so it is history-dependent even for a
+  // lone bot, and is proven separately against the shared-field tree (`tools/tmp/b7_reroot.mjs`).
+  {
+    const DTA = 1000 / 60;
+    const COVER = [
+      { x: 1400, y: 1000, w: 160, h: 640 },
+      { x: 800, y: 650, w: 360, h: 90 }, { x: 2000, y: 1350, w: 360, h: 90 },
+      { x: 800, y: 1350, w: 90, h: 300 }, { x: 2000, y: 650, w: 90, h: 300 },
+    ];
+    const SPAWNS = [[300, 300], [2500, 300], [300, 1700], [2500, 1700], [1400, 250], [1400, 1750]];
+    // Six far-apart goals on open floor; bot i's goal at round r is GOALS[(i + ⌊r / 3⌋) % 6] when
+    // goals JUMP, so at every round all bots want different cells and each bot's own goal changes
+    // exactly every third round.
+    const GOALS = [[2400, 1600], [400, 1600], [2400, 400], [400, 400], [1400, 1650], [1400, 350]];
+    const HOLD = 3;
+    const ROUNDS = 24;
+    /** A FRESH arena object per run: the grid is keyed on its identity, so no run can inherit
+     *  another run's field — on either tree. */
+    const floor = () => makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000, cover: COVER });
+    const bots = (arena, n) => createMatch(arena, Array.from({ length: n }, (_, i) => ({
+      characterId: CHARACTER_IDS[i % CHARACTER_IDS.length], controller: 'ai', spawn: { x: SPAWNS[i][0], y: SPAWNS[i][1] },
+    })));
+    const steer = (f, [gx, gy], arena) => {
+      const d = Math.hypot(gx - f.x, gy - f.y) || 1;
+      moveToward(f, (gx - f.x) / d, (gy - f.y) / d, 4, arena, gx, gy);
+    };
+    const goalOf = (i, r, jump) => GOALS[(i + (jump ? Math.floor(r / HOLD) : 0)) % GOALS.length];
+    /** Round-robin: the first `n` fighters steer once per round (the sim seats two at least, so
+     *  the lone-bot control seats two and steers one). Counts floods per round and in total. */
+    const roundRobin = (n, jump) => {
+      const arena = floor();
+      const st = bots(arena, Math.max(2, n));
+      navStats.reset();
+      const perRound = [];
+      let moved = 0;
+      for (let r = 0; r < ROUNDS; r++) {
+        const b0 = navStats.fieldBuilds;
+        st.fighters.slice(0, n).forEach((f, i) => {
+          const x0 = f.x, y0 = f.y;
+          steer(f, goalOf(i, r, jump), arena);
+          if (f.x !== x0 || f.y !== y0) moved++;
+        });
+        perRound.push(navStats.fieldBuilds - b0);
+      }
+      return { n, perRound, builds: navStats.fieldBuilds, queries: navStats.queries, moved };
+    };
+    const fixed1 = roundRobin(1, false), fixed2 = roundRobin(2, false), fixed6 = roundRobin(6, false);
+    const jump2 = roundRobin(2, true), jump6 = roundRobin(6, true);
+    const after = (r) => r.perRound.slice(1).reduce((a, b) => a + b, 0);
+    const fmtRR = (r) => `${r.n} bot(s): ${r.builds} floods over ${r.queries} queries (per round ${r.perRound.join(',')})`;
+    check('(a) NON-VACUITY: every steer was answered by the flow field and every bot moved, at one, two and six bots',
+      [fixed1, fixed2, fixed6, jump2, jump6].every((r) => r.queries === r.n * ROUNDS && r.moved === r.n * ROUNDS && r.perRound[0] === r.n),
+      [fixed1, fixed2, fixed6, jump2, jump6].map((r) => `${r.n}: ${r.queries} queries, ${r.moved} moved, first round ${r.perRound[0]}`).join(' · '));
+    check('(a) CONTROL: ONE bot with a fixed goal floods once and then never again — the steady state every bot should have',
+      after(fixed1) === 0, fmtRR(fixed1));
+    check('(a) 🔴 TWO bots with fixed, different goals: after each one\'s first query NOTHING is rebuilt, whoever asked in between',
+      after(fixed2) === 0, fmtRR(fixed2));
+    check('(a) 🔴 …and SIX bots',
+      after(fixed6) === 0, fmtRR(fixed6));
+    const wantJump = (n) => n * Math.ceil(ROUNDS / HOLD);
+    check(`(a) 🔴 goals that JUMP every ${HOLD} rounds: a bot floods EXACTLY when its OWN goal changes — ${wantJump(2)} at two bots, ${wantJump(6)} at six`,
+      jump2.builds === wantJump(2) && jump6.builds === wantJump(6), `${fmtRR(jump2)} · ${fmtRR(jump6)}`);
+
+    // The cache is transparent: every warm steer lands exactly where a cold one does — including
+    // after the arena SWAPS ITS COVER (`navGrid` rebuilds the grid on a new cover array, and a
+    // field flooded over the old one must not survive it). The swap lands on round 13, a round
+    // the goals HOLD, so only a field that outlived its grid could still be answering; the wall
+    // it adds cuts every north-south route west of the centre, so a stale field steers wrongly.
+    const SWAP_AT = 13;
+    const COVER_B = [...COVER, { x: 725, y: 1000, w: 1050, h: 40 }];
+    const transparent = (n) => {
+      const arena = floor();
+      const st = bots(arena, n);
+      let worst = 0, compared = 0, sign = 0, swapMatters = 0;
+      for (let r = 0; r < ROUNDS; r++) {
+        if (r === SWAP_AT) arena.cover = COVER_B;
+        st.fighters.forEach((f, i) => {
+          const goal = goalOf(i, r, true);
+          const cold = { ...f };
+          steer(cold, goal, { ...arena });
+          if (r >= SWAP_AT && r < SWAP_AT + HOLD - 1) {
+            const before = { ...f };
+            steer(before, goal, { ...arena, cover: COVER });
+            if (before.x !== cold.x || before.y !== cold.y) swapMatters++;
+          }
+          steer(f, goal, arena);
+          worst = Math.max(worst, Math.abs(cold.x - f.x), Math.abs(cold.y - f.y));
+          if (cold.detourSign !== f.detourSign) sign++;
+          compared++;
+        });
+      }
+      return { worst, compared, sign, swapMatters };
+    };
+    const tr2 = transparent(2), tr6 = transparent(6);
+    check('(a) CONTROL: the cache is TRANSPARENT — every warm steer, interleaved with the other bots\' and with goals jumping, lands bit-for-bit where a COLD one does, before and after the arena swaps its cover',
+      [tr2, tr6].every((t) => t.compared > 0 && t.swapMatters > 0 && t.worst === 0 && t.sign === 0),
+      [tr2, tr6].map((t) => `${t.compared} steers, worst |Δ| ${t.worst}, detour-side mismatches ${t.sign}, steers the swap changed ${t.swapMatters}`).join(' · '));
+
+    // Whole matches: the symptom B5 measured, on this floor, all-bot.
+    const whole = (n) => {
+      const arena = floor();
+      const st = createMatch(arena, Array.from({ length: n }, (_, i) => ({
+        characterId: CHARACTER_IDS[(i + 3) % CHARACTER_IDS.length], controller: 'ai', spawn: { x: SPAWNS[i][0], y: SPAWNS[i][1] },
+      })));
+      navStats.reset();
+      const none = new Array(n).fill(null);
+      while (st.phase !== 'ended' && st.elapsed < 200_000) stepMatch(st, DTA, none);
+      return { n, builds: navStats.fieldBuilds, queries: navStats.queries, rate: navStats.fieldBuilds / Math.max(1, navStats.queries) };
+    };
+    const w2 = whole(2), w6 = whole(6);
+    check('(a) 🔴 a whole all-bot match floods under one field per FOUR nav queries, at two seats and at six (the shared field flooded on 75–96%)',
+      [w2, w6].every((w) => w.queries > 1000 && w.rate < 0.25),
+      [w2, w6].map((w) => `N=${w.n}: ${w.builds} floods / ${w.queries} queries = ${w.rate.toFixed(3)}`).join(' · '));
+  }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) {
   console.log('\nFailed checks:');
