@@ -140,6 +140,11 @@ export interface WeaponVfxCtx {
    * hit-reaction particle pools in `game/vfx.ts`, which deliberately keep animating
    * through hit-stop. `undefined` for every other hook. */
   dt?: number;
+  /** `trail()` only: the sim's `Projectile.arrived` — true once a `peckHits` projectile (Egg's
+   * Hatch!) has landed and is pecking. Since B4 (`2ef3126`) an arrived chick RIDES its victim,
+   * so "has it stopped moving?" is no longer the same question as "has it arrived?" — read this,
+   * not the ground speed. `undefined` for every other hook. */
+  arrived?: boolean;
   /**
    * `telegraph()` only: how long the wind-up this hook is drawing will run, in
    * MILLISECONDS — i.e. `Weapon.castMs`, the same number the sim counted down and the

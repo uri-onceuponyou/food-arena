@@ -64,7 +64,7 @@
  * measures that separation rather than assuming it.
  */
 
-import { CHARACTERS, REGEN_AMOUNT, ringFloorFor, type CharacterId, type Weapon } from '../game/rules';
+import { CHARACTERS, ITEM_TUNING, REGEN_AMOUNT, ringFloorFor, type CharacterId, type ItemId, type Weapon } from '../game/rules';
 import type { Fighter, GameEvent, MatchState, FighterId, FighterRole } from '../game/state';
 // The presentation-side seat rules, stated once for all four consumers of the event
 // stream. ⚠️ `otherRole` is gone from this file — `state[otherRole(ev.targetRole)]` was
@@ -791,9 +791,96 @@ export class MatchAudio {
         }
         break;
 
+      // ── V2: ITEMS YOU CAN HEAR ────────────────────────────────────────────────
+      //
+      // 🚨 NONE OF THESE HAD A CASE (bug-hunt row B7): the most decisive thing a player can press
+      // made no sound, and neither did the state it left on its victim. One cue per event, placed
+      // like every other voice (`playPlaced`, so a far one is culled, B6), at `Priority.Normal` —
+      // an item is a qualifier on a fight, so it yields to Critical and never outranks a hit —
+      // except Tenderiser's per-hit knock, which rides on top of a weapon impact and is Ambient
+      // until the stack that MATTERS (the sixth), and Leftovers' revive, which is the rarest
+      // moment in the game and is Critical exactly like a death. The Blue Cheese tick is NOT
+      // here: it is a `hit-landed` with `itemId`, and stays quiet (`DECISIONS §91q`).
+      case 'item-used':
+        this.lastCombatAt = state.elapsed;
+        this.playItemUsed(ev.itemId, ev.x, ev.y, ev.windupMs, state);
+        break;
+
+      case 'item-resolved':
+        // Shiitake's wind-up went off: the caps snap up.
+        this.playPlaced(S.shiitakeUp(), { ...this.place(ev.x, ev.y, state), key: `item:${ev.itemId}:resolved` });
+        break;
+
+      case 'item-cancelled': {
+        const f = fighterOf(state, ev.fighterId, ev.fighterRole);
+        this.playPlaced(S.itemFizzle(), { ...this.place(f.x, f.y, state), key: `item:${ev.itemId}:cancelled` });
+        break;
+      }
+
+      case 'item-hit':
+        this.lastCombatAt = state.elapsed;
+        this.playItemHit(ev, state);
+        break;
+
+      case 'item-revived': {
+        const mine = slotOf(ev.fighterId, ev.fighterRole) === this.localSlot;
+        const at = this.place(ev.x, ev.y, state);
+        // `death`'s rule, for death's undoing: YOUR revive is full level wherever the ear is;
+        // anybody else's is where it happened, and culled when too far to hear.
+        if (!mine && at.gain < SFX_INAUDIBLE_GAIN) break;
+        this.engine.play(S.revive(), { ...at, gain: mine ? 1 : at.gain, priority: Priority.Critical });
+        break;
+      }
+
       default:
         // projectile-spawned / splat-created / trail-mark-created — see the header.
         break;
+    }
+  }
+
+  /** V2 — `item-used`: the press. A throw whooshes; Springform boings now and thuds when the sim's
+   *  travel is over; Shiitake's wind-up creaks for exactly as long as it runs. */
+  private playItemUsed(itemId: ItemId, x: number, y: number, windupMs: number, state: MatchState): void {
+    const at = this.place(x, y, state);
+    const key = `item:${itemId}:used`;
+    switch (itemId) {
+      case 'springform':
+        this.playPlaced(S.springBoing(), { ...at, key });
+        this.playPlaced(S.springLand(), { ...at, key: `${key}:land`, delay: ITEM_TUNING.springform.travelMs / 1000 });
+        return;
+      case 'shiitake':
+        this.playPlaced(S.shiitakeWindup(windupMs), { ...at, key });
+        return;
+      default:
+        this.playPlaced(S.itemThrow(), { ...at, key });
+    }
+  }
+
+  /** V2 — `item-hit`: the landing, voiced where the VICTIM is (both ends for Disposal), and
+   *  delayed by the same flight time `vfx/items.ts` gives the thrown prop (distance / 18 m/s,
+   *  160–420 ms), so the clink arrives with the mug rather than before it. */
+  private playItemHit(ev: Extract<GameEvent, { type: 'item-hit' }>, state: MatchState): void {
+    const at = this.place(ev.x, ev.y, state);
+    const key = `item:${ev.itemId}:hit`;
+    const owner = fighterOf(state, ev.ownerId, ev.ownerRole);
+    const flight = Math.min(0.42, Math.max(0.16, (Math.hypot(ev.x - owner.x, ev.y - owner.y) * 0.05) / 18));
+    switch (ev.itemId) {
+      case 'tenderiser':
+        this.playPlaced(S.tenderKnock(ev.stacks), { ...at, key, priority: ev.stacks >= 6 ? Priority.Normal : Priority.Ambient });
+        return;
+      case 'warm_milk': this.playPlaced(S.milkClink(), { ...at, key, delay: flight }); return;
+      case 'pompa': this.playPlaced(S.plungerThwop(), { ...at, key, delay: flight }); return;
+      case 'squid_ink': this.playPlaced(S.inkSplat(), { ...at, key, delay: flight }); return;
+      case 'liquorice': this.playPlaced(S.whipCrack(), { ...at, key, delay: flight }); return;
+      case 'disposal':
+        this.playPlaced(S.drainGurgle(), { ...this.place(ev.fromX, ev.fromY, state), key });
+        this.playPlaced(S.drainSpit(), { ...at, key: `${key}:spit`, delay: 0.16 });
+        return;
+      case 'shiitake':
+        this.playPlaced(S.shieldShimmer(), { ...at, key });
+        return;
+      default:
+        return;
     }
   }
 

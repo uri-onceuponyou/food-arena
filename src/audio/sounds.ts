@@ -1324,6 +1324,177 @@ export function uiClick(): SoundFn {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Items (graphics campaign V2) — one cue per item EVENT
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Before V2 the director had no case for `item-used`, `item-resolved`, `item-cancelled`,
+// `item-hit` or `item-revived`: the most decisive thing a player can press was SILENT
+// (`tools/tmp/v2_items.mjs`). Each cue below is built from the same layers as the rest of
+// the catalogue — a transient for the instant, a pitched body for the object, a little room —
+// and is deliberately SHORTER and QUIETER than an impact: an item is a qualifier on a fight,
+// and the impact layer is still what says somebody got hurt. Placement and priority are the
+// director's (`playItem`).
+
+/** A thrown item leaving the hand — a soft, light whoosh. Quieter than `castRanged`. */
+export function itemThrow(): SoundFn {
+  return (s) => {
+    const j = centsJitter(s.rng, 60);
+    const air = noiseBurst(s, { filter: 'bandpass', freq: [900 * j, 2600 * j], q: 1.4, peak: 0.2, attack: 0.03, duration: 0.2, wet: 0.16 });
+    const push = tone(s, { type: 'triangle', freq: [300 * j, 520 * j], peak: 0.08, attack: 0.02, duration: 0.12, wet: 0.1 });
+    return longest(air, push);
+  };
+}
+
+/** Springform: the tin's spring — a rising, wobbling BOING, the only one in the game. */
+export function springBoing(): SoundFn {
+  return (s) => {
+    const j = centsJitter(s.rng, 30);
+    const thump = transient(s, { peak: 0.22, freq: 2200, snap: 900, snapMs: 9 });
+    const boing = tone(s, { type: 'sine', freq: [170 * j, 560 * j], ring: [11, 6], peak: 0.32, attack: 0.004, duration: 0.34, drive: 1.4, wet: 0.2 });
+    const twang = tone(s, { type: 'triangle', freq: [340 * j, 1120 * j], peak: 0.1, attack: 0.004, duration: 0.22, wet: 0.2 });
+    return longest(thump, boing, twang);
+  };
+}
+
+/** Springform's landing — a soft dusty thud. */
+export function springLand(): SoundFn {
+  return (s) => {
+    const thud = tone(s, { type: 'sine', freq: [130, 58], peak: 0.24, duration: 0.14, drive: 2, wet: 0.14 });
+    const dust = noiseBurst(s, { filter: 'lowpass', freq: [1400, 300], q: 0.8, peak: 0.12, attack: 0.006, duration: 0.2, wet: 0.24 });
+    return longest(thud, dust);
+  };
+}
+
+/** Warm Milk lands: a ceramic CLINK, a splash, and a slow falling lull — someone is asleep. */
+export function milkClink(): SoundFn {
+  return (s) => {
+    const j = centsJitter(s.rng, 25);
+    const clink = modes(s, { freq: 1850 * j, duration: 0.3, peak: 0.2, modes: [
+      { ratio: 1, gain: 1, decay: 1 }, { ratio: 2.32, gain: 0.5, decay: 0.6 }, { ratio: 3.87, gain: 0.25, decay: 0.4 }], wet: 0.22 });
+    const splash = droplets(s, { count: 4, spread: 0.12, freq: [500, 1300], peak: 0.12, wet: 0.24 });
+    const lull = tone({ ...s, when: s.when + 0.12 }, { type: 'triangle', freq: [620 * j, 410 * j], peak: 0.1, attack: 0.08, duration: 0.6, wet: 0.5 });
+    return longest(clink, splash, lull + 0.12);
+  };
+}
+
+/** Pompa lands: the plunger's rubber THWOP — a suction pop with a falling pitch. */
+export function plungerThwop(): SoundFn {
+  return (s) => {
+    const j = centsJitter(s.rng, 40);
+    const tick = transient(s, { peak: 0.18, freq: 2600, snap: 1100, snapMs: 7 });
+    const suck = tone(s, { type: 'sine', freq: [920 * j, 210 * j], peak: 0.3, attack: 0.003, duration: 0.16, drive: 2.2, wet: 0.12 });
+    const pop = noiseBurst(s, { filter: 'bandpass', freq: [520, 300], q: 6, peak: 0.16, attack: 0.002, duration: 0.09, wet: 0.1 });
+    return longest(tick, suck, pop);
+  };
+}
+
+/** Squid Ink lands: a wet, dark SPLAT. */
+export function inkSplat(): SoundFn {
+  return (s) => {
+    const body = noiseBurst(s, { filter: 'lowpass', freq: [1900, 260], q: 2.2, poles: 24, peak: 0.28, attack: 0.004, duration: 0.24, drive: 1.6, wet: 0.2 });
+    const glop = tone(s, { type: 'sine', freq: [160, 68], peak: 0.2, duration: 0.16, drive: 2, wet: 0.14 });
+    const drip = droplets(s, { count: 4, spread: 0.18, freq: [260, 700], peak: 0.1, rise: 2.2, wet: 0.3 });
+    return longest(body, glop, drip);
+  };
+}
+
+/** Liquorice lands: the rope's CRACK, then a creak as it pulls tight. */
+export function whipCrack(): SoundFn {
+  return (s) => {
+    const j = centsJitter(s.rng, 50);
+    const crack = transient(s, { peak: 0.3, freq: 6200, snap: 3400, snapMs: 5 });
+    const lash = noiseBurst(s, { filter: 'highpass', freq: [2600, 7000], q: 0.9, peak: 0.2, attack: 0.002, duration: 0.07, wet: 0.08 });
+    const creak = tone({ ...s, when: s.when + 0.05 }, { type: 'sawtooth', freq: [210 * j, 150 * j], lowpass: 900, peak: 0.08, attack: 0.03, duration: 0.24, drive: 1.5, wet: 0.2 });
+    return longest(crack, lash, creak + 0.05);
+  };
+}
+
+/** Disposal: the drain — a hard falling GURGLE where the victim was. */
+export function drainGurgle(): SoundFn {
+  return (s) => {
+    const swirl = noiseBurst(s, { filter: 'bandpass', freq: [1300, 220], q: 5, peak: 0.24, attack: 0.03, duration: 0.5, wet: 0.3 });
+    const plug = tone(s, { type: 'sine', freq: [300, 70], peak: 0.24, attack: 0.01, duration: 0.42, drive: 2.2, wet: 0.2 });
+    const bubbles = droplets(s, { count: 6, spread: 0.36, freq: [180, 520], peak: 0.12, rise: 1.8, wet: 0.3 });
+    return longest(swirl, plug, bubbles);
+  };
+}
+
+/** Disposal: the spit-out at the destination — an upward POP and a splash. */
+export function drainSpit(): SoundFn {
+  return (s) => {
+    const pop = tone(s, { type: 'sine', freq: [150, 460], peak: 0.26, attack: 0.003, duration: 0.14, drive: 1.8, wet: 0.16 });
+    const splash = spray(s, { peak: 0.12, duration: 0.22, wet: 0.24 });
+    const tick = transient(s, { peak: 0.16, freq: 3000, snap: 700, snapMs: 8 });
+    return longest(pop, splash, tick);
+  };
+}
+
+/** Shiitake's wind-up: a slow rising CREAK of growth, as long as the wind-up itself — it is
+ *  what makes the shield COUNTERABLE (`ITEMS.shiitake.look`), so opponents must hear it too. */
+export function shiitakeWindup(ms: number): SoundFn {
+  const dur = Math.max(0.3, Math.min(4, ms / 1000));
+  return (s) => {
+    const grow = noiseBurst(s, { filter: 'bandpass', freq: [260, 1150], q: 3.2, peak: 0.13, attack: dur * 0.85, duration: dur, wet: 0.3 });
+    const stem = tone(s, { type: 'triangle', freq: [150, 330], lowpass: [700, 1600], peak: 0.07, attack: dur * 0.8, duration: dur, voices: 2, detuneCents: 18, wet: 0.3 });
+    return longest(grow, stem);
+  };
+}
+
+/** Shiitake resolves: the caps snap up — a soft FWUMP and a sparkle of spores. */
+export function shiitakeUp(): SoundFn {
+  return (s) => {
+    const fwump = tone(s, { type: 'sine', freq: [240, 520], peak: 0.26, attack: 0.006, duration: 0.2, drive: 1.6, wet: 0.2 });
+    const air = noiseBurst(s, { filter: 'lowpass', freq: [2400, 700], q: 0.9, peak: 0.14, attack: 0.004, duration: 0.22, wet: 0.3 });
+    const spores = glint(s, { count: 3, spread: 0.14, freq: [5000, 9000], peak: 0.05, wet: 0.4 });
+    return longest(fwump, air, spores);
+  };
+}
+
+/** Shiitake's shield is ON — a brief high shimmer under the fwump, so the state that makes
+ *  attackers hurt themselves has its own sound, not only its wind-up's. */
+export function shieldShimmer(): SoundFn {
+  return (s) => {
+    const ring = tone(s, { type: 'sine', freq: [1700, 2300], ring: [140, 90], peak: 0.07, attack: 0.02, duration: 0.3, wet: 0.45 });
+    const sparkle = glint(s, { count: 4, spread: 0.22, freq: [4500, 9500], peak: 0.05, wet: 0.45 });
+    return longest(ring, sparkle);
+  };
+}
+
+/** An item wind-up that died — a short deflating fizzle. */
+export function itemFizzle(): SoundFn {
+  return (s) => {
+    const sag = tone(s, { type: 'sawtooth', freq: [420, 120], lowpass: [1800, 380], peak: 0.12, attack: 0.008, duration: 0.3, wet: 0.24 });
+    const hiss = noiseBurst(s, { filter: 'highpass', freq: [3200, 1600], q: 0.7, peak: 0.06, attack: 0.01, duration: 0.25, wet: 0.2 });
+    return longest(sag, hiss);
+  };
+}
+
+/** Tenderiser: a mallet KNOCK on the victim that climbs with the stack, so the sixth is
+ *  unmistakable by ear as well as by eye. Quiet — it rides on top of a weapon hit. */
+export function tenderKnock(stacks: number): SoundFn {
+  const k = Math.max(1, Math.min(6, stacks));
+  return (s) => {
+    const knock = modes(s, { freq: 480 * (1 + 0.09 * (k - 1)), duration: 0.12, peak: 0.1 + 0.03 * k, modes: [
+      { ratio: 1, gain: 1, decay: 1 }, { ratio: 2.7, gain: 0.4, decay: 0.5 }], drive: 1.4, wet: 0.12 });
+    const tick = transient(s, { peak: 0.08 + 0.02 * k, freq: 3200, snap: 1300, snapMs: 6 });
+    return longest(knock, tick);
+  };
+}
+
+/** Leftovers fires: the fridge hum and a rising chord — the rarest moment in the game. */
+export function revive(): SoundFn {
+  const notes = [392, 523.25, 659.25, 783.99];
+  return (s) => {
+    const hum = tone(s, { type: 'sawtooth', freq: 62, lowpass: 320, peak: 0.12, attack: 0.05, duration: 0.8, voices: 2, detuneCents: 10, wet: 0.2 });
+    notes.forEach((f, i) => {
+      tone({ ...s, when: s.when + 0.08 + i * 0.07 }, { type: 'triangle', freq: f, peak: 0.2, attack: 0.012, duration: 0.42, voices: 2, detuneCents: 8, wet: 0.4 });
+    });
+    const shine = glint({ ...s, when: s.when + 0.3 }, { count: 4, spread: 0.2, freq: [5500, 11000], peak: 0.05, wet: 0.5 });
+    return longest(hum, 0.08 + notes.length * 0.07 + 0.42, shine + 0.3);
+  };
+}
+
 // Re-exported so bespoke weapon files can reach the shared helpers through one
 // import (`from '../sounds'`) rather than reaching past this layer.
 export { droplets, rand, centsJitter, longest, modes, transient };
