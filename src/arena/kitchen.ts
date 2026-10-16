@@ -246,7 +246,12 @@ export const createKitchenArena: ArenaFactory = () => {
   const cover: CoverBox[] = [];
 
   // ── Floor ────────────────────────────────────────────────────────────────────
-  root.add(buildFloor(M));
+  // A2c: the floor is BUILT last (below, once `cover` is complete, so its tiles can bake
+  // contact darkening against every footprint) but still sits FIRST in the graph, in
+  // this slot, so traversal order — what every id pass and ablation walks — is unchanged.
+  const floorSlot = new THREE.Group();
+  floorSlot.name = 'floor_slot';
+  root.add(floorSlot);
 
   // ── Apron — everything OUTSIDE the ARENA_W x ARENA_H playfield ──────────────────
   // (A1: this heading said "the 1400x1000 playfield" — the 1x map, stale since
@@ -1352,6 +1357,9 @@ export const createKitchenArena: ArenaFactory = () => {
     { x: SPAWN_P3X, y: SPAWN_P3Y },
     { x: ARENA_W - SPAWN_P3X, y: ARENA_H - SPAWN_P3Y },
   ];
+
+  // ── Floor, built now that `cover` is complete (see `floorSlot` above) ────────────
+  floorSlot.add(buildFloor(M, cover));
 
   // ── The value lift ───────────────────────────────────────────────────────────
   // LAST, after everything is in `root`, because it walks the finished graph. See the
