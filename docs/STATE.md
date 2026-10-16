@@ -178,7 +178,7 @@ no scoring round spent:**
 |---|---|---|
 | frame choice | **paired mean Δ 0.000** over 4 plate-matched pairs, against a 0.693 between-arms floor | `9585ed6` |
 | prop density | **+0.00** across **13.0% → 24.9%** footprint; low arms 5.50, high arms 5.50 | `fd76ef0` |
-| surface treatment | our ground carries **2.69× the hf detail of every reference plate** (ground-only median window, ours 0.01905 vs ref 0.00336–0.01005). **Texturing moves us AWAY** | `6c133ce` |
+| surface treatment | ⚠️ **SUPERSEDED 2026-10-16 (A2c, `632671d`): wave 1's recalm (A1) had taken the ground BELOW the plates' band on hf/mf/lf (arena hf .00314 vs .00336–.01005); A2c's tile floor sits near the band's middle (hf .00438, mf .01425, lf .01726) — the old reading below is August's** ~~our ground carries **2.69× the hf detail of every reference plate** (ground-only median window, ours 0.01905 vs ref 0.00336–0.01005). **Texturing moves us AWAY** | `6c133ce` |
 | subject scale | ref **8.4–14.2%** of frame height (median 12.4), ours **8.8–10.8%** (median 10.2) — **INSIDE** | `6c133ce` |
 
 **The one live lead is a CAST property, not an arena one.** On the 2026-08-05 cast panel, one 35°
