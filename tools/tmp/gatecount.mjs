@@ -334,7 +334,14 @@ const OFFLINE = [
   // instrument was registered while the arms checking the BLIND were not.
   { key: 'tools/tmp/q1_ledger.mjs --selftest', probes: [pr(['tools/tmp/q1_ledger.mjs', '--selftest'], /selftest (\d+) pass \/ \d+ fail/)] },
   { key: 'tools/tmp/q1_public.mjs --selftest', probes: [pr(['tools/tmp/q1_public.mjs', '--selftest'], S)] },
-  { key: 'tools/tmp/q1_verify.mjs', probes: [pr(['tools/tmp/q1_verify.mjs'], /(\d+)\/\d+ sheets vouched/)] },
+  // ⚠️ `needs` (T1a, 2026-10-16): q1_verify reads the GITIGNORED shots/review/q1-manifest.json; on a
+  // clean worktree it now exits 3 with a named SKIP, and every merge battery of the revamp read it
+  // as GATE-FAIL. A row whose `needs` file is absent is reported SKIP, never run, never passed.
+  { key: 'tools/tmp/q1_verify.mjs', needs: 'shots/review/q1-manifest.json', probes: [pr(['tools/tmp/q1_verify.mjs'], /(\d+)\/\d+ sheets vouched/)] },
+  // ⚠️ MOVED FROM THE BROWSER SKIP LIST (T1a, 2026-10-16): it is node-only (1.2 s) and was registered
+  // as `browser`, so it never ran — which is how it sat at 11/2 (its control could never match while
+  // arena_probe carried the dead ring formula) with nobody seeing it.
+  { key: 'tools/tmp/cw_verify_knownbad.mjs', probes: [pr(['tools/tmp/cw_verify_knownbad.mjs'], S)] },
   { key: 'tools/tmp/rc_prose.mjs', probes: [pr(['tools/tmp/rc_prose.mjs'], /(\d+)\/\d+ checks passed/)] },
   { key: 'tools/tmp/nk_neckgate.mjs --selftest', probes: [pr(['tools/tmp/nk_neckgate.mjs', '--selftest'], /(\d+) pass, \d+ fail/)] },
   { key: 'tools/tmp/xr_repro.mjs --selftest', probes: [pr(['tools/tmp/xr_repro.mjs', '--selftest'], /selftest (\d+) pass \/ \d+ fail/)] },
@@ -639,7 +646,6 @@ const SKIP = [
   ['tools/tmp/home_metrics.mjs',           'browser',     'WCAG from pixels'],
   ['tools/tmp/limbcheck.mjs',              'browser',     'per-joint delivered pixels; and its expect cell is prose'],
   ['tools/tmp/cw_conceal_view.mjs',        'browser',     'concealment on rendered pixels: blip, HP pill, 3D model'],
-  ['tools/tmp/cw_verify_knownbad.mjs',     'browser',     'ablates arena_probe --verify against a derived pre-fix ref'],
   ['tools/tmp/tt_flatrim.mjs',             'browser',     'compiles real GL programs and reads delivered pixels back off the drawing buffer'],
 ];
 
@@ -719,6 +725,10 @@ export function check({ toolsMd, claudeMd, offline = OFFLINE, skip = SKIP, exec 
       continue;
     }
     if (!run) { rows.push({ key: r.key, doc: r.ints, actual: null, verdict: 'not-run', note: '--docs-only', ms: 0 }); continue; }
+    if (off.needs && !existsSync(join(ROOT, off.needs))) {
+      rows.push({ key: r.key, doc: r.ints, actual: null, verdict: 'SKIP', note: `needs gitignored ${off.needs} (absent on this tree)`, ms: 0 });
+      continue;
+    }
 
     const t0 = Date.now();
     const measured = [];
