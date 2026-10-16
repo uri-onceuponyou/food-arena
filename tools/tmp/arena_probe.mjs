@@ -105,7 +105,7 @@ const pct = (v) => `${(v * 100).toFixed(1)}%`;
  * synthetic sources — one per supported registration shape, one in a shape the parser
  * cannot read (must throw), one that only mentions concealment in a comment (must not).
  *
- * `shared.ts` is NOT swappable: it supplies ARENA_W/ARENA_H/FOG_FIRST_CONTACT_S, which
+ * `shared.ts` is NOT swappable: it supplies ARENA_W/ARENA_H and the MAX_SAFE_RADIUS declaration, which
  * are the constants the coordinate expressions are evaluated against, and a fixture that
  * could move those would be testing arithmetic rather than the parser.
  */
@@ -117,10 +117,25 @@ function extractFromSource() {
   const ARENA_W = Number(/export const ARENA_W = (\d+)/.exec(shared)[1]);
   const ARENA_H = Number(/export const ARENA_H = (\d+)/.exec(shared)[1]);
   const CENTER = { x: ARENA_W / 2, y: ARENA_H / 2 };
-  const FOG_FIRST_CONTACT_S = Number(/export const FOG_FIRST_CONTACT_S = ([\d.]+)/.exec(shared)[1]);
-  const MAX_SAFE_RADIUS = Math.round(
-    Math.hypot(ARENA_W / 2, ARENA_H / 2) / (1 - (FOG_FIRST_CONTACT_S * 1000) / MATCH_DURATION_MS)
-  );
+  // ⚠️ WAS `Math.round(hypot(W/2, H/2) / (1 - FOG_FIRST_CONTACT_S * 1000 / MATCH_DURATION_MS))`
+  // — the DEAD clock-coupled opening, 2065 at today's constants. The tree derives
+  // `MAX_SAFE_RADIUS = fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` = 1720.47 (`shared.ts`), so
+  // `--verify` could not MATCH anything: it printed MISMATCH with cover and concealment
+  // agreeing box-for-box, and `--from-src` played every ring on a 2065 opening (T1a,
+  // 2026-10-16). Now both declarations are READ from `shared.ts` and evaluated with the
+  // sim's own `fogOpeningRadiusFor`: a second reader that follows the source rather than
+  // re-deriving it, and that THROWS if the declaration changes shape (the AL guard class).
+  const declRhs = (name) => {
+    const dm = new RegExp(`export const ${name}\\s*=\\s*([^;]+);`).exec(shared);
+    if (!dm) throw new Error(`arena_probe: no \`export const ${name} = …;\` in shared.ts — teach extractFromSource() the new shape`);
+    return dm[1];
+  };
+  const evalIn = (scope, expr) => new Function(...Object.keys(scope), `"use strict"; return (${expr});`)(...Object.values(scope));
+  const ARENA_HALF_DIAGONAL = evalIn({ ARENA_W, ARENA_H, Math }, declRhs('ARENA_HALF_DIAGONAL'));
+  const MAX_SAFE_RADIUS = evalIn(
+    { ARENA_HALF_DIAGONAL, ARENA_W, ARENA_H, Math, fogOpeningRadiusFor: RULES.fogOpeningRadiusFor },
+    declRhs('MAX_SAFE_RADIUS'));
+  if (!Number.isFinite(MAX_SAFE_RADIUS)) throw new Error(`arena_probe: MAX_SAFE_RADIUS evaluated to ${MAX_SAFE_RADIUS}`);
 
   const scope = { ARENA_W, ARENA_H, CENTER, POT, Math };
   const ev = (expr) => {
@@ -275,13 +290,14 @@ if (args.verify) {
    * bit-identical over 3,283,873 ticks. The distinction this guard exists to catch is
    * N-vs-0, not [] -vs-undefined.
    */
-  const norm = (a) => JSON.stringify({
+  const normParts = (a) => ({
     w: a.width, h: a.height, c: a.center, msr: a.maxSafeRadius,
     ps: a.playerSpawn, es: a.enemySpawn,
     cover: [...a.cover].map(boxKey).sort(),
     hz: [...a.hazards].map((h) => `${h.kind}@${h.x},${h.y},r${h.radius}`).sort(),
     conceal: [...(a.concealment ?? [])].map(boxKey).sort(),
   });
+  const norm = (a) => JSON.stringify(normParts(a));
   const ok = norm(DATA) === norm(dump);
   const nConceal = (a) => (a.concealment ?? []).length;
   console.log(`\n== EXTRACTOR VERIFY vs ${LAYOUT_PATH.replace(ROOT + '/', '')}`);
@@ -289,6 +305,15 @@ if (args.verify) {
   console.log(`   browser dump     : ${dump.cover.length} cover, ${dump.hazards.length} hazards, ${nConceal(dump)} concealment`);
   console.log(`   ${ok ? 'MATCH — the extractor is a faithful second reader' : 'MISMATCH — do NOT trust --from-src'}\n`);
   if (!ok) {
+    // ⚠️ THIS USED TO PRINT ONLY THE BOX DIFFS — so a MISMATCH in any other field printed
+    // "MISMATCH" and nothing else, with cover and concealment agreeing box-for-box (T1a,
+    // 2026-10-16: the one field was `msr`, src 2065 vs dump 1720.47 — see extractFromSource).
+    // Every normalised field that differs is named now, so a MISMATCH always says where.
+    const A = normParts(DATA), B = normParts(dump);
+    for (const k of Object.keys(A)) {
+      const a = JSON.stringify(A[k]), b = JSON.stringify(B[k]);
+      if (a !== b) console.log(`     field ${k.padEnd(8)} src ${String(a).slice(0, 160)}  |  dump ${String(b).slice(0, 160)}`);
+    }
     const diff = (label, a, b) => {
       const A = new Set(a.map(boxKey));
       const B = new Set(b.map(boxKey));

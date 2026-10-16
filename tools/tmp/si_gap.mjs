@@ -69,6 +69,11 @@ const VPS = [
  *         say what would have broken.
  */
 export function decide(m) {
+  // NO-DATA before any verdict (T1a, 2026-10-16). A run with no rows, or a row whose ability
+  // clearance was never measured, used to fall through to DELETE: `abilityClear` read null
+  // and the delta was coerced to 0 — "no vertical relief" — the moment U1 (`a7d5ce5`) retired
+  // `.chars-ability`. The selftest stayed 8/8 because it only ever fed decide() good rows.
+  if (!m.length || m.some((r) => r.before?.abilityClear === null || r.after?.abilityClear === null)) return 'NO-DATA';
   const vertical = m.some((r) => r.dStatsH < -0.5 || r.dDetailOverflow < -0.5 || r.dAbilityClear > 0.5);
   const truncates = m.some((r) => r.after.labelOverflow > 0.5 && r.before.labelOverflow <= 0.5);
   if (truncates) return 'REJECT';
@@ -87,6 +92,9 @@ if (process.argv.includes('--selftest')) {
     ['truncation beats vertical', [{ ...base, dStatsH: -4, after: { labelOverflow: 2.1 } }], 'REJECT'],
     ['already truncating, unchanged', [{ ...base, before: { labelOverflow: 3 }, after: { labelOverflow: 3 } }], 'DELETE'],
     ['sub-floor vertical is not vertical', [{ ...base, dStatsH: -0.2 }], 'DELETE'],
+    // KNOWN-BADS for the live arm's blindness: what it produced after U1 retired the row.
+    ['no rows at all is not a verdict', [], 'NO-DATA'],
+    ['an unmeasured ability row is not "no relief"', [{ ...base, before: { labelOverflow: 0, abilityClear: null }, after: { labelOverflow: 0, abilityClear: null } }], 'NO-DATA'],
   ];
   let bad = 0;
   for (const [name, m, want] of cases) {
@@ -112,8 +120,16 @@ const MEASURE = () => {
   const r = (el) => { const b = el.getBoundingClientRect(); return { x: +b.x.toFixed(2), y: +b.y.toFixed(2), w: +b.width.toFixed(2), h: +b.height.toFixed(2) }; };
   const stats = document.querySelector('.fa-chars .chars-stats');
   const detail = document.querySelector('.fa-chars .chars-detail');
-  const ability = document.querySelector('.fa-chars .chars-ability');
+  // ⚠️ WAS `.fa-chars .chars-ability` — the per-ability ROW, retired by U1 (`a7d5ce5`), so this
+  // read null on every viewport while the selftest passed 8/8. The kit is tiles (`.chars-abl`)
+  // plus ONE caption (`.chars-kit-cap`) below them, the last thing in `.chars-detail` and so the
+  // first thing its bottom edge slices: the D3 clearance is measured on the caption now.
+  const tiles = [...document.querySelectorAll('.fa-chars .chars-kit .chars-abl')];
+  const ability = document.querySelector('.fa-chars .chars-kit-cap');
   if (!stats || !detail) return { error: 'no .chars-stats / .chars-detail' };
+  // NON-EMPTY FIRST: no tile or no caption means there is nothing to measure, and that is a
+  // fault, not a clearance of zero.
+  if (!tiles.length || !ability) return { error: `no ability kit to measure: ${tiles.length} .chars-abl tiles, caption ${ability ? 'present' : 'ABSENT'}` };
   const cs = getComputedStyle(stats);
   const cells = [...stats.querySelectorAll('.chars-stat')].map(r);
   // D2: a label that has to be ellipsised. `scrollWidth - clientWidth` is the run that
@@ -135,10 +151,11 @@ const MEASURE = () => {
     // Vertical budget, three ways.
     detailOverflow: +(detail.scrollHeight - detail.clientHeight).toFixed(2),
     detail: dRect,
-    // D3: how much of the FIRST ability row's box clears the panel's own bottom edge.
-    // Positive = the whole row is inside; negative = it is being sliced.
-    abilityClear: ability ? +((dRect.y + dRect.h) - (r(ability).y + r(ability).h)).toFixed(2) : null,
-    ability: ability ? r(ability) : null,
+    // D3: how much of the ability caption's box clears the panel's own bottom edge.
+    // Positive = the whole caption is inside; negative = it is being sliced.
+    abilityClear: +((dRect.y + dRect.h) - (r(ability).y + r(ability).h)).toFixed(2),
+    ability: r(ability),
+    tiles: tiles.length,
   };
 };
 
@@ -152,6 +169,7 @@ for (const vp of VPS) {
   await page.waitForTimeout(1800);
 
   const before = await page.evaluate(MEASURE);
+  if (before.error) { console.error(`🔴 ${vp.w}x${vp.h}: ${before.error}`); await page.close(); await browser.close(); process.exit(1); }
   await page.screenshot({ path: resolve(out, `chars-${vp.w}x${vp.h}-gap3.png`) });
 
   // ── THE ONE VARIABLE. Injected as its own sheet so the delivered value is what a
@@ -164,6 +182,7 @@ for (const vp of VPS) {
   });
   await page.waitForTimeout(250);
   const after = await page.evaluate(MEASURE);
+  if (after.error) { console.error(`🔴 ${vp.w}x${vp.h} after the probe: ${after.error}`); await page.close(); await browser.close(); process.exit(1); }
   await page.screenshot({ path: resolve(out, `chars-${vp.w}x${vp.h}-gap1.png`) });
   await page.close();
 
@@ -173,8 +192,8 @@ for (const vp of VPS) {
     dStatsW: +(after.stats.w - before.stats.w).toFixed(2),
     dCellW: +(after.cells[0].w - before.cells[0].w).toFixed(2),
     dDetailOverflow: +(after.detailOverflow - before.detailOverflow).toFixed(2),
-    dAbilityClear: after.abilityClear === null || before.abilityClear === null
-      ? 0 : +(after.abilityClear - before.abilityClear).toFixed(2),
+    // ⚠️ WAS `null -> 0` here: an unmeasured row read as "no relief". MEASURE refuses now.
+    dAbilityClear: +(after.abilityClear - before.abilityClear).toFixed(2),
   });
 }
 await browser.close();
@@ -200,7 +219,9 @@ console.log({
     + '  buys nothing the author asked for. Delete it and keep the reason.',
   KEEP: '  it buys real vertical space — move it BELOW the 560 block, like :1219.',
   REJECT: '  applying it truncates a label that fits today. Delete it.',
+  'NO-DATA': '  🔴 nothing was measured — no verdict. See the error above.',
 }[verdict]);
+if (verdict === 'NO-DATA') faults++;
 
 writeFileSync(resolve(out, 'si_gap.json'), JSON.stringify({ url, rows, verdict }, null, 1));
 process.exit(faults ? 1 : 0);

@@ -38,7 +38,7 @@
  * is a DIFFERENT QUANTITY. This tool prints both, labelled, and never adds them.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -119,6 +119,22 @@ let driver = arena ? driverFor(arena) : null;
 // ─────────────────────────────────────────────────────────────────────────────
 // one match
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * ONE PRIVATE STAGING ROOT PER PROCESS (T1a, 2026-10-16). The cross-check ref used to be
+ * extracted to a FIXED name under the OS temp dir — one directory for every agent and every
+ * worktree on the machine — so a concurrent run could rm-and-rewrite it between this run's
+ * extraction and its import. Same class as `driver_guard`'s staging race (B4's "3 Donut
+ * matchups moved", reproduced by `t1a_stage_race.mjs`). A function property, not a
+ * module-level `let`: no temporal dead zone wherever it is called.
+ */
+function stageRoot() {
+  if (!stageRoot.dir) {
+    stageRoot.dir = mkdtempSync(join(tmpdir(), 'fa-rosterlab-'));
+    process.on('exit', () => rmSync(stageRoot.dir, { recursive: true, force: true }));
+  }
+  return stageRoot.dir;
+}
+
 function runMatch(playerId, enemyId, policy, seed, { beforeTick = null } = {}) {
   // Seed formula is `pacing_ladder.mjs`'s, unchanged — that is what makes a row here
   // the SAME match as a row there, which is what --selftest checks.
@@ -301,7 +317,7 @@ if (args.selftest) {
     let dir = null;
     try {
       const sha = execFileSync('git', ['rev-parse', '--short', REF], { cwd: ROOT, encoding: 'utf8' }).trim();
-      dir = join(tmpdir(), `fa-rosterlab-ref-${sha}`);
+      dir = join(stageRoot(), `ref-${sha}`);
       rmSync(dir, { recursive: true, force: true });
       mkdirSync(join(dir, 'game'), { recursive: true });
       mkdirSync(join(dir, 'arena'), { recursive: true });

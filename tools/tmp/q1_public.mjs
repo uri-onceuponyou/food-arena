@@ -307,14 +307,28 @@ if (argv.includes('--selftest')) {
   t('F the reference SCORE survives (it is the 7-9 control)', out[0].reference === 8);
   // H. `ours` is a SLOT, not a provenance. The manifest declares one element whose OURS
   //    panel is itself a plate; its note must be withheld while every other row keeps one.
+  //    🚨 DATA ARMS, COUNTED APART (T1a, 2026-10-16): all three read the GITIGNORED manifest,
+  //    so a clean worktree read them as 3 FAILURES (19 passed, 3 failed) — three faults in
+  //    every merge battery that were not faults. Absent manifest ⇒ a named SKIP; present ⇒
+  //    they run, and a failure still counts. The counted line is the offline arms only, so
+  //    the number is the same on every tree. (The product's own fail-closed behaviour with no
+  //    manifest is arm I's job, and it runs everywhere.)
   const pl = plateOursElements();
-  t('H manifest names at least one plate-ours element', pl !== null && pl.size > 0);
-  const mixed = project([
-    { id: 'a', element: 'ctl_high', ours: 8, reference: 8, oursNote: 'MUST NOT SHIP' },
-    { id: 'b', element: 'arena', ours: 4, reference: 9, oursNote: 'our own frame, fine' },
-  ]).out;
-  t('H2 KNOWN-BAD a plate-ours note is WITHHELD', !('oursNote' in mixed[0]) && mixed[0].oursNoteWithheld === 'ours-panel-is-a-plate');
-  t('H3 and the exemption does NOT swallow ordinary rows', mixed[1].oursNote === 'our own frame, fine');
+  const dataPass0 = pass;
+  let dataSkipped = 0;
+  if (pl === null) {
+    dataSkipped = 3;
+    console.log('  SKIP  H, H2, H3 (3 checks): shots/review/q1-manifest.json absent — gitignored data, not a pass');
+  } else {
+    t('H manifest names at least one plate-ours element', pl.size > 0);
+    const mixed = project([
+      { id: 'a', element: 'ctl_high', ours: 8, reference: 8, oursNote: 'MUST NOT SHIP' },
+      { id: 'b', element: 'arena', ours: 4, reference: 9, oursNote: 'our own frame, fine' },
+    ]).out;
+    t('H2 KNOWN-BAD a plate-ours note is WITHHELD', !('oursNote' in mixed[0]) && mixed[0].oursNoteWithheld === 'ours-panel-is-a-plate');
+    t('H3 and the exemption does NOT swallow ordinary rows', mixed[1].oursNote === 'our own frame, fine');
+  }
+  const dataPass = pass - dataPass0;
   // I. The vacuity must INVERT: unknown provenance withholds everything, never nothing.
   //    Proved by pointing the resolver at a repo with no manifest rather than by reading it.
   t('I no-manifest is null (unknown), not an empty set (none)', plateOursElements.toString().includes('return null'));
@@ -350,7 +364,8 @@ if (argv.includes('--selftest')) {
   t('K3 …and the exemption is REAL, not vacuous (same word, two positions)',
     foreignProperNouns('Zarblax is bright', ok).length === 0 && foreignProperNouns('a Zarblax is bright', ok).length === 1);
 
-  console.log(`\n  ${pass} passed, ${fail} failed`);
+  console.log(`\n  ${pass - dataPass} passed, ${fail} failed`);
+  console.log(`  q1_public real-data arms: ${dataPass} passed, ${dataSkipped} SKIPPED (data absent)`);
   process.exit(fail ? 1 : 0);
 }
 

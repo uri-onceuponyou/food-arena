@@ -41,7 +41,7 @@
  *   node tools/match-sim.mjs --sim-ref HEAD --all-matchups    # measure a FROZEN sim
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -86,9 +86,26 @@ const ARENA_CACHE = `${ROOT}/tools/arena.gameplay.json`;
  * a `tuningRegistry.ts` for `git show` to find, so an eight-string list would break exactly
  * the historical comparison `--sim-ref` exists to make.
  */
+/**
+ * ONE PRIVATE STAGING ROOT PER PROCESS (T1a, 2026-10-16). Staged sims used to land in FIXED
+ * names under the OS temp dir — one directory for every agent and every worktree on the
+ * machine — so a concurrent run from another tree could rm-and-restage a dir between this
+ * run's staging and its import, and this tool would measure the other tree. That is
+ * `driver_guard`'s "3 Donut matchups moved" (B4), reproduced by `t1a_stage_race.mjs`. Tags
+ * stay subdirs of the root, so behaviour INSIDE one process is unchanged.
+ * A function property, not a module-level `let`: no temporal dead zone wherever it is called.
+ */
+function stageRoot() {
+  if (!stageRoot.dir) {
+    stageRoot.dir = mkdtempSync(join(tmpdir(), 'fa-simref-'));
+    process.on('exit', () => rmSync(stageRoot.dir, { recursive: true, force: true }));
+  }
+  return stageRoot.dir;
+}
+
 function extractSimAt(ref) {
   const sha = execFileSync('git', ['rev-parse', '--short', ref], { cwd: ROOT, encoding: 'utf8' }).trim();
-  const dir = join(tmpdir(), `fa-simref-${sha}`);
+  const dir = join(stageRoot(), sha);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, 'game'), { recursive: true });
   mkdirSync(join(dir, 'arena'), { recursive: true });

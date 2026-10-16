@@ -54,7 +54,7 @@
  * Node-only. No browser, no snapshot, no GPU.
  */
 
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { simModulesFromTree } from './tf2_simstage.mjs';
@@ -81,8 +81,25 @@ function ok(name, cond, detail = '') {
   else { fail++; failures.push(`${name}${detail ? `  (${detail})` : ''}`); console.log(`  FAIL - ${name}${detail ? `  (${detail})` : ''}`); }
 }
 
+/**
+ * ONE PRIVATE STAGING ROOT PER PROCESS (T1a, 2026-10-16). Staged sims used to land in FIXED
+ * names under the OS temp dir — one directory for every agent and every worktree on the
+ * machine — so a concurrent run from another tree could rm-and-restage a dir between this
+ * run's staging and its import, and this tool would measure the other tree. That is
+ * `driver_guard`'s "3 Donut matchups moved" (B4), reproduced by `t1a_stage_race.mjs`. Tags
+ * stay subdirs of the root, so behaviour INSIDE one process is unchanged.
+ * A function property, not a module-level `let`: no temporal dead zone wherever it is called.
+ */
+function stageRoot() {
+  if (!stageRoot.dir) {
+    stageRoot.dir = mkdtempSync(join(tmpdir(), 'fa-s49-'));
+    process.on('exit', () => rmSync(stageRoot.dir, { recursive: true, force: true }));
+  }
+  return stageRoot.dir;
+}
+
 function patchedSimDir(tag, edits) {
-  const root = join(tmpdir(), `fa-s49-${tag}`);
+  const root = join(stageRoot(), tag);
   const dir = join(root, 'game');
   rmSync(root, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });

@@ -12,8 +12,8 @@
  *   HOW OFTEN   casts opened per match — the spec's estimate was ~1.63 and estimates from
  *               press-OPPORTUNITY counts systematically overshoot, because an opportunity
  *               is not a press.
- *   WHAT HAPPENED TO THEM   resolved / cancelled by stun / cancelled by death / still open
- *               when the match ended. The last bucket is the deliberate do-nothing in
+ *   WHAT HAPPENED TO THEM   resolved / cancelled by stun / by death / by Warm Milk's sleep /
+ *               by Disposal's displacement / still open when the match ended. The last bucket is the deliberate do-nothing in
  *               `resolveDueCast`'s phase gate, and it should be small but non-zero.
  *   DID IT LAND   of the casts that RESOLVED, how many put damage on anybody. This is the
  *               counterplay number measured on play rather than on geometry: `sim.test.mjs`
@@ -71,8 +71,11 @@ const driver = createScriptedPlayer({ CHARACTERS, REACH, arena, ...parseDriverFl
 
 /** Derived, never typed — see `csx_bitid.mjs` for why a literal roster list rots. */
 const CAST_KEYS = new Set();
+let MAX_CAST_MS = 0;
 for (const id of CHARACTER_IDS) {
-  for (const w of CHARACTERS[id].weapons) if ((w.castMs ?? 0) > 0) CAST_KEYS.add(`${id}.${w.key}`);
+  for (const w of CHARACTERS[id].weapons) {
+    if ((w.castMs ?? 0) > 0) { CAST_KEYS.add(`${id}.${w.key}`); MAX_CAST_MS = Math.max(MAX_CAST_MS, w.castMs); }
+  }
 }
 
 /**
@@ -85,6 +88,22 @@ for (const id of CHARACTER_IDS) {
  * rather than the root the sim delivers, which is the entire class of error this file's
  * `pressValue` history is about.
  */
+/**
+ * 🚨 ONE BUCKET PER `cast-cancelled` REASON, AND AN UNKNOWN ONE THROWS (T1a, 2026-10-16).
+ * This was `if (ev.reason === 'stun') r.stunned++; else r.died++;` — written when the union
+ * was `'stun' | 'death'`. It is `'stun' | 'death' | 'sleep' | 'displaced'` now (`state.ts`;
+ * Warm Milk's sleep, and B4's Disposal), so both new reasons were booked as DEATHS. Latent in
+ * this file's own corpus — the 1v1 form gives nobody items, so neither can fire there — but
+ * the first run with a loadout would have printed sleeps and displacements as kills. A
+ * reason this table does not name is refused rather than filed under the nearest bucket.
+ */
+export const CANCEL_BUCKET = { stun: 'stunned', death: 'died', sleep: 'slept', displaced: 'displaced' };
+export function tallyCancel(r, ev) {
+  const bucket = CANCEL_BUCKET[ev.reason];
+  if (!bucket) throw new Error(`csx_castcost: cast-cancelled reason ${JSON.stringify(ev.reason)} has no bucket — add it to CANCEL_BUCKET`);
+  r[bucket]++;
+}
+
 function playMatch(playerId, enemyId, seed) {
   const rnd = rng(seed * 7919 + playerId.length * 131 + enemyId.length * 17 + POLICY.length);
   const decide = driver.POLICY_FNS[POLICY](rnd);
@@ -92,7 +111,7 @@ function playMatch(playerId, enemyId, seed) {
   const state = createMatch(arena, playerId, enemyId);
 
   const r = {
-    opened: 0, resolved: 0, stunned: 0, died: 0, parked: 0,
+    opened: 0, resolved: 0, stunned: 0, died: 0, slept: 0, displaced: 0, parked: 0,
     landed: 0, damage: 0, rootMs: 0, ticks: 0,
   };
   // A resolve is `weapon-fired` for a cast weapon; whether it LANDED is whether a
@@ -106,7 +125,7 @@ function playMatch(playerId, enemyId, seed) {
     let resolvedThisTick = null;
     for (const ev of events) {
       if (ev.type === 'cast-started') r.opened++;
-      else if (ev.type === 'cast-cancelled') { if (ev.reason === 'stun') r.stunned++; else r.died++; }
+      else if (ev.type === 'cast-cancelled') tallyCancel(r, ev);
       else if (ev.type === 'weapon-fired') {
         const f = state.fighters[ev.fighterId];
         if (CAST_KEYS.has(`${f.characterId}.${ev.weaponKey}`)) { r.resolved++; resolvedThisTick = ev.weaponKey; }
@@ -142,11 +161,30 @@ if (import.meta.main && args.selftest) {
   const wb = playMatch('waterbottle', 'donut', 0);
   ok('a matchup containing the cast character actually opens casts', wb.opened > 0, JSON.stringify(wb));
   ok('…and every opened cast is accounted for exactly once',
-    wb.opened === wb.resolved + wb.stunned + wb.died + wb.parked,
-    `opened ${wb.opened} = resolved ${wb.resolved} + stun ${wb.stunned} + death ${wb.died} + parked ${wb.parked}`);
+    wb.opened === wb.resolved + wb.stunned + wb.died + wb.slept + wb.displaced + wb.parked,
+    `opened ${wb.opened} = resolved ${wb.resolved} + stun ${wb.stunned} + death ${wb.died} + sleep ${wb.slept} + displaced ${wb.displaced} + parked ${wb.parked}`);
+
+  // KNOWN-BAD for the reason table: every reason the sim can emit lands in ITS bucket, and
+  // only there. At 3bf9bdf `sleep` and `displaced` both landed in `died`.
+  {
+    const fresh = () => ({ stunned: 0, died: 0, slept: 0, displaced: 0 });
+    const routed = Object.fromEntries(['stun', 'death', 'sleep', 'displaced'].map((reason) => {
+      const r = fresh(); tallyCancel(r, { type: 'cast-cancelled', reason });
+      return [reason, Object.entries(r).filter(([, v]) => v === 1).map(([k]) => k).join('|')];
+    }));
+    ok('KNOWN-BAD: each of the four cancel reasons lands in its own bucket — sleep and displaced are NOT deaths',
+      routed.stun === 'stunned' && routed.death === 'died' && routed.sleep === 'slept' && routed.displaced === 'displaced',
+      JSON.stringify(routed));
+    let threw = false;
+    try { tallyCancel(fresh(), { type: 'cast-cancelled', reason: 'teleported' }); } catch { threw = true; }
+    ok('…and a reason the table does not name is REFUSED, not filed under the nearest bucket', threw);
+  }
+  // ⚠️ WAS `wb.opened * 1100` — a typed castMs. `waterbottle.Mega.castMs` is 1400 now (it is
+  // derived from the slowest human's speed, `rules.ts`), so this row read RED at 3bf9bdf
+  // ("rootMs 1400.0 over 1 casts", 6/7) in a tool no gate table lists. Derived now (T1a).
   ok('…and the observed root is positive and never exceeds opened x castMs',
-    wb.rootMs > 0 && wb.rootMs <= wb.opened * 1100 + DT * wb.opened,
-    `rootMs ${wb.rootMs.toFixed(1)} over ${wb.opened} casts`);
+    wb.rootMs > 0 && wb.rootMs <= wb.opened * MAX_CAST_MS + DT * wb.opened,
+    `rootMs ${wb.rootMs.toFixed(1)} over ${wb.opened} casts, castMs ${MAX_CAST_MS}`);
 
   // KNOWN-BAD: a matchup with NO cast character must report a flat zero on every column.
   // Without this row an instrument that counted every `weapon-fired` would look identical.
@@ -191,6 +229,8 @@ if (import.meta.main) {
   console.log(`     -> RESOLVED                          ${resolved}  ${pct(resolved, opened)}`);
   console.log(`     -> cancelled by an APPLIED STUN      ${add(rows, 'stunned')}  ${pct(add(rows, 'stunned'), opened)}`);
   console.log(`     -> cancelled by DEATH                ${add(rows, 'died')}  ${pct(add(rows, 'died'), opened)}`);
+  console.log(`     -> cancelled by a SLEEP (Warm Milk)  ${add(rows, 'slept')}  ${pct(add(rows, 'slept'), opened)}`);
+  console.log(`     -> cancelled by DISPLACEMENT         ${add(rows, 'displaced')}  ${pct(add(rows, 'displaced'), opened)}`);
   console.log(`     -> still open when the match ended   ${add(rows, 'parked')}  ${pct(add(rows, 'parked'), opened)}`);
   console.log(`\n   of the RESOLVED casts, LANDED damage   ${landed}  ${pct(landed, resolved)}   <-- the dodge, measured on play`);
   console.log(`   damage delivered by cast weapons        ${add(rows, 'damage')}`);

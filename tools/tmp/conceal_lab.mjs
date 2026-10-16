@@ -69,7 +69,7 @@
  *   node tools/tmp/conceal_lab.mjs --occupancy --seeds 8
  */
 
-import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -131,9 +131,26 @@ const args = (() => {
  */
 const SIM_MODULES = simModulesFromTree(ROOT);
 
+/**
+ * ONE PRIVATE STAGING ROOT PER PROCESS (T1a, 2026-10-16). Staged sims used to land in FIXED
+ * names under the OS temp dir — one directory for every agent and every worktree on the
+ * machine — so a concurrent run from another tree could rm-and-restage a dir between this
+ * run's staging and its import, and this tool would measure the other tree. That is
+ * `driver_guard`'s "3 Donut matchups moved" (B4), reproduced by `t1a_stage_race.mjs`. Tags
+ * stay subdirs of the root, so behaviour INSIDE one process is unchanged.
+ * A function property, not a module-level `let`: no temporal dead zone wherever it is called.
+ */
+function stageRoot() {
+  if (!stageRoot.dir) {
+    stageRoot.dir = mkdtempSync(join(tmpdir(), 'fa-conceal-'));
+    process.on('exit', () => rmSync(stageRoot.dir, { recursive: true, force: true }));
+  }
+  return stageRoot.dir;
+}
+
 function extractSimAt(ref) {
   const sha = execFileSync('git', ['rev-parse', '--short', ref], { cwd: ROOT, encoding: 'utf8' }).trim();
-  const dir = join(tmpdir(), `fa-conceal-simref-${sha}`);
+  const dir = join(stageRoot(), `simref-${sha}`);
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(join(dir, 'game'), { recursive: true });
   mkdirSync(join(dir, 'arena'), { recursive: true });
@@ -155,7 +172,7 @@ function extractSimAt(ref) {
  * caller asserts the patch landed rather than assuming it.
  */
 function patchedSimDir(tag, edits) {
-  const root = join(tmpdir(), `fa-conceal-${tag}`);
+  const root = join(stageRoot(), tag);
   const dir = join(root, 'game');
   rmSync(root, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
