@@ -104,7 +104,7 @@
  * seeds is EXACT and is a DIFFERENT QUANTITY — never added to an aggregate.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, rmSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -374,10 +374,27 @@ function readSim(rel) {
     : readFileSync(`${ROOT}/${rel}`, 'utf8');
 }
 
+/**
+ * ONE PRIVATE STAGING ROOT PER PROCESS (T1a, 2026-10-16). Staged sims used to land in FIXED
+ * names under the OS temp dir — one directory for every agent and every worktree on the
+ * machine — so a concurrent run from another tree could rm-and-restage a dir between this
+ * run's staging and its import, and this tool would measure the other tree. That is
+ * `driver_guard`'s "3 Donut matchups moved" (B4), reproduced by `t1a_stage_race.mjs`. Tags
+ * stay subdirs of the root, so behaviour INSIDE one process is unchanged.
+ * A function property, not a module-level `let`: no temporal dead zone wherever it is called.
+ */
+function stageRoot() {
+  if (!stageRoot.dir) {
+    stageRoot.dir = mkdtempSync(join(tmpdir(), 'fa-as-'));
+    process.on('exit', () => rmSync(stageRoot.dir, { recursive: true, force: true }));
+  }
+  return stageRoot.dir;
+}
+
 function stageArm(arm) {
   const edits = ARM_EDITS[arm];
   if (!edits) throw new Error(`unknown arm ${arm}`);
-  const root = join(tmpdir(), `fa-as-${HEAD_SIM ? 'head-' : ''}${arm}`);
+  const root = join(stageRoot(), `${HEAD_SIM ? 'head-' : ''}${arm}`);
   const dir = join(root, 'game');
   rmSync(root, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
@@ -693,7 +710,7 @@ if (args.selftest) {
     // child, with THIS tool's own flag in argv — and show it hijacks the process. Without
     // this assertion the shield looks like defensive noise; with it, deleting the shield
     // fails the gate. (Run as a child because the hijack calls `process.exit`.)
-    const probe = join(tmpdir(), 'fa-as-axprobe.mjs');
+    const probe = join(stageRoot(), 'axprobe.mjs');
     writeFileSync(probe, `await import(${JSON.stringify(`${ROOT}/tools/tmp/ax_layout.mjs`)});\nconsole.log('IMPORTER_STILL_ALIVE');\n`);
     let out = '';
     try { out = execFileSync(process.execPath, [probe, '--selftest'], { encoding: 'utf8' }); }

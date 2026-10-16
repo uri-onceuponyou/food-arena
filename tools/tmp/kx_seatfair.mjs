@@ -144,8 +144,8 @@
  *   node tools/tmp/kx_seatfair.mjs --emit /tmp/a.json --spawns "x,y;x,y;…"
  *   node tools/tmp/kx_seatfair.mjs --selftest              # OFFLINE, no browser
  */
-import { readFileSync, writeFileSync, rmSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 
@@ -596,7 +596,11 @@ async function selftest() {
   //    ring would make every A/B a two-variable experiment.
   // Written to the OS temp dir, not `tools/tmp/`: an empty artefact left in the repo shows up
   // in every peer's `git status` forever, and this selftest runs constantly.
-  const tmp = `${tmpdir()}/kx_emit_selftest.json`;
+  // ⚠️ WAS the fixed `${tmpdir()}/kx_emit_selftest.json` — one file for every agent on the
+  // machine, written and read back: a peer's selftest from another tree (another dump) could
+  // land between this one's emit and its read. Per-run dir now (T1a, see `driver_guard`).
+  const tmpDir = mkdtempSync(join(tmpdir(), 'kx-emit-'));
+  const tmp = join(tmpDir, 'kx_emit_selftest.json');
   emit(arena, good, tmp);
   const back = JSON.parse(readFileSync(tmp, 'utf8'));
   const stripSeats = (o) => JSON.stringify({ ...o, spawns: null, playerSpawn: null, enemySpawn: null });
@@ -604,7 +608,7 @@ async function selftest() {
     `cover ${back.cover.length} vs ${arena.cover.length}, maxSafeRadius ${back.maxSafeRadius} vs ${arena.maxSafeRadius}`);
   ok('--emit keeps spawns[0..1] identical to playerSpawn/enemySpawn (sp_gate §C)',
     back.spawns[0].x === back.playerSpawn.x && back.spawns[1].y === back.enemySpawn.y);
-  rmSync(tmp, { force: true });
+  rmSync(tmpDir, { recursive: true, force: true });
 
   console.log(`\n${n - bad} passed, ${bad} failed\n`);
   return bad;

@@ -44,9 +44,11 @@
  *   node tools/tmp/driver_guard.mjs --strict   # also FAIL on the declared stale copies
  */
 
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync, mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { resolve, relative } from 'node:path';
+import { resolve, relative, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { createScriptedPlayer, rng, DRIVER_REV } from './scripted_player.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
@@ -306,11 +308,34 @@ if (!args['no-e2e']) {
   if (!existsSync(ARENA_PATH)) {
     ok('e2e: arena dump present', false, `no ${ARENA_PATH}`);
   } else {
+    // 🚨 PER-RUN STAGING DIR. This was the FIXED path `/tmp/driver_guard/cd{5,3}`, shared by
+    // every copy of this gate on the machine — every agent, every worktree. `ladder()` imports
+    // `cd5` and then, one full ladder later, `cd3`, so a second run (from ANOTHER TREE) that
+    // restaged in between handed this one a different sim for its second arm. Reproduced by
+    // B4 as "3 Donut matchups moved" on a run 4 s behind a peer's, and by
+    // `t1a_stage_race.mjs --arm before` (a peer restage with a planted REGEN_DELAY_MS): the
+    // clean tree reads N matchups "moved by the countdown" that the PEER'S tree moved. Worse
+    // is the case that stays green: a peer restaging BOTH dirs before either import makes
+    // this gate measure the peer's tree, pass, and say nothing. `mkdtemp` removes the shared
+    // name; the hash check below is the guard that a staged dir was not touched mid-run.
+    const STAGE = mkdtempSync(join(tmpdir(), 'driver_guard-'));
+    process.on('exit', () => rmSync(STAGE, { recursive: true, force: true }));
     const dirs = {};
     for (const n of [5, 3]) {
-      dirs[n] = `/tmp/driver_guard/cd${n}`;
+      dirs[n] = join(STAGE, `cd${n}`);
       execFileSync('node', [`${ROOT}/tools/tmp/stage_rules.mjs`, dirs[n], `COUNTDOWN_FROM=${n}`], { stdio: 'ignore' });
     }
+    const stagedHash = (dir) => {
+      const h = createHash('sha256');
+      for (const sub of ['game', 'arena']) {
+        for (const f of readdirSync(join(dir, sub)).sort()) h.update(`${sub}/${f}\0`).update(readFileSync(join(dir, sub, f)));
+      }
+      return h.digest('hex').slice(0, 12);
+    };
+    const stagedAt = { 5: stagedHash(dirs[5]), 3: stagedHash(dirs[3]) };
+    // Printed BEFORE the ladders on purpose: `t1a_stage_race.mjs --arm knownbad` reads this
+    // line to find the dir and tamper with it, which is how the hash assertion is shown to FAIL.
+    console.log(`  e2e · staged into ${STAGE} (cd5 ${stagedAt[5]}, cd3 ${stagedAt[3]})`);
 
     async function ladder(simDir, { navCountdownBug, decideDuringCountdown }) {
       const { createMatch, stepMatch } = await import(`${simDir}/game/sim.ts`);
@@ -323,12 +348,13 @@ if (!args['no-e2e']) {
       const { pressValue } = await import(`${simDir}/game/ai.ts`);
       const { CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, REACH, AI_SELF_HEAL_HP_FRACTION } = RULES;
       const A = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
-      const HALF = Math.hypot(A.width / 2, A.height / 2);
-      const arena = {
-        ...A,
-        maxSafeRadius: Math.round(HALF / (1 - 6000 / MATCH_DURATION_MS)),
-        build: () => null, update: () => {},
-      };
+      // ⚠️ WAS `maxSafeRadius: Math.round(HALF / (1 - 6000 / MATCH_DURATION_MS))` — the DEAD
+      // clock-coupled opening (1792 at the 150 s clock), overriding the dump's own value. The
+      // tree derives `fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` = 1720.47 (`arena/shared.ts`),
+      // and the dump carries exactly that. Same retired formula as `nf_ffa`/`arena_probe`
+      // (T1a, 2026-10-16). The countdown-invariance verdict is self-consistent either way —
+      // both arms shared the wrong ring — but its matches were not the shipped ones.
+      const arena = { ...A, build: () => null, update: () => {} };
       const drv = createScriptedPlayer({
         CHARACTERS, REACH, arena, hazard: arena.hazards.find((h) => h.kind === 'damage'),
         navCountdownBug, decideDuringCountdown,
@@ -374,6 +400,13 @@ if (!args['no-e2e']) {
     const histMoved = diff(hist5, hist3);
     ok('detection: the HISTORICAL driver manufactures a countdown "balance result"',
       histMoved.length > 0, 'the reproduction flags no longer reproduce the artefact');
+    // PROVENANCE — every arm above imported the sims THIS run staged. Re-hashed after the last
+    // import: a staged dir changed under the run means some arm measured another tree.
+    // Known-bad: `t1a_stage_race.mjs --arm knownbad` restages cd3 mid-run and this goes red.
+    const stagedNow = { 5: stagedHash(dirs[5]), 3: stagedHash(dirs[3]) };
+    ok('e2e: the staged sims were not changed by anyone else during the run',
+      stagedNow[5] === stagedAt[5] && stagedNow[3] === stagedAt[3],
+      `cd5 ${stagedAt[5]} -> ${stagedNow[5]}, cd3 ${stagedAt[3]} -> ${stagedNow[3]}`);
     console.log(`\n  e2e · fixed driver: ${moved.length}/110 matchups moved on COUNTDOWN_FROM 5 -> 3`);
     console.log(`  e2e · historical driver: ${histMoved.length}/110 moved on the SAME edit — every one of them RNG alignment, not the game\n`);
   }
