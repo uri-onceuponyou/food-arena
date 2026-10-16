@@ -74,6 +74,10 @@ import type { Fighter, GameEvent, MatchState, FighterId, FighterRole } from '../
 // synthetic `hit-landed` events carry NO `targetId` and NO `attackerId`.
 import { fighterOf, fightersOf, LOCAL_SLOT, slotOf, weaponAttackerOf } from '../game/roster';
 import { proximityGain, SFX_FADE_WU, SFX_FULL_WU, SFX_INAUDIBLE_GAIN } from '../proximity';
+// V3 — concealment's ONE presentation-side predicate, the same function the models, the HP pill,
+// the radar and `game/vfx.ts` ask. From the root module because `ui/hud.ts`, where it lived, imports
+// `../audio` — and `audio/index.ts` imports this file, so asking it there is a cycle.
+import { fighterVisibleTo } from '../visibility';
 import { Priority, type AudioEngine, type PlayOptions } from './engine';
 import * as S from './sounds';
 import type { SoundFn, SynthCtx } from './synth';
@@ -801,18 +805,24 @@ export class MatchAudio {
       // until the stack that MATTERS (the sixth), and Leftovers' revive, which is the rarest
       // moment in the game and is Critical exactly like a death. The Blue Cheese tick is NOT
       // here: it is a `hit-landed` with `itemId`, and stays quiet (`DECISIONS §91q`).
+      // 🚨 V3: EACH ONE ASKS `audible` FIRST — the cue is placed on the fighter, so for one the ear
+      // cannot see it was a free read of the hiding spot. `lastCombatAt` stays unconditional: the
+      // bed's duck is map-wide and carries no position.
       case 'item-used':
         this.lastCombatAt = state.elapsed;
+        if (!this.audible(state, fighterOf(state, ev.fighterId, ev.fighterRole), slotOf(ev.fighterId, ev.fighterRole))) break;
         this.playItemUsed(ev.itemId, ev.x, ev.y, ev.windupMs, state);
         break;
 
       case 'item-resolved':
         // Shiitake's wind-up went off: the caps snap up.
+        if (!this.audible(state, fighterOf(state, ev.fighterId, ev.fighterRole), slotOf(ev.fighterId, ev.fighterRole))) break;
         this.playPlaced(S.shiitakeUp(), { ...this.place(ev.x, ev.y, state), key: `item:${ev.itemId}:resolved` });
         break;
 
       case 'item-cancelled': {
         const f = fighterOf(state, ev.fighterId, ev.fighterRole);
+        if (!this.audible(state, f, slotOf(ev.fighterId, ev.fighterRole))) break;
         this.playPlaced(S.itemFizzle(), { ...this.place(f.x, f.y, state), key: `item:${ev.itemId}:cancelled` });
         break;
       }
@@ -864,19 +874,31 @@ export class MatchAudio {
     const key = `item:${ev.itemId}:hit`;
     const owner = fighterOf(state, ev.ownerId, ev.ownerRole);
     const flight = Math.min(0.42, Math.max(0.16, (Math.hypot(ev.x - owner.x, ev.y - owner.y) * 0.05) / 18));
+    // V3 — every landing is voiced where the VICTIM is, so it asks whether the ear can see the
+    // victim: the same two answers `match.ts`'s `item-hit` case hands `vfx/items.ts`, so the picture
+    // and the sound agree — a throw at a hidden fighter lands in silence exactly where it lands
+    // unseen. Disposal is two-ended: the drain opens where the victim WAS (`fromX/fromY`), the spit
+    // where it WENT, and each end has its own answer.
+    const target = fighterOf(state, ev.targetId, ev.targetRole);
+    const targetSlot = slotOf(ev.targetId, ev.targetRole);
+    const seeTarget = this.audible(state, target, targetSlot);
     switch (ev.itemId) {
       case 'tenderiser':
+        if (!seeTarget) return;
         this.playPlaced(S.tenderKnock(ev.stacks), { ...at, key, priority: ev.stacks >= 6 ? Priority.Normal : Priority.Ambient });
         return;
-      case 'warm_milk': this.playPlaced(S.milkClink(), { ...at, key, delay: flight }); return;
-      case 'pompa': this.playPlaced(S.plungerThwop(), { ...at, key, delay: flight }); return;
-      case 'squid_ink': this.playPlaced(S.inkSplat(), { ...at, key, delay: flight }); return;
-      case 'liquorice': this.playPlaced(S.whipCrack(), { ...at, key, delay: flight }); return;
+      case 'warm_milk': if (seeTarget) this.playPlaced(S.milkClink(), { ...at, key, delay: flight }); return;
+      case 'pompa': if (seeTarget) this.playPlaced(S.plungerThwop(), { ...at, key, delay: flight }); return;
+      case 'squid_ink': if (seeTarget) this.playPlaced(S.inkSplat(), { ...at, key, delay: flight }); return;
+      case 'liquorice': if (seeTarget) this.playPlaced(S.whipCrack(), { ...at, key, delay: flight }); return;
       case 'disposal':
-        this.playPlaced(S.drainGurgle(), { ...this.place(ev.fromX, ev.fromY, state), key });
-        this.playPlaced(S.drainSpit(), { ...at, key: `${key}:spit`, delay: 0.16 });
+        if (this.audible(state, { ...target, x: ev.fromX, y: ev.fromY }, targetSlot)) {
+          this.playPlaced(S.drainGurgle(), { ...this.place(ev.fromX, ev.fromY, state), key });
+        }
+        if (seeTarget) this.playPlaced(S.drainSpit(), { ...at, key: `${key}:spit`, delay: 0.16 });
         return;
       case 'shiitake':
+        if (!seeTarget) return;
         this.playPlaced(S.shieldShimmer(), { ...at, key });
         return;
       default:
@@ -1054,6 +1076,33 @@ export class MatchAudio {
   private playPlaced(sound: SoundFn, opts: PlayOptions & { gain: number }): void {
     if (opts.gain < SFX_INAUDIBLE_GAIN) return;
     this.engine.play(sound, opts);
+  }
+
+  /**
+   * V3 — CAN THE EAR SEE THIS FIGHTER? A cue placed ON a fighter the listener cannot see is a free
+   * read of where it is hiding, so the item cues ask this first.
+   *
+   * 🚨 THE DEFECT: V2 gave every item event a cue (`item-used`/`-resolved`/`-cancelled`/`-hit`) and
+   * `match.ts` gated the matching VFX on `fighterVisibleTo`; this file asked nothing, so a fighter
+   * pressing Warm Milk from under a table — an item press does NOT spend cover — was heard,
+   * panned to the exact spot (`tools/tmp/v3_conceal.mjs` A.HIDDEN, base `977c21e`: 10 of 10 cues
+   * played for a hidden source, A.SPEC_HIDDEN 4 of 4 for a spectator's).
+   *
+   * The same rule the VFX layer and the model hide state, with this file's two seats:
+   *   * the EAR is `listenerSlot` — the camera's subject, moved by `setListener` exactly as
+   *     `match.ts:viewObserver()` moves the eye, resolved the way `place()` resolves it;
+   *   * YOUR OWN fighter is always audible — `localSlot`, the identity seat, stated explicitly
+   *     rather than left to the predicate answering `true` for a fighter asked about itself.
+   * ⚠️ A state without an `arena` is one of `tools/audio-probe.mjs`'s duck-typed states (built that
+   * way on purpose — see its `__renderEvents`): no arena, no concealment, nothing can be hidden. The
+   * guard is what keeps the predicate from throwing inside `handleEvents`' catch-all, where a throw
+   * would cost SILENCE for the rest of the batch rather than an error anyone sees.
+   */
+  private audible(state: MatchState, target: Fighter, slot: number): boolean {
+    if (slot === this.localSlot) return true;
+    if (!state.arena) return true;
+    const ear = fightersOf(state)[this.listenerSlot] ?? state.player;
+    return fighterVisibleTo(state, ear, target);
   }
 
   /** Pan + distance gain for a world-unit position, relative to the listener. */

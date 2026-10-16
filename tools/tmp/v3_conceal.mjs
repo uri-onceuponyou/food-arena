@@ -37,6 +37,8 @@
  *               `MatchAudio.setListener`).
  *   R.*         reachability through the sim's own functions, and the Blue Cheese radius rule
  *               that makes gating its cloud safe (a fighter the cloud can HURT can always see it).
+ *   X.*         INFO, not asserted: leaks found OUTSIDE this package's files (a hidden fighter's
+ *               regen tick; a third party's hit on it), measured so they can be routed.
  *
  * Objects are measured as V2's `v2_items.mjs` does — visible renderables under the `vfx_layer`
  * group within 3 m of the wearer, as a uuid SET so something expiring cannot cancel something
@@ -78,10 +80,10 @@ const LABEL = String(A.label ?? 'run');
 const OUT = String(A.out ?? `/tmp/v3_conceal_${LABEL}`);
 const PLANT = A.plant ? String(A.plant) : null;
 const PIXELS = !A['no-pixels'];
-// `--only LPARST` runs just those sections (L live, P pixels, A audio, R reach, S spectator VFX,
-// T spectator audio) — for iterating, and so a plant on one consumer can be judged without the other
+// `--only LPARSTX` runs just those sections (L live, P pixels, A audio, R reach, S spectator VFX,
+// T spectator audio, X out-of-set leaks, INFO) — for iterating, and so a plant on one consumer can be judged without the other
 // consumer's rows; a quotable run is always the whole probe.
-const ONLY = A.only ? String(A.only) : 'LPARST';
+const ONLY = A.only ? String(A.only) : 'LPARSTX';
 const on = (sec) => ONLY.includes(sec);
 mkdirSync(OUT, { recursive: true });
 
@@ -617,6 +619,45 @@ try {
   }
 
   // ── §S: the local seat DEAD, the camera (and the ear) on a spectated subject ─────────────────
+  // ── §X: OUT-OF-SET LEAKS, MEASURED FOR ROUTING (INFO — not this package's files) ─────────────
+  // Two more things drawn and voiced ON a hidden fighter, through BOTH shipped consumers, with the
+  // local seat alive and 130 wu away: a REGEN tick (out-of-combat regen is exactly what a fighter
+  // hiding under a table is doing) and a THIRD party's hit on it. The visual halves live in
+  // `match.ts`'s event switch (`heal`, `hit-landed`), outside V3's set; the audio halves are left
+  // ungated ON PURPOSE so the two consumers of one event keep agreeing until both are routed.
+  if (on('X')) {
+    await arrange({ 0: 'd130', [T]: 'C', 3: 'tVisible' });
+    await camOn('d130');
+    const x = await page.evaluate((T) => {
+      const K = window.__K; const st = K.st; const F = K.F; const aud = window.__aud; const feel = window.__feelDebug;
+      const t = F[T];
+      const route = (ev) => {
+        K.pump(4);
+        const s0 = K.near(t.x, t.y); const v0 = feel.responses.vfx; const n0 = feel.responses.damageNumber;
+        window.__v3Plays = []; window.__v3On = true;
+        try { window.__feelEvent(ev); aud.handleEvents([ev], st); } finally { window.__v3On = false; }
+        const s1 = K.near(t.x, t.y);
+        return { vfx: feel.responses.vfx - v0, numbers: feel.responses.damageNumber - n0,
+          born: [...s1.objs.keys()].filter((k) => !s0.objs.has(k)).length, plays: window.__v3Plays.slice() };
+      };
+      t.hp = Math.max(1, t.maxHp - 20);
+      const regen = route({ type: 'heal', fighterRole: t.role, fighterId: t.id, amount: K.rules.REGEN_AMOUNT });
+      const w = K.rules.CHARACTERS[F[3].characterId].weapons[0];
+      const hit = route({ type: 'hit-landed', targetRole: t.role, targetId: t.id, amount: 4, effect: null, x: t.x, y: t.y,
+        source: { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: F[3].id } });
+      const ear = aud.listenerSlot; const gain = aud.place(t.x, t.y, st).gain;
+      K.clear(); K.pump(4);
+      return { hidden: !K.vis(0, T), alive0: F[0].alive, ear, gain, regen, hit };
+    }, T);
+    results.outOfSet = x;
+    // 🚨 THE EAR MUST BE THE LIVING LOCAL SEAT. The first full run placed this section AFTER §S,
+    // which leaves the local seat dead: the ear had moved to the far subject, every placed cue was
+    // culled by distance, and both rows read "0 plays" — a leak reported as absent. Hence it runs
+    // before §S now, and this row asserts the ear and the gain it hears the wearer at.
+    row('X.PRE.hidden', x.hidden === true && x.alive0 === true && x.ear === 0 && x.gain > 0.5, { hidden: x.hidden, alive0: x.alive0, ear: x.ear, gain: x.gain });
+    row('X.heal-on-hidden (match.ts `heal` + director `heal`)', null, x.regen);
+    row('X.third-party-hit-on-hidden (match.ts `hit-landed` + director playHit)', null, x.hit);
+  }
   if (on('S') || on('T')) {
     // Kill the local seat at d80 with the subject (slot 1) at d130 and the wearer at C: with no
     // death event routed there is no dwell and no killer chain, so `resolveViewSubject` takes rung 4
