@@ -333,6 +333,7 @@ const OFFLINE = [
   // until 2026-08-21 — an agent noticed while routing `q1_sigma` that the arm checking the
   // instrument was registered while the arms checking the BLIND were not.
   { key: 'tools/tmp/q1_ledger.mjs --selftest', probes: [pr(['tools/tmp/q1_ledger.mjs', '--selftest'], /selftest (\d+) pass \/ \d+ fail/)] },
+  { key: 'tools/deploy-pages.mjs --selftest', probes: [pr(['tools/deploy-pages.mjs', '--selftest'], /--selftest: (\d+) passed, \d+ failed/)] },
   { key: 'tools/tmp/q1_public.mjs --selftest', probes: [pr(['tools/tmp/q1_public.mjs', '--selftest'], S)] },
   // ⚠️ `needs` (T1a, 2026-10-16): q1_verify reads the GITIGNORED shots/review/q1-manifest.json; on a
   // clean worktree it now exits 3 with a named SKIP, and every merge battery of the revamp read it

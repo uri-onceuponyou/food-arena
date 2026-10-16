@@ -35,7 +35,8 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -108,6 +109,30 @@ export function findMissingReferences(indexHtml, publishFiles) {
   const have = new Set(publishFiles);
   return { vacuous: false, missing: refs.filter((r) => !have.has(r)), refs, why: null };
 }
+
+/**
+ * 🚨 THE TREE ABOUT TO BE COMMITTED MUST EQUAL `dist/` BY CONTENT. Added 2026-10-16 after the
+ * `e84d52c` deploy published a STALE index.html beside the new chunks it names: `rsync -a`'s quick
+ * check skips a file whose SIZE and MTIME both match, the old and new index.html were the same size
+ * (both chunk hashes are 8 characters) and the gh-pages checkout was written in the same second the
+ * build wrote dist/index.html — so the page was never copied while its chunks (new names) were, and
+ * the live page would have loaded a 404. `findMissingReferences` passed: it checks dist/, not the
+ * tree being committed. Returns the published paths (relative) that are missing or differ in dest;
+ * `ignore` names files that live on the branch by design (PRESERVE).
+ */
+export function findContentMismatches(distDir, destDir, ignore = []) {
+  const skip = new Set(ignore);
+  const out = [];
+  for (const rel of listFiles(distDir)) {
+    if (skip.has(rel) || NEVER_PUBLISH.some((n) => rel.split('/').includes(n))) continue;
+    const d = join(destDir, rel);
+    if (!existsSync(d) || !readFileSync(join(distDir, rel)).equals(readFileSync(d))) out.push(rel);
+  }
+  return out;
+}
+
+/** The sync. `--checksum` compares CONTENT, so a same-size same-mtime file cannot be skipped. */
+const RSYNC_ARGS = ['-a', '--checksum', '--delete', '--exclude=.git', ...NEVER_PUBLISH.map((n) => `--exclude=${n}`)];
 
 function listFiles(dir, base = dir) {
   const out = [];
@@ -204,6 +229,35 @@ function selftest() {
   ok(NEVER_PUBLISH.length > 0 && NEVER_PUBLISH.includes('.DS_Store'),
      'D2  NEVER_PUBLISH is non-empty and still names .DS_Store');
 
+  H('§F  the committed tree equals dist/ by CONTENT  (fails: a same-size, same-mtime page left stale)');
+  // The e84d52c deploy, reproduced: a dest file of the SAME SIZE and the SAME MTIME as its
+  // source but different bytes. Plain `rsync -a` must leave it stale (the known-bad — proves this
+  // arm can see the bug), the content check must name it, and the shipped RSYNC_ARGS must fix it.
+  {
+    const root = mkdtempSync(join(tmpdir(), 'fa-deploy-selftest-'));
+    try {
+      const src = join(root, 'src'); const dst = join(root, 'dst');
+      mkdirSync(join(src, 'assets'), { recursive: true }); mkdirSync(join(dst, 'assets'), { recursive: true });
+      writeFileSync(join(src, 'index.html'), '<script src="assets/main-NEWHASH1.js"></script>');
+      writeFileSync(join(src, 'assets/main-NEWHASH1.js'), 'new');
+      const stage = () => {
+        writeFileSync(join(dst, 'index.html'), '<script src="assets/main-OLDHASH0.js"></script>');
+        const t = new Date(1_700_000_000_000);
+        utimesSync(join(src, 'index.html'), t, t); utimesSync(join(dst, 'index.html'), t, t);
+      };
+      stage();
+      execFileSync('rsync', ['-a', '--delete', `${src}/`, `${dst}/`]);
+      const old = readFileSync(join(dst, 'index.html'), 'utf8');
+      ok(old.includes('OLDHASH0'), 'F1  KNOWN-BAD: plain `rsync -a` leaves a same-size same-mtime index.html STALE', old.match(/main-\w+/)?.[0] ?? '?');
+      const caught = findContentMismatches(src, dst);
+      ok(caught.includes('index.html'), 'F2  the content check NAMES the stale page', caught.join(' '));
+      stage();
+      execFileSync('rsync', [...RSYNC_ARGS, `${src}/`, `${dst}/`]);
+      ok(readFileSync(join(dst, 'index.html'), 'utf8').includes('NEWHASH1') && findContentMismatches(src, dst).length === 0,
+         'F3  the shipped RSYNC_ARGS (--checksum) copy it, and the check then reads clean');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
+
   console.log(`\ndeploy-pages --selftest: ${pass} passed, ${fail} failed`);
   return fail === 0 ? 0 : 1;
 }
@@ -292,10 +346,15 @@ function main() {
 
   // rsync with BOTH halves governed: --delete for departures, --exclude for arrivals,
   // and the preserved set restored afterwards.
-  sh('rsync', ['-a', '--delete', '--exclude=.git',
-    ...NEVER_PUBLISH.map((n) => `--exclude=${n}`),
-    `${dist}/`, `${WORKTREE}/`]);
+  sh('rsync', [...RSYNC_ARGS, `${dist}/`, `${WORKTREE}/`]);
   for (const p of carried) sh('git', ['checkout', `origin/${BRANCH}`, '--', p], { cwd: WORKTREE });
+
+  // The tree about to be committed, checked against dist/ BY CONTENT (see findContentMismatches).
+  const stale = findContentMismatches(dist, WORKTREE, PRESERVE);
+  if (stale.length) {
+    console.error(`deploy-pages: POST-SYNC content check failed — ${stale.length} file(s) differ from dist/: ${stale.join(', ')} — not committing.`);
+    process.exit(1);
+  }
 
   const after = listFiles(WORKTREE);
   const post = findDroppedPreserved(branchFiles, after);
