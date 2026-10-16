@@ -27,7 +27,7 @@ import { CHARACTER_RADIUS } from '../units';
 // not a constructor argument — it is an OWNERSHIP answer, not a design preference.
 // Nothing in `vfx/ink.ts` imports THREE or anything under `render/`, so this introduces
 // no cycle; `game/vfx.ts` already imports `render/toon.ts` in the other direction.
-import { INK_DISC_COUNT, inkLayout, readInk } from '../vfx/ink';
+import { INK_DISC_COUNT, applyInkTo, inkLayout, readInk } from '../vfx/ink';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // THE GRADE — a saturation curve that cannot clip a channel
@@ -2872,6 +2872,17 @@ export class Stage {
     // so they must be positioned before anything walks the scene's matrices.
     this.updateSeatRings();
     if (this.shadowsOn) this.scheduleShadowUpdate();
+    // Squid Ink's READER. The effect, its channel and its writer existed and nothing here ever
+    // read the channel: `ink`, `inkRevision` and `inkAspect` were declared and never used, so a
+    // blotted player saw a clean screen on every tree (bug-hunt B7; V2, `6e07e52`, wrote the
+    // channel and measured this half missing — its `ink-reader` plant makes the uniform 1 while
+    // blotted and 0 after). Re-solves the disc layout only when the cast or the aspect changes.
+    if (this.ink) {
+      const seen = { revision: this.inkRevision, aspect: this.inkAspect };
+      applyInkTo(this.ink, this.rig.camera.aspect, seen);
+      this.inkRevision = seen.revision;
+      this.inkAspect = seen.aspect;
+    }
     if (this.composer) this.composer.render(dtSeconds);
     else this.renderer.render(this.scene, this.rig.camera);
   }
