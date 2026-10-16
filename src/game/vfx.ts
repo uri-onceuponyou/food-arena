@@ -3551,6 +3551,10 @@ export class VfxLayer {
             spawnTransient: (o, life, onUpdate) => { o.userData.vfxSrc = `${owner.characterId}.${p.weapon.key}.trail`; this.spawnTransientObject(o, life, onUpdate); },
             object: obj,
             dt: frameDtSeconds,
+            // The sim's own "landed and pecking" flag (Egg's Hatch!). Handed over because B4
+            // made the arrived chick RIDE its victim (82-90 wu/s), so the ground-speed guess
+            // `egg.ts` used to make read a pecking chick as a waddling one.
+            arrived: p.arrived === true,
           };
           bespoke.trail(ctx);
         }

@@ -31,14 +31,17 @@
  *   `'Shards'` Shell Shards — `rangedMid`, 3 pellets, `effect: 'slow'` → jagged shell
  *                             with albumen still on it
  *
- * ── Hatch! detects "landed and pecking" from the contract alone ─────────────
- * `Projectile.arrived`/`peckTimer` live in `game/state.ts` and are NOT on
+ * ── Hatch! picks "landed and pecking" from the SIM's `arrived` flag ─────────
+ * ~~`Projectile.arrived`/`peckTimer` live in `game/state.ts` and are NOT on
  * `WeaponVfxCtx`, so `chickTrail` infers the phase from what it does have: the
  * per-frame position delta and `ctx.dt`. Once the chick's measured ground speed drops
  * under a quarter of `ctx.weapon.speed` it has stopped travelling and is pecking in
- * place, and the animation switches from a waddle to a peck cycle. Reading the speed
- * off the weapon rather than hardcoding a threshold means a re-tune in `rules.ts`
- * keeps working.
+ * place, and the animation switches from a waddle to a peck cycle.~~ — kept because the
+ * inference was RIGHT until B4 (`2ef3126`) made the arrived chick RIDE its victim: a
+ * fleeing victim drags it at 82-90 wu/s, far above the 44.8 wu/s threshold, so it pecked
+ * the damage while drawing the waddle. `ctx.arrived` (V2) now carries the sim's own flag
+ * and decides; the speed guess survives only as the fallback for a caller that does not
+ * pass it (the QA spawner).
  *
  * ── Scale discipline ───────────────────────────────────────────────────────
  * Every size is a fraction of `CHARACTER_HEIGHT`, never a bare metre literal.
@@ -803,13 +806,14 @@ function chickTrail(ctx: WeaponVfxCtx): void {
   const st = animState(obj, ctx, 1);
   st.age += dt;
 
-  // "Has it arrived?", derived from the contract alone — see the file header.
+  // "Has it arrived?" — the sim's flag when the caller passes it (see the file header); the
+  // ground-speed guess only for a caller that does not.
   const moved = Math.hypot(ctx.position.x - st.lx, ctx.position.z - st.lz);
   if (dt > 0) st.speed = st.speed * 0.55 + (moved / dt) * 0.45;
   st.lx = ctx.position.x;
   st.lz = ctx.position.z;
   const cruise = wu(ctx.weapon.speed ?? 160);
-  const pecking = st.speed < cruise * 0.28;
+  const pecking = ctx.arrived ?? st.speed < cruise * 0.28;
 
   const bob = obj.userData.__bob as THREE.Object3D | undefined;
   if (bob) {
@@ -1071,9 +1075,9 @@ export const eggWeaponVfx: CharacterWeaponVfxMap = {
 
   // ── Hatch! (ranged, homing, pecks in place) ────────────────────────────────
   // She cracks open and a chick comes out. The projectile is a bird, it waddles the
-  // whole 1750 ms flight, and once it arrives it switches to a peck cycle — a phase
-  // it works out for itself from the per-frame position delta, since `arrived` is not
-  // on the hook contract.
+  // whole 1750 ms flight, and once it arrives it switches to a peck cycle — on the
+  // sim's `arrived` flag, which `ctx.arrived` carries since V2 (see the file header for
+  // why the old position-delta inference stopped being enough).
   Hatch: {
     projectile(ctx) {
       const obj = buildChick(ctx.color);
