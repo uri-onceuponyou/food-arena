@@ -526,15 +526,23 @@ export const donutWeaponVfx: CharacterWeaponVfxMap = {
       // is a trail language nothing else in the roster has — Pizza sheds a sweep
       // arc, Soup sheds drips, Water Bottle glints — and it reinforces the one
       // shape this weapon is about.
+      //
+      // ⚠️ V1b: SPARSER — one echo every 0.11 s living 0.14 s, where it was every 0.075 s
+      // living 0.2 s. A Candy volley is THREE pellets flying together, so the old rate hung
+      // ~8 hoops in the air at once, and they arrive WITH the pellets: at the canonical
+      // rv_capture shutter (t=17760 ms) six of them sat just short of the Taco — the thin
+      // concentric rings beside it that the w5 cast notes call "overlapping translucent
+      // rings" (2,491 changed px there; group `donut.Candy.trail|donut.hoop` in
+      // `tools/tmp/v1b_cover.mjs`). ~4 live per volley still reads as a chain.
       st.echo -= dt;
       if (st.echo <= 0) {
-        st.echo = 0.075;
+        st.echo = 0.11;
         const outer = RING_R + RING_TUBE;
         spawnRing(
           ctx,
           ctx.position.x, ctx.position.y, ctx.position.z,
           outer, outer * 1.45,
-          GLAZE_ECHO, 0.55, 0.2,
+          GLAZE_ECHO, 0.55, 0.14,
           { glow: true, fadePow: 1.4 },
         );
       }
