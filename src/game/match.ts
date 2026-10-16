@@ -51,7 +51,7 @@ import { CHARACTER_HEIGHT, groundPos, toWorldUnits } from '../units';
 // `shakeProximityScale` for the same reason that one does: `camera.ts` is importable from
 // a `.mjs` tool and this file never will be (it imports `ui/hud.ts`). A camera rule whose
 // failure mode only appears at six seats has to be drivable without a GPU.
-import { onAnyScreen, resolveViewSubject, shakeProximityScale, type ViewSubjectReason } from '../render/camera';
+import { onAnyScreen, qaAimFromSearch, qaPitchFromSearch, resolveViewSubject, shakeProximityScale, type ViewSubjectReason } from '../render/camera';
 import { InputController } from './input';
 import { createPointerLock, type PointerLockController } from './pointerLock';
 import { VfxLayer } from './vfx';
@@ -1046,7 +1046,9 @@ export class GameSession {
       container: opts.container,
       background: 0xffcf8a,
       fog: { color: 0xffcf8a, near: 40, far: 130 },
-      camera: { pitchDeg: 58, yawDeg: 0, frameMode: 'fair' },
+      // QA-ONLY `?camPitch=` / `?camAim=centred` (`camera.ts:QA_CAMERA`, the K1 pitch experiment,
+      // DECISIONS §91e). Absent or refused -> 58 and the shipped aim, exactly as before.
+      camera: { pitchDeg: qaPitchFromSearch(location.search) ?? 58, yawDeg: 0, frameMode: 'fair', aim: qaAimFromSearch(location.search) ?? 'past' },
     });
     this.stage.scene.add(this.arena.build());
 
