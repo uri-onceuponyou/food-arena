@@ -111,6 +111,7 @@ import { ensureIconStyles, icon } from '../icons';
 import type { Screen, ScreenContext } from './types';
 import { injectStyles } from './theme';
 import { el } from './fx';
+import { qaAimFromStorage, setStoredQaAim } from '../../render/camera';
 
 // ── Persisted preferences ────────────────────────────────────────────────────
 //
@@ -604,6 +605,7 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
       <section class="fa-panel set-section">
         <p class="fa-panel-title">Game</p>
         ${row(icon('speed'), 'Reduce motion', 'Stops the menus pulsing and drifting', toggle('motion', 'Reduce motion'))}
+        ${row(icon('cone'), 'Centred camera', 'Test: see as far below you as above', toggle('camaim', 'Centred camera'))}
       </section>
 
       <section class="fa-panel set-section set-danger">
@@ -773,6 +775,7 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
     setSwitch('mute', muted);
     setSwitch('music', audio.music.isEnabled());
     setSwitch('motion', stored.reduceMotion);
+    setSwitch('camaim', qaAimFromStorage() === 'centred');
 
     // Everything downstream of the master mute is dimmed while it is on, so the
     // screen never shows a music slider that reads 70% next to silence.
@@ -899,6 +902,11 @@ export function createSettingsScreen(ctx: ScreenContext): Screen {
         stored = { ...stored, reduceMotion: !stored.reduceMotion };
         saveSettings(stored);
         applyStoredSettings();
+        break;
+      case 'camaim':
+        // The QA camera (DECISIONS §91z), stored beside the URL flag it mirrors — not in this
+        // screen's blob, so the match reads it without importing a menu module.
+        setStoredQaAim(qaAimFromStorage() === 'centred' ? null : 'centred');
         break;
     }
     render();

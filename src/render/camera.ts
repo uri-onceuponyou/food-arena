@@ -650,6 +650,8 @@ export const QA_CAMERA = {
   minPitchDeg: 47,
   maxPitchDeg: 70,
   aimParam: 'camAim',
+  /** The Settings switch's copy of `?camAim=centred` — see `qaAimFromStorage`. */
+  aimStorageKey: 'food-arena.camAim.v1',
 } as const;
 
 /** `?camPitch=<deg>` -> degrees, or null (absent, empty, not a finite number, outside the
@@ -664,6 +666,26 @@ export function qaPitchFromSearch(search: string): number | null {
 /** `?camAim=centred` -> `'centred'`; anything else -> null ("the shipped aim"). */
 export function qaAimFromSearch(search: string): CameraAim | null {
   return new URLSearchParams(search).get(QA_CAMERA.aimParam) === 'centred' ? 'centred' : null;
+}
+
+/**
+ * The same choice from the Settings switch ("Centred camera"), or null. Added 2026-10-16
+ * because the owner tests on a phone and reported the URL flag doing nothing — editing the
+ * address bar of a running game is the fragile step (`?` appended after an existing query is
+ * not a parameter). The URL still wins when present. Storage that throws (private Safari,
+ * Node) reads as null. Like the URL flag, a future online mode must not take it.
+ */
+export function qaAimFromStorage(): CameraAim | null {
+  try { return localStorage.getItem(QA_CAMERA.aimStorageKey) === 'centred' ? 'centred' : null; }
+  catch { return null; }
+}
+
+/** Write the Settings switch. `null` removes the key — the shipped aim. */
+export function setStoredQaAim(aim: CameraAim | null): void {
+  try {
+    if (aim === 'centred') localStorage.setItem(QA_CAMERA.aimStorageKey, 'centred');
+    else localStorage.removeItem(QA_CAMERA.aimStorageKey);
+  } catch { /* non-fatal: the choice holds for nothing, the switch reads off again */ }
 }
 
 export interface CameraRigOptions {
