@@ -14170,13 +14170,15 @@ console.log('\n48. The bot at two, three and six seats — sudden death, what it
 //
 //   (a) AI-B5 (found and priced by B5, `79bbad6`) — the bots shared ONE flow field.
 //   (b) SPLAT-OWNER (routed by V1, `DECISIONS §91u`) — a splat did not record who threw it.
+//   (c) Egg's peck clock (routed by B4, `2cf23cf`) — reset to zero when it fired.
 //
 // ⚠️ SEAT COUNTS. (a) cannot express itself below TWO BOTS — a lone bot never evicts anyone — so
 // its rows run at two and six, and the lone bot is its CONTROL. (b) is a property of one shot and
 // runs at two seats AND six, the thrower in slot 3 at six — where a two-seat fallback ("slot 0 or
-// slot 1") names the wrong fighter and still reads green at two.
+// slot 1") names the wrong fighter and still reads green at two. (c) is a property of one
+// projectile's clock; it runs at two seats and six all the same.
 // ═══════════════════════════════════════════════════════════════════════════
-console.log('\n49. Sim follow-ups (B7) — every bot steers by its own flow field, a splat knows its thrower');
+console.log('\n49. Sim follow-ups (B7) — every bot steers by its own flow field, a splat knows its thrower, the peck clock carries');
 {
   // ── (a) AI-B5: EVERY BOT STEERS BY ITS OWN FLOW FIELD ─────────────────────────
   //
@@ -14353,6 +14355,74 @@ console.log('\n49. Sim follow-ups (B7) — every bot steers by its own flow fiel
       owned(runs.filter((r) => r.hit)), runs.filter((r) => r.hit).map(fmtRun).join(' · '));
     check('(b) 🔴 …and so does one left where a shot ENDS without hitting anyone',
       owned(runs.filter((r) => !r.hit)), runs.filter((r) => !r.hit).map(fmtRun).join(' · '));
+  }
+
+  // ── (c) EGG'S PECK CLOCK CARRIES ITS OVERSHOOT ────────────────────────────────
+  //
+  // An arrived Hatch! pecks its latched victim every `peckInterval`, and its clock — like the fog,
+  // the pot and regen before B4's `2cf23cf` (§47(e)) — RESET TO ZERO when it fired, throwing the
+  // frame's overshoot away. So the delivered period was the declared one rounded UP to a whole
+  // number of frames, and `match.ts` steps a variable frame (`min(getDelta, 1/20 s)`): 540 ms at a
+  // 45 ms frame, and 533.33 at 30 fps — 15 x 33.333… sums to just UNDER 500 in floats, so it takes
+  // 16. On time at 60 Hz and 144 Hz. A chick has two periodic pecks, so the drift shows on the
+  // SECOND: 1080 ms after the strike at 45 ms, 80 past its time. The clock now carries
+  // (`t = (t − interval) % interval`, B4's shape), so the k-th peck lands within one frame of
+  // k x interval after the strike at every frame time — the drift no longer accumulates.
+  //
+  // ⚠️ AT THE CORPUS'S 16.667 NOTHING MOVES, AND NOTHING MAY: 30 frames reach 500.01, so both rules
+  // peck on frames 30 and 60 after the strike. The carry banks 0.01 ms a period, and a chick's two
+  // periods can never bank the 16.66 ms it would take to pull a peck a frame early. That is the
+  // CONTROL row; `b5_digest`'s 316 cells are its whole-match version (the commit).
+  {
+    const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+    const HATCH = CHARACTERS.egg.weapons.findIndex((w) => w.key === 'Hatch');
+    const W = CHARACTERS.egg.weapons[HATCH];
+    const INTERVAL = W.peckInterval;
+    const DTS = [1000 / 60, 1000 / 30, 1000 / 144, 45];
+    /** Egg (slot 0) strikes a victim (slot 1) 100 wu east and pecks it; everyone else stands far
+     *  off. Returns the times, in ms after the STRIKE, of every peck that follows it. `hits`
+     *  overrides the chick's peck count on a COPY of the weapon (never the shared rules object). */
+    const pecks = (dt, n, hits = W.peckHits) => {
+      const seats = [{ characterId: 'egg', controller: 'human', spawn: { x: 1000, y: 1000 }, facing: { x: 1, y: 0 } },
+        { characterId: 'sushi', controller: 'human', spawn: { x: 1100, y: 1000 } }];
+      while (seats.length < n) seats.push({ characterId: 'pizza', controller: 'human', spawn: { x: 2400, y: 250 + seats.length * 250 } });
+      const st = createMatch(makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 }), seats);
+      st.phase = 'playing';
+      st.fighters[1].maxHp = st.fighters[1].hp = 1e6;
+      const at = [];
+      for (let tick = 0; tick < Math.ceil((hits + 2) * INTERVAL / dt) + 60 && at.length < hits; tick++) {
+        const ins = st.fighters.map(() => NEUTRAL);
+        if (tick === 0) ins[0] = { ...NEUTRAL, aim: { x: 1, y: 0 }, selectedWeapon: HATCH, attack: true };
+        const evs = stepMatch(st, dt, ins);
+        if (tick === 0 && hits !== W.peckHits) {
+          const p = st.projectiles.find((q) => q.weapon.key === 'Hatch');
+          if (p) p.weapon = { ...p.weapon, peckHits: hits };
+        }
+        for (const e of evs) {
+          if (e.type === 'hit-landed' && e.targetId === 1 && e.source.kind === 'weapon' && e.source.weaponKey === 'Hatch') at.push(st.elapsed);
+        }
+      }
+      return { dt, n, hits, count: at.length, after: at.slice(1).map((t) => t - at[0]) };
+    };
+    /** How late the k-th peck after the strike lands against k x interval; at most one frame. */
+    const late = (r) => r.after.map((t, k) => t - (k + 1) * INTERVAL);
+    const onTime = (r) => late(r).every((l) => l >= -1e-6 && l <= r.dt + 1e-6);
+    const fmtP = (r) => `${r.dt.toFixed(2)} ms N=${r.n}: ${r.after.map((t) => t.toFixed(2)).join(', ')}`;
+    const real = [];
+    for (const n of [2, 6]) for (const dt of DTS) real.push(pecks(dt, n));
+    const long = DTS.map((dt) => pecks(dt, 2, 13));
+    check(`(c) NON-VACUITY: Hatch! struck and pecked its full ${W.peckHits} at every frame time, two seats and six — and the 13-hit chick pecked 13`,
+      real.every((r) => r.count === W.peckHits) && long.every((r) => r.count === 13),
+      [...real, ...long].map((r) => `${r.dt.toFixed(2)}/N=${r.n}: ${r.count}`).join(' · '));
+    check(`(c) 🔴 every peck of a real Hatch! lands within ONE frame of k x ${INTERVAL} ms after the strike — at 60 Hz, 30 fps, 144 Hz and a 45 ms frame, two seats and six`,
+      real.every(onTime), real.map(fmtP).join(' · '));
+    check('(c) 🔴 a chick that pecks TWELVE times keeps the declared cadence — the 12th within one frame of 12 x the interval, at every frame time',
+      long.every(onTime), long.map((r) => `${r.dt.toFixed(2)} ms: 12th at ${r.after[11]?.toFixed(2)} (declared ${12 * INTERVAL})`).join(' · '));
+    const corpus = [pecks(16.667, 2), pecks(16.667, 6)];
+    check('(c) CONTROL: at the corpus\'s 16.667 ms the pecks land on frames 30 and 60 after the strike — on BOTH trees, which is why the corpus cannot move',
+      corpus.every((r) => r.count === W.peckHits && r.after.length === 2
+        && Math.round(r.after[0] / 16.667) === 30 && Math.round(r.after[1] / 16.667) === 60),
+      corpus.map((r) => `N=${r.n}: frames ${r.after.map((t) => (t / 16.667).toFixed(3)).join(', ')}`).join(' · '));
   }
 }
 

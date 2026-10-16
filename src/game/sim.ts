@@ -1735,9 +1735,17 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
       }
       p.tx = target.x;
       p.ty = target.y;
+      // ── THE PECK CLOCK CARRIES ITS OVERSHOOT (B4's routing, landed by B7) ───────
+      // It used to RESET to 0, throwing the frame's overshoot away, so the delivered period was
+      // `peckInterval` rounded UP to whole frames of the variable step `match.ts` takes: 540 ms at
+      // a 45 ms frame, 533.33 at 30 fps (15 x 33.333… sums to just under 500 in floats). Carried
+      // the way `2cf23cf` carries the fog, the pot and regen — `(t − period) % period`, one peck per
+      // step — every peck lands within one frame of its declared time (`sim.test.mjs` §49(c)). At
+      // the corpus's 16.667 both rules peck on frames 30 and 60: the carry banks 0.01 ms a period.
+      const peckInterval = w.peckInterval ?? 500;
       p.peckTimer = (p.peckTimer ?? 0) + dt;
-      if (p.peckTimer >= (w.peckInterval ?? 500)) {
-        p.peckTimer = 0;
+      if (p.peckTimer >= peckInterval) {
+        p.peckTimer = (p.peckTimer - peckInterval) % peckInterval;
         applyDamage(state, target, p.damage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: p.ownerId }, events);
         p.hitsSoFar = (p.hitsSoFar ?? 1) + 1;
         if (p.hitsSoFar >= w.peckHits) {

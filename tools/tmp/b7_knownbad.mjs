@@ -88,6 +88,19 @@ export const ARMS = [
     mustFail: ['(b) 🔴 …and so does one left where a shot ENDS'],
     mustPass: ['(b) 🔴 a splat left where a shot HITS', '(b) NON-VACUITY: every splatter weapon'],
   },
+  // ── (c) Egg's peck clock ───────────────────────────────────────────────────────
+  // One arm: the revert. B4's other shape question — `t -= period` without the `%` — is identical
+  // whenever a step is shorter than the period, which every shipped step is (the 50 ms clamp vs
+  // 500 ms), so no row can tell them apart and none pretends to.
+  {
+    name: 'peck-resets',
+    bug: 'PECK REVERT — the peck clock drops its overshoot (540 ms at a 45 ms frame, 533.33 at 30 fps)',
+    file: 'game/sim.ts',
+    find: '        p.peckTimer = (p.peckTimer - peckInterval) % peckInterval;\n',
+    repl: '        p.peckTimer = 0;\n',
+    mustFail: ['(c) 🔴 every peck of a real Hatch!', '(c) 🔴 a chick that pecks TWELVE times'],
+    mustPass: ['(c) NON-VACUITY: Hatch! struck', '(c) CONTROL: at the corpus'],
+  },
 ];
 
 const IS_MAIN = process.argv[1] !== undefined && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
