@@ -14169,11 +14169,14 @@ console.log('\n48. The bot at two, three and six seats — sudden death, what it
 // its controls stay green.
 //
 //   (a) AI-B5 (found and priced by B5, `79bbad6`) — the bots shared ONE flow field.
+//   (b) SPLAT-OWNER (routed by V1, `DECISIONS §91u`) — a splat did not record who threw it.
 //
 // ⚠️ SEAT COUNTS. (a) cannot express itself below TWO BOTS — a lone bot never evicts anyone — so
-// its rows run at two and six, and the lone bot is its CONTROL.
+// its rows run at two and six, and the lone bot is its CONTROL. (b) is a property of one shot and
+// runs at two seats AND six, the thrower in slot 3 at six — where a two-seat fallback ("slot 0 or
+// slot 1") names the wrong fighter and still reads green at two.
 // ═══════════════════════════════════════════════════════════════════════════
-console.log('\n49. Sim follow-ups (B7) — every bot steers by its own flow field');
+console.log('\n49. Sim follow-ups (B7) — every bot steers by its own flow field, a splat knows its thrower');
 {
   // ── (a) AI-B5: EVERY BOT STEERS BY ITS OWN FLOW FIELD ─────────────────────────
   //
@@ -14302,6 +14305,54 @@ console.log('\n49. Sim follow-ups (B7) — every bot steers by its own flow fiel
     check('(a) 🔴 a whole all-bot match floods under one field per FOUR nav queries, at two seats and at six (the shared field flooded on 75–96%)',
       [w2, w6].every((w) => w.queries > 1000 && w.rate < 0.25),
       [w2, w6].map((w) => `N=${w.n}: ${w.builds} floods / ${w.queries} queries = ${w.rate.toFixed(3)}`).join(' · '));
+  }
+
+  // ── (b) SPLAT-OWNER: A SPLAT RECORDS WHO THREW IT ─────────────────────────────
+  //
+  // V1 keyed every persistent ground mark's colour to its OWNER's character (`vfx.ts:markHexFor`,
+  // `DECISIONS §91u`), but `Splat` carried no owner and `sim.ts:spawnSplat` recorded none, so
+  // every splat fell back to the splatter family's hue — Donut's Glaze Bomb drew tomato red. The
+  // sim now stamps the thrower's slot on the splat at BOTH places one is made: where a shot HITS,
+  // and where it ENDS (on cover, at its range, or at its age cap). PRESENTATION ONLY: a splat
+  // slows everyone standing in it, its thrower included (`movement.ts:terrainSlowAt` never asks),
+  // and the `splat-created` event is untouched — which is what keeps `b5_digest`'s 316 cells
+  // identical (the commit).
+  {
+    const NEUTRAL = { move: { x: 0, y: 0 }, selectedWeapon: 0, attack: false };
+    const SPLATTERS = [];
+    for (const id of CHARACTER_IDS) CHARACTERS[id].weapons.forEach((w, i) => { if (w.splatter) SPLATTERS.push({ id, i, name: w.name }); });
+    /** One press by a thrower in slot `slot` of an `n`-seat match: `hit` aims it at a fighter
+     *  100 wu east, otherwise west at open floor, where it ends at its range. Everyone else
+     *  stands 1,100 wu east, out of every splatter's reach. */
+    const throwOnce = ({ id, i }, n, slot, hit) => {
+      const victim = slot === n - 1 ? n - 2 : n - 1;
+      const seats = Array.from({ length: n }, (_, s) => ({ characterId: 'egg', controller: 'human', spawn: { x: 2500, y: 250 + s * 300 } }));
+      seats[slot] = { characterId: id, controller: 'human', spawn: { x: 1400, y: 1000 }, facing: { x: hit ? 1 : -1, y: 0 } };
+      seats[victim] = { characterId: 'hamburger', controller: 'human', spawn: { x: 1500, y: 1000 } };
+      const st = createMatch(makeArena({ width: 2800, height: 2000, maxSafeRadius: 50_000 }), seats);
+      st.phase = 'playing';
+      let splats = [];
+      let struck = false;
+      for (let tick = 0; tick < 400 && splats.length === 0; tick++) {
+        const ins = st.fighters.map(() => NEUTRAL);
+        if (tick === 0) ins[slot] = { ...NEUTRAL, aim: { x: hit ? 1 : -1, y: 0 }, selectedWeapon: i, attack: true };
+        const evs = stepMatch(st, 1000 / 60, ins);
+        if (evs.some((e) => e.type === 'hit-landed' && e.source.kind === 'weapon' && e.source.attackerId === slot)) struck = true;
+        if (evs.some((e) => e.type === 'splat-created')) splats = st.splats.map((s) => ({ ...s }));
+      }
+      return { id, n, slot, hit, struck, splats };
+    };
+    const runs = [];
+    for (const sp of SPLATTERS) for (const [n, slot] of [[2, 1], [6, 3]]) for (const hit of [true, false]) runs.push(throwOnce(sp, n, slot, hit));
+    const fmtRun = (r) => `${r.id} ${r.hit ? 'hit' : 'end'} N=${r.n} slot ${r.slot}: owner ${r.splats.length ? r.splats.map((s) => String(s.ownerId)).join('/') : 'NO SPLAT'}`;
+    check(`(b) NON-VACUITY: every splatter weapon in the roster (${SPLATTERS.map((s) => `${s.id} ${s.name}`).join(', ')}) leaves ONE splat where it hits and ONE where it ends, at two seats and six`,
+      SPLATTERS.length > 0 && runs.every((r) => r.splats.length === 1 && r.struck === r.hit),
+      runs.map((r) => `${r.id} ${r.hit ? 'hit' : 'end'} N=${r.n}: ${r.splats.length} splat(s), struck ${r.struck}`).join(' · '));
+    const owned = (rs) => rs.length > 0 && rs.every((r) => r.splats.length === 1 && r.splats[0].ownerId === r.slot);
+    check('(b) 🔴 a splat left where a shot HITS records its thrower — slot 1 of two, slot 3 of six',
+      owned(runs.filter((r) => r.hit)), runs.filter((r) => r.hit).map(fmtRun).join(' · '));
+    check('(b) 🔴 …and so does one left where a shot ENDS without hitting anyone',
+      owned(runs.filter((r) => !r.hit)), runs.filter((r) => !r.hit).map(fmtRun).join(' · '));
   }
 }
 

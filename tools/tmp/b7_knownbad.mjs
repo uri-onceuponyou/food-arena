@@ -60,6 +60,34 @@ export const ARMS = [
     mustFail: ['(a) CONTROL: the cache is TRANSPARENT'],
     mustPass: ['(a) 🔴 TWO bots with fixed', '(a) 🔴 …and SIX bots', '(a) 🔴 goals that JUMP', '(a) CONTROL: ONE bot'],
   },
+  // ── (b) SPLAT-OWNER ────────────────────────────────────────────────────────────
+  {
+    name: 'splat-no-owner',
+    bug: 'SPLAT-OWNER REVERT — the splat records no owner, so every ground mark falls back to the splatter hue',
+    file: 'game/sim.ts',
+    find: '  const splat: Splat = { id: state.nextId++, ownerId, x, y, expiresAt: state.elapsed + SPLAT_DURATION_MS };\n',
+    repl: '  const splat: Splat = { id: state.nextId++, x, y, expiresAt: state.elapsed + SPLAT_DURATION_MS };\n',
+    mustFail: ['(b) 🔴 a splat left where a shot HITS', '(b) 🔴 …and so does one left where a shot ENDS'],
+    mustPass: ['(b) NON-VACUITY: every splatter weapon'],
+  },
+  {
+    name: 'splat-owner-is-victim',
+    bug: 'SPLAT-OWNER WRONG FIX — the HIT site stamps the body struck (`p.targetId`, retargeted onto the victim)',
+    file: 'game/sim.ts',
+    find: '      if (w.splatter) spawnSplat(state, p.ownerId, p.x, p.y, events);\n      if (w.peckHits) {\n',
+    repl: '      if (w.splatter) spawnSplat(state, p.targetId, p.x, p.y, events);\n      if (w.peckHits) {\n',
+    mustFail: ['(b) 🔴 a splat left where a shot HITS'],
+    mustPass: ['(b) 🔴 …and so does one left where a shot ENDS', '(b) NON-VACUITY: every splatter weapon'],
+  },
+  {
+    name: 'splat-owner-two-seat',
+    bug: 'SPLAT-OWNER WRONG FIX — the END site maps the seat NAME to a slot (player 0, enemy 1): right at two seats, slot 1 for slot 3 at six',
+    file: 'game/sim.ts',
+    find: "projectileMaxAgeMs(w)) {\n      if (w.splatter) spawnSplat(state, p.ownerId, p.x, p.y, events);\n",
+    repl: "projectileMaxAgeMs(w)) {\n      if (w.splatter) spawnSplat(state, p.ownerRole === 'player' ? 0 : 1, p.x, p.y, events);\n",
+    mustFail: ['(b) 🔴 …and so does one left where a shot ENDS'],
+    mustPass: ['(b) 🔴 a splat left where a shot HITS', '(b) NON-VACUITY: every splatter weapon'],
+  },
 ];
 
 const IS_MAIN = process.argv[1] !== undefined && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;

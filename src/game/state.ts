@@ -1038,6 +1038,18 @@ export interface Projectile {
 
 export interface Splat {
   id: number;
+  /**
+   * Slot of the fighter whose shot left it (`Projectile.ownerId` — a reflection reflects damage,
+   * never the shot, so this is always the thrower). Read by presentation ONLY: V1 keys every
+   * persistent ground mark's colour to its owner's character (`vfx.ts:markHexFor`,
+   * `DECISIONS §91u`), and with no owner a Glaze Bomb's splat drew the splatter family's
+   * tomato red. Nothing in the sim reads it — a splat slows EVERYONE in it, its thrower
+   * included (`movement.ts:terrainSlowAt` never asks) — and the `splat-created` event does not
+   * carry it, so the event stream every bit-identity digest hashes is untouched.
+   * ⚠️ Slot only, no `ownerRole` mirror beside it: `TrailMark` keeps one for a legacy reader;
+   * nothing ever read a splat's owner by seat name.
+   */
+  ownerId: FighterId;
   x: number;
   y: number;
   expiresAt: number;

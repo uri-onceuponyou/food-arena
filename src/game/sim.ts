@@ -1617,8 +1617,9 @@ function removeProjectile(state: MatchState, index: number, reason: 'hit-target'
   state.projectiles.splice(index, 1);
 }
 
-function spawnSplat(state: MatchState, x: number, y: number, events: GameEvent[]): void {
-  const splat: Splat = { id: state.nextId++, x, y, expiresAt: state.elapsed + SPLAT_DURATION_MS };
+/** `ownerId` is the THROWER (`Splat.ownerId`) — presentation only; see the field's note. */
+function spawnSplat(state: MatchState, ownerId: FighterId, x: number, y: number, events: GameEvent[]): void {
+  const splat: Splat = { id: state.nextId++, ownerId, x, y, expiresAt: state.elapsed + SPLAT_DURATION_MS };
   state.splats.push(splat);
   events.push({ type: 'splat-created', x, y });
 }
@@ -1828,7 +1829,7 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
     p.y = newY;
 
     if (hitWall || p.traveled >= (w.range ?? Infinity) || p.age >= projectileMaxAgeMs(w)) {
-      if (w.splatter) spawnSplat(state, p.x, p.y, events);
+      if (w.splatter) spawnSplat(state, p.ownerId, p.x, p.y, events);
       removeProjectile(state, i, hitWall ? 'hit-cover' : 'expired', events);
       continue;
     }
@@ -1857,7 +1858,7 @@ function stepProjectiles(state: MatchState, dt: number, events: GameEvent[]): vo
         p.targetRole = victim.role;
       }
       applyDamage(state, victim, p.damage, w.effect, { kind: 'weapon', weaponKey: w.key, weaponName: w.name, attackerId: p.ownerId }, events);
-      if (w.splatter) spawnSplat(state, p.x, p.y, events);
+      if (w.splatter) spawnSplat(state, p.ownerId, p.x, p.y, events);
       if (w.peckHits) {
         p.arrived = true;
         p.peckTimer = 0;
