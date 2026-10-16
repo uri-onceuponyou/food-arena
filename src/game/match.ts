@@ -2889,7 +2889,11 @@ export class GameSession {
     });
 
     this.arena.update?.(stepDtSeconds, elapsedSeconds);
-    this.vfx.sync(this.state);
+    // V3 — the SAME `observer` the model hide above asked, so nothing the VFX layer draws ON a
+    // fighter (statuses, the Blue Cheese cloud, item states) is shown to a screen whose subject
+    // cannot see that fighter. Was `sync(this.state)`: the layer fell back to "the local seat, or
+    // every seat once it is dead" — a spectator saw every hidden fighter's states.
+    this.vfx.sync(this.state, observer);
     // Ability VFX (flashes/shards/arcs) run on `rawDtSeconds` — UNAFFECTED by
     // hit-stop — so the impact itself still pops instantly and reads clearly during
     // the freeze instead of also grinding to a near-halt with everything else.

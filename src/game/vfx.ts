@@ -3407,7 +3407,22 @@ export class VfxLayer {
     window.__vfxLayer = this;
   }
 
-  sync(state: MatchState): void {
+  /**
+   * Draw the frame's persistent effects from the sim's state.
+   *
+   * `observer` — V3 — is WHOSE EYES this frame is seen through: the fighter the camera is watching,
+   * `match.ts:viewObserver()` (the local seat while it lives, a spectated fighter after it dies).
+   * Everything drawn ON a fighter is shown only if that observer can see the fighter
+   * (`resolveSeatShown`). It travels here from the one place that decides it rather than being
+   * re-derived, for the reason `hud.ts`'s `observerSlot` gives: a dead player whose radar and models
+   * disagreed was `30e3360`'s half-moved rule.
+   *
+   * ⚠️ OPTIONAL ONLY FOR THE QA CALLERS THAT DRIVE `sync(state)` BY HAND (`vfx_coverage`,
+   * `vfx_ablate`, `vfx_splatdepth`, `fx_draws`, and every wrapper written `(s) => orig(s)`); they get
+   * V2's rule — the local seat while it lives, else every seat shown. The shipped loop always passes
+   * it, and `tools/tmp/v3_conceal.mjs --plant drop-observer` is red without it.
+   */
+  sync(state: MatchState, observer?: Fighter): void {
     const roster = fightersOf(state);
     this.qaRoster = roster;
     // 🚨 BEFORE ANY POOL. See `statusBySlot`: growth has to happen at a fixed point in
@@ -3415,7 +3430,7 @@ export class VfxLayer {
     // depending on which tick it first appeared on.
     this.ensureSlots(roster.length);
     // V3 — and before any layer that draws ON a fighter, so all of them read one answer.
-    this.resolveSeatShown(state, roster);
+    this.resolveSeatShown(state, roster, observer);
 
     // ⚠️ THE `player`/`enemy` KEYS ARE A PUBLISHED CONTRACT. Twenty-two instruments read
     // `window.__vfxDebugFighters.player` / `.enemy` by name (grep over `tools/`), so they
@@ -3964,17 +3979,26 @@ export class VfxLayer {
    * see it. Projectiles, medikits and ground marks are WORLD entities and are not asked — the
    * projectile pool's own note in `sync()` measured why hiding a shot would now be the bug.
    *
-   * THE OBSERVER (V2's rule, moved here verbatim in substance): the LOCAL seat while it lives —
-   * `match.ts:viewObserver()`'s rung 1, which is every frame a living player draws. Once it is dead
-   * the camera is on a spectated subject this layer is not told about, and every seat is shown
-   * rather than asking a corpse: a corpse 2,000 wu away would hide the very fighter the camera is
-   * pointed at (the "rendering and invisible" failure `viewObserver`'s own note records). The exact
-   * observer is a ROUTED follow-up (pass `viewObserver()` into `sync`; the call is in `match.ts`'s
-   * loop).
+   * THE OBSERVER is the camera's subject, handed in by `match.ts`'s loop (`sync`'s `observer`).
+   * ⚠️ V2's rule is kept, below the line it used to be, as the fallback for a caller that names no
+   * observer — and its last sentence is what this change carries out:
+   *
+   *   > *"the LOCAL seat while it lives — `match.ts:viewObserver()`'s rung 1, which is every frame
+   *   > a living player draws. Once it is dead the camera is on a spectated subject this layer is
+   *   > not told about, and every seat is shown rather than asking a corpse: a corpse 2,000 wu away
+   *   > would hide the very fighter the camera is pointed at (the "rendering and invisible" failure
+   *   > `viewObserver`'s own note records). The exact observer is a ROUTED follow-up (pass
+   *   > `viewObserver()` into `sync`; the call is in `match.ts`'s loop)."*
+   *
+   * "Every seat shown" was the safe answer for a layer that could not know the subject, and it was
+   * a LEAK for a spectator: every status and item state on a fighter its subject could not see was
+   * drawn (`v3_conceal.mjs` S.HIDDEN, base `977c21e`: 11 of 11). Told the subject, the layer asks it —
+   * which is exactly what the model hide asks, so a spectator no longer sees Zs float over a model
+   * the same frame has hidden.
    */
-  private resolveSeatShown(state: MatchState, roster: readonly Fighter[]): void {
+  private resolveSeatShown(state: MatchState, roster: readonly Fighter[], observer: Fighter | undefined): void {
     const local = roster[LOCAL_SLOT];
-    const eye = local && local.alive ? local : null;
+    const eye = observer ?? (local && local.alive ? local : null);
     this.seatShown.length = roster.length;
     for (let i = 0; i < roster.length; i++) {
       this.seatShown[i] = eye === null || i === LOCAL_SLOT || fighterVisibleTo(state, eye, roster[i]!);

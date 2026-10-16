@@ -78,9 +78,10 @@ const LABEL = String(A.label ?? 'run');
 const OUT = String(A.out ?? `/tmp/v3_conceal_${LABEL}`);
 const PLANT = A.plant ? String(A.plant) : null;
 const PIXELS = !A['no-pixels'];
-// `--only LPARS` runs just those sections (L live, P pixels, A audio, R reach, S spectator) — for
-// iterating; a quotable run is always the whole probe.
-const ONLY = A.only ? String(A.only) : 'LPARS';
+// `--only LPARST` runs just those sections (L live, P pixels, A audio, R reach, S spectator VFX,
+// T spectator audio) — for iterating, and so a plant on one consumer can be judged without the other
+// consumer's rows; a quotable run is always the whole probe.
+const ONLY = A.only ? String(A.only) : 'LPARST';
 const on = (sec) => ONLY.includes(sec);
 mkdirSync(OUT, { recursive: true });
 
@@ -294,6 +295,12 @@ try {
       return { born: born.length, names: [...new Set(born)].slice(0, 6), cheese: on.cheese - off.cheese, active };
     };
     K.unapplyAll = () => { K.clear(); };
+    // The director's plays, counted at BOOT. 🚨 This used to be installed lazily by the live audio
+    // arm, so `--only S` ran the spectator's audio rows with nothing counting: every cue read 0
+    // plays and the HIDDEN rows passed VACUOUSLY. `A.PRE.spec` (all visible cues must play) is what
+    // went red and said so.
+    { const eng = aud.engine; const orig = eng.play.bind(eng); window.__v3Plays = []; window.__v3On = false;
+      eng.play = (fn, o) => { if (window.__v3On && o?.key !== 'ambience') window.__v3Plays.push(o?.key ?? null); return orig(fn, o); }; }
     K.place = (s, x, y) => { F[s].x = x; F[s].y = y; };
     return { ok: true, phase: st.phase, seats: F.length, alive: F.filter((f) => f.alive).length,
       regions: (st.arena.concealment ?? []).length, syncArgs: window.__syncArgs, simSpeedOk: true,
@@ -520,8 +527,7 @@ try {
     await arrange(spec);
     await camOn(cam);
     return page.evaluate(({ src, owner }) => {
-      const K = window.__K; const st = K.st; const F = K.F; const aud = window.__aud; const eng = aud.engine;
-      if (!eng.__v3) { const orig = eng.play.bind(eng); eng.__v3 = true; eng.play = (fn, o) => { if (window.__v3On && o?.key !== 'ambience') window.__v3Plays.push(o?.key ?? null); return orig(fn, o); }; }
+      const K = window.__K; const st = K.st; const F = K.F; const aud = window.__aud;
       const ev0 = (type, extra) => ({ type, fighterRole: F[src].role, fighterId: F[src].id, ...extra });
       const S = F[src]; const O = F[owner];
       const hitBase = (itemId, extra = {}) => ({ type: 'item-hit', itemId, ownerRole: O.role, ownerId: O.id, targetRole: S.role, targetId: S.id,
@@ -611,7 +617,7 @@ try {
   }
 
   // ── §S: the local seat DEAD, the camera (and the ear) on a spectated subject ─────────────────
-  if (on('S')) {
+  if (on('S') || on('T')) {
     // Kill the local seat at d80 with the subject (slot 1) at d130 and the wearer at C: with no
     // death event routed there is no dwell and no killer chain, so `resolveViewSubject` takes rung 4
     // (nearest living to the camera): the subject is 50 wu away, the wearer 80. It then HOLDS.
@@ -636,7 +642,7 @@ try {
         }, { arm, L: layout, T });
         await camOn(arm === 'HIDDEN' ? 'd130' : 'd70');
       };
-      for (const status of STATUSES) {
+      for (const status of on('S') ? STATUSES : []) {
         await specArrange('HIDDEN');
         const preH = await page.evaluate((T) => ({ subj: window.__matchDebug.viewSubject, fromSubject: window.__K.vis(1, T), fromCorpse: window.__K.vis(0, T), model: window.__K.modelShown(T) }), T);
         const h = await measureArm('S.HIDDEN', T, status);
@@ -675,13 +681,15 @@ try {
           return { plays: out, ear: aud.listenerSlot };
         }, { T });
       };
-      const SH = await spAudio('HIDDEN');
-      const SV = await spAudio('VISIBLE');
-      results.audio.spec = { SH, SV };
-      row('A.PRE.spec', SH.ear === 1 && SV.ear === 1 && Object.keys(SV.plays).every((n) => SV.plays[n].length > 0), { ear: [SH.ear, SV.ear], visible: SV.plays });
-      for (const n of Object.keys(SH.plays)) {
-        row(`A.SPEC_HIDDEN.${n}`, SH.plays[n].length === 0, { plays: SH.plays[n] });
-        row(`A.SPEC_VISIBLE.${n}`, SV.plays[n].length > 0, { plays: SV.plays[n] });
+      const SH = on('T') ? await spAudio('HIDDEN') : null;
+      const SV = on('T') ? await spAudio('VISIBLE') : null;
+      if (SH && SV) {
+        results.audio.spec = { SH, SV };
+        row('A.PRE.spec', SH.ear === 1 && SV.ear === 1 && Object.keys(SV.plays).every((n) => SV.plays[n].length > 0), { ear: [SH.ear, SV.ear], visible: SV.plays });
+        for (const n of Object.keys(SH.plays)) {
+          row(`A.SPEC_HIDDEN.${n}`, SH.plays[n].length === 0, { plays: SH.plays[n] });
+          row(`A.SPEC_VISIBLE.${n}`, SV.plays[n].length > 0, { plays: SV.plays[n] });
+        }
       }
     }
   }
