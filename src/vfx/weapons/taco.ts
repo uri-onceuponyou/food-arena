@@ -126,6 +126,12 @@ const ONION_R = CH * 0.125;   // 0.26 m radius -> 0.52 m across
 /** The peeling layers at impact. The largest single element Taco draws, and still
  * under the generic burst's 1.74 m typical mark. */
 const PEEL_R = CH * 0.33;     // 0.69 m radius -> 1.39 m across
+/** V1b — where the peel opens: this far from the victim's centre toward the thrower (the
+ *  struck side), about a body's half-width at hit height; and how much further off that side
+ *  it drifts as it opens. See `onionImpact`. */
+const PEEL_CONTACT = CH * 0.28;   // 0.59 m
+const PEEL_DRIFT = CH * 0.12;     // 0.25 m
+const PEEL_OPACITY = 0.48;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope geometry/material singletons. Only the cheap Object3D/Mesh WRAPPER
@@ -361,10 +367,13 @@ function spawnDebris(
   sx: number, sy: number, sz: number,
   life: number,
   gravity = -9,
+  name = 'fx:taco.debris',
 ): void {
   mat.color.set(color);
   mat.opacity = 1;
   const mesh = new THREE.Mesh(geo, mat);
+  // NAMED for the diagnostics (`tools/tmp/v1b_cover.mjs` splits body cover by it).
+  mesh.name = name;
   mesh.renderOrder = 9;
   mesh.position.set(ox, oy, oz);
   mesh.scale.set(sx, sy, sz);
@@ -390,7 +399,7 @@ function spawnShard(
   spawnDebris(
     ctx, nextShardGeo(), nextShellMat(), Math.random() < 0.35 ? SHELL_DARK : SHELL,
     ox, oy, oz, vx, vy, vz,
-    SHARD_R * scale, SHARD_H * scale, SHARD_R * scale, life,
+    SHARD_R * scale, SHARD_H * scale, SHARD_R * scale, life, -9, 'fx:taco.shard',
   );
 }
 
@@ -403,7 +412,7 @@ function spawnCrumb(
   spawnDebris(
     ctx, crumbGeo, nextCrumbMat(), CRUMB,
     ox, oy, oz, vx, vy, vz,
-    CRUMB_R * scale, CRUMB_R * scale, CRUMB_R * scale, life,
+    CRUMB_R * scale, CRUMB_R * scale, CRUMB_R * scale, life, -9, 'fx:taco.crumb',
   );
 }
 
@@ -418,23 +427,23 @@ function spawnFillingBit(
   if (kind === 'lettuce') {
     spawnDebris(
       ctx, lettuceGeo, nextBitMat(), LETTUCE, ox, oy, oz, vx, vy, vz,
-      LETTUCE_R * scale, LETTUCE_R * 0.42 * scale, LETTUCE_R * scale, life, -6.5,
+      LETTUCE_R * scale, LETTUCE_R * 0.42 * scale, LETTUCE_R * scale, life, -6.5, 'fx:taco.bit',
     );
   } else if (kind === 'tomato') {
     spawnDebris(
       ctx, diceGeo, nextBitMat(), TOMATO, ox, oy, oz, vx, vy, vz,
-      DICE_R * scale, DICE_R * scale, DICE_R * scale, life,
+      DICE_R * scale, DICE_R * scale, DICE_R * scale, life, -9, 'fx:taco.bit',
     );
   } else if (kind === 'onion') {
     spawnDebris(
       ctx, diceGeo, nextBitMat(), ONION_PALE, ox, oy, oz, vx, vy, vz,
-      DICE_R * 1.3 * scale, DICE_R * 0.4 * scale, DICE_R * 1.3 * scale, life,
+      DICE_R * 1.3 * scale, DICE_R * 0.4 * scale, DICE_R * 1.3 * scale, life, -9, 'fx:taco.bit',
     );
   } else {
     const s = MEAT_R * (0.45 + Math.random() * 0.3) * scale;
     spawnDebris(
       ctx, meatGeo, nextBitMat(), Math.random() < 0.4 ? MEAT_DARK : '#6B3E26',
-      ox, oy, oz, vx, vy, vz, s, s * 0.8, s * 1.15, life,
+      ox, oy, oz, vx, vy, vz, s, s * 0.8, s * 1.15, life, -9, 'fx:taco.bit',
     );
   }
 }
@@ -451,6 +460,7 @@ function spawnCrackFlash(ctx: WeaponVfxCtx, x: number, y: number, z: number, rad
   mat.color.set('#FFF3D6');
   mat.opacity = 1;
   const flash = new THREE.Mesh(crumbGeo, mat);
+  flash.name = 'fx:taco.crackFlash';
   flash.renderOrder = 12;
   flash.position.set(x, y, z);
   flash.rotation.set(Math.random() * TWO_PI, Math.random() * TWO_PI, 0);
@@ -487,6 +497,7 @@ function spawnShellSnap(ctx: WeaponVfxCtx, scale: number): void {
     mat.color.set(i % 2 === 0 ? '#FFF3D6' : '#FFD27A');
     mat.opacity = 1;
     const tile = new THREE.Mesh(shardGeos[i % shardGeos.length], mat);
+    tile.name = 'fx:taco.shellSnap';
     tile.renderOrder = 12;
     const cos = Math.cos(a), sin = Math.sin(a);
     const r0 = CH * 0.11 * scale;
@@ -514,6 +525,7 @@ function spawnVapour(
   radius: number, rise: number, life: number, peak = 0.3,
 ): void {
   const sprite = new THREE.Sprite(nextVapourMat());
+  sprite.name = 'fx:taco.vapour';
   const mat = sprite.material;
   mat.color.set(VAPOUR);
   mat.opacity = 0;                 // SET, never read — see the block comment above.
@@ -548,6 +560,7 @@ function spawnShellSplit(ctx: WeaponVfxCtx, scale: number, speed: number, life: 
     mat.color.set(side < 0 ? SHELL : SHELL_DARK);
     mat.opacity = 1;
     const half = new THREE.Mesh(halfShellGeo, mat);
+    half.name = 'fx:taco.shellSplit';
     half.renderOrder = 9;
     // Born already parted by a head-radius, for the reason recorded in
     // `fillingImpact`: two halves that start coincident at the point of contact
@@ -817,6 +830,7 @@ function onionTrail(ctx: WeaponVfxCtx, turns: number): void {
     mat.color.set(ONION_PALE);
     mat.opacity = 1;
     const flake = new THREE.Mesh(skinGeo, mat);
+    flake.name = 'fx:taco.onionSkin';
     flake.renderOrder = 9;
     const fx = ctx.position.x - ctx.direction.x * ONION_R;
     const fz = ctx.position.z - ctx.direction.z * ONION_R;
@@ -846,6 +860,20 @@ function onionImpact(ctx: WeaponVfxCtx, mult: number): void {
   // — a bulb coming apart from the inside. This is Onion Bomb's signature beat and it
   // is deliberately 3D and domed, so it can never be confused with `donut.ts`'s flat
   // expanding hoops or `pizza.ts`'s flat plates.
+  //
+  // ⚠️ V1b: THEY OPEN ON THE STRUCK SIDE NOW, NOT AROUND THE TARGET. The impact position is
+  // the VICTIM's centre (`combat.ts` emits `hit-landed` at `target.x/y`), so three domes
+  // centred there were wrapped round the whole fighter — and measured, they were the single
+  // largest thing sitting on a body in the canonical Donut-v-Taco fight: 25% of every
+  // effect-covered body pixel (`tools/tmp/v1b_cover.mjs --plan duel`, element
+  // `fx:taco.onionPeel`). From the match camera a dome over a fighter reads as a ring round
+  // it, and "overlapping translucent rings" over the donut is what 5 of 8 cast critics named.
+  // So each layer is centred at the CONTACT point — `PEEL_CONTACT` toward the thrower along
+  // the shot's own line — and blows further off that side as it opens; smaller (x0.8),
+  // fainter (0.66 -> 0.48) and shorter (0.30-0.40 s -> 0.24-0.32 s). Same three layers, same
+  // colours, same peel-and-flatten motion: the beat is kept, it just stops wearing the target.
+  // A hit with no direction (none on record) falls back to the centre, as before.
+  const cx = x - d.x * PEEL_CONTACT, cz = z - d.z * PEEL_CONTACT;
   for (let i = 0; i < 3; i++) {
     const mat = nextPeelMat();
     mat.color.set(i === 0 ? ctx.color : i === 1 ? ctx.color : ONION_PALE);
@@ -853,21 +881,24 @@ function onionImpact(ctx: WeaponVfxCtx, mult: number): void {
     // third they are WRAPPED AROUND the target; at near-full opacity they read as a
     // pale collar clamped over the fighter instead of as layers blowing off it, and
     // they hide the thing the hit is supposed to be giving feedback about.
-    mat.opacity = 0.66;
+    //   (V1b: 0.48 now, and centred on the contact point — see above.)
+    mat.opacity = PEEL_OPACITY;
     const peel = new THREE.Mesh(onionShellGeo, mat);
+    peel.name = 'fx:taco.onionPeel';
     peel.renderOrder = 10;
-    peel.position.set(x, y, z);
+    peel.position.set(cx, y, cz);
     peel.rotation.set((Math.random() - 0.5) * 0.5, Math.random() * TWO_PI, (Math.random() - 0.5) * 0.5);
     const r0 = ONION_R * (0.8 + i * 0.12);
-    const r1 = PEEL_R * s * (0.78 + i * 0.22);
+    const r1 = PEEL_R * s * (0.78 + i * 0.22) * 0.8;
     const spin = (Math.random() - 0.5) * 5;
-    ctx.spawnTransient(peel, 0.3 + i * 0.05, (t) => {
+    ctx.spawnTransient(peel, 0.24 + i * 0.04, (t) => {
       const e = 1 - Math.pow(1 - t, 2.6);
       const r = THREE.MathUtils.lerp(r0, r1, e);
       peel.scale.set(r, r * (0.9 - e * 0.45), r);   // flattens as it opens out
-      peel.position.y = y + e * CH * 0.06;
+      // Blows OFF the struck side as it opens, rather than standing on the contact point.
+      peel.position.set(cx - d.x * PEEL_DRIFT * e, y + e * CH * 0.06, cz - d.z * PEEL_DRIFT * e);
       peel.rotation.y += spin * 0.02;
-      mat.opacity = 0.66 * (1 - Math.pow(t, 1.4));
+      mat.opacity = PEEL_OPACITY * (1 - Math.pow(t, 1.4));
     });
   }
 
@@ -940,6 +971,7 @@ function tossCast(ctx: WeaponVfxCtx, kinds: Array<'meat' | 'lettuce' | 'tomato' 
   mat.color.set(SHELL);
   mat.opacity = 0.9;
   const sweep = new THREE.Mesh(halfShellGeo, mat);
+  sweep.name = 'fx:taco.sweep';
   sweep.renderOrder = 11;
   const yaw = Math.atan2(d.x, d.z);
   const r0 = SHARD_R * 0.9 * mult;

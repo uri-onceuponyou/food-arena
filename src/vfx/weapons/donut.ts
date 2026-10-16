@@ -151,6 +151,10 @@ const SPRINKLE_L = CH * 0.042; // 0.088 m long -> ~0.15 m end to end
  */
 const HALO_R = CH * 0.375; // 0.79 m radius -> 1.58 m across, at hit height
 const SHOCK_R = CH * 0.40; // 0.84 m radius -> 1.68 m across, on the floor
+/** V1b — the contact ring the impact debris launches from (x impact scale): `taco.ts`'s
+ *  `CH * 0.24`, i.e. about a fighter's half-width at hit height, so the arcs and sprinkles
+ *  are born at the victim's edge instead of inside it. */
+const IMPACT_RING = CH * 0.24; // 0.50 m
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Module-scope geometry/material singletons. Only the cheap Object3D/Mesh WRAPPER
@@ -351,6 +355,9 @@ function spawnRing(
   mat.color.set(color);
   mat.opacity = startOpacity;
   const ring = new THREE.Mesh(opts.band ? bandRingGeo : thinRingGeo, mat);
+  // NAMED for the diagnostics (`tools/tmp/v1b_cover.mjs` splits body cover by it): a hoop
+  // at hit height and a hoop on the floor are different jobs.
+  ring.name = y > GROUND_Y + 0.1 ? 'fx:donut.hoop' : 'fx:donut.floorHoop';
   ring.renderOrder = opts.renderOrder ?? 9;
   ring.position.set(x, y, z);
   ring.rotation.y = Math.random() * TWO_PI; // flat XZ geometry: yaw alone, never a tipped plane
@@ -380,6 +387,7 @@ function spawnSprinkle(
   mat.color.set(SPRINKLES[(Math.random() * SPRINKLES.length) | 0]);
   mat.opacity = 1;                       // SET, never read — see `spawnRing`.
   const mesh = new THREE.Mesh(sprinkleGeo, mat);
+  mesh.name = 'fx:donut.sprinkle';
   mesh.renderOrder = 9;
   mesh.position.set(ox, oy, oz);
   mesh.scale.setScalar(scale);
@@ -408,6 +416,7 @@ function spawnArc(
   ang: number, speed: number, scale: number, life: number,
 ): void {
   const group = new THREE.Group();
+  group.name = 'fx:donut.arc';
   const backMat = nextArcMat();
   backMat.color.set(GLAZE_DEEP);
   backMat.opacity = 1;
@@ -517,15 +526,23 @@ export const donutWeaponVfx: CharacterWeaponVfxMap = {
       // is a trail language nothing else in the roster has — Pizza sheds a sweep
       // arc, Soup sheds drips, Water Bottle glints — and it reinforces the one
       // shape this weapon is about.
+      //
+      // ⚠️ V1b: SPARSER — one echo every 0.11 s living 0.14 s, where it was every 0.075 s
+      // living 0.2 s. A Candy volley is THREE pellets flying together, so the old rate hung
+      // ~8 hoops in the air at once, and they arrive WITH the pellets: at the canonical
+      // rv_capture shutter (t=17760 ms) six of them sat just short of the Taco — the thin
+      // concentric rings beside it that the w5 cast notes call "overlapping translucent
+      // rings" (2,491 changed px there; group `donut.Candy.trail|donut.hoop` in
+      // `tools/tmp/v1b_cover.mjs`). ~4 live per volley still reads as a chain.
       st.echo -= dt;
       if (st.echo <= 0) {
-        st.echo = 0.075;
+        st.echo = 0.11;
         const outer = RING_R + RING_TUBE;
         spawnRing(
           ctx,
           ctx.position.x, ctx.position.y, ctx.position.z,
           outer, outer * 1.45,
-          GLAZE_ECHO, 0.55, 0.2,
+          GLAZE_ECHO, 0.55, 0.14,
           { glow: true, fadePow: 1.4 },
         );
       }
@@ -563,25 +580,32 @@ export const donutWeaponVfx: CharacterWeaponVfxMap = {
       //     that band erases the character even while its silhouette survives.
       // A hollow hoop is the only shape that can be this bright at this size without
       // hiding the thing it is giving feedback about.
-      spawnRing(ctx, x, y, z, HALO_R * 0.80 * s, HALO_R * s, '#FBF6FF', 1, 0.16,
-        { hard: true, renderOrder: 12, fadePow: 1.1, hold: 0.45 });
-      // A candy-pink hoop just inside it — the two-tone hard edge, and the colour
-      // that says whose hit this was.
-      spawnRing(ctx, x, y, z, HALO_R * 0.62 * s, HALO_R * 0.86 * s, ctx.color, 1, 0.19,
-        { hard: true, renderOrder: 11, fadePow: 1.4, hold: 0.3 });
+      //
+      // ⚠️ V1b: ONCE PER VOLLEY. Candy Barrage is three pellets landing together, and each
+      // one drew all four hoops (1. and 2.) — twelve concentric rings on one fighter, the
+      // "overlapping translucent rings" the w5 cast notes named. A later pellet of the same
+      // volley (`ctx.repeat`, see `types.ts`) draws its arcs and sprinkles and skips the hoops.
+      if (!ctx.repeat) {
+        spawnRing(ctx, x, y, z, HALO_R * 0.80 * s, HALO_R * s, '#FBF6FF', 1, 0.16,
+          { hard: true, renderOrder: 12, fadePow: 1.1, hold: 0.45 });
+        // A candy-pink hoop just inside it — the two-tone hard edge, and the colour
+        // that says whose hit this was.
+        spawnRing(ctx, x, y, z, HALO_R * 0.62 * s, HALO_R * 0.86 * s, ctx.color, 1, 0.19,
+          { hard: true, renderOrder: 11, fadePow: 1.4, hold: 0.3 });
 
-      // 2. The floor shock — two concentric hoops, NOT a filled disc (decision (3),
-      // the Sticky Trail this character paints under herself). Two-tone on purpose:
-      // the leading edge is candy pink, the body behind it near-white sugar. Donut's
-      // own trail discs are `#FF9EC4` at 0.6 opacity, so a pink-only mark would be
-      // competing inside the exact hue it must not be confused with; the pale band
-      // is the value break that settles it, and it is the same "author the one
-      // element that is not in the scene's hue stack" call `soup.ts` and `pizza.ts`
-      // both arrived at independently.
-      spawnRing(ctx, x, GROUND_Y, z, SHOCK_R * 0.20 * s, SHOCK_R * s, ctx.color, 0.95, 0.3,
-        { hard: true, renderOrder: 7, fadePow: 1.6, hold: 0.35 });
-      spawnRing(ctx, x, GROUND_Y - 0.01, z, SHOCK_R * 0.16 * s, SHOCK_R * 0.86 * s, SUGAR, 0.9, 0.34,
-        { hard: true, band: true, renderOrder: 6, fadePow: 1.4, hold: 0.3 });
+        // 2. The floor shock — two concentric hoops, NOT a filled disc (decision (3),
+        // the Sticky Trail this character paints under herself). Two-tone on purpose:
+        // the leading edge is candy pink, the body behind it near-white sugar. Donut's
+        // own trail discs are `#FF9EC4` at 0.6 opacity, so a pink-only mark would be
+        // competing inside the exact hue it must not be confused with; the pale band
+        // is the value break that settles it, and it is the same "author the one
+        // element that is not in the scene's hue stack" call `soup.ts` and `pizza.ts`
+        // both arrived at independently.
+        spawnRing(ctx, x, GROUND_Y, z, SHOCK_R * 0.20 * s, SHOCK_R * s, ctx.color, 0.95, 0.3,
+          { hard: true, renderOrder: 7, fadePow: 1.6, hold: 0.35 });
+        spawnRing(ctx, x, GROUND_Y - 0.01, z, SHOCK_R * 0.16 * s, SHOCK_R * 0.86 * s, SUGAR, 0.9, 0.34,
+          { hard: true, band: true, renderOrder: 6, fadePow: 1.4, hold: 0.3 });
+      } // !ctx.repeat
 
       // 3. The broken ring — curved arcs, thrown hard enough to CLEAR THE BODY.
       // (At 1.3 m/s over 0.38 s debris travels ~0.5 m and spends its whole life
@@ -591,26 +615,41 @@ export const donutWeaponVfx: CharacterWeaponVfxMap = {
       // fragment is ~13 px on screen and its curvature — the entire reason it is an
       // arc and not a chip — is undetectable. Biased along `ctx.direction`, the
       // attacker→hit vector, so fragments carry through the way real debris does.
+      //
+      // ⚠️ V1b: "thrown hard enough to clear the body" was true of where they END. They
+      // STARTED at the hit position — which is the VICTIM's centre (`combat.ts` emits
+      // `hit-landed` at `target.x/y`) — so every fragment spent its first frames on the
+      // fighter: in the canonical Donut-v-Taco fight the arcs were 7–8% of every
+      // effect-covered body pixel (`tools/tmp/v1b_cover.mjs --plan duel`, element
+      // `fx:donut.arc`). Now launched from the CONTACT RING, `IMPACT_RING` out along their
+      // own flight line — the same fix `taco.ts` made for its debris ("launched from the
+      // contact RING, not from dead centre"). Count, speed, size and life unchanged.
+      const R0 = IMPACT_RING * s;
       for (let i = 0; i < 3; i++) {
         const ang = (i / 3) * TWO_PI + Math.random() * 0.9;
         spawnArc(
-          ctx, ctx.position, ctx.color,
+          ctx, new THREE.Vector3(x + Math.cos(ang) * R0, y, z + Math.sin(ang) * R0), ctx.color,
           ang, (2.3 + Math.random() * 1.5) * s,
           (1.05 + Math.random() * 0.5) * s, 0.36 + Math.random() * 0.12,
         );
       }
 
       // 4. The sprinkles.
-      for (let i = 0; i < 8; i++) {
+      // ⚠️ V1b: 8 -> 5 per pellet, from the contact ring, life x0.8. A Candy volley is three
+      // pellets landing together, so this was 24 pieces of six-colour confetti per volley,
+      // born inside the victim and living half a second; "confetti" sitting on the bodies is
+      // in 5 of 8 w5 cast notes. Five per pellet is still fifteen per volley — the "loudest
+      // DONUT signal" stays loud, it stops being born on the fighter it hit.
+      for (let i = 0; i < 5; i++) {
         const ang = Math.random() * TWO_PI;
         const out = (2.2 + Math.random() * 1.8) * s;
         spawnSprinkle(
           ctx,
-          x, y, z,
+          x + Math.cos(ang) * R0, y, z + Math.sin(ang) * R0,
           Math.cos(ang) * out + ctx.direction.x * 0.9,
           2.5 + Math.random() * 1.6,
           Math.sin(ang) * out + ctx.direction.z * 0.9,
-          0.4 + Math.random() * 0.14,
+          (0.4 + Math.random() * 0.14) * 0.8,
           1.1 + Math.random() * 0.6,
         );
       }

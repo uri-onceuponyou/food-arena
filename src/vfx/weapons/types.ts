@@ -153,6 +153,16 @@ export interface WeaponVfxCtx {
    * reason. `undefined` for every other hook.
    */
   castMs?: number;
+  /**
+   * `impact()` only (V1b): `true` when this hit is a LATER pellet of the same volley on the
+   * same victim — another impact landed within `IMPACT_REPEAT_MS` / `IMPACT_REPEAT_WU` of it
+   * (`game/vfx.ts`). Draw the per-PELLET beat (debris, the pop) and skip the once-per-HIT
+   * marks — hoops, ground rings, halos — or a three- or five-pellet volley stacks three or five
+   * concentric copies of them on one fighter: the "overlapping translucent rings" 5 of 8 w5
+   * cast critics named. The generic anchor under every hit already does this. `undefined`
+   * (= not a repeat) for every other hook.
+   */
+  repeat?: boolean;
 }
 
 export interface WeaponVfx {

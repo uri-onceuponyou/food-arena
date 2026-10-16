@@ -76,7 +76,7 @@ import { preserveDestinationAlpha } from '../render/roles';
 import { getWeaponVfx } from '../vfx/weapons';
 import type { WeaponVfx, WeaponVfxCtx } from '../vfx/weapons/types';
 // Persistent ground marks — one dark union, one draw (graphics campaign V1).
-import { GroundMarkBatch, linAtLC } from '../vfx/groundMarks';
+import { GroundMarkBatch, linAtLC, stainFactor } from '../vfx/groundMarks';
 import { VFX_SIGNATURE, effectColor } from '../vfx/palette';
 // Blue Cheese's stink cloud, drawn from state (graphics campaign V1).
 import { BlueCheeseClouds } from '../vfx/blueCheese';
@@ -313,6 +313,24 @@ const MEDIKIT_WARN_MS = MEDIKIT.popMs * 3;
  * character rather than at their feet. */
 const IMPACT_HEIGHT = 1.15;
 const CAST_HEIGHT = 1.25;
+/**
+ * V1b — ROOM AROUND THE FIGHTER. The cast muzzle's distance in front of the caster, and how far
+ * its flash swells (x `castMuzzle`'s role scale). It used to share the bespoke cast's 0.7 m
+ * origin and swell 0.75 -> 1.3 m, so its tail reached back across the caster's own body: in the
+ * canonical Donut-v-Taco fight it was 19% of every effect-covered body pixel
+ * (`tools/tmp/v1b_cover.mjs --plan duel`). 1.05 m puts the swollen edge (0.53 m radius) at the
+ * caster's ~0.5 m half-width; the frame-1 size, the colour and the full opacity — the parts
+ * that make a cast read — are untouched.
+ */
+const MUZZLE_OFF_M = 1.05;
+const MUZZLE_END_SCALE = 1.05;
+/** V1b — an impact within this long and this close (sim ms, world units) of an earlier one is a
+ *  later pellet of the same volley on the same victim (`spawnImpactBurst`). Pellets of one
+ *  volley land within a frame or two; the fastest volley-to-volley cooldown on the roster is
+ *  several hundred ms; two fighters cannot stand 30 wu apart (they collide at `PLAYER_SIZE`
+ *  42). */
+const IMPACT_REPEAT_MS = 150;
+const IMPACT_REPEAT_WU = 30;
 /**
  * Linear scale of the SUBORDINATE impact burst anchor — the one that sits under a
  * bespoke `impact()` hook. `impactAnchor`'s header carries the whole derivation.
@@ -725,25 +743,64 @@ const PUDDLE_SPLASH_DIST_WU = 18;
 // keyed to the OWNER's C1a signature hue (`src/vfx/palette.ts`) — Donut's trail is a dark
 // violet, not slot 0's rose.
 
-/** OKLab lightness / chroma of a mark's BODY. The floor measured L 0.48–0.52, C 0.12–0.14 on
- *  `d1b2621`'s canonical frames; V1's acceptance asks ΔL ≤ −0.15. Set from the rendered
- *  measurement in the commit that introduced it, not from this algebra. */
-const MARK_BODY_L = 0.33;
-const MARK_BODY_C = 0.13;
-/** The RIM — between the body and the floor. It must stay LIGHTER than the body's brightest
- *  churn (`groundMarks.ts` FRAG: body x 1.06 at most) or a neighbour's rim prints inside the
- *  union. */
-const MARK_RIM_L = 0.44;
-const MARK_RIM_C = 0.15;
-/** Rim band width, in units of the mark's radius. */
-const MARK_RIM_W = 0.11;
-/** The AA fringe ramps toward rim x this, which must be at or above any floor it lands on —
- *  `min` then resolves the fringe to the floor itself. Too high only sharpens the edge; too
- *  low leaves a step where the fragment is discarded. */
-const MARK_EDGE_K = 2.6;
+// ⚠️ **V1b REVERSED THE VALUES BELOW, AND THE OLD WORDING IS KEPT PER THIS FILE'S RULE.** V1 drew
+// the union with `MIN` at a fixed body/rim colour:
+//   *"OKLab lightness / chroma of a mark's BODY. The floor measured L 0.48–0.52, C 0.12–0.14 on
+//   `d1b2621`'s canonical frames; V1's acceptance asks ΔL ≤ −0.15."* — `MARK_BODY_L = 0.33`,
+//   `MARK_BODY_C = 0.13`, `MARK_RIM_L = 0.44`, `MARK_RIM_C = 0.15`, `MARK_RIM_W = 0.11` (radius
+//   units), `MARK_EDGE_K = 2.6` (the AA fringe ramped toward rim x this so `min` resolved it to
+//   the floor).
+// It met "spent dark" at ΔL −0.19…−0.23 and the w5 blind round read it as a HOLE (6 of 8 cast
+// notes: "dark purple smoke blob", "a near-black smear that reads like a hole torn in the floor"):
+// `MIN` REPLACES the floor, so its seams vanished inside the union (2–21% of their contrast kept,
+// `tools/tmp/v1b_stain.py` on `f6aabdc`). The stain is now a MULTIPLY over a per-pixel union
+// (`src/vfx/groundMarks.ts` header): darker, tinted FLOOR, its seams and cells still there.
+
+// ── THE MULTIPLY HAPPENS BEFORE THE GRADE, SO ITS ON-SCREEN STEP IS MEASURED, NOT ASSUMED ──
+// The scene renders linear into a half-float target and `render/stage.ts`'s `ToyGradeEffect` then
+// grades it in display space — a shadow toe, a contrast S, and a gamut-limited SATURATION BOOST
+// about luma (1.19). A scene-space multiply is therefore not the screen-space multiply it looks
+// like: the first build solved these constants against the floor's SCREEN colour, at tint 0.5 /
+// −0.08, and measured on screen a per-channel ratio of (0.47, 0.21, 1.00) where the factor was
+// (0.62, 0.47, 0.83) — ΔL −0.10…−0.12 and chroma +0.015 over the floor (`v1b_stain.py`). The
+// grade, emulated from its shader and its shipped uniforms, reproduces that ratio to ±0.01
+// (0.471, 0.205, 0.992), and inverting it puts the floor's SCENE colour at (0.225, 0.118, 0.164):
+// far less saturated than what reaches the screen. The constants below are solved there.
+
+/** How far below the floor the stain sits, in OKLab L, on `STAIN_REF_FLOOR` in SCENE space. The
+ *  grade stretches it: −0.055 here is ~−0.08 on screen (emulated −0.079; measured by
+ *  `tools/tmp/v1b_stain.py`, see the commit), inside the V1b brief's [−0.12, −0.04] — a clear
+ *  step, not near-black. Prop shadows on this floor sit ~0.05 below it, so the stain is a step
+ *  past a shadow and the owner's dye says what kind of step. */
+const STAIN_DL = -0.055;
+/** The dye's strength: 0 = a neutral darkening, 1 = the owner's colour, normalised to its brightest
+ *  channel, as the full multiply. The grade roughly doubles a multiply's hue shift and adds chroma
+ *  to it, so 0.25 is the most dye that keeps the stain at the floor's own chroma ON SCREEN (emulated
+ *  ΔC +0.004 for Donut's violet, hue 353° -> 340°; at 0.5 it was +0.04, i.e. louder than the
+ *  floor it stains — V1's §2.5 defect in a new colour). */
+const STAIN_TINT = 0.25;
+/** The floor the dye is solved against, in SCENE-LINEAR sRGB (before the grade): the grade
+ *  inverted from the floor's on-screen colour under V1's five canonical stains on `f6aabdc`
+ *  (linear (0.33, 0.055, 0.15): OKLab L 0.51, C 0.128, h 353°). A different surface takes the same
+ *  FACTOR, i.e. a proportionally darker version of itself. */
+const STAIN_REF_FLOOR: [number, number, number] = [0.225, 0.118, 0.164];
+/** The soft edge, in METRES either side of the union's boundary (the sim's damage radius x
+ *  lobes): coverage is 1 at `-STAIN_SOFT_IN`, 0.5 on the boundary, 0 at `+STAIN_SOFT_OUT`. A
+ *  0.20 m ramp is ~9 px at the canonical match framing — soft, and the hazard's edge still sits
+ *  where it hurts. */
+const STAIN_SOFT_IN = 0.10;
+const STAIN_SOFT_OUT = 0.10;
+/** A dried EDGE: a little extra darkening in a band just inside the union's boundary (a stain's
+ *  "coffee ring"), so the boundary of the area that hurts is legible without a hard outline. It is
+ *  a function of the UNION's distance, so it prints only on the pile's outer boundary.
+ *  `STAIN_RIM_K` multiplies the dye at the band's peak (1 = no rim). */
+const STAIN_RIM_K = 0.88;
+const STAIN_RIM_C = 0.16;
+const STAIN_RIM_W = 0.12;
 /** A new mark grows from nothing over this long, and an expiring one shrinks to nothing over
  *  the last `MARK_SHRINK_MS` of its life — so the union's tail RECEDES instead of a whole
- *  lobe blinking out. Radius, not opacity: `MIN` has no opacity. */
+ *  lobe blinking out. Radius, not opacity: `MIN` has no opacity (V1b: the multiply has no opacity
+ *  either — coverage comes from the union's distance — so radius is still the only knob). */
 const MARK_GROW_MS = 140;
 const MARK_SHRINK_MS = 700;
 /** Splats carry no owner (`state.ts:Splat`), so they keep one hue: tomato red-orange, the
@@ -1422,7 +1479,13 @@ const UNION_CORE_OPACITY = 1.0;
  * sprite sitting on the victim for the whole dwell, which is the *"effect that hides
  * the thing it is giving feedback about"* this file already has a scar from.
  */
-const UNION_CORE_LIFE_S = 0.34;
+// ⚠️ V1b: WAS 0.34, AND THE PARAGRAPH ABOVE ALREADY SAID WHY IT SHOULD NOT BE. "A core is a
+// POP, not a dwell", benchmarked against burst()'s 0.16–0.24 s flash — and then shipped half
+// again as long. With `depthTest: false` over the victim it was 8.5% of every effect-covered
+// body pixel in the canonical Donut-v-Taco fight and 10% at six seats
+// (`tools/tmp/v1b_cover.mjs`, family `unionCores`). 0.22 s is inside the flash's own range;
+// the peak — size, whiteness, full opacity, the spike profile — is untouched.
+const UNION_CORE_LIFE_S = 0.22;
 /** `(1 - t)^this` — slightly faster than linear. */
 const UNION_CORE_FADE = 1.1;
 /**
@@ -2936,6 +2999,13 @@ export class VfxLayer {
    * its position, matching every other projectile-flight behaviour. Reset to 0 in
    * `clear()` so a match restart never reads a huge bogus first-frame delta. */
   private lastSyncElapsedMs = 0;
+  /** V1b — the recent impacts a later pellet is matched against (`spawnImpactBurst`). Pruned
+   *  on every impact; at most a few entries live (one per victim hit in the last 150 ms). */
+  private readonly recentImpacts: { x: number; y: number; t: number }[] = [];
+  /** QA: impacts drawn as REPEATS (a later pellet of a volley) since the layer was built.
+   *  Read by `tools/tmp/v1b_cover.mjs`; a separate field rather than a `VfxQaKey`, because
+   *  that union is also the `__vfxSpawnTest` kind list other probes enumerate. */
+  qaImpactRepeats = 0;
 
   // Shared geometry — every instance of a given kind reuses the same buffers.
   private readonly projectileGeo = new THREE.SphereGeometry(wu(10), 10, 8);
@@ -2968,14 +3038,17 @@ export class VfxLayer {
   private readonly shellSize = new THREE.Vector3();
 
   // ── PERSISTENT GROUND MARKS — one union, one draw (see `src/vfx/groundMarks.ts`) ──
-  // The trail and the splats share ONE batch: `MIN` makes their overlap idempotent too, and
-  // the pile costs one draw call whatever its size (the old path was one per mark).
+  // The trail and the splats share ONE batch: the per-pixel union makes their overlap
+  // idempotent too (V1: `MIN` did), and the pile costs one draw call whatever its size (the
+  // old path was one per mark).
   // Built here, before the pools, so its place in `this.group` is fixed and early — the
   // same scene-graph-order argument `statusBySlot` below makes for its own visuals.
-  private readonly groundMarks = new GroundMarkBatch('vfx_ground_mark', TRAIL_Y, MARK_RIM_W, MARK_EDGE_K);
-  /** Body/rim colours per hue source, memoised: an OKLab solve is cheap but not free, and
-   *  it runs per mark per frame otherwise. */
-  private readonly markColors = new Map<string, { body: [number, number, number]; rim: [number, number, number] }>();
+  private readonly groundMarks = new GroundMarkBatch('vfx_ground_mark', TRAIL_Y, {
+    softIn: STAIN_SOFT_IN, softOut: STAIN_SOFT_OUT, rimK: STAIN_RIM_K, rimC: STAIN_RIM_C, rimW: STAIN_RIM_W,
+  });
+  /** Stain factors per hue source, memoised: the solve is a 40-step bisection, cheap but not
+   *  free, and it would run per mark per frame otherwise. */
+  private readonly markColors = new Map<string, { stain: [number, number, number] }>();
   /** Blue Cheese: one cloud per living wearer, one draw for all of them. Above the marks so a
    *  wearer walking through goo still shows his boundary. */
   private readonly ribbons = new RibbonBatch(RIBBON_MAX, RIBBON_POINTS);
@@ -2983,13 +3056,14 @@ export class VfxLayer {
   private readonly ribbonRgb = new Map<string, [number, number, number]>();
   private readonly cheeseClouds = new BlueCheeseClouds(TRAIL_Y + 0.03, MAX_FIGHTERS, CHEESE_HAZE, CHEESE_EDGE, CHEESE_HAZE_A, CHEESE_EDGE_A);
 
-  /** The (linear) body and rim a mark keyed to `hex` draws in — `hex`'s hue at this file's
-   *  mark VALUES. Public for QA: a probe reads the colour a character's trail resolves to
-   *  through the same function the draw uses. */
-  markColorFor(hex: string): { body: [number, number, number]; rim: [number, number, number] } {
+  /** The (linear) MULTIPLY factor a mark keyed to `hex` stains the floor with at full coverage —
+   *  `hex` as a dye at `STAIN_TINT`, darkened to `STAIN_DL` on `STAIN_REF_FLOOR`. (Until V1b this
+   *  returned a `MIN` body and rim colour.) Public for QA: a probe reads the factor a character's
+   *  trail resolves to through the same function the draw uses. */
+  markColorFor(hex: string): { stain: [number, number, number] } {
     let c = this.markColors.get(hex);
     if (!c) {
-      c = { body: linAtLC(hex, MARK_BODY_L, MARK_BODY_C), rim: linAtLC(hex, MARK_RIM_L, MARK_RIM_C) };
+      c = { stain: stainFactor(hex, STAIN_REF_FLOOR, STAIN_DL, STAIN_TINT) };
       this.markColors.set(hex, c);
     }
     return c;
@@ -3386,7 +3460,7 @@ export class VfxLayer {
             damage: p.damage,
             weapon: p.weapon,
             characterId: owner.characterId,
-            spawnTransient: (obj, life, onUpdate) => this.spawnTransientObject(obj, life, onUpdate),
+            spawnTransient: (obj, life, onUpdate) => { obj.userData.vfxSrc = `${owner.characterId}.${p.weapon.key}.projectile`; this.spawnTransientObject(obj, life, onUpdate); },
           };
           const obj = bespoke.projectile(ctx);
           // A bespoke projectile is created by `syncPool`, not by `spawnTransient`, so
@@ -3474,7 +3548,7 @@ export class VfxLayer {
             damage: p.damage,
             weapon: p.weapon,
             characterId: owner.characterId,
-            spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
+            spawnTransient: (o, life, onUpdate) => { o.userData.vfxSrc = `${owner.characterId}.${p.weapon.key}.trail`; this.spawnTransientObject(o, life, onUpdate); },
             object: obj,
             dt: frameDtSeconds,
           };
@@ -3654,7 +3728,7 @@ export class VfxLayer {
       const pos = groundPos(t.x, t.y);
       this.groundMarks.push({
         x: pos.x, z: pos.z, r: markRadius(t.expiresAt - TRAIL.durationMs, t.expiresAt, TRAIL.radius),
-        seed: (spinForId(t.id) / (Math.PI * 2)) % 1, body: col.body, rim: col.rim,
+        seed: (spinForId(t.id) / (Math.PI * 2)) % 1, stain: col.stain,
       });
     }
     {
@@ -3663,7 +3737,7 @@ export class VfxLayer {
         const pos = groundPos(sp.x, sp.y);
         this.groundMarks.push({
           x: pos.x, z: pos.z, r: markRadius(sp.expiresAt - SPLAT_DURATION_MS, sp.expiresAt, SPLAT_RADIUS),
-          seed: (spinForId(sp.id) / (Math.PI * 2)) % 1, body: col.body, rim: col.rim,
+          seed: (spinForId(sp.id) / (Math.PI * 2)) % 1, stain: col.stain,
         });
       }
     }
@@ -3892,7 +3966,13 @@ export class VfxLayer {
   /** `ctx.spawnTransient` for every `WeaponVfx` hook (see `vfx/weapons/types.ts`):
    * adds `object` to the VFX layer and removes it again after `lifetimeSeconds`,
    * calling `onUpdate(progress, elapsedSeconds)` once per `updateEffects` tick in
-   * between so an author can fade/scale/move it over its life. */
+   * between so an author can fade/scale/move it over its life.
+   *
+   * QA: each of the five hook sites that build a `ctx` stamps
+   * `object.userData.vfxSrc = '<character>.<weapon key>.<hook>'` before calling this
+   * (V1b) — `tools/tmp/v1b_cover.mjs` attributes body cover to a weapon hook by it, so
+   * "the bespoke effects cover the fighters" can name WHICH weapon file. Nothing in the
+   * game reads it. */
   private spawnTransientObject(
     object: THREE.Object3D,
     lifetimeSeconds: number,
@@ -4359,7 +4439,7 @@ export class VfxLayer {
       // Everything the hook spawns is TAGGED WITH THE CASTER, so `cancelCastTelegraph`
       // tears the bespoke half down with the generic half. Without this an interrupted
       // cast would keep its gathering beats animating over a corpse.
-      spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate, fighterId),
+      spawnTransient: (o, life, onUpdate) => { o.userData.vfxSrc = `${characterId}.${weapon.key}.telegraph`; this.spawnTransientObject(o, life, onUpdate, fighterId); },
     };
     bespokeTelegraph(ctx);
   }
@@ -4501,7 +4581,9 @@ export class VfxLayer {
     const color = weapon.color;
 
     const bespoke = getWeaponVfx(characterId, weapon.key)?.cast;
-    this.castMuzzle(origin.x + fx * offM, origin.z + fy * offM, color, bespoke ? 'subordinate' : 'primary');
+    // The MUZZLE sits further out than the bespoke cast's origin (`offM`) — V1b, see
+    // `MUZZLE_OFF_M`. The bespoke `ctx.position` below is unchanged.
+    this.castMuzzle(origin.x + fx * MUZZLE_OFF_M, origin.z + fy * MUZZLE_OFF_M, color, bespoke ? 'subordinate' : 'primary');
     if (!bespoke) return;
 
     const ctx: WeaponVfxCtx = {
@@ -4512,7 +4594,7 @@ export class VfxLayer {
       damage: weapon.damage,
       weapon,
       characterId,
-      spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
+      spawnTransient: (o, life, onUpdate) => { o.userData.vfxSrc = `${characterId}.${weapon.key}.cast`; this.spawnTransientObject(o, life, onUpdate); },
     };
     bespoke(ctx);
   }
@@ -4579,13 +4661,19 @@ export class VfxLayer {
   private castMuzzle(xM: number, zM: number, color: string, role: 'primary' | 'subordinate'): void {
     const k = role === 'primary' ? 1 : 0.75;
     const p = this.allocParticle();
+    p.sprite.userData.vfxKind = 'muzzle'; // QA: v1b_cover attributes body cover by it
     p.active = true;
     p.life = 0;
     p.maxLife = role === 'primary' ? 0.16 : 0.13;
     p.sprite.visible = true;
     p.sprite.position.set(xM, CAST_HEIGHT, zM);
     p.vx = 0; p.vy = 0; p.vz = 0; p.gravity = 0;
-    p.startScale = 0.75 * k; p.endScale = 1.3 * k;
+    // V1b: the start (the pop, the cast READ) is unchanged; the swell is not — 1.3k -> 1.05k.
+    // The swell is the half that landed on the caster: with the old 0.7 m offset a 1.3 m
+    // sprite reached back to 0.05 m from the caster's own centre, and the muzzle was the
+    // second-largest thing on any body in the canonical fight (19% of covered body pixels,
+    // `tools/tmp/v1b_cover.mjs --plan duel`, `particles:muzzle`). See `MUZZLE_OFF_M`.
+    p.startScale = 0.75 * k; p.endScale = MUZZLE_END_SCALE * k;
     // Full opacity in both roles. The anchor is made subordinate by SIZE, not by
     // dimming: rule 1 of the colour contract above requires every transient to clear
     // the cast's luma 0.302 by >= 0.15 upward, and a half-opacity additive sprite over
@@ -4754,12 +4842,32 @@ export class VfxLayer {
 
     const bespoke = source && getWeaponVfx(source.characterId, source.weapon.key)?.impact;
 
+    // ── V1b: ONE SET OF HIT MARKS PER VOLLEY, NOT ONE PER PELLET ────────────────
+    // `hit-landed` fires per PELLET and at the victim's own position, so Sprinkle Spray's
+    // five pellets drew five full generic bursts on one fighter in the same frame — ten
+    // ground rings and five star decals, concentric — and Candy Barrage's three drew three
+    // sets of the donut's hoops: the "overlapping translucent rings" 5 of 8 w5 cast critics
+    // named. A hit within `IMPACT_REPEAT_MS` / `IMPACT_REPEAT_WU` of an earlier one is a
+    // REPEAT: it keeps its per-pellet POP (flash, sparks, shards, the bespoke debris) and
+    // skips the once-per-hit GROUND marks; bespoke hooks are told via `ctx.repeat`. The
+    // window is anchored on the first hit (a repeat does not extend it), so a sustained
+    // stream still lays a fresh set of marks every `IMPACT_REPEAT_MS`.
+    const now = this.lastSyncElapsedMs;
+    let repeat = false;
+    for (let i = this.recentImpacts.length - 1; i >= 0; i--) {
+      const r = this.recentImpacts[i];
+      if (now - r.t > IMPACT_REPEAT_MS || now < r.t) { this.recentImpacts.splice(i, 1); continue; }
+      if (Math.hypot(r.x - xWU, r.y - yWU) <= IMPACT_REPEAT_WU) repeat = true;
+    }
+    if (!repeat) this.recentImpacts.push({ x: xWU, y: yWU, t: now });
+    if (repeat) this.qaImpactRepeats++;
+
     // ── THE ANCHOR, UNCONDITIONAL, UNDER THE BESPOKE HOOK ───────────────────────
     // Same position in the function, and for the same reason, as `castMuzzle` in
     // `spawnCastFlash`: the beat every weapon shares is drawn for every weapon, and a
     // bespoke `impact()` adds this weapon's identity ON TOP of it instead of replacing
     // it. `'primary'` is byte-for-byte the generic burst that used to live below.
-    this.impactAnchor(origin, color, amount, bespoke ? 'subordinate' : 'primary');
+    this.impactAnchor(origin, color, amount, bespoke ? 'subordinate' : 'primary', repeat);
 
     if (bespoke && source) {
       let dirX = 0;
@@ -4776,7 +4884,8 @@ export class VfxLayer {
         damage: amount,
         weapon: source.weapon,
         characterId: source.characterId,
-        spawnTransient: (o, life, onUpdate) => this.spawnTransientObject(o, life, onUpdate),
+        spawnTransient: (o, life, onUpdate) => { o.userData.vfxSrc = `${source.characterId}.${source.weapon.key}.impact`; this.spawnTransientObject(o, life, onUpdate); },
+        repeat,
       };
       // UNION SHADE — every lobe this hook spawns becomes a member of ONE mass, and
       // the core/edge/falloff treatment is applied to that mass rather than to each
@@ -4973,6 +5082,8 @@ export class VfxLayer {
     color: string,
     amount: number,
     role: 'primary' | 'subordinate',
+    /** V1b: a later pellet of the same volley — see `spawnImpactBurst`. */
+    repeat = false,
   ): void {
     const k = role === 'primary' ? 1 : IMPACT_ANCHOR_K;
     // `sizeFactor` is the ONE knob every element of `burst()` is multiplied by, so
@@ -5033,9 +5144,13 @@ export class VfxLayer {
     // scaled: two chunks is what makes a hit read as a hit at all.
     const shards = Math.max(2, Math.round(THREE.MathUtils.clamp(1 + amount * 0.4, 2, 8) * k));
     if (role === 'primary') {
-      this.burst(origin, color, sizeFactor, shards);
+      // V1b: a repeat keeps the POP (flash, streaks, shards — what the hit felt like) and
+      // drops the GROUND half (decal + both rings — where it landed, already marked).
+      this.burst(origin, color, sizeFactor, shards, repeat ? { skipRing: true, skipDecal: true } : undefined);
       return;
     }
+    // V1b: the subordinate anchor IS the ground half (see below), so a repeat draws none of it.
+    if (repeat) return;
 
     // ── THE SUBORDINATE ANCHOR IS THE GROUND HALF OF `burst()`, NOT A SMALL COPY ──
     //
@@ -5171,6 +5286,7 @@ export class VfxLayer {
     const count = 7;
     for (let i = 0; i < count; i++) {
       const p = this.allocParticle();
+      p.sprite.userData.vfxKind = 'heal'; // QA: v1b_cover attributes body cover by it
       const ang = (i / count) * Math.PI * 2 + Math.random() * 0.5;
       // Outside the body's visible half-width (~0.55 m) from the first frame, so no
       // particle ever has to survive being composited over the character.
@@ -5241,6 +5357,7 @@ export class VfxLayer {
     const count = 5;
     for (let i = 0; i < count; i++) {
       const p = this.allocParticle();
+      p.sprite.userData.vfxKind = 'puddle'; // QA: v1b_cover attributes body cover by it
       const ang = (i / count) * Math.PI * 2 + Math.random() * 1.0;
       // Rim of the fighter's own footprint. `CHARACTER_RADIUS` is the sim's collision
       // radius (1.05 m); 0.6 of it clears the visible silhouette without throwing the
@@ -5330,6 +5447,7 @@ export class VfxLayer {
     // The contact pop. Small — 0.85 m against the generic impact flash's 0.5-1.15x
     // sizeFactor (1.4-3.2 m for a real hit) — and short.
     const flash = this.allocParticle();
+    flash.sprite.userData.vfxKind = 'scuffFlash'; // QA: v1b_cover attributes body cover by it
     flash.active = true; flash.life = 0; flash.maxLife = 0.12;
     flash.sprite.visible = true;
     flash.sprite.position.set(origin.x, PROJECTILE_HEIGHT, origin.z);
@@ -5358,6 +5476,7 @@ export class VfxLayer {
       const ax = bx * c - bz * s;
       const az = bx * s + bz * c;
       const p = this.allocParticle();
+      p.sprite.userData.vfxKind = 'scuff'; // QA: v1b_cover attributes body cover by it
       p.mat.map = this.streakTex;
       p.mat.rotation = Math.atan2(az, ax);
       p.aspect = 0.22;
@@ -5453,6 +5572,7 @@ export class VfxLayer {
       this.spawnStarPop(origin, IMPACT_HEIGHT * 1.5, color, 5.2, 0.38);
 
       const flash = this.allocParticle();
+      flash.sprite.userData.vfxKind = 'slamFlash'; // QA: v1b_cover attributes body cover by it
       flash.active = true; flash.life = 0; flash.maxLife = 0.3;
       flash.sprite.visible = true;
       flash.sprite.position.set(origin.x, IMPACT_HEIGHT * 1.5, origin.z);
@@ -5529,6 +5649,7 @@ export class VfxLayer {
 
     if (!opts?.skipFlash) {
       const flash = this.allocParticle();
+      flash.sprite.userData.vfxKind = 'impactFlash'; // QA: v1b_cover attributes body cover by it
       flash.active = true; flash.life = 0; flash.maxLife = (0.16 + sizeFactor * 0.04) * life;
       flash.sprite.visible = true;
       flash.sprite.position.set(origin.x, IMPACT_HEIGHT, origin.z);
@@ -5761,6 +5882,9 @@ export class VfxLayer {
     slot.mat.map = this.glowTex;
     slot.mat.rotation = 0;
     slot.aspect = 1;
+    // QA only: the caller says what it is using the slot for (`v1b_cover.mjs`); a slot reused
+    // by a caller that does not say must not keep the last one's word.
+    slot.sprite.userData.vfxKind = undefined;
     return slot;
   }
 
@@ -5783,6 +5907,12 @@ export class VfxLayer {
   /** Radiating hit-spark rays out of an impact point — thin bright streaks at random
    * angles, reusing one texture via per-sprite `SpriteMaterial.rotation`. This is
    * what separates a "concentrated hit" from a generic puff of particles. */
+  // ⚠️ V1b TRIED RADIATING THESE FROM A RING AT THE BODY'S EDGE AND REVERTED IT, MEASURED:
+  // body cover from `particles:streak` went UP, 0.008 -> 0.014 of all body pixels
+  // (`tools/tmp/v1b_cover.mjs --plan duel`). The particle sprites are DEPTH-TESTED, so a ray
+  // centred on the victim at hit height is mostly hidden INSIDE the fighter — the body's own
+  // front surface occludes the bright middle — and moving it out to the edge put it in
+  // front of the body instead. The centred burst stays.
   private spawnStreaks(origin: { x: number; z: number }, height: number, color: string, count: number, length: number, life: number): void {
     for (let i = 0; i < count; i++) {
       const p = this.allocParticle();
@@ -5845,6 +5975,9 @@ export class VfxLayer {
     // Ground marks are rebuilt from `state` on every `sync()`; an empty batch is the reset.
     this.groundMarks.begin();
     this.groundMarks.end(0);
+    // A new match's clock restarts at 0: last match's impacts must not make its first hit a
+    // "repeat" (the `now < r.t` prune in `spawnImpactBurst` would catch it too).
+    this.recentImpacts.length = 0;
     this.cheeseClouds.begin();
     this.cheeseClouds.end(0);
     this.ribbons.begin();
