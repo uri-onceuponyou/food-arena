@@ -1130,7 +1130,12 @@ interface NavGrid {
   /** Identity of the cover array the grid was built from; rebuild if the arena swaps it. */
   cover: CoverBox[];
   passable: Uint8Array;
-  /** Grid steps from each cell to `goalCell`; -1 = not reached (unreachable or unbuilt). */
+  /**
+   * Grid steps from each cell to `goalCell`; -1 = not reached (unreachable or unbuilt).
+   * ⚠️ This, `goalCell` and `requestedGoal` are the field of the fighter steering RIGHT NOW:
+   * `navSteer` swaps that fighter's own `NavField` in before the query and stores it back
+   * after. Nothing else reads them. See `NAV_FIELDS`.
+   */
   dist: Int32Array;
   /** BFS frontier. Length = cell count, because each cell is enqueued at most once. */
   queue: Int32Array;
@@ -1160,6 +1165,9 @@ export const navStats = {
   cellsVisited: 0,
   queries: 0,
   losChecks: 0,
+  /** Queries whose goal was in another connected component (the re-root below). Counted so a
+   *  fixture that claims to exercise that branch can be shown to (`tools/tmp/b7_reroot.mjs`). */
+  reroots: 0,
   cols: 0,
   rows: 0,
   cellSize: NAV_CELL,
@@ -1170,6 +1178,7 @@ export const navStats = {
     this.cellsVisited = 0;
     this.queries = 0;
     this.losChecks = 0;
+    this.reroots = 0;
   },
 };
 
@@ -1324,12 +1333,74 @@ function navClearPath(x0: number, y0: number, x1: number, y1: number, size: numb
 const NAV_OUT = { dirX: 0, dirY: 0, wpX: 0, wpY: 0 };
 
 /**
+ * ── 🚨 EVERY FIGHTER FLOODS ITS OWN FIELD (AI-B5, `docs/REVAMP.md` §5 B5 → B7) ──────────
+ *
+ * There used to be ONE distance field per arena, inside the `NavGrid`, keyed by the last goal
+ * ASKED for. One bot steering is the case it was written for and the case it is right for. Two
+ * bots with different goals evict each other: every query found the other bot's goal cached
+ * and flooded a fresh BFS. Measured by B5 on the shipped kitchen (`tools/tmp/b5_navcost.mjs`,
+ * all-bot whole matches, re-measured on `7360289`): **0.85–0.96 floods per nav query at two to
+ * six seats, 110–177 floods per second of play, 16–26k BFS cells per tick** — against a lone
+ * bot's handful. That is the AI's single largest cost at six seats (`docs/NETCODE.md` §5).
+ *
+ * So each fighter keeps its OWN field (`dist`, `goalCell`, `requestedGoal`) over the SHARED
+ * passability grid, and `navSteer` swaps it into the grid around the query. The query itself —
+ * `navSteerOn` below — is the old body unchanged, which is the bit-identity argument: on a
+ * connected floor a field is a pure function of its goal cell, so WHO flooded it last cannot
+ * change what it says, only how often it is flooded.
+ *
+ * ⚠️ ONE PLACE IT IS NOT A PURE FUNCTION: the re-root. When the goal is in another connected
+ * component, the stand-in goal is the reachable cell nearest the TARGET POINT of the query that
+ * built the field, and a cached field keeps that stand while the goal cell holds. A lone bot
+ * always behaved that way; with one shared field, a second bot's query re-flooded it against a
+ * fresher point. So the two caches may pick different stands — `tools/tmp/b7_reroot.mjs`
+ * measures it on a split arena.
+ *
+ * ⚠️ KEYED ON THE FIGHTER OBJECT, so nothing is added to `Fighter` (every bit-identity differ
+ * here walks state with `Object.keys`, and `net/wire.ts` would ship a 56 KB array per fighter)
+ * and a finished match's fields are collected with its fighters. The cost of that choice, for
+ * whoever wires `src/net/` (inert today): `wire.ts:cloneMatchState` makes NEW fighter objects,
+ * so every rollback replay starts each bot's field cold — one flood per bot per replay.
+ * A grid rebuilt under a field (new cover array, new size) orphans it: `grid` is checked.
+ */
+interface NavField {
+  /** The grid this field was flooded over. A rebuilt grid makes the field meaningless. */
+  grid: NavGrid;
+  dist: Int32Array;
+  goalCell: number;
+  requestedGoal: number;
+}
+
+const NAV_FIELDS = new WeakMap<Fighter, NavField>();
+
+function navFieldOf(g: NavGrid, fighter: Fighter): NavField {
+  let field = NAV_FIELDS.get(fighter);
+  if (field === undefined || field.grid !== g) {
+    field = { grid: g, dist: new Int32Array(g.passable.length), goalCell: -1, requestedGoal: -1 };
+    NAV_FIELDS.set(fighter, field);
+  }
+  return field;
+}
+
+/**
  * Ask the flow field which way to go. Writes `NAV_OUT` and returns true when it has an
  * answer; returns false — leaving the caller on its straight-line bearing — when the map
  * genuinely offers no route, which is the honest answer rather than a fabricated one.
  */
 function navSteer(arena: ArenaDefinition, fighter: Fighter, targetX: number, targetY: number): boolean {
   const g = navGrid(arena, fighter.size);
+  const field = navFieldOf(g, fighter);
+  g.dist = field.dist;
+  g.goalCell = field.goalCell;
+  g.requestedGoal = field.requestedGoal;
+  const ok = navSteerOn(g, arena, fighter, targetX, targetY);
+  field.goalCell = g.goalCell;
+  field.requestedGoal = g.requestedGoal;
+  return ok;
+}
+
+/** The query, on whichever fighter's field `navSteer` swapped into `g`. */
+function navSteerOn(g: NavGrid, arena: ArenaDefinition, fighter: Fighter, targetX: number, targetY: number): boolean {
   const { cell, cols, rows, dist, chain } = g;
   const half = fighter.size / 2;
 
@@ -1376,6 +1447,7 @@ function navSteer(arena: ArenaDefinition, fighter: Fighter, targetX: number, tar
   if (g.requestedGoal !== goal || dist[me] < 0) {
     navBuildField(g, goal);
     if (dist[me] < 0) {
+      navStats.reroots++;
       navBuildField(g, me);
       let stand = me;
       let bestD = Infinity;
