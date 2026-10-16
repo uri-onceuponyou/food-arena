@@ -190,6 +190,8 @@ if (IS_MAIN && !ARGS.includes('--compare')) {
       [rerun, 'the same cell re-run digests identically (determinism)'],
     ];
     for (const [ok, msg] of rows) console.log(`${ok ? 'PASS' : 'FAIL'}  ${msg}`);
+    // A COUNT LINE (T1b, 2026-10-16): gatecount registers this selftest against it.
+    console.log(`\nb5_digest --selftest: ${rows.filter(([ok]) => ok).length} passed, ${rows.filter(([ok]) => !ok).length} failed`);
     process.exit(rows.every(([ok]) => ok) ? 0 : 1);
   }
 

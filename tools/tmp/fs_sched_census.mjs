@@ -62,9 +62,9 @@ const RULES = await import(`${ROOT}/src/game/rules.ts`);
 const { FOG_HOLD_MS, MATCH_DURATION_MS, fogOpeningRadiusFor } = RULES;
 
 const args = new Set(process.argv.slice(2));
-let failures = 0;
+let failures = 0, passes = 0;
 const check = (name, pass, detail = '') => {
-  if (!pass) failures++;
+  if (!pass) failures++; else passes++;
   console.log(`  ${pass ? 'ok  ' : 'FAIL'} - ${name}${detail ? `\n         ${detail}` : ''}`);
 };
 
@@ -326,4 +326,7 @@ if (args.has('--knownbad')) {
 }
 
 console.log(`\n${failures ? `${failures} FAILED` : 'all rows passed'}`);
+// The CHECK count, for gatecount's row (T1b, 2026-10-16) — never the copy count, which is a
+// worklist that moves as copies are fixed and is deliberately not pinned (see the note above).
+console.log(`fs_sched_census${args.has('--knownbad') ? ' --knownbad' : ''}: ${passes} passed, ${failures} failed`);
 process.exit(failures ? 1 : 0);

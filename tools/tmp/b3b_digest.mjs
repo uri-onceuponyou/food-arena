@@ -28,6 +28,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { argv } from './bh_combat_lib.mjs';
 
 const ARGS = process.argv.slice(2);
@@ -62,7 +63,12 @@ if (ARGS.includes('--compare')) {
 
 const { loadSim, kitchenArena } = await import('./bh_combat_lib.mjs');
 const ROOT = argv('root', undefined);
-const S = await loadSim(ROOT);
+// ⚠️ T1b 2026-10-16 — this was `loadSim(ROOT)`, and with no --root that falls through to
+// bh_combat_lib's DEFAULT_ROOT, `/private/tmp/fa-rv-head`: a review-phase worktree (at 1090046 that
+// day), so `--selftest` digested ANOTHER tree's sim — and would crash wherever that path is absent.
+// b5_digest's rule, copied: --selftest runs on THIS tree; a measurement run must name its tree.
+if (!ROOT && !ARGS.includes('--selftest')) { console.error('b3b_digest: --root <tree> is required (see the header)'); process.exit(2); }
+const S = await loadSim(ROOT ?? resolve(new URL('../..', import.meta.url).pathname));
 const { CHARACTER_IDS, MATCH_DURATION_MS } = S.rules;
 const arena = kitchenArena();
 const DT = 16.667;
@@ -149,6 +155,9 @@ if (ARGS.includes('--selftest')) {
   console.log(`${moved === 1 ? 'PASS' : 'FAIL'}  a planted change reads MOVED (exit ${moved})`);
   console.log(`${empty === 2 ? 'PASS' : 'FAIL'}  an empty suite reads VACUOUS, not identical (exit ${empty})`);
   console.log(`${rerun ? 'PASS' : 'FAIL'}  the same cell re-run digests identically (determinism)`);
+  // A COUNT LINE (T1b, 2026-10-16): gatecount registers this selftest against it.
+  const checks = [same === 0, moved === 1, empty === 2, rerun];
+  console.log(`\nb3b_digest --selftest: ${checks.filter(Boolean).length} passed, ${checks.filter((c) => !c).length} failed`);
   process.exit(same === 0 && moved === 1 && empty === 2 && rerun ? 0 : 1);
 }
 

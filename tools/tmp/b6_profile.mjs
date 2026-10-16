@@ -294,13 +294,18 @@ if (!SELFTEST) {
 console.log('B6 PROFILE --selftest — every row proved able to fail, on known-bad variants of the real file');
 const src = readFileSync(PROFILE, 'utf8');
 let faults = 0;
+// One CHECK per variant (its anchors all matched once AND its rows went red/green as declared) plus
+// the shipped control — counted for gatecount's row (T1b, 2026-10-16); `faults` above is unchanged.
+let checks = 0, checksPassed = 0;
 for (const [name, v] of Object.entries(VARIANTS)) {
   let text = src;
+  let anchorsOk = true;
   for (const [anchor, repl] of v.edits) {
     const n = text.split(anchor).length - 1;
     if (n !== 1) {
       console.log(`  FAIL [${name}] STALE MUTATION — anchor matched ${n}× (want 1): ${JSON.stringify(anchor.slice(0, 60))}`);
       faults++;
+      anchorsOk = false;
     }
     text = text.replace(anchor, repl);
   }
@@ -310,6 +315,8 @@ for (const [name, v] of Object.entries(VARIANTS)) {
   const wrongGreen = v.green.filter((id) => byId[id] !== true);
   const good = wrongRed.length === 0 && wrongGreen.length === 0;
   if (!good) faults++;
+  checks++;
+  if (good && anchorsOk) checksPassed++;
   console.log(`  ${good ? 'ok  ' : 'FAIL'} [${name}] ${v.why}: red ${v.red.join(' ')}${wrongRed.length ? ` — NOT RED: ${wrongRed.join(' ')}` : ''}`
     + `; green ${v.green.join(' ')}${wrongGreen.length ? ` — NOT GREEN: ${wrongGreen.join(' ')}` : ''}`);
 }
@@ -317,6 +324,9 @@ for (const [name, v] of Object.entries(VARIANTS)) {
 const real = runRows(await bundle(src));
 const realGood = real.every((r) => r.pass) && real.length === Object.keys(LABEL).length;
 if (!realGood) faults++;
+checks++;
+if (realGood) checksPassed++;
 console.log(`  ${realGood ? 'ok  ' : 'FAIL'} [shipped] the unmutated file through the SAME stdin path is all green (${real.filter((r) => r.pass).length}/${real.length})`);
 console.log(`\n══ b6_profile --selftest: ${faults === 0 ? 'every variant failed where it should' : `${faults} fault(s)`}`);
+console.log(`b6_profile --selftest: ${checksPassed} passed, ${checks - checksPassed} failed`);
 process.exit(faults === 0 ? 0 : 1);

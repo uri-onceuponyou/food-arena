@@ -532,6 +532,35 @@ const OFFLINE = [
       pr(['tools/tmp/sentinel.mjs', '--selftest'], /^\d+\/(\d+) sentinel checks passed\s*$/m),
       pr(['tools/tmp/sentinel.mjs'], /^\d+\/(\d+) sentinels passed\s*$/m),
   ] },
+  // ── T1b (2026-10-16): the campaign's instruments that sat UNREGISTERED, and T1b's own guards ──
+  // `sp6_seats` and `csx_castcost` were red with no row to show it (T1a fixed both); the rest
+  // arrived with the graphics campaign and never got a row. Every one TIMED before registering
+  // (the `hw_ord` lesson): t1b_ring 0.1 s · fs_sched_census 1 s · sp6_seats 24 s · csx_castcost
+  // 0.3 s · each b*_knownbad --selftest 17-19 s (ONE whole sim.test run: the no-op arm) · b3b/b5
+  // digest 1-2 s · b6_profile 0.2 s · b7_reroot 1 s · k1_fair 0.3 s · rv_packets 3 s. Every summary
+  // line read off a real run's raw bytes and checked to match EXACTLY ONCE; NUMERATOR, never
+  // `SLASH_ASSERT`'s denominator (`hc_occluders`' rule). Four tools printed PASS lines and no
+  // total, so they were given one (`<tool> --selftest: N passed, M failed`) in the same commit.
+  // ⚠️ The BARE b*_knownbad batteries are NOT here: every arm is a whole sim.test run, ~14 min for
+  //    the four, more than the rest of this battery together. SKIP 'slow' below; the count lives
+  //    in the table row, never here.
+  { key: 'tools/tmp/t1b_ring.mjs --selftest', probes: [pr(['tools/tmp/t1b_ring.mjs', '--selftest'], /^t1b_ring --selftest: (\d+) passed, \d+ failed\s*$/m)] },
+  { key: 'tools/tmp/fs_sched_census.mjs --knownbad', probes: [pr(['tools/tmp/fs_sched_census.mjs', '--knownbad'], /^fs_sched_census --knownbad: (\d+) passed, \d+ failed\s*$/m)] },
+  { key: 'tools/tmp/sp6_seats.mjs', probes: [pr(['tools/tmp/sp6_seats.mjs'], /SP6_SEATS: (\d+) passed, \d+ failed/)] },
+  { key: 'tools/tmp/csx_castcost.mjs --selftest', probes: [pr(['tools/tmp/csx_castcost.mjs', '--selftest'], /^\s*(\d+)\/\d+ assertions passed\s*$/m)] },
+  { key: 'tools/tmp/b3b_knownbad.mjs --selftest', probes: [pr(['tools/tmp/b3b_knownbad.mjs', '--selftest'], /^b3b_knownbad --selftest: (\d+) passed, \d+ failed\s*$/m)] },
+  { key: 'tools/tmp/b4_knownbad.mjs --selftest', probes: [pr(['tools/tmp/b4_knownbad.mjs', '--selftest'], /^b4_knownbad --selftest: (\d+) passed, \d+ failed\s*$/m)] },
+  { key: 'tools/tmp/b5_knownbad.mjs --selftest', probes: [pr(['tools/tmp/b5_knownbad.mjs', '--selftest'], /^b5_knownbad --selftest: (\d+) passed, \d+ failed\s*$/m)] },
+  { key: 'tools/tmp/b7_knownbad.mjs --selftest', probes: [pr(['tools/tmp/b7_knownbad.mjs', '--selftest'], /^b7_knownbad --selftest: (\d+) passed, \d+ failed\s*$/m)] },
+  { key: 'tools/tmp/b3b_digest.mjs --selftest', probes: [pr(['tools/tmp/b3b_digest.mjs', '--selftest'], /^b3b_digest --selftest: (\d+) passed, \d+ failed\s*$/m)] },
+  { key: 'tools/tmp/b5_digest.mjs --selftest', probes: [pr(['tools/tmp/b5_digest.mjs', '--selftest'], /^b5_digest --selftest: (\d+) passed, \d+ failed\s*$/m)] },
+  { key: 'tools/tmp/b6_profile.mjs', probes: [pr(['tools/tmp/b6_profile.mjs'], /^══ b6_profile: (\d+)\/\d+ rows pass\s*$/m)] },
+  { key: 'tools/tmp/b6_profile.mjs --selftest', probes: [pr(['tools/tmp/b6_profile.mjs', '--selftest'], /^b6_profile --selftest: (\d+) passed, \d+ failed\s*$/m)] },
+  { key: 'tools/tmp/b7_reroot.mjs --selftest', probes: [pr(['tools/tmp/b7_reroot.mjs', '--selftest'], /^b7_reroot --selftest: (\d+) passed, \d+ failed\s*$/m)] },
+  { key: 'tools/tmp/k1_fair.mjs', probes: [pr(['tools/tmp/k1_fair.mjs'], S)] },
+  // `needs`: its selftest reads the gitignored menu plates under reference/ (redaction tables are
+  // checked against the real plates) — on a tree without them it is a named SKIP, never a pass.
+  { key: 'tools/tmp/rv_packets.mjs --selftest', needs: 'reference/images/curated/menus_home', probes: [pr(['tools/tmp/rv_packets.mjs', '--selftest'], /rv_packets selftest: (\d+)\/\d+/)] },
   // Self-application. `--selftest` spawns nothing, so there is no recursion.
   { key: 'tools/tmp/gatecount.mjs --selftest',   probes: [pr(['tools/tmp/gatecount.mjs', '--selftest'], /^gatecount --selftest: (\d+) passed, \d+ failed\s*$/m)] },
 ];
@@ -647,6 +676,18 @@ const SKIP = [
   ['tools/tmp/limbcheck.mjs',              'browser',     'per-joint delivered pixels; and its expect cell is prose'],
   ['tools/tmp/cw_conceal_view.mjs',        'browser',     'concealment on rendered pixels: blip, HP pill, 3D model'],
   ['tools/tmp/tt_flatrim.mjs',             'browser',     'compiles real GL programs and reads delivered pixels back off the drawing buffer'],
+  // ── T1b (2026-10-16) ──────────────────────────────────────────────────────────────────
+  // ⚠️ 'slow' is a NEW reason and it is not 'browser': these are offline and deterministic, and
+  //    they are skipped on COST alone — each arm is one whole sim.test run on a scratch copy, so
+  //    the four batteries are ~14 min, more than every other offline gate here together. Their
+  //    `--selftest`s (the rig shown able to fail) ARE registered OFFLINE above. Run these
+  //    deliberately before merging anything that touches the sim rows they revert.
+  ['tools/tmp/b3b_knownbad.mjs', 'slow', 'every B3b fix reverted on a scratch copy of src/ must turn its own sim.test rows red — one whole suite run per arm'],
+  ['tools/tmp/b4_knownbad.mjs',  'slow', 'every B4 fix reverted (or replaced by a plausible wrong fix) must be caught by its own sim.test rows — one whole suite run per arm'],
+  ['tools/tmp/b5_knownbad.mjs',  'slow', 'every B5 fix reverted must turn its own sim.test rows red — one whole suite run per arm'],
+  ['tools/tmp/b7_knownbad.mjs',  'slow', 'every B7 fix reverted (or wrongly fixed) must turn its own §49 rows red — one whole suite run per arm'],
+  ['tools/tmp/k1_fair.mjs --base <tree>', 'needs-tree', '§E: byte-identity of every default camera matrix against a SECOND worktree — the bare run is OFFLINE above'],
+  ['tools/tmp/v2_items.mjs', 'browser', 'every item event has a visual AND an audio consumer and every item state is drawn, through a real page; PREVIEW_BASE or --url required'],
 ];
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -712,7 +753,7 @@ export function check({ toolsMd, claudeMd, offline = OFFLINE, skip = SKIP, exec 
     const off = offByKey.get(r.key);
     if (!off) {
       const sk = skipByKey.get(r.key);
-      rows.push({ key: r.key, doc: r.ints, actual: null, verdict: 'SKIP', note: sk ? `${sk.reason}: ${sk.why}` : 'unregistered', ms: 0 });
+      rows.push({ key: r.key, doc: r.ints, actual: null, verdict: 'SKIP', note: sk ? `${sk.reason}: ${sk.why}` : 'unregistered', reason: sk ? sk.reason : 'unregistered', ms: 0 });
       continue;
     }
     const nGroups = off.probes.reduce((n, p) => n + countGroups(p.re), 0);
@@ -726,7 +767,7 @@ export function check({ toolsMd, claudeMd, offline = OFFLINE, skip = SKIP, exec 
     }
     if (!run) { rows.push({ key: r.key, doc: r.ints, actual: null, verdict: 'not-run', note: '--docs-only', ms: 0 }); continue; }
     if (off.needs && !existsSync(join(ROOT, off.needs))) {
-      rows.push({ key: r.key, doc: r.ints, actual: null, verdict: 'SKIP', note: `needs gitignored ${off.needs} (absent on this tree)`, ms: 0 });
+      rows.push({ key: r.key, doc: r.ints, actual: null, verdict: 'SKIP', note: `needs gitignored ${off.needs} (absent on this tree)`, reason: 'needs-data', ms: 0 });
       continue;
     }
 
@@ -1244,7 +1285,11 @@ function summarise(rows, faults, run, secs = 0) {
   const notRunN = byVerdict.get('not-run') ?? 0;
   const rest = [...byVerdict].filter(([k]) => k !== 'OK' && k !== 'SKIP' && k !== 'not-run');
 
-  const parts = [`${okN} verified`, `${skipN} skipped (browser / non-numeric)`];
+  // The skip label names the reasons ACTUALLY skipped (T1b, 2026-10-16). It was the fixed string
+  // `(browser / non-numeric)`, which went false the day a row was skipped for needing gitignored
+  // data (T1a's `needs`) and again for 'slow' — a summary that misnames its own buckets.
+  const reasons = [...new Set(rows.filter((r) => r.verdict === 'SKIP').map((r) => r.reason ?? 'browser / non-numeric'))].sort();
+  const parts = [`${okN} verified`, `${skipN} skipped (${reasons.join(' / ') || 'none'})`];
   if (notRunN) parts.push(`${notRunN} NOT RUN (--docs-only)`);
   for (const [k, n] of rest) parts.push(`${n} ${k}`);
   parts.push(faults.length ? `${faults.length} FAULT(S)` : '0 faults');
