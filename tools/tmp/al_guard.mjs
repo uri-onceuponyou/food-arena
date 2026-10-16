@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ROOT, MAP_1X, MAXR_1X, MAXR_RETIRED_X4, SELF_EXCLUDED, isRetiredX4Scalar,
   loadArena, scanFiles, extract, classify,
-  addressesShippedArena, coverAt, quadrant, isDocFile,
+  addressesShippedArena, coverAt, collarAt, quadrant, isDocFile,
 } from './al_lib.mjs';
 
 const IS_MAIN = process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url));
@@ -175,6 +175,25 @@ const ACK = [
   ].map((file) => ({ file, code: 'IN-COVER', why:
     'ROUTED: one-shot analysis probe whose page URL or station table stands the fighter in a prop at '
     + 'a 1x coordinate. Not a gate; see the block comment above.' })),
+
+  // ── (4) THE COLLAR ARM'S FIRST FINDINGS (T1b, 2026-10-16) — coverage ARRIVING, not debt ──
+  // `IN-COLLAR` is new, and on its first run it found five fixture points in three files that
+  // the box test had passed for as long as they existed. One file is a deliberate historical
+  // query; two are live stations in BROWSER gates outside T1b's file set, so they are routed
+  // (file, symbol and a re-site are in T1b's report) rather than re-sited unverified. §E's
+  // dead-entry check retires each entry the moment its file is fixed.
+  { file: 'tools/tmp/lu2_qafog.mjs', code: 'IN-COLLAR', why:
+    'the three `old:` query strings (`px=1180&py=820`, 6 wu inside the stove_island collar) are the '
+    + 'HISTORICAL stations reproduced verbatim as the OLD arm of an A/B — the tool loads `s.old` beside '
+    + '`s.neu` and prints what each one is actually given. Re-siting them would falsify the arm.' },
+  { file: 'tools/tmp/lu_sudden.mjs', code: 'IN-COLLAR', why:
+    'ROUTED: the N=2 query `px=760&py=500` stands the player 6 wu inside the herb_crate collar (700,465) '
+    + '90x90; the sim pushes the seat out, so the frame is not taken where the query says. A browser '
+    + 'gate outside T1b\'s set: re-site to a point clear of every collar and re-run it.' },
+  { file: 'tools/tmp/sx_fog.mjs', code: 'IN-COLLAR', why:
+    'ROUTED: POS `mid` (400,400) sits 16 wu inside the freezer collar (300,300) 230x190, so the canopy '
+    + 'pixel it reads is not at the 1166.2 wu its comment states. A browser gate outside T1b\'s set: '
+    + 're-site `mid` clear of every collar (keep it between 400 and 1500 wu from centre) and re-run it.' },
 ];
 
 /**
@@ -183,8 +202,11 @@ const ACK = [
  * like: +2 for `docs/LESSONS.md`, which §M now judges and no arm judged before (so this is
  * coverage ARRIVING, not debt), and +1 for `lit_clockguard`'s control string, a genuinely
  * new hit that landed with `b203329` and is routed to its owner in the entry itself.
+ * ⚠️ 73 → 76 on 2026-10-16 (T1b), the same shape: +3 for `IN-COLLAR`, the §C arm that tests the
+ * collision COLLAR as well as the box. Its first run found five points in three files that no arm
+ * could see before — coverage arriving. Each entry names its file and fix; none is a new defect.
  */
-const ACK_BUDGET = 73;
+const ACK_BUDGET = 76;
 
 function acknowledged(rel, code) {
   return ACK.some((a) => a.file === rel && a.code === code);
@@ -305,13 +327,21 @@ function run() {
     pairHits.map((r) => `${r.file}:${r.line}  (${r.value})  ${r.why}`).join('\n         '));
 
   // §C — every fixture point is on legal ground.
-  console.log('\n§C — no fixture point inside a CoverBox or outside the playfield');
+  console.log('\n§C — no fixture point inside a CoverBox, inside its collision collar, or outside the playfield');
   const oob = code.filter((r) => r.flags.some((f) => f.code === 'OOB') && !acknowledged(r.file, 'OOB'));
   check('0 fixture points outside the playfield', oob.length === 0,
     oob.map((r) => `${r.file}:${r.line}  (${r.value})`).join('\n         '));
   const inCover = code.filter((r) => r.flags.some((f) => f.code === 'IN-COVER') && !acknowledged(r.file, 'IN-COVER'));
   check('0 fixture points inside a CoverBox', inCover.length === 0,
     inCover.map((r) => `${r.file}:${r.line}  (${r.value})  ${r.flags.find((f) => f.code === 'IN-COVER').detail}`).join('\n         '));
+  // 🚨 THE BOX IS NOT WHERE A FIGHTER STOPS (T1b, 2026-10-16). The sim collides a PLAYER_SIZE body,
+  // so a station within half a body of a box — or of a wall — is refused or pushed out exactly as
+  // one inside it is. Until this row the arm above was the only one, and A2b's first 190 wu pass
+  // put five fixtures inside a collar while it read green (`al_lib:collarAt` has the history).
+  const inCollar = code.filter((r) => r.flags.some((f) => f.code === 'IN-COLLAR') && !acknowledged(r.file, 'IN-COLLAR'));
+  check(`0 fixture points inside a cover or wall COLLISION COLLAR (a ${arena.bodySize} wu body centred there cannot stand)`,
+    inCollar.length === 0,
+    inCollar.map((r) => `${r.file}:${r.line}  (${r.value})  ${r.flags.find((f) => f.code === 'IN-COLLAR').detail}`).join('\n         '));
 
   // §D — no fixture TABLE confined to one quadrant.
   // This is the arm that would have caught `valuescan` (18/0/0/0), `arena-scan`
@@ -532,7 +562,7 @@ function retiredArm(arena, rows) {
  * fires on everything is as useless as one that fires on nothing. Seven controls in one
  * session here could not distinguish their own two arms; that is what the pairing is for.
  */
-function selftest() {
+async function selftest() {
   const arena = loadArena();
   const ctx = { shipped: true };
   const codes = (rel, text) => {
@@ -672,6 +702,66 @@ function selftest() {
   asAckedDoc.length >= 2 && asAckedDoc.every((f) => acknowledged(f.rel, f.code)),
   JSON.stringify(asAckedDoc.map((f) => `${f.code}:${acknowledged(f.rel, f.code)}`)));
 
+  /**
+   * §KB-C — THE COLLAR ARM (T1b, 2026-10-16), against the defect it exists for.
+   *
+   * The defect: a station clear of the BOX and inside the collision COLLAR — A2b's first 190 wu
+   * pass put `arena-scan`'s `west_choke` (900,1000) 20 wu clear of a box and `al_guard` read green
+   * (`a2b_district.mjs`'s own known-bad plants a 20x20 box at (925,1000) for exactly this). The
+   * implementation that FAILS this section is the one that shipped: `coverAt` alone.
+   *   C1  the collar predicate IS the sim's: `movement.ts:boxesOverlap` with `PLAYER_SIZE`, on a
+   *       lattice straddling every edge of every shipped box — not a second copy trusted to agree.
+   *   C2  the plant: the box test alone calls the station LEGAL (the blindness, reproduced), and
+   *       `classify` flags it IN-COLLAR — and not IN-COVER, so the two arms stay distinguishable.
+   *   C3  CONTROL: the same station on the shipped arena trips nothing.
+   *   C4  the edge is the sim's STRICT `<`: exactly on the collar line is legal, half a wu in is not.
+   *   C5  the walls: half a body from the outer wall is legal, one wu nearer is IN-COLLAR.
+   */
+  console.log('\n§KB-C — the collar arm: a station clear of the box but inside the collar must go red\n');
+  const MV = await import(path.join(ROOT, 'src/game/movement.ts'));
+  const RU = await import(path.join(ROOT, 'src/game/rules.ts'));
+  check('the body the guard reads is the sim\'s PLAYER_SIZE (else every collar below is the wrong width)',
+    arena.bodySize === RU.PLAYER_SIZE, `al_lib ${arena.bodySize} vs rules.ts ${RU.PLAYER_SIZE}`);
+  let lattice = 0;
+  const disagree = [];
+  for (const c of arena.cover) {
+    const ex = (arena.bodySize + c.w) / 2, ey = (arena.bodySize + c.h) / 2;
+    for (const dx of [-ex - 1, -ex, -ex + 0.5, -c.w / 2, 0, c.w / 2, ex - 0.5, ex, ex + 1]) {
+      for (const dy of [-ey - 1, -ey, -ey + 0.5, 0, ey - 0.5, ey, ey + 1]) {
+        const x = c.x + dx, y = c.y + dy;
+        if (x < arena.bodySize || y < arena.bodySize || x > arena.w - arena.bodySize || y > arena.h - arena.bodySize) continue;
+        lattice++;
+        const sim = arena.cover.some((o) => MV.boxesOverlap(x, y, RU.PLAYER_SIZE, RU.PLAYER_SIZE, o.x, o.y, o.w, o.h));
+        const ours = collarAt(arena, x, y)?.kind === 'cover';
+        if (sim !== ours) disagree.push(`(${x},${y}) sim ${sim} al_lib ${ours}`);
+      }
+    }
+  }
+  check('C1  NON-VACUITY: the lattice straddling every shipped box\'s collar edge is populated',
+    lattice > 20 * arena.cover.length, `${lattice} points over ${arena.cover.length} boxes`);
+  check('C1  the collar predicate agrees with movement.ts:boxesOverlap at EVERY lattice point',
+    disagree.length === 0, disagree.slice(0, 6).join(' · '));
+  const WEST_CHOKE = `// __matchArena\nconst STATIONS = [\n  { id: 'west_choke', x: 900, y: 1000, fog: ${RADIUS} },\n];`;
+  const flagsOn = (a, text) => extract('tools/tmp/kb_fixture.mjs', text).flatMap((h) => classify(a, h, ctx).map((f) => f.code));
+  const planted = { ...arena, cover: [...arena.cover, { x: 925, y: 1000, w: 20, h: 20, kind: 'kb' }] };
+  check('C2  THE BLINDNESS, reproduced: the box test alone calls the planted station legal',
+    coverAt(planted, 900, 1000) === null, `coverAt = ${coverAt(planted, 900, 1000)?.kind ?? 'null'}`);
+  const plantFlags = flagsOn(planted, WEST_CHOKE);
+  check('C2  KNOWN-BAD  a station 15 wu clear of a planted box (A2b\'s case) IS flagged IN-COLLAR, not IN-COVER',
+    plantFlags.includes('IN-COLLAR') && !plantFlags.includes('IN-COVER'), JSON.stringify(plantFlags));
+  check('C3  CONTROL  the same station on the shipped arena trips nothing', flagsOn(arena, WEST_CHOKE).length === 0,
+    JSON.stringify(flagsOn(arena, WEST_CHOKE)));
+  const lone = { ...arena, cover: [{ x: 1000, y: 1000, w: 100, h: 60, kind: 'kb' }] };
+  const edge = 1000 + (arena.bodySize + 100) / 2;
+  const at = (x, y) => flagsOn(lone, `// __matchArena\nconst PIN = { x: ${x}, y: ${y} };`);
+  check('C4  the edge is the sim\'s STRICT <: exactly on the collar line is legal, half a wu inside is IN-COLLAR',
+    at(edge, 1000).length === 0 && at(edge - 0.5, 1000).includes('IN-COLLAR'),
+    `on ${edge}: ${JSON.stringify(at(edge, 1000))} · in ${edge - 0.5}: ${JSON.stringify(at(edge - 0.5, 1000))}`);
+  const half = arena.bodySize / 2;
+  check('C5  the walls: half a body from the west wall is legal, one wu nearer is IN-COLLAR (movement.ts clamps it)',
+    at(half, 1500).length === 0 && at(half - 1, 1500).includes('IN-COLLAR'),
+    `x=${half}: ${JSON.stringify(at(half, 1500))} · x=${half - 1}: ${JSON.stringify(at(half - 1, 1500))}`);
+
   // And the negative control the whole design rests on: legality alone is BLIND here.
   const legal = coverAt(arena, 700, 600);
   check('CONTROL  a 1× point can be perfectly legal ground on the ×4 map — which is WHY '
@@ -687,6 +777,6 @@ function selftest() {
 }
 
 if (IS_MAIN) {
-  const f = process.argv.includes('--selftest') ? selftest() : run();
+  const f = process.argv.includes('--selftest') ? await selftest() : run();
   process.exitCode = f ? 1 : 0;
 }
