@@ -1657,3 +1657,48 @@ and it is that one). Shrinking the Giant Lollipop's radius (`afad1ca`) made Loll
 better, 3.313 → 3.013, while its win rate FELL 13.3% → 7.3%**: it survives longer and converts
 less. **A six-seat pass steered by win rate names a different roster from one steered by
 placement.** Say which one you are steering by, before you steer.
+
+## 29. THE GRAPHICS REVAMP (2026-10-15/16) — what five blind rounds and ten packages taught
+
+The campaign is `docs/REVAMP.md`; its scoreboard is §8. These are the lessons that cost time.
+
+- **What converted, and what did not.** The fighter crop rose **4.51 → 5.50** across the rounds that
+  changed READABILITY (an outline, seat rings and plates, a saturated cast palette, one limb system,
+  faces tilted to read at 58°, the hit-flash blob gone). The environment did not convert on the
+  six-seat frame (4.97 → 4.85) through a floor recalm, a prop kit, a re-saturated floor and a built
+  hub district — the third time "add environment" has come back null here (`fd76ef0` density,
+  `6c133ce` surface detail). Every round's notes still say "empty floor" (16/16) and "tiny fighters"
+  (15/16), and subject scale is inside the reference band — **the prescription in a critic's note is
+  not the lever.** The open variable is the camera's pitch (`DECISIONS §91e`; K1).
+- **A target that is met can still be the wrong target.** V1 met "persistent marks are spent dark"
+  (ΔL ≤ −0.15) with a MIN blend that REPLACED the floor's detail, and 6 of 8 critics then read the
+  trail as *"a hole torn in the floor"*. V1b kept the rule and changed the blend: a multiply over a
+  per-pixel union (WebGL2 has no blend that is both overlap-safe and detail-preserving), calibrated
+  ON SCREEN through `stage.ts`'s grade (the grade's saturation boost reshapes a multiply — emulating
+  it reproduced the measurement to ±0.01). Darker floor, not the darkest thing in the frame.
+- **Effects sit on bodies for structural reasons, not taste.** `hit-landed` is emitted at the
+  VICTIM'S CENTRE, so every impact effect is centred on the body it reports; a multi-pellet weapon
+  emitted one per pellet (a 5-pellet spray stacked 10 rings). And depth-tested sprites centred on a
+  victim mostly hide INSIDE it — moving them to the body's edge made cover worse. Measure cover per
+  effect family by ablation (`tools/tmp/v1b_cover.mjs`), then move what is on the body.
+- **`ShaderMaterial` is single-pass by default in three r180** (`forceSinglePass = true`); a
+  `MeshBasicMaterial` with `DoubleSide` + transparency costs TWO draws. A known-bad that assumed the
+  opposite was pointed where the bug cannot show (V1b).
+- **A layout change breaks instruments that never import the layout.** A2b's six counters turned three
+  green gates red — an inlined copy of the arena (`arena-scan`'s `COVER`) and a fixture planted on a
+  centre line the new pass blocked (`sp_place`/`sp_gate`'s pot pin, which became a LEGAL seat). A
+  brief's own gate list had omitted `gatecount`, the one gate that would have seen it (`AGENT-BRIEF
+  §5`). The same day C1b's head tilt staled `nk_neckgate`'s taco fixture. Re-anchor such fixtures by
+  scanning the TOOL'S OWN predicate for an input with exactly the one violation, and check the
+  re-anchored row can still fail.
+- **Gates that fail on load, not on code.** `driver_guard` stages into a fixed shared temp path, so
+  two copies collide (demonstrated by B4: a second run 4 s later reproduces "3 Donut matchups
+  moved"); `menu_accept`'s 45 s boot timeout trips under SwiftShader contention and its COUNT drops
+  with it (492/493). Both re-ran clean alone. Re-run alone before believing either line.
+- **A browser gate gatecount cannot see can rot for months.** `np_nfighter` printed 85 checks against
+  a documented 64, and carried one deterministic red row (a seat inside the guaranteed radius but
+  off-screen at N=5) that predates every revamp merge (`a7d5ce5` and earlier). Unrun is not green.
+- **Unverified bug reports were real at a high rate.** Of the findings the verifiers could not confirm
+  (0/2), every one that a package wrote a red-first test for reproduced — the two timer bugs (B4), all
+  six AI findings (B5), Back abandoning a live match (B6, against a DECISIONS line that said it was
+  fixed when only the docs had changed). "0 of 2 confirmations" meant "not yet tested", not "false".
