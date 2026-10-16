@@ -98,6 +98,54 @@ import { routeChecks, selftest as routeSelftest, CONDITIONAL_SCREENS } from './m
 const SETTLE_MS = 60_000;
 
 /**
+ * THE ROUND-TRIP FLOW'S BOOT BUDGET — one deadline for the whole cold boot, not 45 s a wait.
+ *
+ * The flow is the only page that boots through the front door (title card -> START -> a
+ * settled home), and under SwiftShader contention it "timed out at boot" while re-running
+ * clean alone (T1a, 2026-10-16) — costing the orchestrator battery reruns. One deadline
+ * shared by the boot's four waits, ~4x the old 45 s each, and the boot is its own
+ * `flow · boot` row carrying its measured time — or, on failure, WHICH wait stopped and what
+ * the page said its screen was — so an environment problem reads as that, not as a product
+ * step. `--boot-ms <n>` overrides it; the stall known-bad (`t1a_boot_stall.mjs`) uses a
+ * small one so a stalled boot fails in seconds.
+ * ⚠️ The budget is the secondary half. The flake itself was a RACE — see FLOW_HOLD_MS.
+ */
+const BOOT_MS = (() => {
+  const i = process.argv.indexOf('--boot-ms');
+  const v = i >= 0 ? Number(process.argv[i + 1]) : 180_000;
+  if (!(v > 0)) throw new Error(`--boot-ms must be a positive number of ms, got ${process.argv[i + 1]}`);
+  return v;
+})();
+
+/**
+ * 🚨 BUT THE BUDGET WAS NOT THE BUG — THE FLOW RACED THE TITLE CARD (T1a, 2026-10-16).
+ *
+ * The brief that sent this fix said "a 45 s wait times out under contention, give boot its
+ * own budget". Measured, it was not slowness: with 180 s the flow failed the SAME way, every
+ * time, under `--flow-only` (the cold first page on a fresh dev server), and the boot row
+ * read `__screen="characters"`. The title card auto-continues after `DEFAULT_HOLD_MS` = 4.5 s
+ * (`opening.ts`). When settling the 3D card takes longer than that, the card has ALREADY
+ * gone home by the time the flow clicks `[data-el="start"]` — and home's START GAME carries
+ * the SAME `data-el`, so the forced click lands on it and the flow arrives at CHARACTERS,
+ * then waits for a home that never comes. Fast machine: the click wins the race and it
+ * passes; loaded machine: the card wins and it "times out at boot". That is the flake.
+ *
+ * `auditOpening` already holds the card (`?hold=120000`) for exactly this reason, and
+ * `opening.ts`'s own `?hold` doc says why: a card that leaves after 4.5 s "races every one
+ * of those measurements". So the flow holds it too — it still enters through the title
+ * card and clicks START, the path a player takes; the auto-continue itself stays asserted
+ * at its real duration in `auditOpening`. And the click is scoped to the card, so a lost
+ * race can never again click a different screen's button.
+ * Known-bad: `--flow-hold 1` re-opens the race on purpose and the boot row goes red.
+ */
+const FLOW_HOLD_MS = (() => {
+  const i = process.argv.indexOf('--flow-hold');
+  const v = i >= 0 ? Number(process.argv[i + 1]) : 600_000;
+  if (!(v >= 0)) throw new Error(`--flow-hold must be a non-negative number of ms, got ${process.argv[i + 1]}`);
+  return v;
+})();
+
+/**
  * Wait for a route AND for it to be on screen.
  *
  * The flag alone is not enough — see the header. Every `__screenReady` wait in this
@@ -1143,22 +1191,64 @@ async function run() {
 
   // ── Flow: home -> characters -> match -> home ────────────────────────────
   {
+    // 🚨 THE FLOW'S ROWS ARE DECLARED, SO A FAILURE CANNOT SHRINK THE COUNT (T1a, 2026-10-16).
+    // Every row below used to be recorded only if the flow REACHED it, so a boot timeout
+    // recorded 2 flow rows instead of 16: the battery read 492/493 where a healthy run read
+    // 507/507 — fourteen checks gone, and the headline a COUNT change rather than fourteen
+    // FAILs. Now each declared row is recorded exactly once; one the flow never reached is a
+    // FAIL naming the step that stopped it. Recording an undeclared row, or one twice, throws.
+    const FLOW_ROWS = [
+      ['-', 'boot'],
+      ['home', 'gear-opens-settings'],
+      ['match', 'canvas-gets-mousemove'],
+      ['match', 'canvas-gets-mousedown'],
+      ['match', 'canvas-is-top-at-centre'],
+      ['-', 'selection-persists'],
+      ['home', 'cta-is-hit-target'],
+      ['trophies', 'no-delta-for-an-abandoned-match'],
+      ['trophies', 'trophy-count-renders'],
+      ['shop', 'lobby-tab-reaches-the-shop'],
+      ['shop', 'every-container-has-a-card'],
+      ['shop', 'drop-rates-are-published'],
+      ['shop', 'NO-purchase-button-is-live'],
+      ['shop', 'prices-are-still-shown'],
+      ['shop', 'unavailability-is-stated-in-words'],
+      ['-', 'round-trip'],
+    ];
+    const flowDone = new Set();
+    const frec = (screen, check, ok, detail = '') => {
+      const key = `${screen}|${check}`;
+      if (!FLOW_ROWS.some(([s, c]) => `${s}|${c}` === key)) throw new Error(`undeclared flow row ${key} — add it to FLOW_ROWS`);
+      if (flowDone.has(key)) throw new Error(`flow row ${key} recorded twice`);
+      flowDone.add(key);
+      record('flow', screen, check, ok, detail);
+    };
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
     const errs = [];
     page.on('pageerror', (e) => errs.push(String(e)));
     page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
     let step = 'boot';
+    let bootWait = `goto /?hold=${FLOW_HOLD_MS}`;
+    const tBoot = Date.now();
+    const bootLeft = () => Math.max(1_000, BOOT_MS - (Date.now() - tBoot));
     try {
       // Through the front door: a bare `/` is the title card now, and the flow test is
       // the one place that should exercise the same path a player takes rather than
       // jumping past it with `?screen=`.
-      await page.goto(`${BASE}/`, { waitUntil: 'networkidle', timeout: 45000 });
-      await page.waitForFunction('window.__screen === "opening"', null, { timeout: 45000 });
+      // ⚠️ WAS `timeout: 45000` on each of the four waits below — see BOOT_MS.
+      // ⚠️ WAS `${BASE}/` and an unscoped `[data-el="start"]` — see FLOW_HOLD_MS: the race.
+      await page.goto(`${BASE}/?hold=${FLOW_HOLD_MS}`, { waitUntil: 'networkidle', timeout: bootLeft() });
+      bootWait = '__screen === "opening"';
+      await page.waitForFunction('window.__screen === "opening"', null, { timeout: bootLeft() });
       // Before a FORCED click: force SKIPS Playwright's own stability check, so a
       // click issued during fa-screen-in aims where the button no longer is.
-      await settleScreen(page, { label: 'flow/opening', timeout: SETTLE_MS });
-      await page.click('[data-el="start"]', { force: true });
-      await atScreen(page, "home", 45000);
+      bootWait = 'the opening settles';
+      await settleScreen(page, { label: 'flow/opening', timeout: Math.max(SETTLE_MS, bootLeft()) });
+      bootWait = 'click the TITLE CARD\'s START';
+      await page.click('.fa-opening [data-el="start"]', { force: true, timeout: bootLeft() });
+      bootWait = 'a settled home';
+      await atScreen(page, "home", bootLeft());
+      frec('-', 'boot', true, `${Date.now() - tBoot} ms from the title card to a settled home (budget ${BOOT_MS} ms, card held ${FLOW_HOLD_MS} ms)`);
 
       step = 'the gear reaches settings';
       // It said "Settings coming soon" for two review rounds. A dead control on the
@@ -1167,7 +1257,7 @@ async function run() {
       await atScreen(page, "settings", 20000);
       await page.click('[data-el="done"]', { force: true });
       await atScreen(page, "home", 20000);
-      record('flow', 'home', 'gear-opens-settings', true, 'home -> settings -> home');
+      frec('home', 'gear-opens-settings', true, 'home -> settings -> home');
 
       step = 'home->characters';
       await page.click('[data-el="start"]', { force: true });
@@ -1205,9 +1295,9 @@ async function run() {
           topAtCentre: document.elementFromPoint(
             Math.round(window.innerWidth / 2), Math.round(window.innerHeight / 2))?.tagName ?? '?',
         }));
-        record('flow', 'match', 'canvas-gets-mousemove', hit.move > 0, `${hit.move} events`);
-        record('flow', 'match', 'canvas-gets-mousedown', hit.down > 0, `${hit.down} events`);
-        record('flow', 'match', 'canvas-is-top-at-centre', hit.topAtCentre === 'CANVAS', hit.topAtCentre);
+        frec('match', 'canvas-gets-mousemove', hit.move > 0, `${hit.move} events`);
+        frec('match', 'canvas-gets-mousedown', hit.down > 0, `${hit.down} events`);
+        frec('match', 'canvas-is-top-at-centre', hit.topAtCentre === 'CANVAS', hit.topAtCentre);
       }
 
       step = 'pause';
@@ -1245,7 +1335,7 @@ async function run() {
       step = 'equipped fighter persisted';
       const equipped = await page.evaluate(() =>
         document.querySelector('[data-el="heroname"]')?.textContent ?? '');
-      record('flow', '-', 'selection-persists', equipped === 'Lollipop', `home hero = "${equipped}"`);
+      frec('-', 'selection-persists', equipped === 'Lollipop', `home hero = "${equipped}"`);
 
       step = 'menu buttons still receive their own clicks';
       {
@@ -1255,7 +1345,7 @@ async function run() {
           const el = document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2));
           return el === btn || btn.contains(el);
         });
-        record('flow', 'home', 'cta-is-hit-target', top, 'elementFromPoint over START GAME');
+        frec('home', 'cta-is-hit-target', top, 'elementFromPoint over START GAME');
       }
 
       step = 'home -> trophy road';
@@ -1272,9 +1362,9 @@ async function run() {
           delta: document.querySelector('[data-el="delta"]')?.textContent ?? '',
           trophies: document.querySelector('[data-el="trophies"]')?.textContent ?? '',
         }));
-        record('flow', 'trophies', 'no-delta-for-an-abandoned-match', state.delta === '',
+        frec('trophies', 'no-delta-for-an-abandoned-match', state.delta === '',
           `delta = "${state.delta}"`);
-        record('flow', 'trophies', 'trophy-count-renders', /^[\d,]+$/.test(state.trophies),
+        frec('trophies', 'trophy-count-renders', /^[\d,]+$/.test(state.trophies),
           `trophies = "${state.trophies}"`);
       }
 
@@ -1307,16 +1397,16 @@ async function run() {
             notice: document.querySelector('.shop-notice')?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
           };
         });
-        record('flow', 'shop', 'lobby-tab-reaches-the-shop', true, 'home -> shop');
-        record('flow', 'shop', 'every-container-has-a-card', shop.cards === 5, `${shop.cards} cards`);
+        frec('shop', 'lobby-tab-reaches-the-shop', true, 'home -> shop');
+        frec('shop', 'every-container-has-a-card', shop.cards === 5, `${shop.cards} cards`);
         // The drop table sits ON the cards rather than behind a tap, so a compliance
         // surface is never one modal away from every screenshot and every battery.
-        record('flow', 'shop', 'drop-rates-are-published', shop.odds >= 15, `${shop.odds} odds rows`);
-        record('flow', 'shop', 'NO-purchase-button-is-live', shop.buys > 0 && shop.live === 0,
+        frec('shop', 'drop-rates-are-published', shop.odds >= 15, `${shop.odds} odds rows`);
+        frec('shop', 'NO-purchase-button-is-live', shop.buys > 0 && shop.live === 0,
           `${shop.live} of ${shop.buys} enabled`);
-        record('flow', 'shop', 'prices-are-still-shown', shop.priced === shop.buys,
+        frec('shop', 'prices-are-still-shown', shop.priced === shop.buys,
           `${shop.priced}/${shop.buys} carry a number`);
-        record('flow', 'shop', 'unavailability-is-stated-in-words',
+        frec('shop', 'unavailability-is-stated-in-words',
           /\b(not|nothing|no)\b[^.]{0,40}\bfor sale\b/i.test(shop.notice), shop.notice.slice(0, 90));
       }
 
@@ -1324,9 +1414,27 @@ async function run() {
       await page.click('[data-el="back"]', { force: true });
       await atScreen(page, "home", 20000);
 
-      record('flow', '-', 'round-trip', true, 'home -> characters -> match -> home -> trophies -> home -> shop -> home');
+      frec('-', 'round-trip', true, 'home -> characters -> match -> home -> trophies -> home -> shop -> home');
     } catch (err) {
-      record('flow', '-', 'round-trip', false, `failed at "${step}": ${String(err).split('\n')[0]}`);
+      const why = String(err).split('\n')[0];
+      if (step === 'boot') {
+        // Which wait stopped, and what the page said about itself at that moment: a boot
+        // that never painted, one stuck on the title card and one that went somewhere else
+        // are three different causes, and "timed out at boot" names none of them.
+        // ⚠️ BOUNDED. A navigation that never commits (the stall known-bad) leaves `evaluate`
+        // waiting for an execution context forever — the first version of this read hung the
+        // whole battery at 0% CPU, found by `t1a_boot_stall.mjs`. 3 s, then say so.
+        const seen = await Promise.race([
+          page.evaluate(() => `__screen=${JSON.stringify(window.__screen ?? null)} __screenReady=${JSON.stringify(window.__screenReady ?? null)} at ${location.pathname}${location.search}`)
+            .catch((e) => `page unreadable: ${String(e).split('\n')[0]}`),
+          new Promise((r) => setTimeout(() => r('page unreadable: no answer in 3 s — its navigation never committed'), 3000)),
+        ]);
+        frec('-', 'boot', false, `stopped waiting for ${bootWait} ${Date.now() - tBoot} ms after loading the title card (budget ${BOOT_MS} ms; ${seen}): ${why}`);
+      }
+      if (!flowDone.has('-|round-trip')) frec('-', 'round-trip', false, `failed at "${step}": ${why}`);
+    }
+    for (const [s, c] of FLOW_ROWS) {
+      if (!flowDone.has(`${s}|${c}`)) record('flow', s, c, false, `NOT REACHED — the flow stopped at "${step}"`);
     }
     record('flow', '-', 'no-console-errors', errs.length === 0, errs.slice(0, 3).join(' | '));
     await page.close();
