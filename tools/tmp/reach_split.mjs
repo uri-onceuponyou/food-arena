@@ -37,6 +37,7 @@
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const args = (() => {
@@ -64,13 +65,9 @@ if (!existsSync(ARENA_PATH)) { console.error(`no arena at ${ARENA_PATH}`); proce
 const DATA = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
 // `maxSafeRadius` is DERIVED from the clock in `arena/shared.ts`; a cached dump goes
 // stale the moment the clock moves, so recompute it from the same formula.
-const HALF_DIAG = Math.hypot(DATA.width / 2, DATA.height / 2);
-const FOG_FIRST_CONTACT_MS = 6000;
-const arena = {
-  ...DATA,
-  maxSafeRadius: Math.round(HALF_DIAG / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS)),
-  build: () => null, update: () => {},
-};
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
+const arena = withShippedRing(DATA, { override: args.maxsafe, rules: R });
 
 const DT = Number(args.dt ?? 16.667);
 const TAG = String(args.tag ?? (SIM_DIR === `${ROOT}/src/game` ? 'shipped' : SIM_DIR));

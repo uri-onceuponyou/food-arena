@@ -16,6 +16,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const args = Object.fromEntries(process.argv.slice(2).reduce((a, v, i, arr) =>
@@ -25,12 +26,9 @@ const SIM = String(args.sim ?? `${ROOT}/src/game`);
 const { createMatch, stepMatch } = await import(`${SIM}/sim.ts`);
 const R = await import(`${SIM}/rules.ts`);
 const A = JSON.parse(readFileSync(`${ROOT}/tools/arena.gameplay.json`, 'utf8'));
-const HALF = Math.hypot(A.width / 2, A.height / 2);
-const arena = {
-  ...A,
-  maxSafeRadius: Math.round(HALF / (1 - 6000 / R.MATCH_DURATION_MS)),
-  build: () => null, update: () => {},
-};
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
+const arena = withShippedRing(A, { override: args.maxsafe, rules: R, source: 'tools/arena.gameplay.json' });
 const DT = 16.667;
 
 function chasePolicy() {

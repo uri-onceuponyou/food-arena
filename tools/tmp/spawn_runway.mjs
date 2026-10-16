@@ -105,10 +105,23 @@ function extractFromSource() {
   const ARENA_W = Number(/export const ARENA_W = (\d+)/.exec(shared)[1]);
   const ARENA_H = Number(/export const ARENA_H = (\d+)/.exec(shared)[1]);
   const CENTER = { x: ARENA_W / 2, y: ARENA_H / 2 };
-  const FOG_FIRST_CONTACT_S = Number(/export const FOG_FIRST_CONTACT_S = ([\d.]+)/.exec(shared)[1]);
-  const MAX_SAFE_RADIUS = Math.round(
-    Math.hypot(ARENA_W / 2, ARENA_H / 2) / (1 - (FOG_FIRST_CONTACT_S * 1000) / MATCH_DURATION_MS)
-  );
+  // ⚠️ WAS `Math.round(hypot(W/2, H/2) / (1 - FOG_FIRST_CONTACT_S * 1000 / MATCH_DURATION_MS))` —
+  // the clock-coupled opening retired 2026-08-12, 2065 at the 25 s / 150 s constants — and the
+  // src-vs-dump check below could not see it, because `norm` never compared the ring (T1b,
+  // 2026-10-16). Now READ from `shared.ts` and evaluated with the sim's own `fogOpeningRadiusFor`,
+  // exactly as `arena_probe.mjs:extractFromSource` does since T1a: a second reader that follows the
+  // source rather than re-deriving it, and that THROWS if the declaration changes shape.
+  const declRhs = (name) => {
+    const dm = new RegExp(`export const ${name}\\s*=\\s*([^;]+);`).exec(shared);
+    if (!dm) throw new Error(`spawn_runway: no \`export const ${name} = …;\` in shared.ts — teach extractFromSource() the new shape`);
+    return dm[1];
+  };
+  const evalIn = (scope, expr) => new Function(...Object.keys(scope), `"use strict"; return (${expr});`)(...Object.values(scope));
+  const ARENA_HALF_DIAGONAL = evalIn({ ARENA_W, ARENA_H, Math }, declRhs('ARENA_HALF_DIAGONAL'));
+  const MAX_SAFE_RADIUS = evalIn(
+    { ARENA_HALF_DIAGONAL, ARENA_W, ARENA_H, Math, fogOpeningRadiusFor: RULES.fogOpeningRadiusFor },
+    declRhs('MAX_SAFE_RADIUS'));
+  if (!Number.isFinite(MAX_SAFE_RADIUS)) throw new Error(`spawn_runway: MAX_SAFE_RADIUS evaluated to ${MAX_SAFE_RADIUS}`);
 
   const scope = { ARENA_W, ARENA_H, CENTER, POT, Math };
   const ev = (expr) => new Function(...Object.keys(scope), `"use strict"; return (${expr});`)(...Object.values(scope));
@@ -147,8 +160,10 @@ function extractFromSource() {
   };
 }
 
+// `msr` added by T1b (2026-10-16): without it the src-vs-dump check passed with the source reader
+// on a 2065 ring and the dump on the shipped one — a comparison blind to the field it most needed.
 const norm = (a) => JSON.stringify({
-  w: a.width, h: a.height, ps: a.playerSpawn, es: a.enemySpawn,
+  w: a.width, h: a.height, ps: a.playerSpawn, es: a.enemySpawn, msr: a.maxSafeRadius,
   cover: [...a.cover].map((c) => `${c.kind}@${c.x},${c.y},${c.w}x${c.h}`).sort(),
   hz: [...a.hazards].map((h) => `${h.kind}@${h.x},${h.y},r${h.radius}`).sort(),
 });
@@ -168,6 +183,7 @@ if (args.layout) {
     const B = new Set(dump.cover.map((c) => `${c.kind}@${c.x},${c.y},${c.w}x${c.h}`));
     for (const s of A) if (!B.has(s)) console.error(`        src only  ${s}`);
     for (const s of B) if (!A.has(s)) console.error(`        dump only ${s}`);
+    if (src.maxSafeRadius !== dump.maxSafeRadius) console.error(`        maxSafeRadius src ${src.maxSafeRadius} dump ${dump.maxSafeRadius}`);
     if (JSON.stringify(src.playerSpawn) !== JSON.stringify(dump.playerSpawn)) console.error(`        playerSpawn src ${JSON.stringify(src.playerSpawn)} dump ${JSON.stringify(dump.playerSpawn)}`);
     if (JSON.stringify(src.enemySpawn) !== JSON.stringify(dump.enemySpawn)) console.error(`        enemySpawn  src ${JSON.stringify(src.enemySpawn)} dump ${JSON.stringify(dump.enemySpawn)}`);
     process.exit(1);

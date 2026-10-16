@@ -37,6 +37,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createScriptedPlayer, rng, parseDriverFlags } from './scripted_player.mjs';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -59,10 +60,9 @@ const { CHARACTERS, CHARACTER_IDS, MATCH_DURATION_MS, REACH } = RULES;
 
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
 const ARENA_DATA = existsSync(ARENA_PATH) ? JSON.parse(readFileSync(ARENA_PATH, 'utf8')) : null;
-const FOG_FIRST_CONTACT_MS = 6000;
-const HALF_DIAG = ARENA_DATA ? Math.hypot(ARENA_DATA.width / 2, ARENA_DATA.height / 2) : 0;
-const derivedMaxSafe = Math.round(HALF_DIAG / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS));
-let arena = ARENA_DATA ? { ...ARENA_DATA, maxSafeRadius: derivedMaxSafe, build: () => null, update: () => {} } : null;
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
+let arena = ARENA_DATA ? withShippedRing(ARENA_DATA, { override: args.maxsafe, rules: RULES, source: ARENA_PATH }) : null;
 
 const DT = Number(args.dt ?? 16.667);
 const SEEDS = Number(args.seeds ?? 4);

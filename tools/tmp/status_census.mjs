@@ -59,6 +59,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { createScriptedPlayer, parseDriverFlags, rng, DRIVER_REV } from './scripted_player.mjs';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -92,14 +93,9 @@ if (!existsSync(ARENA_PATH)) { console.error(`no arena at ${ARENA_PATH}`); proce
 const ARENA_DATA = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
 // `arena.maxSafeRadius` is DERIVED from MATCH_DURATION_MS in `arena/shared.ts`, so a
 // cached dump goes stale the moment the clock moves. Recompute from the same formula.
-const HALF_DIAG = Math.hypot(ARENA_DATA.width / 2, ARENA_DATA.height / 2);
-const FOG_FIRST_CONTACT_MS = 6000; // arena/shared.ts FOG_FIRST_CONTACT_S
-const derivedMaxSafe = Math.round(HALF_DIAG / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS));
-const arena = {
-  ...ARENA_DATA,
-  maxSafeRadius: Number(args.maxsafe ?? derivedMaxSafe),
-  build: () => null, update: () => {},
-};
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
+const arena = withShippedRing(ARENA_DATA, { override: args.maxsafe, rules: RULES, source: ARENA_PATH });
 const HAZ = arena.hazards.find((h) => h.kind === 'damage');
 
 const DT = Number(args.dt ?? 16.667);

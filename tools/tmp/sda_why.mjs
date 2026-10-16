@@ -10,6 +10,7 @@
 import { resolve } from 'node:path';
 import { existsSync, readFileSync } from 'node:fs';
 import { createScriptedPlayer, rng } from './scripted_player.mjs';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const args = (() => { const o = {}; for (let i = 2; i < process.argv.length; i++) { const a = process.argv[i]; if (!a.startsWith('--')) continue; const n = process.argv[i + 1]; if (n === undefined || n.startsWith('--')) o[a.slice(2)] = true; else { o[a.slice(2)] = n; i++; } } return o; })();
@@ -53,8 +54,9 @@ const { CHARACTER_IDS, MATCH_DURATION_MS, PLAYER_MAX_HP, ENEMY_MAX_HP } = A.RULE
 
 // ── PART 3. THE LIVE HUNT ──────────────────────────────────────────────────
 const ARENA_DATA = JSON.parse(readFileSync(`${ROOT}/tools/arena.gameplay.json`, 'utf8'));
-const derivedMaxSafe = Math.round(Math.hypot(ARENA_DATA.width / 2, ARENA_DATA.height / 2) / (1 - 6000 / MATCH_DURATION_MS));
-const arena = { ...ARENA_DATA, maxSafeRadius: derivedMaxSafe, build: () => null, update: () => {} };
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
+const arena = withShippedRing(ARENA_DATA, { source: 'tools/arena.gameplay.json' });
 const mk = (S) => createScriptedPlayer({ CHARACTERS: S.RULES.CHARACTERS, REACH: S.RULES.REACH, arena, pressValue: S.AI.pressValue, selfHealHpFraction: S.RULES.AI_SELF_HEAL_HP_FRACTION });
 const dA = mk(A);
 const DT = 16.667, POLICY = 'smart2';

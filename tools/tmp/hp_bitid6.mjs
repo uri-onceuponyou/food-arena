@@ -106,6 +106,7 @@
 import { resolve } from 'node:path';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { ringOf } from './t1b_ring.mjs';
 
 const ROOT = resolve(fileURLToPath(new URL('../..', import.meta.url)));
 
@@ -210,12 +211,11 @@ const { CHARACTER_IDS, MATCH_DURATION_MS } = A.RULES;
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
 if (!existsSync(ARENA_PATH)) { console.error(`no arena at ${ARENA_PATH}`); process.exit(1); }
 const ARENA_DATA = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
-const FOG_FIRST_CONTACT_MS = 6000;
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
 const arena = {
   ...ARENA_DATA,
-  maxSafeRadius: Math.round(
-    Math.hypot(ARENA_DATA.width / 2, ARENA_DATA.height / 2) / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS),
-  ),
+  maxSafeRadius: ringOf(ARENA_DATA, { override: args.maxsafe, source: ARENA_PATH }),
   build: () => null,
   update: () => {},
 };
@@ -257,7 +257,8 @@ const arenaB = (() => {
   }
   return {
     ...d,
-    maxSafeRadius: Math.round(Math.hypot(d.width / 2, d.height / 2) / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS)),
+    // the B arm's own dump ring (hazard scaling does not touch it) — t1b_ring, as above
+    maxSafeRadius: ringOf(d, { override: args.maxsafe, source: ARENA_B_PATH ?? ARENA_PATH }),
     build: () => null,
     update: () => {},
   };

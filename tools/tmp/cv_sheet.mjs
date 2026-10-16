@@ -13,6 +13,9 @@
  */
 import sharp from 'sharp';
 import { readFileSync } from 'node:fs';
+import { ringOf } from './t1b_ring.mjs';
+
+const { concealmentKeepoutRadius } = await import(new URL('../../src/game/rules.ts', import.meta.url).href);
 
 const OUT = 'shots/conceal';
 const D = JSON.parse(readFileSync(`${OUT}/panels.json`, 'utf8'));
@@ -49,9 +52,14 @@ const svg = (w, h, body) => Buffer.from(
  */
 function largestLegalSquare() {
   const step = 5;
-  const halfDiag = Math.hypot(ARENA.width / 2, ARENA.height / 2);
-  const maxSafe = Math.round(halfDiag / (1 - 6000 / 45000));   // arena/shared.ts formula
-  const keepout = Math.max(120, maxSafe * 0.25);               // rules.ts concealmentKeepoutRadius
+  // ⚠️ T1b 2026-10-16 — these two lines were copies, both stale:
+  //     const maxSafe = Math.round(halfDiag / (1 - 6000 / 45000));   // arena/shared.ts formula
+  //     const keepout = Math.max(120, maxSafe * 0.25);               // rules.ts concealmentKeepoutRadius
+  // — the clock-coupled ring on the dead 45 s clock (1985) and a keep-out floor of 120 where
+  // `MIN_SAFE_RADIUS` is 140. Both now come from their owners: the dump's ring (t1b_ring) and
+  // `rules.ts:concealmentKeepoutRadius` itself (496.25 -> 430.12 wu on 2026-10-16).
+  const maxSafe = ringOf(ARENA, { source: 'tools/arena.gameplay.json' });
+  const keepout = concealmentKeepoutRadius(maxSafe);
   const nx = Math.floor(ARENA.width / step) + 1;
   const ny = Math.floor(ARENA.height / step) + 1;
   const blocked = (x, y) => ARENA.cover.some((c) => Math.abs(x - c.x) < c.w / 2 && Math.abs(y - c.y) < c.h / 2)

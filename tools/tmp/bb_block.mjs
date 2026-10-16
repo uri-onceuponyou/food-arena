@@ -56,6 +56,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -183,7 +184,6 @@ export function runKnownBad() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const ARENA_PATH = join(ROOT, 'tools/arena.gameplay.json');
-const FOG_FIRST_CONTACT_MS = 6000; // arena/shared.ts FOG_FIRST_CONTACT_S
 
 async function loadSim(simDir) {
   const sim = await import(`${simDir}/sim.ts`);
@@ -192,15 +192,11 @@ async function loadSim(simDir) {
   return { ...sim, RULES: rules, STATE: state };
 }
 
-function loadArena(MATCH_DURATION_MS) {
-  const d = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
-  const halfDiag = Math.hypot(d.width / 2, d.height / 2);
-  return {
-    ...d,
-    maxSafeRadius: Math.round(halfDiag / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS)),
-    build: () => null,
-    update: () => {},
-  };
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
+// The clock argument is kept so the call sites read as they did; the ring no longer depends on it.
+function loadArena(_matchDurationMsIgnored) {
+  return withShippedRing(JSON.parse(readFileSync(ARENA_PATH, 'utf8')), { source: ARENA_PATH });
 }
 
 /**

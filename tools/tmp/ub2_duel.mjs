@@ -106,6 +106,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { resolve } from 'node:path';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 const IS_MAIN = process.argv[1] !== undefined
@@ -137,16 +138,11 @@ const ARM = String(args.arm ?? 'none');
 const LOADOUT = args.items ? String(args.items).split(',').filter(Boolean) : [];
 
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
-const FOG_FIRST_CONTACT_MS = 6000;
+// ⚠️ T1b 2026-10-16: this recomputed the ring with the clock-coupled formula retired 2026-08-12
+// (1792 on the 150 s clock, against the shipped half-diagonal). Read off the dump by t1b_ring.
 function loadArena() {
   if (!existsSync(ARENA_PATH)) return null;
-  const d = JSON.parse(readFileSync(ARENA_PATH, 'utf8'));
-  return {
-    ...d,
-    maxSafeRadius: Math.round(Math.hypot(d.width / 2, d.height / 2)
-      / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS)),
-    build: () => null, update: () => {},
-  };
+  return withShippedRing(JSON.parse(readFileSync(ARENA_PATH, 'utf8')), { override: args.maxsafe, rules: RULES, source: ARENA_PATH });
 }
 const ARENA = loadArena();
 const driverFor = (a) => createScriptedPlayer({ CHARACTERS, REACH, arena: a, ...parseDriverFlags(args) });
