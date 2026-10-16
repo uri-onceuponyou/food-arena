@@ -561,14 +561,25 @@ async function main() {
   // keep this wording above it with the reason, per `CLAUDE.md`'s rule on reversed
   // assertions. Until then, a `seats` appearing in a screen is a design decision shipped
   // under a wiring commit and this goes red.
-  const FLAG_OWNERS = new Set(['src/main.ts']);
+  //
+  // ✅ URI ANSWERED §66 ON 2026-08-12 AND THE AFFORDANCE SHIPPED THE SAME DAY — `2d4840e`,
+  // `src/ui/screens/lobby.ts`, routed in `shell.ts`, entered from home (DECISIONS-FOR-URI's
+  // answer sheet). This row went red at that commit, as designed, and then STAYED red for two
+  // months (58 passed, 1 failed: "no SCREEN sets `seats`") because `sp6_seats` is in no gate
+  // table, so nobody made the change the paragraph above asks for. Made by T1a, 2026-10-16:
+  // the lobby is the second owner. Any OTHER screen setting `seats` is still rogue — the
+  // synthetic known-bad below keeps that half provably armed.
+  const FLAG_OWNERS = new Set(['src/main.ts', 'src/ui/screens/lobby.ts']);
+  ok('KNOWN-BAD: a screen navigating `{ name: \'match\', seats: 4 }` is SEEN to set seats by this census',
+    matchRouteLiterals("ctx.navigate({ name: 'match', seats: 4 });").some((l) => /\bseats\b/.test(l)));
   const navFiles = walkTs(join(ROOT, 'src'))
     .map((p) => ({ p, rel: relative(ROOT, p), lits: matchRouteLiterals(readFileSync(p, 'utf8')) }))
     .filter((f) => f.lits.length > 0);
   ok('the navigation census found at least one `{ name: \'match\' }` literal to judge',
     navFiles.length > 0, navFiles.map((f) => `${f.rel}×${f.lits.length}`).join(' · '));
   const rogue = navFiles.filter((f) => !FLAG_OWNERS.has(f.rel) && f.lits.some((l) => /\bseats\b/.test(l)));
-  ok('no SCREEN sets `seats` — the affordance is still Uri\'s to place (§66 Q1)',
+  // Label WAS "no SCREEN sets `seats` — the affordance is still Uri's to place (§66 Q1)".
+  ok('no screen but the LOBBY sets `seats` — the affordance Uri placed (§66, `2d4840e`)',
     rogue.length === 0, rogue.map((f) => f.rel).join(' · '));
   const owner = navFiles.filter((f) => FLAG_OWNERS.has(f.rel) && f.lits.some((l) => /\bseats\b/.test(l)));
   ok('...and the flag\'s OWN entry point does set it, so the row above is not vacuous',
