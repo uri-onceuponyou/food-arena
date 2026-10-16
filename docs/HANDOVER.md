@@ -13,8 +13,9 @@
 > for three rounds while the critics grew harsher (drift −0.21). What is left is not a package:
 > - **`§91z` — a FAIRNESS BUG in the match camera:** the guaranteed 199 wu view ends at **123 wu below
 >   the player** (16:9); 28 of 42 weapons can hit from below the screen; `aspect.mjs` could not see
->   it. The fix reframes the game, so it is the owner's call — try `?camAim=centred` on the deployed
->   build. `np_nfighter`'s one red row IS this bug (pinned until decided).
+>   it. The fix reframes the game, so it is the owner's call — try **Settings → Centred camera** on
+>   the deployed build (`3f0e1bd`; the URL flag `?camAim=centred` still works on a FRESH load — appended
+>   to the running game's `?screen=…` it is not a parameter, which is how the owner saw it do nothing). `np_nfighter`'s one red row IS this bug (pinned until decided).
 > - `§91s` the floor/cast hue clash; `§91aa` splat colours; `§91ab`/`§91ad` items vs hidden fighters.
 >
 > **The bug sweep is done:** B1–B7 (items usable; combat, items, movement, timers, AI, screens; bot
