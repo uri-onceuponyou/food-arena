@@ -21,7 +21,7 @@ import { toonMat, roundedBox, cloneToon } from '../../render/toon';
 import { PALETTE } from '../../game/rules';
 import { CHARACTER_HEIGHT } from '../../units';
 import { puck, mesh, noOutline, addBacksplash, addTopRim, type Materials } from '../shared';
-import { KitGeo, KP, block, burner, chamferBox, chamferCyl, counterShell, flat, herbPot, lump, paint, plateStack, skirt, srgb, steelSheets, stockpot, tileField, topClip, towel, val } from './kit';
+import { KitGeo, KP, block, burner, chamferBox, chamferCyl, counterShell, flat, herbPot, lump, paint, plateStack, rangeGrate, skirt, srgb, steelSheets, stockpot, tileField, topClip, towel, val } from './kit';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COVER GRAMMAR
@@ -650,15 +650,24 @@ export function buildStoveIsland(M: Materials, wM: number, dM: number, opts?: { 
   skirt(kg, { x: 0, z: 0 }, topY, (hobW + 0.18) / 2, (hobD + 0.18) / 2, 0.3, KP.steel, 'gloss', 0.3, 0, topClip(wM, dM));
   const hobTop = topY + 0.09;
   const bx = wM * 0.155, bz = dM * 0.155;
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) burner(kg, sx * bx, hobTop, sz * bz, 0.3);
+  // ── A2c: a GAS RANGE, not a slab. Round w6's crop critics on this hob: *"the big flat purple
+  // slab"*, *"the flat, untextured purple slab ... looks like greybox geometry"*. Four 0.3 m
+  // rings with an X each were ~23 px dots on the plate. Now: heads at 0.42 m (a flat iron
+  // ring + a steel cap) and one continuous grate over the whole plate — frame, centre cross,
+  // fingers to each ring (`rangeGrate`). Was `burner(kg, sx * bx, hobTop, sz * bz, 0.3)`.
+  const BURNER_R = 0.42;
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) burner(kg, sx * bx, hobTop, sz * bz, BURNER_R);
+  rangeGrate(kg, 0, hobTop, 0, hobW, hobD, bx, bz, BURNER_R);
+  /** what a pan stands on: the grate's top (0.09), above the burner cap (0.05) */
+  const panY = hobTop + 0.09;
   for (let i = 0; i < 4; i++) {
     kg.add(chamferCyl(0.075, 0.08, 0.022, 8), { x: (i - 1.5) * 0.42, y: topY - 0.08, z: dM * 0.495, rx: Math.PI / 2 },
       paint(KP.iron, val(KP.iron, 0.9), val(KP.steel, 1.0)), 'matte', 0, 0);
   }
   // the stockpot on the back-left burner, a frying pan on the front-right one
-  stockpot(kg, -bx, hobTop + 0.05, -bz, 0.36, 0.62);
-  kg.add(chamferCyl(0.3, 0.08, 0.03, 16), { x: bx, y: hobTop + 0.05, z: bz }, paint(val(KP.iron, 1.15), KP.iron, val(KP.iron, 1.7)), 'matte', hobTop, 0.4);
-  kg.add(chamferBox(0.62, 0.05, 0.09, 0.02), { x: bx + 0.55, y: hobTop + 0.09, z: bz + 0.05, yaw: -0.15 }, paint(KP.iron), 'matte', 0, 0);
+  stockpot(kg, -bx, panY, -bz, 0.36, 0.62);
+  kg.add(chamferCyl(0.3, 0.08, 0.03, 16), { x: bx, y: panY, z: bz }, paint(val(KP.iron, 1.15), KP.iron, val(KP.iron, 1.7)), 'matte', hobTop, 0.4);
+  kg.add(chamferBox(0.62, 0.05, 0.09, 0.02), { x: bx + 0.55, y: panY + 0.04, z: bz + 0.05, yaw: -0.15 }, paint(KP.iron), 'matte', 0, 0);
   // the herb pot stands on the tiles (its old contact skirt lay on the slab, under them now)
   herbPot(kg, wM * 0.35, topY + 0.006, dM * 0.26, 1.6);
   towel(kg, -wM * 0.33, topY + 0.006, dM * 0.495, 0.55, KP.cloth);

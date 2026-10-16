@@ -89,6 +89,7 @@ import * as THREE from 'three';
 import { roundedBox, cloneToon, toonMat } from '../render/toon';
 import { wu, groundPos } from '../units';
 import { mesh, noOutline, FLOOR_Y, ARENA_W, ARENA_H, CENTER, type Materials } from './shared';
+import type { CoverBox } from './types';
 
 /**
  * Local decal heights for THIS module's flat ground markings, replacing the shared
@@ -1302,57 +1303,183 @@ interface StoneBuf { pos: number[]; nrm: number[]; uv: number[]; col: number[]; 
 function newStoneBuf(): StoneBuf { return { pos: [], nrm: [], uv: [], col: [], idx: [], v: 0, cells: 0 }; }
 
 /**
- * One stone: a FLAT face whose last `JOINT_SOFT` wu darken toward its edge — one soft
- * joint band, drawn in vertex colour, and nothing else.
- *
- * `outline` is the stone's full cell (no gap); `inner` is `outline` inset by the band.
- * Both arrive CCW and are emitted CW, because world (x, y) maps to three (x, ·, z) and a
- * CCW ground polygon in (x, y) produces a DOWNWARD face normal there — verified by hand on
- * a unit triangle rather than discovered by rendering an invisible floor.
- *
- * ── 🚨 A1 (graphics revamp, 2026-10-15): THE BEVEL, THE SKIRT AND THE GAP ARE GONE ──
- * This function used to read *"a flat top face, a shallow rolled bevel, and a short
- * skirt"*, with the stone inset by half a 1.6 wu `JOINT_W` so the subfloor showed through
- * a gap. Kept here per the reversal rule, with what it measured to be: at the shipped
- * 58° camera every joint rendered as a MULTI-BAND seam — a bevel ring lit or dark by
- * its orientation, a saturated gap line, and a 1-px dotted hairline (the 0.014 m skirt
- * is a sub-pixel vertical face, i.e. an aliasing generator) — against a reference joint
- * that is one soft dark band ~10 px wide (`shots/rv/audit/arena/sheets/joint_8x.png`).
- * The floor's fine band measured 3.06x the plate median (`hf 0.0132`), and lit-ground
- * windows were dead-flat in 10-15.5% of pixels against 40-93% on the plates.
- *
- * Now: ring 0 (`inner`) carries the face colour, ring 1 (`outline`) the face colour
- * x `edgeMul`, everything at one height with an UP normal. Two neighbours share the cell
- * edge, so the joint is a V-shaped value dip `2 x JOINT_SOFT` wide whose floor sits on
- * the true edge — no geometry between them, nothing for the lights to pick out, nothing
- * sub-pixel. The subfloor plane below still fills any `polyClean` sliver, and it is keyed
- * at the joint's own ratio (see `subfloorDark`), so a sliver reads as joint.
+ * Mean of a canvas-backed map's RGB, 0..1 — what it multiplies a surface's albedo by on
+ * average (`textures.ts` sets no colour space, so the canvas values are sampled raw). A2c
+ * uses it to hold the ground's value when the tile field stops taking `tileWearA/B`.
+ * Falls back to 1 (no compensation) when there is no readable canvas, and says so.
  */
-function emitStone(
-  buf: StoneBuf, outline: GPt[], inner: GPt[], y: number,
-  r: number, g: number, b: number, edgeMul: number
+function mapMean(map: THREE.Texture | null): number {
+  const img = map?.image as HTMLCanvasElement | undefined;
+  const ctx = img && typeof img.getContext === 'function' ? img.getContext('2d') : null;
+  if (!img || !ctx || !img.width || !img.height) {
+    console.warn('floor: tile map has no readable canvas — ground value not compensated');
+    return 1;
+  }
+  const d = ctx.getImageData(0, 0, img.width, img.height).data;
+  let sum = 0;
+  for (let i = 0; i < d.length; i += 4) sum += d[i] + d[i + 1] + d[i + 2];
+  return sum / (3 * 255 * (d.length / 4));
+}
+
+/**
+ * ── A2c: CONTACT DARKENING — the floor knows where things stand on it ────────────────
+ * Round-w6 critics asked for *"a crafted ground surface with tile variation, edge trim and
+ * contact shadows"* and *"grounding shadows"* (`shots/rv/w6/scores.json`, cast notes). The
+ * props carry a 0.35 m contact band each (`shared.ts` `CONTACT_OVERHANG_M`) — the CORE of a
+ * contact shadow, ~13 px at the match camera. A real floor also darkens in a soft pool
+ * where a counter or a wall meets it, a hand's width out, because the sky it sees is half
+ * blocked. That pool is baked here, into the tiles' own vertex colour: no decal, no draw,
+ * and it multiplies the same tint field everything else on the tile does.
+ *
+ * `occ` is 1 on a footprint's edge and falls as (1 - d/reach)^2 to 0 at `CONTACT_REACH`;
+ * the tile is multiplied by 1 - `CONTACT_DEPTH` x occ and leans cool as it darkens (the
+ * rule `tintFrom` already follows: shaded ground goes cooler, not just darker). The
+ * playfield's own edge — the kerb wall — gets the same pool at `WALL_REACH`.
+ */
+const CONTACT_REACH = 34;
+const CONTACT_DEPTH = 0.30;
+const WALL_REACH = 40;
+/**
+ * Segments a side for a tile the pool reaches (25 wu of resolution on a 50 wu tile). 4 was
+ * tried first and cost **+114k triangles** on the phone 1v1 (`perf.mjs --mode counts
+ * --device mobile`, 528k -> 643k, draws 146 = 146): ~96 triangles a pooled tile against 10
+ * for a plain one. The pool is a soft (1 - d/reach)^2 ramp, and 2 carries it.
+ */
+const CONTACT_SUBDIV = 2;
+
+function contactShade(
+  wx: number, wy: number, boxes: readonly CoverBox[], out: [number, number, number],
 ): void {
-  const n = outline.length;
-  const o: GPt[] = [], t: GPt[] = [];
-  for (let i = n - 1; i >= 0; i--) { o.push(outline[i]); t.push(inner[i]); }
-  let minx = Infinity, maxx = -Infinity, miny = Infinity, maxy = -Infinity;
-  for (const q of o) { if (q.x < minx) minx = q.x; if (q.x > maxx) maxx = q.x; if (q.y < miny) miny = q.y; if (q.y > maxy) maxy = q.y; }
-  const sxw = Math.max(1e-6, maxx - minx), syw = Math.max(1e-6, maxy - miny);
-  const base = buf.v;
-  const push = (q: GPt, k: number) => {
+  let occ = 0;
+  for (const b of boxes) {
+    const dx = Math.max(Math.abs(wx - b.x) - b.w / 2, 0);
+    const dy = Math.max(Math.abs(wy - b.y) - b.h / 2, 0);
+    const t = 1 - Math.min(1, Math.hypot(dx, dy) / CONTACT_REACH);
+    if (t * t > occ) occ = t * t;
+  }
+  const dw = Math.max(0, Math.min(wx, ARENA_W - wx, wy, ARENA_H - wy));
+  const tw = 1 - Math.min(1, dw / WALL_REACH);
+  if (tw * tw > occ) occ = tw * tw;
+  const k = 1 - CONTACT_DEPTH * occ;
+  out[0] = k * (1 - 0.03 * occ);
+  out[1] = k;
+  out[2] = k * (1 + 0.05 * occ);
+}
+
+/** wu from the tile edge to where the flat face colour starts (the shoulder's top). */
+const GROUT_SOFT = 2.6;
+/** wu from the tile edge to where the shoulder bottoms out — half the grout core. */
+const GROUT_CORE = 0.7;
+/** Vertex-colour multiplier across the grout core (LINEAR — vertex colours multiply the
+ * linear albedo, as A1's `JOINT_EDGE` 0.80 did; 0.66 arrives ~0.83x in sRGB). */
+const GROUT_EDGE = 0.66;
+
+/**
+ * One glazed tile (A2c): a FLAT face, then a grout channel drawn in vertex colour — a
+ * soft shoulder from the face colour down to `GROUT_EDGE` x it, and a flat dark core out
+ * to the tile's true edge, where the neighbour's core continues it. See the A2c note in
+ * `buildFloor` (point 7 of the stone-field block) for why the field is a grid of these.
+ *
+ * Kept from `emitStone`, which this replaces (its header is below, per the reversal rule):
+ * the face and the joint are all at one height with an UP normal, and the outline arrives
+ * CCW and is emitted CW, because world (x, y) maps to three (x, ·, z) and a CCW ground
+ * polygon in (x, y) produces a DOWNWARD face normal there — verified by hand on a unit
+ * triangle rather than discovered by rendering an invisible floor.
+ *
+ * `emitStone`'s header, kept:
+ * > One stone: a FLAT face whose last `JOINT_SOFT` wu darken toward its edge — one soft
+ * > joint band, drawn in vertex colour, and nothing else.
+ * >
+ * > `outline` is the stone's full cell (no gap); `inner` is `outline` inset by the band.
+ * > Both arrive CCW and are emitted CW, because world (x, y) maps to three (x, ·, z) and a
+ * > CCW ground polygon in (x, y) produces a DOWNWARD face normal there — verified by hand on
+ * > a unit triangle rather than discovered by rendering an invisible floor.
+ * >
+ * > ── 🚨 A1 (graphics revamp, 2026-10-15): THE BEVEL, THE SKIRT AND THE GAP ARE GONE ──
+ * > This function used to read *"a flat top face, a shallow rolled bevel, and a short
+ * > skirt"*, with the stone inset by half a 1.6 wu `JOINT_W` so the subfloor showed through
+ * > a gap. Kept here per the reversal rule, with what it measured to be: at the shipped
+ * > 58° camera every joint rendered as a MULTI-BAND seam — a bevel ring lit or dark by
+ * > its orientation, a saturated gap line, and a 1-px dotted hairline (the 0.014 m skirt
+ * > is a sub-pixel vertical face, i.e. an aliasing generator) — against a reference joint
+ * > that is one soft dark band ~10 px wide (`shots/rv/audit/arena/sheets/joint_8x.png`).
+ * > The floor's fine band measured 3.06x the plate median (`hf 0.0132`), and lit-ground
+ * > windows were dead-flat in 10-15.5% of pixels against 40-93% on the plates.
+ * >
+ * > Now: ring 0 (`inner`) carries the face colour, ring 1 (`outline`) the face colour
+ * > x `edgeMul`, everything at one height with an UP normal. Two neighbours share the cell
+ * > edge, so the joint is a V-shaped value dip `2 x JOINT_SOFT` wide whose floor sits on
+ * > the true edge — no geometry between them, nothing for the lights to pick out, nothing
+ * > sub-pixel. The subfloor plane below still fills any `polyClean` sliver, and it is keyed
+ * > at the joint's own ratio (see `subfloorDark`), so a sliver reads as joint.
+ */
+function emitTile(
+  buf: StoneBuf, x0: number, y0: number, x1: number, y1: number, y: number,
+  r: number, g: number, b: number,
+  m = 1,
+  shade?: (wx: number, wy: number, out: [number, number, number]) => void,
+): void {
+  // Rings, innermost first: the face's boundary, the grout shoulder, the tile's true edge.
+  // Each is the square inset by `d` with `m` segments a side, walked CCW in world (x, y)
+  // from the (x0, y0) corner. `m` > 1 only where `shade` varies inside a tile (contact
+  // darkening near a footprint): a flat colour needs no more than the corners.
+  const sw = x1 - x0, sh = y1 - y0;
+  const ringPts = (d: number): GPt[] => {
+    const ax = x0 + d, ay = y0 + d, bx = x1 - d, by = y1 - d;
+    const pts: GPt[] = [];
+    for (let k = 0; k < m; k++) pts.push({ x: ax + ((bx - ax) * k) / m, y: ay });
+    for (let k = 0; k < m; k++) pts.push({ x: bx, y: ay + ((by - ay) * k) / m });
+    for (let k = 0; k < m; k++) pts.push({ x: bx - ((bx - ax) * k) / m, y: by });
+    for (let k = 0; k < m; k++) pts.push({ x: ax, y: by - ((by - ay) * k) / m });
+    return pts;
+  };
+  const sh3: [number, number, number] = [1, 1, 1];
+  const push = (q: GPt, k: number): number => {
+    if (shade) shade(q.x, q.y, sh3); else { sh3[0] = 1; sh3[1] = 1; sh3[2] = 1; }
     buf.pos.push(wu(q.x), y, wu(q.y));
     buf.nrm.push(0, 1, 0);
-    buf.uv.push((q.x - minx) / sxw, (q.y - miny) / syw);
-    buf.col.push(r * k, g * k, b * k);
-    buf.v++;
+    buf.uv.push((q.x - x0) / sw, (q.y - y0) / sh);
+    buf.col.push(r * k * sh3[0], g * k * sh3[1], b * k * sh3[2]);
+    return buf.v++;
   };
-  for (let i = 0; i < n; i++) push(t[i], 1);        // ring 0 — the face, face colour
-  for (let i = 0; i < n; i++) push(o[i], edgeMul);  // ring 1 — the cell edge, the joint's floor
-  for (let i = 1; i < n - 1; i++) buf.idx.push(base, base + i, base + i + 1);
-  const U = base, L = base + n;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    buf.idx.push(U + i, L + i, L + j, U + i, L + j, U + j);
+  // An up-facing triangle over CCW-in-(x, y) points p, q, r is emitted (p, r, q): world y
+  // is three z, and (x+, z+) order gives a DOWNWARD normal (the note above).
+  const tri = (p: number, q: number, rr: number) => { buf.idx.push(p, rr, q); };
+
+  // The face: an (m+1)^2 grid inside the shoulder. Its boundary coincides with ring 0's
+  // vertices (same positions, same colours), so the two meet without a seam.
+  const fx0 = x0 + GROUT_SOFT, fy0 = y0 + GROUT_SOFT;
+  const fw = sw - 2 * GROUT_SOFT, fh = sh - 2 * GROUT_SOFT;
+  const f0 = buf.v;
+  for (let v = 0; v <= m; v++) {
+    for (let u = 0; u <= m; u++) push({ x: fx0 + (fw * u) / m, y: fy0 + (fh * v) / m }, 1);
+  }
+  for (let v = 0; v < m; v++) {
+    for (let u = 0; u < m; u++) {
+      const p00 = f0 + v * (m + 1) + u, p10 = p00 + 1, p01 = p00 + (m + 1), p11 = p01 + 1;
+      tri(p00, p10, p11); tri(p00, p11, p01);
+    }
+  }
+  // The grout: two strips, face boundary -> shoulder -> edge.
+  const profile: Array<{ d: number; k: number }> = [
+    { d: GROUT_SOFT, k: 1 },
+    { d: GROUT_CORE, k: GROUT_EDGE },
+    { d: 0, k: GROUT_EDGE },
+  ];
+  const n = 4 * m;
+  const starts = profile.map(({ d, k }) => {
+    const s0 = buf.v;
+    for (const q of ringPts(d)) push(q, k);
+    return s0;
+  });
+  for (let ri = 0; ri + 1 < starts.length; ri++) {
+    const U = starts[ri], L = starts[ri + 1];
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      // U is inside L and both walk CCW, so the quad's own CCW order is
+      // (U_i, L_i, L_j, U_j): out to the edge, along it, back in.
+      tri(U + i, L + i, L + j); tri(U + i, L + j, U + j);
+    }
   }
   buf.cells++;
 }
@@ -1374,7 +1501,12 @@ function stoneMesh(buf: StoneBuf, mat: THREE.Material, name: string): THREE.Mesh
   return m;
 }
 
-export function buildFloor(M: Materials): THREE.Group {
+/**
+ * `cover` (A2c): the arena's collision footprints, so the tile field can bake its contact
+ * darkening against them — see `contactShade`. Omitted (the floor-only preview), the floor
+ * is built exactly the same with no darkening.
+ */
+export function buildFloor(M: Materials, cover: readonly CoverBox[] = []): THREE.Group {
   const g = new THREE.Group();
   noOutline(g);
   const debrisMats = buildDebrisMats(M);
@@ -1728,16 +1860,44 @@ export function buildFloor(M: Materials): THREE.Group {
   //      tiles, not 875 — since that commit, without one line of this file changing.
   //      The block below therefore also said "~2,240 instances", which was never right
   //      either. **A count derived from `ARENA_W` cannot be written down.**
-  const TILE = 40;
-  /** Site jitter as a fraction of `TILE`. At 0 this degenerates back to a lattice. */
-  const TILE_SITE_JITTER = 0.40;
+  //
+  //   7. 🚨 A2c (graphics revamp, wave 7): POINT 6 IS REVERSED — THE FIELD IS A GLAZED TILE
+  //      FLOOR ON A REGULAR GRID AGAIN, and the Voronoi construction below is retired. Point 6
+  //      is kept verbatim because its critic was right about what it measured and wrong about
+  //      what the eye would make of the fix. Six blind rounds later (`docs/REVAMP.md` §8,
+  //      `shots/rv/w*/scores.json` notes) the field is read as *"a large flat pink field with
+  //      faint hex lines ... a placeholder ground plane"*, *"greybox"*, *"cracked-tile
+  //      pattern"* — 8/8 arena and 8/8 arena6 notes every round. An irregular tessellation in
+  //      the tile's own hue is a PATTERN; nobody can name the material it is. A kitchen floor
+  //      of square glazed tiles with grout is a material everybody can name.
+  //      ⚠️ AND THE MEASURED NULL THAT FORBADE "ADD DETAIL" HAS GONE STALE. `6c133ce` measured
+  //      this ground at 2.69x the plates' fine band; A1 then calmed it, and on `685e5b7`
+  //      `fp_ground_windows` reads the ground BELOW the reference range on all three bands —
+  //      hf 0.00314 (ref 0.00336-0.01005), mf 0.00720 (0.0093-0.0241), lf 0.00821
+  //      (0.0110-0.0399), groundFeat 0.059 (0.136-0.276). The floor is now too FLAT, at every
+  //      scale, and the fix is structure at the TILE scale (grout lines, tile-to-tile value),
+  //      not noise: each tile's face stays one flat colour, so "dead-flat" holds inside it.
+  //      The old site-field constants were `TILE` 40, `TILE_SITE_JITTER` 0.40 and
+  //      `TILE_DROP_P` 0.40 (and `TILE_CLEAN` 3.0, unused since A1); they are deleted rather
+  //      than left unused, because `tools/tmp/v1_tess.mjs --verify` greps for them and a dead
+  //      declaration would let a mirror of a tessellation that no longer exists read green.
   /**
-   * Fraction of sites removed so their area is absorbed by the neighbours — this is
-   * where *"varied cell size"* comes from, and it is cheaper than a second site grid.
-   * Never two adjacent (see the drop pass), or one hole becomes a stone four times the
-   * size of its neighbours and reads as a missing tile rather than a big flagstone.
+   * wu. The tile's side. An exact divisor of BOTH `ARENA_W` and `ARENA_H` (asserted where
+   * the grid is built), so whole tiles meet every wall and a grout line runs through
+   * `CENTER`. 50 wu is ~1.2x a fighter's footprint (`PLAYER_SIZE` 42) — by EYE (not
+   * measured) a little under the one square-tile plate's ~1.4 fighter widths — and coarse
+   * enough that a joint never approaches the one-pixel aliasing regime round 4 (point 5)
+   * warned about. 80 wu was rendered too: calmer, but `fp_ground_windows` put its hf back
+   * BELOW the plates' range (0.00302 / 0.00263 on the canonical framings) and its mf/lf at
+   * the range's floor, where 50 wu lands all three bands near the plates' medians.
+   *
+   * At the shipped match camera a 50 wu tile measures 132-147 px across a 1600 px frame
+   * (grout autocorrelation along three rows of `a2a_cap`'s canon6, nearer rows larger), i.e.
+   * ~0.34-0.38 wu/px: A1's 0.362 wu/px (the `JOINT_SOFT` note above) checks out against the
+   * first ruler of known size this file has drawn. (An eyeball off a half-size sheet had
+   * said ~97 px; the measurement is what is written here.)
    */
-  const TILE_DROP_P = 0.40;
+  const GLAZE_TILE = 50;
   // ── A1 (graphics revamp, 2026-10-15): ONE SOFT JOINT ─────────────────────────
   // ⚠️ THE THREE CONSTANTS THAT USED TO OPEN THIS BLOCK ARE GONE, AND THEIR NOTES ARE
   // KEPT, because the argument they made is the one this package reverses:
@@ -1753,27 +1913,30 @@ export function buildFloor(M: Materials): THREE.Group {
   // at 8x. The joint is now one value dip in vertex colour: `JOINT_SOFT` wu of each stone
   // ramp from the face colour down to `JOINT_EDGE` x it on the shared edge, so a joint is
   // `2 x JOINT_SOFT` wide, darkest on the true boundary, with no geometry in it.
+  // A1's two joint constants, kept as notes (A2c replaced them with the grout profile below):
+  //   > `JOINT_SOFT` 3.0 — *"wu. How far in from the cell edge the face colour starts. 3 wu
+  //   > a side puts the band's half-depth width at ~3 wu ≈ 8 px at the shipped camera
+  //   > (0.362 wu/px), against the reference's ~10 px soft band."*
+  //   > `JOINT_EDGE` 0.80 — *"Vertex-colour multiplier on the cell edge (LINEAR ... 0.80
+  //   > arrives ~0.90x in sRGB). The reference transect is 101 -> 89 -> 101 luma (0.88x)."*
+  //   > `TILE_CLEAN` 3.0 — the `polyClean` merge distance, unused by the stones since A1.
+  // A V-shaped dip with no floor reads as a soft crease between two pillows, which is what
+  // a Voronoi joint is. Grout between glazed tiles is a LINE: a narrow flat-bottomed
+  // channel with a soft shoulder on each side. So the profile has three rings, not two:
+  //   face (x1) --GROUT_SOFT--> shoulder (x GROUT_EDGE) --GROUT_CORE--> edge (x GROUT_EDGE)
+  // i.e. a dark core `2 x GROUT_CORE` wide between two `GROUT_SOFT - GROUT_CORE` ramps.
+  // Everything is still vertex colour at one height with an UP normal — no geometry in the
+  // joint, nothing sub-pixel, nothing for the lights to pick out (A1's reasons, unchanged).
+  // (`GROUT_SOFT`, `GROUT_CORE`, `GROUT_EDGE` live at module scope, beside `emitTile`.)
   /**
-   * wu. How far in from the cell edge the face colour starts. 3 wu a side puts the band's
-   * half-depth width at ~3 wu ≈ 8 px at the shipped camera (0.362 wu/px), against the
-   * reference's ~10 px soft band; the audit's remedy named "an inner ring ~3 wu in".
+   * The checker: tiles alternate between the two stone materials by grid parity, and
+   * each side carries a small extra LINEAR value step on top of the two keys' own ~3%
+   * (`GROUND_KEY_LIGHT` / `GROUND_KEY_DARK`, OKLab L 0.5219 / 0.5068). The pair is
+   * centred near 1.0 so the ground's median value — A2a's `GROUND_VALUE` decision — is
+   * held; the step is a role cue ("this is laid tile"), not a value move.
    */
-  const JOINT_SOFT = 3.0;
-  /**
-   * Vertex-colour multiplier on the cell edge (LINEAR — vertex colours multiply the
-   * linear albedo, so 0.80 arrives ~0.90x in sRGB before lighting and the grade). The
-   * reference transect is 101 -> 89 -> 101 luma (0.88x); the subfloor below sits at the
-   * same ratio (#694D57 against #785864 is 0.875x in sRGB) so a `polyClean` sliver that
-   * shows it reads as part of the joint, not as a hole.
-   */
-  const JOINT_EDGE = 0.80;
-  /**
-   * wu. Vertices closer together than this are merged before the insets — see
-   * `polyClean`. Swept offline on `tools/tmp/v1_tess.mjs` rather than guessed:
-   * 0 -> 394 degenerate cells, 1.5 -> 84, 2.5 -> 1, **3.0 -> 0**, 4.0 -> 0. Taken to the
-   * first value that reaches zero, because every degenerate cell is a visible hole.
-   */
-  const TILE_CLEAN = 3.0;
+  const CHECK_LIGHT = 1.035;
+  const CHECK_DARK = 0.945;
   // Gap ratio 0.95 — a wider joint than the 0.965 the previous loop settled on. That
   // nudge was made to fight a BRIGHT orange seam, i.e. it was compensating for the
   // joint colour rather than fixing it. With the joint now dark (`subfloorDark` plus
@@ -2159,6 +2322,19 @@ export function buildFloor(M: Materials): THREE.Group {
   const darkBuf = newStoneBuf();
   tileLightInst.vertexColors = true;
   tileDarkInst.vertexColors = true;
+  // A2c: a GLAZE carries no aggregate. `tileWearA/B` (`TILE_WEAR_CALM`, 173 pebble flecks
+  // per map) was stamped once per stone across the stone's UV bounding box; a Voronoi
+  // cell's box differs per cell, so the stamp never repeated. A grid tile's box is the
+  // tile, so every light tile would carry the IDENTICAL speckle and every dark tile the
+  // other one — a visible repeat at 50 wu. The tile's identity is its grout, its checker
+  // step and its per-tile tint; the face itself is one smooth glazed colour.
+  // ⚠️ The map was ALSO a value: its base is grey(0.88) and, with no colour space set, it
+  // is sampled raw — so it multiplied every stone's albedo by its mean. Dropping it alone
+  // would lift the ground ~6% in sRGB and undo A2a's `GROUND_VALUE`. Its mean is read off
+  // the canvas it was drawn on (not retyped) and folded into the tile colours instead.
+  const glazeHold = (mapMean(M.tileLight.map) + mapMean(M.tileDark.map)) / 2;
+  tileLightInst.map = null;
+  tileDarkInst.map = null;
   tileLightInst.needsUpdate = true;
   tileDarkInst.needsUpdate = true;
 
@@ -2284,44 +2460,11 @@ export function buildFloor(M: Materials): THREE.Group {
   // Arena half-diagonal, for the broad edge falloff below.
   const halfDiag = Math.hypot(ARENA_W, ARENA_H) / 2;
 
-  // ── THE SITE FIELD ──────────────────────────────────────────────────────────
-  //
-  // ⚠️ `SITE_COLS`/`SITE_ROWS` are DERIVED and are deliberately not written down. The
-  // two lines this replaced said "35, exact" and "25, exact" and had been wrong since
-  // `6631446`. See the note beside `TILE`.
-  const SITE_COLS = Math.round(ARENA_W / TILE);
-  const SITE_ROWS = Math.round(ARENA_H / TILE);
-  const nSites = SITE_COLS * SITE_ROWS;
-  const siteX = new Float64Array(nSites);
-  const siteY = new Float64Array(nSites);
-  const alive = new Uint8Array(nSites).fill(1);
-  const J = TILE * TILE_SITE_JITTER;
-  for (let j = 0; j < SITE_ROWS; j++) {
-    for (let i = 0; i < SITE_COLS; i++) {
-      const k = j * SITE_COLS + i;
-      siteX[k] = i * TILE + TILE / 2 + (tileRand() - 0.5) * 2 * J;
-      siteY[k] = j * TILE + TILE / 2 + (tileRand() - 0.5) * 2 * J;
-    }
-  }
-  // The drop pass — where "varied cell size" comes from. A dropped site's area is
-  // absorbed by its neighbours, so a few stones come out roughly double. Refusing to
-  // drop next to an already-dropped site caps that at double: two adjacent holes make a
-  // stone ~3x its neighbours, which stops reading as a big flagstone and starts reading
-  // as a missing tile — the exact defect this whole field exists to avoid.
-  for (let j = 0; j < SITE_ROWS; j++) {
-    for (let i = 0; i < SITE_COLS; i++) {
-      if (tileRand() >= TILE_DROP_P) continue;
-      let near = false;
-      for (let dj = -1; dj <= 1 && !near; dj++) {
-        for (let di = -1; di <= 1; di++) {
-          const ii = i + di, jj = j + dj;
-          if (ii < 0 || jj < 0 || ii >= SITE_COLS || jj >= SITE_ROWS) continue;
-          if (!alive[jj * SITE_COLS + ii]) { near = true; break; }
-        }
-      }
-      if (!near) alive[j * SITE_COLS + i] = 0;
-    }
-  }
+  // ── THE SITE FIELD — retired by A2c ─────────────────────────────────────────
+  // The jittered site grid and its drop pass (`TILE_SITE_JITTER`, `TILE_DROP_P`) built the
+  // Voronoi stones. The grid below has no sites: a tile is its own grid cell. The two
+  // `tileRand()` draws each stone took (micro, odd) are still taken per tile, in the same
+  // order, so the per-tile tint keeps the statistics A1 tuned.
   // ── The per-stone tint, as a FUNCTION OF PLACE (A1) ────────────────────────────
   // Lifted out of the cell loop unchanged so `buildGroundChips` can tint a crumb from
   // the same macro field as the stone it lies on (`micro` 0, `odd` 1). The loop passes
@@ -2399,111 +2542,57 @@ export function buildFloor(M: Materials): THREE.Group {
     );
   };
 
-  // Every cell starts as the whole playfield and is clipped down, so the stones stop
-  // exactly at the arena edge with no partial-tile fringe — the property the old
-  // "exact divisor of ARENA_W" argument was buying, kept without the divisor.
-  const arenaRect: GPt[] = [
-    { x: 0, y: 0 }, { x: ARENA_W, y: 0 }, { x: ARENA_W, y: ARENA_H }, { x: 0, y: ARENA_H },
-  ];
-  let cellsSkipped = 0;
-  let bandless = 0;
-  for (let j = 0; j < SITE_ROWS; j++) {
-    for (let i = 0; i < SITE_COLS; i++) {
-      const k = j * SITE_COLS + i;
-      if (!alive[k]) continue;
-      const kx = siteX[k], ky = siteY[k], kq = kx * kx + ky * ky;
-      let poly: GPt[] = arenaRect;
-      // 5x5 neighbourhood: with the jitter and the drop pass a cell can reach ~1.7 TILE
-      // from its site, and a bisector against a neighbour at distance d cuts at d/2, so
-      // every site within ~3.4 TILE can bind. The 5x5 ring reaches 3.8 TILE with jitter.
-      for (let dj = -2; dj <= 2 && poly.length >= 3; dj++) {
-        const jj = j + dj;
-        if (jj < 0 || jj >= SITE_ROWS) continue;
-        for (let di = -2; di <= 2; di++) {
-          const ii = i + di;
-          if (ii < 0 || ii >= SITE_COLS) continue;
-          const m = jj * SITE_COLS + ii;
-          if (m === k || !alive[m]) continue;
-          const mx = siteX[m], my = siteY[m];
-          poly = clipHalf(poly, 2 * (mx - kx), 2 * (my - ky), mx * mx + my * my - kq);
-          if (poly.length < 3) break;
-        }
-      }
-      // A1: the RAW cell is the stone now — no `JOINT_W / 2` inset (no gap) and no
-      // `polyClean` (see `insetConvex` for the red sliver line that step opened between
-      // neighbours once the gap was gone). `TILE_CLEAN` is unused by the stones.
-      if (poly.length >= 3) poly = polyDedupe(poly);
-      const outline = poly.length >= 3 && polyArea(poly) > 1 ? poly : null;
-      if (!outline) { cellsSkipped++; continue; }
-      // ⚠️ A FAILED BAND MUST NOT COST THE STONE — the rule the bevel learned, kept. The
-      // smallest cells cannot take a full `JOINT_SOFT` erosion; the first bevel version
-      // skipped them outright and punched 47-167 HOLES in the floor (`v1_tess`). A stone
-      // with a narrower band is correct; a missing stone is not.
-      let inner = insetConvex(outline, JOINT_SOFT);
-      if (!inner) inner = insetConvex(outline, JOINT_SOFT * 0.45);
-      if (!inner) { inner = outline; bandless++; } // no band — the ring quads collapse to zero area
-      // Every field below was written against a grid cell's CENTRE. The stone's own
-      // centroid is the same quantity for an irregular cell, and using the SITE instead
-      // would put the sample off-centre by up to the jitter.
-      let wx = 0, wy = 0;
-      for (const q of outline) { wx += q.x; wy += q.y; }
-      wx /= outline.length; wy /= outline.length;
-
-      const b = blotch(wx, wy);
-      const wear = wearAt(wx, wy);
-      // Broad edge falloff. Both reference plates carry a big soft gradient across the
-      // whole ground — brighter through the middle of play, sinking toward the frame
-      // edges — which is most of what stops a large flat field reading as a swatch.
-      // A single flat quad has ONE normal and no lighting can give it that (a standing
-      // trap in this project), so it is baked in here per instance instead.
-      const edge = Math.min(1, Math.hypot(wx - CENTER.x, wy - CENTER.y) / halfDiag);
-
-      // Which of the two stone shades this tile is. Driven by the SAME blotch field as
-      // brightness plus a per-tile dither, so shades cluster into organic patches with
-      // ragged boundaries instead of alternating on a lattice. Wear pushes the mix
-      // toward the darker shade without ever forcing it (capped below 1), so a worn
-      // zone stays a mottled mix rather than a solid recoloured block.
-      // Steep coefficient on `b` on purpose: it drives most tiles to a near-0 or
-      // near-1 probability, so shades form CLEAN organic patches and the random
-      // dither only bites in the narrow band where the field crosses the middle.
-      // A shallow coefficient makes every tile a coin flip, i.e. salt-and-pepper.
-      const pDark = THREE.MathUtils.clamp(0.5 + b * 1.15 + wear * 0.55, 0.02, 0.97);
-      const isDark = tileRand() < pDark;
-
-      // A1: the per-stone tint is `tintFrom` (defined above the site field) so the crumb
-      // layer can read the SAME macro field at any point — see `buildGroundChips`. The
-      // two `tileRand()` draws stay here, in their original order, so the tessellation
-      // and every stone's tint are bit-identical to before the move.
+  // ── A2c: THE TILE GRID ─────────────────────────────────────────────────────────
+  // Whole tiles, wall to wall: `GLAZE_TILE` must divide the playfield exactly, and a
+  // count is DERIVED here, never written down (see point 6's note on `6631446`).
+  const COLS = Math.round(ARENA_W / GLAZE_TILE);
+  const ROWS = Math.round(ARENA_H / GLAZE_TILE);
+  if (COLS * GLAZE_TILE !== ARENA_W || ROWS * GLAZE_TILE !== ARENA_H) {
+    throw new Error(`floor: GLAZE_TILE ${GLAZE_TILE} does not divide the ${ARENA_W}x${ARENA_H} playfield`);
+  }
+  const nTiles = COLS * ROWS;
+  let contactTiles = 0;
+  for (let j = 0; j < ROWS; j++) {
+    for (let i = 0; i < COLS; i++) {
+      const x0 = i * GLAZE_TILE, y0 = j * GLAZE_TILE;
+      const x1 = x0 + GLAZE_TILE, y1 = y0 + GLAZE_TILE;
+      // Grid parity, not the old `blotch`-driven clusters: a laid floor alternates. Round
+      // 1 (loop 3) called a `(i + j) % 2` field "a diagonal argyle" — at 25 wu, with a step
+      // nobody had measured. Here it is 50 wu with a ~0.03 luma step (`CHECK_*`).
+      const isDark = ((i + j) & 1) === 1;
       const micro = tileRand() * 2 - 1; // -1..1, independent per tile
       let odd = 1;
       if (tileRand() < 0.03) odd = tileRand() < 0.5 ? 0.90 : 1.08;
-      tintFrom(wx, wy, micro, odd, noiseColor);
-      emitStone(
-        isDark ? darkBuf : lightBuf, outline, inner, Y_TOP,
-        noiseColor.r, noiseColor.g, noiseColor.b, JOINT_EDGE
+      tintFrom(x0 + GLAZE_TILE / 2, y0 + GLAZE_TILE / 2, micro, odd, noiseColor);
+      const k = (isDark ? CHECK_DARK : CHECK_LIGHT) * glazeHold;
+      // Contact darkening: only the footprints whose pool can reach this tile, and only
+      // those tiles are subdivided — a tile nothing stands near is one flat colour.
+      const near = cover.filter((c) =>
+        c.x + c.w / 2 + CONTACT_REACH > x0 && c.x - c.w / 2 - CONTACT_REACH < x1 &&
+        c.y + c.h / 2 + CONTACT_REACH > y0 && c.y - c.h / 2 - CONTACT_REACH < y1);
+      const atWall = x0 < WALL_REACH || x1 > ARENA_W - WALL_REACH || y0 < WALL_REACH || y1 > ARENA_H - WALL_REACH;
+      const pooled = near.length > 0 || atWall;
+      if (pooled) contactTiles++;
+      emitTile(
+        isDark ? darkBuf : lightBuf, x0, y0, x1, y1, Y_TOP,
+        noiseColor.r * k, noiseColor.g * k, noiseColor.b * k,
+        pooled ? CONTACT_SUBDIV : 1,
+        pooled ? (wx, wy, out) => contactShade(wx, wy, near, out) : undefined,
       );
     }
   }
-  // 🚨 NON-EMPTY BEFORE ANYTHING IS BUILT FROM IT (`CLAUDE.md` rule 6). Every failure
-  // mode in the block above — a degenerate cell, an inset that ate the shape, a
-  // half-plane loop that clipped everything away — produces FEWER cells, silently, and
-  // the end state of "silently fewer" is zero. A floor with no stones is a subfloor
-  // plane, which renders perfectly well and looks like a deliberate flat ground.
-  if (lightBuf.cells + darkBuf.cells === 0) {
-    throw new Error('floor: the stone field produced no cells — the tessellation is broken');
-  }
-  if (cellsSkipped > nSites * 0.15) {
-    console.warn(`floor: ${cellsSkipped} of ${nSites} stone cells were degenerate and skipped`);
-  }
-  // A1: a stone with no band is a stone whose joint is missing on all sides — rare by
-  // construction (only cells under 2.7 wu of inradius), and loud if it is not.
-  if (bandless > nSites * 0.02) {
-    console.warn(`floor: ${bandless} of ${nSites} stones could take no joint band`);
+  // 🚨 NON-EMPTY, AND COMPLETE, BEFORE ANYTHING IS BUILT FROM IT (`CLAUDE.md` rule 6). A
+  // floor with no tiles is a subfloor plane, which renders perfectly well and looks like a
+  // deliberate flat ground; a floor with SOME tiles missing has holes. Both meshes must be
+  // non-empty too, or the checker has silently collapsed to one material.
+  if (lightBuf.cells === 0 || darkBuf.cells === 0 || lightBuf.cells + darkBuf.cells !== nTiles) {
+    throw new Error(`floor: the tile grid built ${lightBuf.cells}+${darkBuf.cells} of ${nTiles} tiles`);
   }
   // QA-only read-out (a probe reads it; nothing in the game does).
   if (typeof window !== 'undefined') {
-    (window as unknown as { __a1FloorStats?: unknown }).__a1FloorStats = {
-      sites: nSites, stones: lightBuf.cells + darkBuf.cells, skipped: cellsSkipped, bandless,
+    (window as unknown as { __a2cFloorStats?: unknown }).__a2cFloorStats = {
+      tile: GLAZE_TILE, cols: COLS, rows: ROWS, light: lightBuf.cells, dark: darkBuf.cells,
+      contactTiles, cover: cover.length,
     };
   }
   const lightMesh = stoneMesh(lightBuf, tileLightInst, 'floor_stones_light');
