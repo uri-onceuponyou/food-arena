@@ -52,6 +52,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { withShippedRing } from './t1b_ring.mjs';
 
 const ROOT = resolve(new URL('../..', import.meta.url).pathname);
 
@@ -79,16 +80,13 @@ const {
 const ARENA_PATH = String(args.arena ?? `${ROOT}/tools/arena.gameplay.json`);
 if (!existsSync(ARENA_PATH) && !args.selftest) { console.error(`no arena at ${ARENA_PATH}`); process.exit(1); }
 const ARENA_DATA = existsSync(ARENA_PATH) ? JSON.parse(readFileSync(ARENA_PATH, 'utf8')) : null;
-// `arena.maxSafeRadius` is DERIVED from MATCH_DURATION_MS in `arena/shared.ts`, so a
-// cached dump goes stale the moment the clock moves. Recompute from the same formula.
-const HALF_DIAG = ARENA_DATA ? Math.hypot(ARENA_DATA.width / 2, ARENA_DATA.height / 2) : 0;
-const FOG_FIRST_CONTACT_MS = 6000; // arena/shared.ts FOG_FIRST_CONTACT_S
-const derivedMaxSafe = Math.round(HALF_DIAG / (1 - FOG_FIRST_CONTACT_MS / MATCH_DURATION_MS));
-let arena = ARENA_DATA ? {
-  ...ARENA_DATA,
-  maxSafeRadius: Number(args.maxsafe ?? derivedMaxSafe),
-  build: () => null, update: () => {},
-} : null;
+// ⚠️ REVERSED 2026-10-16 (T1b) — this read: "`arena.maxSafeRadius` is DERIVED from
+//   MATCH_DURATION_MS in `arena/shared.ts`, so a cached dump goes stale the moment the clock
+//   moves. Recompute from the same formula." — and recomputed `HALF_DIAG / (1 - 6000 / T)` (1792).
+// Since 2026-08-12 the ring is `rules.ts:fogOpeningRadiusFor(ARENA_HALF_DIAGONAL)` — the
+// half-diagonal (1720.47 on 2026-10-16) — so the recompute WAS the wrong ring. `t1b_ring` reads the
+// dump's, refusing a dump without it or one stale for this tree's rule. `--maxsafe` still overrides.
+let arena = ARENA_DATA ? withShippedRing(ARENA_DATA, { override: args.maxsafe, rules: RULES, source: ARENA_PATH }) : null;
 let HAZ = arena ? arena.hazards.find((h) => h.kind === 'damage') : null;
 
 const DT = Number(args.dt ?? 16.667);

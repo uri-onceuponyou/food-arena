@@ -10,6 +10,7 @@ const { CHARACTER_IDS } = await import(`${SIM}/rules.ts`);
 const fs = await import('node:fs');
 const d = JSON.parse(fs.readFileSync('/private/tmp/fa-rv-head/tools/arena.gameplay.json','utf8'));
 const halfDiag = Math.hypot(d.width/2, d.height/2);
+// KNOWN-BAD arm of this A/B: the retired division, computed on purpose (fs_sched_census exempts it).
 const instr = Math.round(halfDiag / (1 - 6000 / 150000));
 console.log('dump/shipped maxSafeRadius', d.maxSafeRadius, 'instrument-derived', instr);
 function run(maxSafe, p, e) {

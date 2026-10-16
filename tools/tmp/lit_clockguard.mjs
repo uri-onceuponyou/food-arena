@@ -522,7 +522,7 @@ function selftest(S) {
   future.lowestScheduled = Math.max(140, future.MAX_SAFE_RADIUS
     * (future.SUDDEN_DEATH_REMAINING_MS / future.MATCH_DURATION_MS));
 
-  // ── §A ────────────────────────────────────────────────────────────────────
+  // ── §A ── KNOWN-BAD fixture TEXT: a tool's own stale clock + first-contact (fs_sched_census exempts it)
   const declText = 'const MATCH_DURATION_MS = 45_000;\nconst FOG_FIRST_CONTACT_MS = 6000;\n';
   const got = replicaDecls('tools/tmp/kb_fixture.mjs', declText);
   check('KNOWN-BAD §A  a tool\'s own `MATCH_DURATION_MS = 45_000` is extracted with its value',

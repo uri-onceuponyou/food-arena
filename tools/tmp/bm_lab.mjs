@@ -305,6 +305,7 @@ if (args.selftest) {
   {
     const halfDiag = Math.hypot(1400, 1000);
     const derived = openingRadiusFor(halfDiag);
+    // KNOWN-BAD (see the rows below): the superseded expression, computed only to prove it separates.
     const superseded = Math.round(halfDiag / (1 - 6000 / MATCH_DURATION_MS));
     if (typeof RULES.fogOpeningRadiusFor === 'function') {
       // KNOWN-BAD: the superseded expression, which 47 tools still carry. It must
