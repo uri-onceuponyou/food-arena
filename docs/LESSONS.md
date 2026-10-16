@@ -1698,6 +1698,13 @@ The campaign is `docs/REVAMP.md`; its scoreboard is §8. These are the lessons t
 - **A browser gate gatecount cannot see can rot for months.** `np_nfighter` printed 85 checks against
   a documented 64, and carried one deterministic red row (a seat inside the guaranteed radius but
   off-screen at N=5) that predates every revamp merge (`a7d5ce5` and earlier). Unrun is not green.
+- **A publish guard must read what is PUBLISHED, not what was built.** The last deploy of the campaign
+  (`e84d52c`) committed a stale `index.html` beside the renamed chunks it names: `rsync -a` skips a file
+  whose size AND mtime match, both pages were the same size (8-character hashes) and the gh-pages
+  checkout landed in the build's second. `deploy-pages`' asset check read `dist/` and passed. Caught by
+  asking what the deploy COMMIT changed (index.html was not in it) and hotfixed (`a574f7d`) before Pages
+  served it; the tool now syncs by content and refuses a committed tree that differs from `dist/`
+  (`daaf64a`, selftest §F reproduces the race). "LIVE-MATCHES" had compared two stale references.
 - **Unverified bug reports were real at a high rate.** Of the findings the verifiers could not confirm
   (0/2), every one that a package wrote a red-first test for reproduced — the two timer bugs (B4), all
   six AI findings (B5), Back abandoning a live match (B6, against a DECISIONS line that said it was
