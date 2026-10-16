@@ -176,7 +176,10 @@ tools all key on `name`. Name geometry you may later need to measure.
 9. **Two cameras, and they expose different defects.** Lobby `charStage.ts` **pitch 20** (what Uri
    judges); match `camera.ts` **58**. A limb through a torso is wrong at both. **Fix the geometry,
    verify at both, diagnose up close.** ⚠️ **Cite the VALUE and grep for it — never a line number.**
-   → `grep -n "opts.pitchDeg ?? 58" src/render/camera.ts` (`CameraRig`'s constructor).
+   → the MATCH's pitch is `src/game/match.ts`'s camera-options literal: `grep -n "pitchDeg:" src/game/match.ts`
+   (`qaPitchFromSearch(location.search) ?? 58` since K1, `fa98ddb`). ⚠️ **`camera.ts`'s `opts.pitchDeg ?? 58`
+   is a DEFAULT that no shipped construction site reaches** (match 58 explicit, preview 58/22, lobby 20,
+   thumbnails 12 — K1 checked): changing it moves no shipped camera. `CLAUDE.md` rule 3 still cites the default.
    ~~`camera.ts`'s 58 is at `:640` today; a citation "corrected" to `:476` went stale inside a day,
    and `CLAUDE.md` still points at `:265`, a different function.~~ — **this sentence did the thing it
    warns against:** by 2026-10-15 the 58 was at `:668` (found by C1b, re-deriving it), and `CLAUDE.md`

@@ -1492,6 +1492,11 @@ export const REACH = {
 // ⚠️ `REACH.ultimateSlam` (400) is EXCLUDED, exactly as `render/camera.ts` excludes it from
 // `FAIR_PLAY.radiusUnits` and for the same reason: it is an 8 s map-scale ultimate whose
 // tell is the screen-filling slam. Covering it would demand a 500 wu final ring.
+// ⚠️ STALE NUMBER, found by K1 (2026-10-16): `REACH.ultimateSlam` is no longer 400 — it is
+// 157.2 wu (reach 182.4 with the body), INSIDE the 199.2 wu fair radius. The exclusion is now
+// moot rather than wrong. And see `DECISIONS §91z`: the shipped camera does not deliver that
+// radius below the player (123 wu at 16:9), so 'inside the fair radius' is itself a claim the
+// camera does not keep until the aim is decided.
 //
 // ── AND THE UPPER BOUND THIS LANDS INSIDE, WHICH IS THE PART THAT MAKES IT A DESIGN ──
 //
