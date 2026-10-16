@@ -90,7 +90,10 @@ import type { ItemId } from './rules';
 // Concealment's ONE presentation-side predicate (the HP pill's, `cast-started`'s), so a state
 // drawn on a fighter the observer cannot see is not a free read of where they stand. NOT a direct
 // `isVisibleFrom` call: `sim.test.mjs` §26(m) pins `src/game/*.ts` to exactly two of those.
-import { fighterVisibleTo } from '../ui/hud';
+// ⚠️ WAS `from '../ui/hud'` (V2). Same function, moved by V3 to a root module the audio director
+// can reach too (`hud.ts` imports `../audio`, so asking it from `director.ts` is a cycle) — see
+// `src/visibility.ts`. It also drops this layer's one import of the DOM HUD.
+import { fighterVisibleTo } from '../visibility';
 
 declare global {
   interface Window {
@@ -3067,8 +3070,15 @@ export class VfxLayer {
    *  textures); its group is the LAST child the constructor adds, so nothing that existed before
    *  it moves in the scene-graph order. */
   private readonly items: ItemVfx;
-  /** Scratch for `sync`'s per-seat concealment answer, reused every frame. */
-  private readonly itemShown: boolean[] = [];
+  /**
+   * V3 — WHO MAY SEE EACH SEAT THIS FRAME. `seatShown[slot]` is the observer's concealment answer
+   * for that fighter, resolved ONCE at the top of `sync()` (`resolveSeatShown`) and read by every
+   * layer here that draws ON a fighter: the status telegraphs, the Blue Cheese cloud and V2's item
+   * states. Scratch, reused every frame. ⚠️ Was V2's `itemShown` (*"Scratch for `sync`'s per-seat
+   * concealment answer"*), read by the item states alone — the statuses and the cloud, drawn in
+   * the same `sync()` just above them, never asked at all.
+   */
+  private readonly seatShown: boolean[] = [];
   private readonly cheeseClouds = new BlueCheeseClouds(TRAIL_Y + 0.03, MAX_FIGHTERS, CHEESE_HAZE, CHEESE_EDGE, CHEESE_HAZE_A, CHEESE_EDGE_A);
 
   /** The (linear) MULTIPLY factor a mark keyed to `hex` stains the floor with at full coverage —
@@ -3397,13 +3407,30 @@ export class VfxLayer {
     window.__vfxLayer = this;
   }
 
-  sync(state: MatchState): void {
+  /**
+   * Draw the frame's persistent effects from the sim's state.
+   *
+   * `observer` — V3 — is WHOSE EYES this frame is seen through: the fighter the camera is watching,
+   * `match.ts:viewObserver()` (the local seat while it lives, a spectated fighter after it dies).
+   * Everything drawn ON a fighter is shown only if that observer can see the fighter
+   * (`resolveSeatShown`). It travels here from the one place that decides it rather than being
+   * re-derived, for the reason `hud.ts`'s `observerSlot` gives: a dead player whose radar and models
+   * disagreed was `30e3360`'s half-moved rule.
+   *
+   * ⚠️ OPTIONAL ONLY FOR THE QA CALLERS THAT DRIVE `sync(state)` BY HAND (`vfx_coverage`,
+   * `vfx_ablate`, `vfx_splatdepth`, `fx_draws`, and every wrapper written `(s) => orig(s)`); they get
+   * V2's rule — the local seat while it lives, else every seat shown. The shipped loop always passes
+   * it, and `tools/tmp/v3_conceal.mjs --plant drop-observer` is red without it.
+   */
+  sync(state: MatchState, observer?: Fighter): void {
     const roster = fightersOf(state);
     this.qaRoster = roster;
     // 🚨 BEFORE ANY POOL. See `statusBySlot`: growth has to happen at a fixed point in
     // the frame or a new seat's telegraph lands in a different place in the scene graph
     // depending on which tick it first appeared on.
     this.ensureSlots(roster.length);
+    // V3 — and before any layer that draws ON a fighter, so all of them read one answer.
+    this.resolveSeatShown(state, roster, observer);
 
     // ⚠️ THE `player`/`enemy` KEYS ARE A PUBLISHED CONTRACT. Twenty-two instruments read
     // `window.__vfxDebugFighters.player` / `.enemy` by name (grep over `tools/`), so they
@@ -3770,9 +3797,20 @@ export class VfxLayer {
     // Read from state every frame rather than from an event: the aura is passive and
     // permanent, there is no event that starts it, and a cloud that followed an event would
     // be missing on a rejoin or a revive. `hasItem` is the sim's one statement of "carries".
+    //
+    // 🚨 V3: AND ONLY ON A WEARER THE OBSERVER CAN SEE. The cloud follows its wearer and is
+    // centred on it, so drawn on a concealed one it was a 168 wu ring round the exact spot —
+    // the loudest leak of the lot (`v3_conceal.mjs`: 68,804 px changed at the cloth's edge,
+    // 27,278 at its centre, on a frame that otherwise showed a bare table).
+    // ⚠️ HIDING IT NEVER HIDES DAMAGE THAT IS LANDING ON YOU, and that is a property of two
+    // constants, not of this branch: the cloud hurts at centre distance STRICTLY < its radius
+    // (`sim.ts`'s aura block) and concealment gives way at <= `CONCEAL_REVEAL_RADIUS`; both are
+    // `REACH.meleeHeavy` = 84, so anyone the cloud can touch can see its wearer, and is shown it.
+    // If the cloud ever outgrows the reveal radius that stops being true — `v3_conceal.mjs` §R
+    // asserts `blue_cheese.radius <= CONCEAL_REVEAL_RADIUS` so it cannot drift silently.
     this.cheeseClouds.begin();
     roster.forEach((f, slot) => {
-      if (!f.alive || !hasItem(f, 'blue_cheese')) return;
+      if (!f.alive || !hasItem(f, 'blue_cheese') || !this.seatShown[slot]) return;
       const pos = groundPos(f.x, f.y);
       this.cheeseClouds.push(pos.x, pos.z, wu(ITEM_TUNING.blue_cheese.radius), (slot * 0.37) % 1);
     });
@@ -3784,6 +3822,15 @@ export class VfxLayer {
       const vis = this.statusBySlot[slot];
       if (!vis) return;
       const pos = groundPos(fighter.x, fighter.y);
+      // 🚨 V3: EVERY TELEGRAPH BELOW IS DRAWN ON THE FIGHTER, SO IT RIDES THE MODEL'S VISIBILITY.
+      // None of them asked before, and a hidden fighter's stun stars, slow ring + tint, puddle
+      // splash and ward band all marked the spot it was hiding on — measured at the cloth's
+      // camera-facing edge (`v3_conceal.mjs` §P, base `977c21e`): slow 5,411 px, ward 804, stars
+      // 332; at its centre the TINT alone, 3,291 px of blue drawn over the table top. Only what is
+      // DRAWN is gated: the onset clock, the splash accumulator and `statusSnapshot` keep running
+      // while hidden, so a reveal shows the status as it stands rather than replaying its onset,
+      // and the refusal pop still knows who it belongs to.
+      const shown = this.seatShown[slot] === true;
 
       // Two independent slow SOURCES — a puddle underfoot (`terrainSlowFactor`, the
       // sim's read-only per-tick observation; 1 = unaffected, see `state.ts`) and a
@@ -3794,13 +3841,13 @@ export class VfxLayer {
       const weaponSlowed = fighter.alive && state.elapsed < fighter.status.slowedUntil;
       const slowed = terrainSlowed || weaponSlowed;
 
-      vis.slowRing.visible = slowed;
-      vis.slowRingDark.visible = slowed;
+      vis.slowRing.visible = slowed && shown;
+      vis.slowRingDark.visible = slowed && shown;
       // ONSET flash only — see `SLOW_TINT_FLASH_MS`.
       if (!slowed) vis.slowSince = NaN;
       else if (Number.isNaN(vis.slowSince)) vis.slowSince = state.elapsed;
       const tintOpacity = slowed ? slowTintOpacity(state.elapsed - vis.slowSince) : 0;
-      vis.slowTint.visible = tintOpacity > 0;
+      vis.slowTint.visible = shown && tintOpacity > 0;
       if (slowed) {
         const pulse = 0.9 + Math.sin(state.elapsed * 0.0035) * 0.12;
         const spin = state.elapsed * 0.0012;
@@ -3831,7 +3878,9 @@ export class VfxLayer {
           splash.distAccum += Math.hypot(fighter.x - splash.lastX, fighter.y - splash.lastY);
           while (splash.distAccum >= PUDDLE_SPLASH_DIST_WU) {
             splash.distAccum -= PUDDLE_SPLASH_DIST_WU;
-            this.spawnPuddleSplash(pos.x, pos.z);
+            // Accumulated either way (above), spawned only where seen — a hidden wader leaves
+            // no splash trail, and the cadence does not burst on the reveal.
+            if (shown) this.spawnPuddleSplash(pos.x, pos.z);
           }
         }
       } else {
@@ -3854,7 +3903,8 @@ export class VfxLayer {
       const inSlowGrace = fighter.alive && !slowReady && state.elapsed >= fighter.status.slowedUntil;
       const warded = inStunGrace || inSlowGrace;
       const popT = vis.wardPop > 0 ? vis.wardPop / WARD_POP_SECONDS : 0;
-      vis.wardRing.visible = warded || popT > 0;
+      // The refusal POP rides the same mesh, so this one gate covers both.
+      vis.wardRing.visible = shown && (warded || popT > 0);
       if (vis.wardRing.visible) {
         vis.wardRing.position.set(pos.x, STATUS_RING_Y - 0.02, pos.z);
         // Counter-rotating against the slow ring's `+state.elapsed * 0.0012`.
@@ -3878,9 +3928,10 @@ export class VfxLayer {
       }
 
       const stunned = fighter.alive && state.elapsed < fighter.status.stunnedUntil;
+      const starsOn = stunned && shown;
       vis.stunStars.forEach((star, i) => {
-        star.visible = stunned;
-        if (!stunned) return;
+        star.visible = starsOn;
+        if (!starsOn) return;
         const ang = state.elapsed * 0.006 + (i * Math.PI * 2) / vis.stunStars.length;
         star.position.set(
           pos.x + Math.cos(ang) * STUN_STAR_RADIUS,
@@ -3893,19 +3944,10 @@ export class VfxLayer {
 
     // ── V2: ITEM STATES, and the SQUID INK channel ─────────────────────────────────────
     //
-    // The observer is the LOCAL seat while it lives — `match.ts:viewObserver()`'s rung 1, which
-    // is every frame a living player draws. Once it is dead the camera is on a spectated subject
-    // this layer is not told about, and every seat is shown rather than asking a corpse: a
-    // corpse 2,000 wu away would hide the very fighter the camera is pointed at (the "rendering
-    // and invisible" failure `viewObserver`'s own note records). The exact observer is a ROUTED
-    // follow-up (pass `viewObserver()` into `sync`; the call is in `match.ts`'s loop).
+    // The states ride `seatShown` like every other thing drawn on a fighter here (V3). V2's
+    // observer rule moved into `resolveSeatShown` with its reasoning, unchanged.
     const local = roster[LOCAL_SLOT];
-    const observer = local && local.alive ? local : null;
-    this.itemShown.length = roster.length;
-    for (let i = 0; i < roster.length; i++) {
-      this.itemShown[i] = observer === null || i === LOCAL_SLOT || fighterVisibleTo(state, observer, roster[i]!);
-    }
-    this.items.sync(state, roster, this.itemShown);
+    this.items.sync(state, roster, this.seatShown);
 
     // `vfx/ink.ts`'s header: *"`game/vfx.ts` observes the sim. Its `sync(state)` is the only
     // per-frame call in the presentation layer that is handed a live `MatchState`, so it is the
@@ -3925,6 +3967,41 @@ export class VfxLayer {
       writeInk(inkEnvelope(left, total), Math.min(1, Math.max(0, 1 - left / total)), Math.floor(local.item.blotUntil));
     } else {
       clearInk();
+    }
+  }
+
+  /**
+   * V3 — CONCEALMENT FOR EVERYTHING THIS LAYER DRAWS *ON* A FIGHTER, resolved once per frame.
+   *
+   * The same rule, from the same predicate, as the model hide in `match.ts`'s loop: the local seat
+   * is always shown to its own screen (stated here, not left to `fighterVisibleTo` happening to
+   * return `true` for a fighter asked about itself), every other seat is shown iff the observer can
+   * see it. Projectiles, medikits and ground marks are WORLD entities and are not asked — the
+   * projectile pool's own note in `sync()` measured why hiding a shot would now be the bug.
+   *
+   * THE OBSERVER is the camera's subject, handed in by `match.ts`'s loop (`sync`'s `observer`).
+   * ⚠️ V2's rule is kept, below the line it used to be, as the fallback for a caller that names no
+   * observer — and its last sentence is what this change carries out:
+   *
+   *   > *"the LOCAL seat while it lives — `match.ts:viewObserver()`'s rung 1, which is every frame
+   *   > a living player draws. Once it is dead the camera is on a spectated subject this layer is
+   *   > not told about, and every seat is shown rather than asking a corpse: a corpse 2,000 wu away
+   *   > would hide the very fighter the camera is pointed at (the "rendering and invisible" failure
+   *   > `viewObserver`'s own note records). The exact observer is a ROUTED follow-up (pass
+   *   > `viewObserver()` into `sync`; the call is in `match.ts`'s loop)."*
+   *
+   * "Every seat shown" was the safe answer for a layer that could not know the subject, and it was
+   * a LEAK for a spectator: every status and item state on a fighter its subject could not see was
+   * drawn (`v3_conceal.mjs` S.HIDDEN, base `977c21e`: 11 of 11). Told the subject, the layer asks it —
+   * which is exactly what the model hide asks, so a spectator no longer sees Zs float over a model
+   * the same frame has hidden.
+   */
+  private resolveSeatShown(state: MatchState, roster: readonly Fighter[], observer: Fighter | undefined): void {
+    const local = roster[LOCAL_SLOT];
+    const eye = observer ?? (local && local.alive ? local : null);
+    this.seatShown.length = roster.length;
+    for (let i = 0; i < roster.length; i++) {
+      this.seatShown[i] = eye === null || i === LOCAL_SLOT || fighterVisibleTo(state, eye, roster[i]!);
     }
   }
 
